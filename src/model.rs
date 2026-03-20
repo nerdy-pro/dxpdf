@@ -143,6 +143,8 @@ pub struct ParagraphProperties {
     pub spacing: Option<Spacing>,
     pub indentation: Option<Indentation>,
     pub tab_stops: Vec<TabStop>,
+    /// Paragraph background shading from `w:shd`.
+    pub shading: Option<Color>,
 }
 
 /// A tab stop alignment type.
@@ -294,6 +296,8 @@ pub struct RunProperties {
     pub font_size: Option<u32>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
+    /// Background shading color from `w:shd`.
+    pub shading: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

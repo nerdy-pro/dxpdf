@@ -134,6 +134,13 @@ pub fn handle_empty_element(
                         props.color = Color::from_hex(&val);
                     }
                 }
+                b"shd" => {
+                    if let Some(fill) = get_attr(e, b"fill")? {
+                        if fill != "auto" && !fill.is_empty() {
+                            props.shading = Color::from_hex(&fill);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -198,6 +205,13 @@ pub fn handle_empty_element(
                                 position: p,
                                 stop_type: st,
                             });
+                        }
+                    }
+                }
+                b"shd" => {
+                    if let Some(fill) = get_attr(e, b"fill")? {
+                        if fill != "auto" && !fill.is_empty() {
+                            props.shading = Color::from_hex(&fill);
                         }
                     }
                 }

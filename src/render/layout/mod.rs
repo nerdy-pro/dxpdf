@@ -351,9 +351,18 @@ fn layout_header_footer_blocks(
                     match frag {
                         Fragment::Text {
                             text, font_family, font_size, bold, italic,
-                            underline, color, measured_width, ..
+                            underline, color, shading, measured_width, ..
                         } => {
                             let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+                            if let Some(bg) = shading {
+                                commands.push(DrawCommand::Rect {
+                                    x,
+                                    y: cursor_y - line_height,
+                                    width: *measured_width,
+                                    height: line_height,
+                                    color: (bg.r, bg.g, bg.b),
+                                });
+                            }
                             commands.push(DrawCommand::Text {
                                 x, y: cursor_y, text: text.clone(),
                                 font_family: font_family.clone(),

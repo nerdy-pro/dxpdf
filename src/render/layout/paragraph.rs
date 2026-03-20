@@ -64,6 +64,10 @@ impl Layouter {
             &self.measurer,
         );
         let base_x = self.config.margin_left + indent.left_pt();
+        let mut para_cmd_start = self.current_page.commands.len();
+        // Track the text area (excluding before/after spacing) for paragraph shading
+        let mut text_area_top: Option<f32> = None;
+        let mut text_area_bottom: f32 = self.cursor_y;
 
         let mut line_start = 0;
         let mut first_line = true;
@@ -123,6 +127,9 @@ impl Layouter {
 
             if self.cursor_y + line_height > self.content_bottom() {
                 self.new_page();
+                // Reset shading tracking for the new page
+                para_cmd_start = self.current_page.commands.len();
+                text_area_top = None;
             }
 
             let used_width = if actual_end > line_start {
@@ -137,7 +144,12 @@ impl Layouter {
             };
 
             let mut x = base_x + first_line_offset + float_x_shift + x_offset;
+            // Track text area for paragraph shading
+            if text_area_top.is_none() {
+                text_area_top = Some(self.cursor_y);
+            }
             self.cursor_y += line_height;
+            text_area_bottom = self.cursor_y;
 
             for frag in &fragments[line_start..actual_end] {
                 match frag {
@@ -149,10 +161,21 @@ impl Layouter {
                         italic,
                         underline,
                         color,
+                        shading,
                         measured_width,
                         ..
                     } => {
                         let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+
+                        if let Some(bg) = shading {
+                            self.current_page.commands.push(DrawCommand::Rect {
+                                x,
+                                y: self.cursor_y - line_height,
+                                width: *measured_width,
+                                height: line_height,
+                                color: (bg.r, bg.g, bg.b),
+                            });
+                        }
 
                         self.current_page.commands.push(DrawCommand::Text {
                             x,
@@ -203,6 +226,26 @@ impl Layouter {
 
             line_start = actual_end;
             first_line = false;
+        }
+
+        // Paragraph background shading — covers the text area only,
+        // not before/after spacing
+        if let Some(bg) = &para.properties.shading {
+            if let Some(top) = text_area_top {
+                let height = text_area_bottom - top;
+                if height > 0.0 {
+                    self.current_page.commands.insert(
+                        para_cmd_start,
+                        DrawCommand::Rect {
+                            x: self.config.margin_left,
+                            y: top,
+                            width: self.config.content_width(),
+                            height,
+                            color: (bg.r, bg.g, bg.b),
+                        },
+                    );
+                }
+            }
         }
 
         self.cursor_y += spacing.after_pt();

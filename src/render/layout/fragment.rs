@@ -42,6 +42,7 @@ pub enum Fragment {
         italic: bool,
         underline: bool,
         color: Option<Color>,
+        shading: Option<Color>,
         measured_width: f32,
         measured_height: f32,
     },
@@ -121,6 +122,7 @@ pub fn collect_fragments(
                         italic,
                         underline: !is_space && tr.properties.underline,
                         color: tr.properties.color,
+                        shading: if is_space { None } else { tr.properties.shading },
                         measured_width,
                         measured_height: line_height,
                     });
