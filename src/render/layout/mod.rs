@@ -134,8 +134,39 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         default_header: doc.default_header.clone(),
         default_footer: doc.default_footer.clone(),
     };
+    // Pre-compute header extent to adjust margin_top if header content
+    // (including float images) extends past the declared top margin.
+    let mut effective_config = initial_config;
+    if let Some(ref header) = doc.default_header {
+        let pre_measurer = measurer::TextMeasurer::new();
+        let pre_defaults = DocDefaultsLayout {
+            font_size_half_pts: doc.default_font_size,
+            font_family: doc.default_font_family.clone(),
+            default_spacing: doc.default_spacing,
+            default_cell_margins: doc.default_cell_margins,
+            table_cell_spacing: doc.table_cell_spacing,
+            default_table_borders: doc.default_table_borders,
+            default_header: None,
+            default_footer: None,
+        };
+        let (_, header_bottom) = layout_header_footer_blocks(
+            &header.blocks,
+            initial_config.margin_left,
+            initial_config.header_margin,
+            initial_config.content_width(),
+            initial_config.margin_top,
+            initial_config.page_height,
+            &pre_defaults,
+            &pre_measurer,
+            default_tab_stop_pt,
+        );
+        if header_bottom > effective_config.margin_top {
+            effective_config.margin_top = header_bottom + 4.0; // small gap
+        }
+    }
+
     let mut layouter =
-        Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
+        Layouter::new(&effective_config, next_configs, default_tab_stop_pt, doc_defaults);
 
     let blocks = &doc.blocks;
     for (i, block) in blocks.iter().enumerate() {
@@ -185,13 +216,13 @@ fn render_headers_footers(
 
         // Render header
         if let Some(ref header) = doc_defaults.default_header {
-            let commands = layout_header_footer_blocks(
+            let (commands, _header_bottom) = layout_header_footer_blocks(
                 &header.blocks,
                 margin_left,
                 header_y,
                 content_width,
-                margin_top,      // margin area for vertical centering of floats
-                margin_top,      // clip: don't render past top margin
+                margin_top,
+                page_height, // don't clip header text — let it extend if needed
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
@@ -204,13 +235,13 @@ fn render_headers_footers(
 
         // Render footer
         if let Some(ref footer) = doc_defaults.default_footer {
-            let commands = layout_header_footer_blocks(
+            let (commands, _) = layout_header_footer_blocks(
                 &footer.blocks,
                 margin_left,
                 footer_y,
                 content_width,
-                margin_bottom,   // margin area for vertical centering of floats
-                page_height,     // clip: don't render past page bottom
+                margin_bottom,
+                page_height,
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
@@ -220,23 +251,25 @@ fn render_headers_footers(
     }
 }
 
-/// Layout header/footer blocks at a fixed position, returning draw commands.
-/// Content is clipped at `y_limit` — paragraphs past that boundary are not rendered.
+/// Layout header/footer blocks at a fixed position.
+/// Returns (draw_commands, max_y_extent) where max_y_extent is the bottommost
+/// y coordinate used by any content including float images.
 fn layout_header_footer_blocks(
     blocks: &[Block],
     x_start: f32,
     y_start: f32,
     content_width: f32,
-    margin_extent: f32,  // margin area height for vertical centering of floats
-    y_limit: f32,        // absolute y coordinate to stop rendering
+    margin_extent: f32,
+    y_limit: f32,
     defaults: &DocDefaultsLayout,
     measurer: &measurer::TextMeasurer,
     default_tab_stop_pt: f32,
-) -> Vec<DrawCommand> {
+) -> (Vec<DrawCommand>, f32) {
     use fragment::*;
 
     let mut commands = Vec::new();
     let mut cursor_y = y_start;
+    let mut max_y = y_start;
 
     for block in blocks {
         // Stop rendering if we've exceeded the allowed area
@@ -274,6 +307,7 @@ fn layout_header_footer_blocks(
                     Some("top") => 0.0,
                     _ => cursor_y + float.offset_y_pt,
                 };
+                max_y = max_y.max(img_y + img_h);
                 commands.push(DrawCommand::Image {
                     x: img_x,
                     y: img_y,
@@ -390,7 +424,8 @@ fn layout_header_footer_blocks(
         }
     }
 
-    commands
+    max_y = max_y.max(cursor_y);
+    (commands, max_y)
 }
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
