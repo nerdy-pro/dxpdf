@@ -35,6 +35,10 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     if let Some(dts) = contents.default_tab_stop {
         document.default_tab_stop = dts;
     }
+    // Apply theme font as default (can be overridden by docDefaults)
+    if let Some(ref tf) = contents.theme_minor_font {
+        document.default_font_family = tf.clone();
+    }
     if let Some(dd) = &contents.doc_defaults {
         if let Some(fs) = dd.font_size {
             document.default_font_size = fs;

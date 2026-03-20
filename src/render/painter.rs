@@ -1,5 +1,6 @@
-use skia_safe::{pdf, Color4f, Data, Font, FontMgr, FontStyle, Image, Paint, Rect};
+use skia_safe::{pdf, Color4f, Data, FontMgr, Image, Paint, Rect};
 
+use super::fonts;
 use super::layout::{DrawCommand, LayoutedPage};
 use crate::error::Error;
 
@@ -58,20 +59,7 @@ fn draw_text(
     italic: bool,
     color: (u8, u8, u8),
 ) {
-    let style = match (bold, italic) {
-        (true, true) => FontStyle::bold_italic(),
-        (true, false) => FontStyle::bold(),
-        (false, true) => FontStyle::italic(),
-        (false, false) => FontStyle::normal(),
-    };
-
-    let typeface = font_mgr
-        .match_family_style(font_family, style)
-        .or_else(|| font_mgr.match_family_style("Helvetica", style))
-        .or_else(|| font_mgr.legacy_make_typeface(None::<&str>, style))
-        .expect("no fallback typeface available");
-
-    let font = Font::from_typeface(typeface, font_size);
+    let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     paint.set_color4f(color_to_4f(color), None);

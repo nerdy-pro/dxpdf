@@ -1,0 +1,68 @@
+use skia_safe::{Font, FontMgr, FontStyle};
+
+/// Open-source metric-compatible substitutes for proprietary fonts.
+/// Each entry maps a proprietary font name to a list of alternatives
+/// tried in order. These fonts have matching metrics so line wrapping
+/// and spacing remain accurate.
+const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
+    // Microsoft fonts → metric-compatible open-source alternatives
+    ("Calibri", &["Carlito", "Liberation Sans", "Noto Sans"]),
+    ("Cambria", &["Caladea", "Liberation Serif", "Noto Serif"]),
+    ("Arial", &["Liberation Sans", "Noto Sans", "Helvetica"]),
+    ("Times New Roman", &["Liberation Serif", "Noto Serif", "Times"]),
+    ("Courier New", &["Liberation Mono", "Noto Sans Mono", "Courier"]),
+    ("Verdana", &["DejaVu Sans", "Noto Sans"]),
+    ("Georgia", &["DejaVu Serif", "Noto Serif"]),
+    ("Trebuchet MS", &["Ubuntu", "Noto Sans"]),
+    ("Consolas", &["Inconsolata", "Liberation Mono", "Noto Sans Mono"]),
+    ("Segoe UI", &["Noto Sans", "Liberation Sans"]),
+];
+
+/// Resolve a font family name, trying the requested font first, then
+/// substitutes from the table, then Helvetica as a final fallback.
+pub fn resolve_typeface(
+    font_mgr: &FontMgr,
+    font_family: &str,
+    style: FontStyle,
+) -> skia_safe::Typeface {
+    // Try the requested font first
+    if let Some(tf) = font_mgr.match_family_style(font_family, style) {
+        return tf;
+    }
+
+    // Try substitutes
+    if let Some((_, subs)) = FONT_SUBSTITUTIONS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(font_family))
+    {
+        for sub in *subs {
+            if let Some(tf) = font_mgr.match_family_style(sub, style) {
+                return tf;
+            }
+        }
+    }
+
+    // Final fallbacks
+    font_mgr
+        .match_family_style("Helvetica", style)
+        .or_else(|| font_mgr.legacy_make_typeface(None::<&str>, style))
+        .expect("no fallback typeface available")
+}
+
+/// Create a Skia Font for the given properties with substitution support.
+pub fn make_font(
+    font_mgr: &FontMgr,
+    font_family: &str,
+    font_size: f32,
+    bold: bool,
+    italic: bool,
+) -> Font {
+    let style = match (bold, italic) {
+        (true, true) => FontStyle::bold_italic(),
+        (true, false) => FontStyle::bold(),
+        (false, true) => FontStyle::italic(),
+        (false, false) => FontStyle::normal(),
+    };
+    let typeface = resolve_typeface(font_mgr, font_family, style);
+    Font::from_typeface(typeface, font_size)
+}

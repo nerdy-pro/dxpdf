@@ -35,6 +35,10 @@ pub struct DocxContents {
     pub default_tab_stop: Option<u32>,
     /// Document-wide default run properties from `word/styles.xml`.
     pub doc_defaults: Option<DocDefaults>,
+    /// Minor (body) font name from theme (e.g., "Calibri").
+    pub theme_minor_font: Option<String>,
+    /// Major (heading) font name from theme (e.g., "Calibri Light").
+    pub _theme_major_font: Option<String>,
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -105,13 +109,88 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         Err(_) => None,
     };
 
+    // 6. Extract theme fonts from word/theme/theme1.xml
+    let (theme_minor_font, theme_major_font) = extract_theme_fonts(&mut archive);
+
     Ok(DocxContents {
         document_xml,
         relationships,
         media_files,
         default_tab_stop,
         doc_defaults,
+        theme_minor_font,
+        _theme_major_font: theme_major_font,
     })
+}
+
+/// Extract minor and major font names from the theme file.
+fn extract_theme_fonts(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+) -> (Option<String>, Option<String>) {
+    let mut minor = None;
+    let mut major = None;
+
+    let theme_xml = match archive.by_name("word/theme/theme1.xml") {
+        Ok(mut file) => {
+            let mut xml = String::new();
+            if file.read_to_string(&mut xml).is_ok() {
+                xml
+            } else {
+                return (None, None);
+            }
+        }
+        Err(_) => return (None, None),
+    };
+
+    let mut reader = Reader::from_str(&theme_xml);
+    let mut in_minor = false;
+    let mut in_major = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"minorFont" => in_minor = true,
+                    b"majorFont" => in_major = true,
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"minorFont" => in_minor = false,
+                    b"majorFont" => in_major = false,
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                if local == b"latin" {
+                    for attr in e.attributes().flatten() {
+                        if local_name(attr.key.as_ref()) == b"typeface" {
+                            let val =
+                                String::from_utf8_lossy(&attr.value).into_owned();
+                            if in_minor && minor.is_none() {
+                                minor = Some(val.clone());
+                            }
+                            if in_major && major.is_none() {
+                                major = Some(val);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => break,
+            _ => {}
+        }
+    }
+
+    (minor, major)
 }
 
 /// Parse `word/_rels/document.xml.rels` into a map of relationship ID -> target path.
