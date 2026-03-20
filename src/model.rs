@@ -8,6 +8,11 @@ pub struct Document {
     /// Default tab stop interval in twips (from `word/settings.xml`).
     /// Defaults to 720 twips (0.5 inch) if not specified.
     pub default_tab_stop: u32,
+    /// Default font size in half-points (from `word/styles.xml` docDefaults).
+    /// Defaults to 24 (12pt) if not specified.
+    pub default_font_size: u32,
+    /// Default font family (from `word/styles.xml` docDefaults).
+    pub default_font_family: String,
 }
 
 /// A block-level element.
@@ -276,8 +281,15 @@ impl Color {
 
 impl RunProperties {
     /// Font size in points (converts from half-points).
+    /// Falls back to 12pt if not specified.
     pub fn font_size_pt(&self) -> f32 {
         self.font_size.map(|s| s as f32 / 2.0).unwrap_or(12.0)
+    }
+
+    /// Font size in points using a document-level default (in half-points).
+    pub fn font_size_pt_with_default(&self, default_half_pts: u32) -> f32 {
+        self.font_size
+            .unwrap_or(default_half_pts) as f32 / 2.0
     }
 }
 

@@ -110,7 +110,11 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     next_configs.reverse(); // So we can pop from the end
 
     let default_tab_stop_pt = doc.default_tab_stop as f32 / 20.0;
-    let mut layouter = Layouter::new(&initial_config, next_configs, default_tab_stop_pt);
+    let doc_defaults = DocDefaultsLayout {
+        font_size_half_pts: doc.default_font_size,
+        font_family: doc.default_font_family.clone(),
+    };
+    let mut layouter = Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
 
     for block in &doc.blocks {
         layouter.layout_block(block);
@@ -132,6 +136,12 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
     }
 }
 
+/// Document-level defaults for layout.
+struct DocDefaultsLayout {
+    font_size_half_pts: u32,
+    font_family: String,
+}
+
 /// A floating image that affects text layout on the current page.
 struct ActiveFloat {
     page_x: f32,
@@ -150,10 +160,17 @@ struct Layouter {
     next_section_configs: Vec<LayoutConfig>,
     /// Default tab stop interval in points.
     default_tab_stop_pt: f32,
+    /// Document-level default font settings.
+    doc_defaults: DocDefaultsLayout,
 }
 
 impl Layouter {
-    fn new(config: &LayoutConfig, next_section_configs: Vec<LayoutConfig>, default_tab_stop_pt: f32) -> Self {
+    fn new(
+        config: &LayoutConfig,
+        next_section_configs: Vec<LayoutConfig>,
+        default_tab_stop_pt: f32,
+        doc_defaults: DocDefaultsLayout,
+    ) -> Self {
         Self {
             config: *config,
             pages: Vec::new(),
@@ -166,6 +183,7 @@ impl Layouter {
             active_floats: Vec::new(),
             next_section_configs,
             default_tab_stop_pt,
+            doc_defaults,
         }
     }
 
@@ -292,7 +310,7 @@ impl Layouter {
             - indent.left_pt()
             - indent.right_pt();
         let content_height = self.config.content_height();
-        let fragments = collect_fragments(&para.runs, base_content_width, content_height);
+        let fragments = collect_fragments(&para.runs, base_content_width, content_height, &self.doc_defaults);
         let base_x = self.config.margin_left + indent.left_pt();
 
         let mut line_start = 0;
@@ -510,6 +528,7 @@ impl Layouter {
                             &p.runs,
                             cell_content_width,
                             self.config.content_height(),
+                            &self.doc_defaults,
                         );
 
                         if fragments.is_empty() && p.floats.is_empty() {
@@ -779,13 +798,16 @@ impl Fragment {
     }
 }
 
-fn collect_fragments(runs: &[Inline], content_width: f32, content_height: f32) -> Vec<Fragment> {
+fn collect_fragments(
+    runs: &[Inline],
+    content_width: f32,
+    content_height: f32,
+    defaults: &DocDefaultsLayout,
+) -> Vec<Fragment> {
     let mut fragments = Vec::new();
     for run in runs {
         match run {
             Inline::TextRun(tr) => {
-                // Collapse runs of excessive whitespace (>3 consecutive spaces)
-                // These are typically used for manual alignment in Word
                 let collapsed = collapse_spaces(&tr.text);
                 let words: Vec<&str> = collapsed.split_inclusive(' ').collect();
                 for word in words {
@@ -798,8 +820,10 @@ fn collect_fragments(runs: &[Inline], content_width: f32, content_height: f32) -
                             .properties
                             .font_family
                             .clone()
-                            .unwrap_or_else(|| "Helvetica".to_string()),
-                        font_size: tr.properties.font_size_pt(),
+                            .unwrap_or_else(|| defaults.font_family.clone()),
+                        font_size: tr.properties.font_size_pt_with_default(
+                            defaults.font_size_half_pts,
+                        ),
                         bold: tr.properties.bold,
                         italic: tr.properties.italic,
                         underline: tr.properties.underline,
@@ -906,7 +930,13 @@ mod tests {
     use super::*;
 
     fn make_doc(blocks: Vec<Block>) -> Document {
-        Document { blocks, final_section: None, default_tab_stop: 720 }
+        Document {
+            blocks,
+            final_section: None,
+            default_tab_stop: 720,
+            default_font_size: 24,
+            default_font_family: "Helvetica".to_string(),
+        }
     }
 
     fn simple_paragraph(text: &str) -> Block {

@@ -373,7 +373,13 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
         }
     }
 
-    Ok(Document { blocks, final_section, default_tab_stop: 720 })
+    Ok(Document {
+        blocks,
+        final_section,
+        default_tab_stop: 720,
+        default_font_size: 24,
+        default_font_family: "Helvetica".to_string(),
+    })
 }
 
 enum ParseState {

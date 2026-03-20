@@ -6,6 +6,14 @@ use quick_xml::Reader;
 
 use crate::error::Error;
 
+/// Document-wide default run properties from `word/styles.xml`.
+pub struct DocDefaults {
+    /// Default font size in half-points.
+    pub font_size: Option<u32>,
+    /// Default font family.
+    pub font_family: Option<String>,
+}
+
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
 pub struct DocxContents {
     pub document_xml: String,
@@ -15,6 +23,8 @@ pub struct DocxContents {
     pub media_files: HashMap<String, Vec<u8>>,
     /// Default tab stop interval in twips (from `word/settings.xml`).
     pub default_tab_stop: Option<u32>,
+    /// Document-wide default run properties from `word/styles.xml`.
+    pub doc_defaults: Option<DocDefaults>,
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -75,11 +85,22 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         Err(_) => None,
     };
 
+    // 5. Extract document defaults from word/styles.xml
+    let doc_defaults = match archive.by_name("word/styles.xml") {
+        Ok(mut file) => {
+            let mut styles_xml = String::new();
+            file.read_to_string(&mut styles_xml)?;
+            parse_doc_defaults(&styles_xml)
+        }
+        Err(_) => None,
+    };
+
     Ok(DocxContents {
         document_xml,
         relationships,
         media_files,
         default_tab_stop,
+        doc_defaults,
     })
 }
 
@@ -124,6 +145,79 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, String>, Error> {
     }
 
     Ok(rels)
+}
+
+/// Parse `word/styles.xml` to extract document default font size and family.
+fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
+    let mut reader = Reader::from_str(xml);
+    let mut in_doc_defaults = false;
+    let mut in_rpr_default = false;
+    let mut font_size = None;
+    let mut font_family = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"docDefaults" => in_doc_defaults = true,
+                    b"rPrDefault" if in_doc_defaults => in_rpr_default = true,
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"docDefaults" => break, // Done once we leave docDefaults
+                    b"rPrDefault" => in_rpr_default = false,
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) if in_rpr_default => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"sz" => {
+                        for attr in e.attributes().flatten() {
+                            if local_name(attr.key.as_ref()) == b"val" {
+                                let val = String::from_utf8_lossy(&attr.value);
+                                font_size = val.parse().ok();
+                            }
+                        }
+                    }
+                    b"rFonts" => {
+                        // Try ascii, then hAnsi
+                        for attr in e.attributes().flatten() {
+                            let key = local_name(attr.key.as_ref());
+                            if key == b"ascii" || key == b"hAnsi" {
+                                let val =
+                                    String::from_utf8_lossy(&attr.value).into_owned();
+                                // Skip theme references like "minorHAnsi"
+                                if font_family.is_none() && !val.is_empty() {
+                                    font_family = Some(val);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Err(_) => break,
+            _ => {}
+        }
+    }
+
+    if font_size.is_some() || font_family.is_some() {
+        Some(DocDefaults {
+            font_size,
+            font_family,
+        })
+    } else {
+        None
+    }
 }
 
 /// Parse `word/settings.xml` to find `w:defaultTabStop` value.

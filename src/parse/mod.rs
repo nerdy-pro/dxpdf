@@ -35,6 +35,14 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     if let Some(dts) = contents.default_tab_stop {
         document.default_tab_stop = dts;
     }
+    if let Some(dd) = &contents.doc_defaults {
+        if let Some(fs) = dd.font_size {
+            document.default_font_size = fs;
+        }
+        if let Some(ref ff) = dd.font_family {
+            document.default_font_family = ff.clone();
+        }
+    }
     resolve_images(
         &mut document,
         &contents.relationships,
