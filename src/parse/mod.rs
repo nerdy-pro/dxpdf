@@ -51,6 +51,12 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         if let Some(sl) = dd.spacing_line {
             document.default_spacing.line = Some(sl);
         }
+        if let Some(cm) = dd.cell_margins {
+            document.default_cell_margins = cm;
+        }
+        if let Some(tcs) = dd.table_cell_spacing {
+            document.table_cell_spacing = tcs;
+        }
     }
     resolve_images(
         &mut document,

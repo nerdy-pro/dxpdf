@@ -114,6 +114,8 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         font_size_half_pts: doc.default_font_size,
         font_family: doc.default_font_family.clone(),
         default_spacing: doc.default_spacing,
+        default_cell_margins: doc.default_cell_margins,
+        table_cell_spacing: doc.table_cell_spacing,
     };
     let mut layouter =
         Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
@@ -237,6 +239,25 @@ impl Layouter {
         }
     }
 
+    /// Resolve spacing for paragraphs inside table cells.
+    /// Table style spacing (e.g., after=0) takes priority over document defaults.
+    fn resolve_cell_spacing(
+        &self,
+        para_spacing: Option<Spacing>,
+        table_spacing: Option<Spacing>,
+    ) -> Spacing {
+        let table_defaults = table_spacing
+            .unwrap_or(self.doc_defaults.table_cell_spacing);
+        match para_spacing {
+            Some(s) => Spacing {
+                before: s.before.or(table_defaults.before),
+                after: s.after.or(table_defaults.after),
+                line: s.line.or(table_defaults.line),
+            },
+            None => table_defaults,
+        }
+    }
+
     /// Get the width of a table cell, accounting for grid_span.
     fn cell_width(&self, grid_col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
         if !col_widths.is_empty() {
@@ -294,6 +315,8 @@ mod tests {
             default_font_size: 24,
             default_font_family: "Helvetica".to_string(),
             default_spacing: Spacing::default(),
+            default_cell_margins: CellMargins::default(),
+            table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
         }
     }
 
@@ -323,6 +346,7 @@ mod tests {
             width: None,
             grid_span: 1,
             vertical_merge: None,
+            cell_margins: None,
         }
     }
 
@@ -456,6 +480,8 @@ mod tests {
                 },
             ],
             grid_cols: vec![2880, 2880],
+            default_cell_margins: None,
+            cell_spacing: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -492,6 +518,8 @@ mod tests {
                 },
             ],
             grid_cols: vec![2000, 2000, 2000],
+            default_cell_margins: None,
+            cell_spacing: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -550,6 +578,8 @@ mod tests {
                 },
             ],
             grid_cols: vec![1000, 1000, 1000, 1000],
+            default_cell_margins: None,
+            cell_spacing: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -618,6 +648,8 @@ mod tests {
                 },
             ],
             grid_cols: vec![100, 200, 300],
+            default_cell_margins: None,
+            cell_spacing: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();

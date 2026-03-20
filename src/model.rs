@@ -15,6 +15,10 @@ pub struct Document {
     pub default_font_family: String,
     /// Default paragraph spacing (from `word/styles.xml` docDefaults).
     pub default_spacing: Spacing,
+    /// Default table cell margins (from table style in `word/styles.xml`).
+    pub default_cell_margins: CellMargins,
+    /// Default paragraph spacing inside table cells (from table style).
+    pub table_cell_spacing: Spacing,
 }
 
 /// A block-level element.
@@ -238,11 +242,51 @@ pub struct Color {
     pub b: u8,
 }
 
+/// Cell margins (padding) in twips, applied to all four sides.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellMargins {
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+    pub left: u32,
+}
+
+impl Default for CellMargins {
+    fn default() -> Self {
+        // OOXML default: 0 top/bottom, 108 twips (5.4pt) left/right
+        Self {
+            top: 0,
+            right: 108,
+            bottom: 0,
+            left: 108,
+        }
+    }
+}
+
+impl CellMargins {
+    pub fn top_pt(&self) -> f32 {
+        self.top as f32 / 20.0
+    }
+    pub fn right_pt(&self) -> f32 {
+        self.right as f32 / 20.0
+    }
+    pub fn bottom_pt(&self) -> f32 {
+        self.bottom as f32 / 20.0
+    }
+    pub fn left_pt(&self) -> f32 {
+        self.left as f32 / 20.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     pub rows: Vec<TableRow>,
     /// Column widths from `w:tblGrid` in twips.
     pub grid_cols: Vec<u32>,
+    /// Default cell margins for this table (from `w:tblCellMar`).
+    pub default_cell_margins: Option<CellMargins>,
+    /// Default paragraph spacing for cells in this table (from table style).
+    pub cell_spacing: Option<Spacing>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -268,6 +312,8 @@ pub struct TableCell {
     pub grid_span: u32,
     /// Vertical merge state (from `w:vMerge`).
     pub vertical_merge: Option<VerticalMerge>,
+    /// Per-cell margins override (from `w:tcMar`).
+    pub cell_margins: Option<CellMargins>,
 }
 
 impl TableCell {

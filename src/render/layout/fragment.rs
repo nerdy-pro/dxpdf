@@ -7,6 +7,8 @@ pub struct DocDefaultsLayout {
     pub font_size_half_pts: u32,
     pub font_family: String,
     pub default_spacing: Spacing,
+    pub default_cell_margins: CellMargins,
+    pub table_cell_spacing: Spacing,
 }
 
 /// A flattened fragment for layout — either text, an image, a tab, or a line break.

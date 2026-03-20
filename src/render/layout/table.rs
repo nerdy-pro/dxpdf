@@ -3,6 +3,17 @@ use crate::model::*;
 use super::fragment::*;
 use super::{DrawCommand, Layouter};
 
+/// Resolve cell margins for a specific cell: per-cell > table default > document default.
+fn resolve_cell_margins(
+    cell: &TableCell,
+    table_default: &Option<CellMargins>,
+    doc_default: &CellMargins,
+) -> CellMargins {
+    cell.cell_margins
+        .or(*table_default)
+        .unwrap_or(*doc_default)
+}
+
 impl Layouter {
     pub(super) fn layout_table(&mut self, table: &Table) {
         if table.rows.is_empty() {
@@ -15,7 +26,7 @@ impl Layouter {
         }
 
         let content_width = self.config.content_width();
-        let cell_padding = 4.0;
+        let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
         let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
             let grid_total: f32 =
@@ -36,7 +47,7 @@ impl Layouter {
 
         for row in &table.rows {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
-            let mut row_height = cell_padding * 2.0 + 12.0;
+            let mut row_height = 12.0; // minimum row height
 
             let mut col_x_positions: Vec<f32> = Vec::with_capacity(row.cells.len());
             let mut cell_widths_computed: Vec<f32> =
@@ -54,9 +65,19 @@ impl Layouter {
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
                 let col_width = cell_widths_computed[col_idx];
-                let cell_content_width = (col_width - cell_padding * 2.0).max(1.0);
+                let margins = resolve_cell_margins(
+                    cell,
+                    &table.default_cell_margins,
+                    &doc_cell_margins,
+                );
+                let pad_left = margins.left_pt();
+                let pad_right = margins.right_pt();
+                let pad_top = margins.top_pt();
+                let pad_bottom = margins.bottom_pt();
+                let cell_content_width =
+                    (col_width - pad_left - pad_right).max(1.0);
                 let mut commands = Vec::new();
-                let mut cell_y = cell_padding;
+                let mut cell_y = pad_top;
 
                 if cell.is_vmerge_continue() {
                     cell_layouts.push(commands);
@@ -65,8 +86,10 @@ impl Layouter {
 
                 for block in &cell.blocks {
                     if let Block::Paragraph(p) = block {
-                        let spacing =
-                            self.resolve_spacing(p.properties.spacing);
+                        let spacing = self.resolve_cell_spacing(
+                            p.properties.spacing,
+                            table.cell_spacing,
+                        );
                         cell_y += spacing.before_pt();
 
                         for float in &p.floats {
@@ -86,7 +109,7 @@ impl Layouter {
                             let img_x = if float.offset_x_pt > 0.0
                                 && float.offset_x_pt + img_w <= cell_content_width
                             {
-                                cell_x + cell_padding + float.offset_x_pt
+                                cell_x + pad_left + float.offset_x_pt
                             } else {
                                 cell_x + (col_width - img_w) / 2.0
                             };
@@ -146,7 +169,7 @@ impl Layouter {
                                 }
                                 _ => 0.0,
                             };
-                            let mut x = cell_x + cell_padding + align_offset;
+                            let mut x = cell_x + pad_left + align_offset;
 
                             for frag in &fragments[line_start..actual_end] {
                                 match frag {
@@ -206,13 +229,13 @@ impl Layouter {
                                         x += width;
                                     }
                                     Fragment::Tab { .. } => {
-                                        let rel_x = x - (cell_x + cell_padding);
+                                        let rel_x = x - (cell_x + pad_left);
                                         let next_stop = find_next_tab_stop(
                                             rel_x,
                                             &p.properties.tab_stops,
                                             self.default_tab_stop_pt,
                                         );
-                                        x = cell_x + cell_padding + next_stop;
+                                        x = cell_x + pad_left + next_stop;
                                     }
                                     Fragment::LineBreak { .. } => {}
                                 }
@@ -225,7 +248,10 @@ impl Layouter {
                     }
                 }
 
-                let total_cell_height = cell_y + cell_padding;
+                // Ensure minimum bottom padding to prevent text descenders
+                // from overlapping the cell border
+                let effective_pad_bottom = pad_bottom.max(2.0);
+                let total_cell_height = cell_y + effective_pad_bottom;
                 if total_cell_height > row_height {
                     row_height = total_cell_height;
                 }

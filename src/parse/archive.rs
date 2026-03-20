@@ -18,6 +18,10 @@ pub struct DocDefaults {
     pub spacing_before: Option<u32>,
     /// Default line spacing in twips.
     pub spacing_line: Option<u32>,
+    /// Default table cell margins from the table grid style.
+    pub cell_margins: Option<crate::model::CellMargins>,
+    /// Default paragraph spacing inside table cells (from table grid style).
+    pub table_cell_spacing: Option<crate::model::Spacing>,
 }
 
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
@@ -164,6 +168,11 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
     let mut spacing_after = None;
     let mut spacing_before = None;
     let mut spacing_line = None;
+    let mut cell_margins: Option<crate::model::CellMargins> = None;
+    let mut in_tbl_cell_mar = false;
+    let mut table_cell_spacing: Option<crate::model::Spacing> = None;
+    let mut in_table_style = false;
+    let mut in_table_style_ppr = false;
 
     loop {
         match reader.read_event() {
@@ -175,6 +184,20 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                     b"docDefaults" => in_doc_defaults = true,
                     b"rPrDefault" if in_doc_defaults => in_rpr_default = true,
                     b"pPrDefault" if in_doc_defaults => in_ppr_default = true,
+                    b"tblCellMar" => in_tbl_cell_mar = true,
+                    b"style" => {
+                        // Check if this is a table style
+                        for attr in e.attributes().flatten() {
+                            if local_name(attr.key.as_ref()) == b"type"
+                                && attr.value.as_ref() == b"table"
+                            {
+                                in_table_style = true;
+                            }
+                        }
+                    }
+                    b"pPr" if in_table_style => {
+                        in_table_style_ppr = true;
+                    }
                     _ => {}
                 }
             }
@@ -182,9 +205,21 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 match local {
-                    b"docDefaults" => break,
+                    b"docDefaults" => {
+                        in_doc_defaults = false;
+                        in_rpr_default = false;
+                        in_ppr_default = false;
+                    }
                     b"rPrDefault" => in_rpr_default = false,
                     b"pPrDefault" => in_ppr_default = false,
+                    b"tblCellMar" => in_tbl_cell_mar = false,
+                    b"style" => {
+                        in_table_style = false;
+                        in_table_style_ppr = false;
+                    }
+                    b"pPr" if in_table_style => {
+                        in_table_style_ppr = false;
+                    }
                     _ => {}
                 }
             }
@@ -228,6 +263,49 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         }
                     }
                 }
+                if in_tbl_cell_mar && cell_margins.is_none() {
+                    // Parse margin children (top/bottom/left/right)
+                    let w_type_attr = e.attributes().flatten().find(|a| {
+                        local_name(a.key.as_ref()) == b"type"
+                    });
+                    let is_dxa = w_type_attr
+                        .map(|a| a.value.as_ref() == b"dxa")
+                        .unwrap_or(false);
+                    if is_dxa {
+                        let w_val: Option<u32> = e.attributes().flatten()
+                            .find(|a| local_name(a.key.as_ref()) == b"w")
+                            .and_then(|a| {
+                                String::from_utf8_lossy(&a.value).parse().ok()
+                            });
+                        if let Some(val) = w_val {
+                            let m = cell_margins
+                                .get_or_insert(crate::model::CellMargins::default());
+                            match local {
+                                b"top" => m.top = val,
+                                b"bottom" => m.bottom = val,
+                                b"left" | b"start" => m.left = val,
+                                b"right" | b"end" => m.right = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if in_table_style_ppr && local == b"spacing"
+                    && table_cell_spacing.is_none()
+                {
+                    let mut sp = crate::model::Spacing::default();
+                    for attr in e.attributes().flatten() {
+                        let key = local_name(attr.key.as_ref());
+                        let val = String::from_utf8_lossy(&attr.value);
+                        match key {
+                            b"after" => sp.after = val.parse().ok(),
+                            b"before" => sp.before = val.parse().ok(),
+                            b"line" => sp.line = val.parse().ok(),
+                            _ => {}
+                        }
+                    }
+                    table_cell_spacing = Some(sp);
+                }
             }
             Err(_) => break,
             _ => {}
@@ -239,6 +317,8 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
         || spacing_after.is_some()
         || spacing_before.is_some()
         || spacing_line.is_some()
+        || cell_margins.is_some()
+        || table_cell_spacing.is_some()
     {
         Some(DocDefaults {
             font_size,
@@ -246,6 +326,8 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
             spacing_after,
             spacing_before,
             spacing_line,
+            cell_margins,
+            table_cell_spacing,
         })
     } else {
         None

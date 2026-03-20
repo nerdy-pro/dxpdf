@@ -75,6 +75,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         state = ParseState::InTable {
                             rows: Vec::new(),
                             grid_cols: Vec::new(),
+                            default_cell_margins: None,
+                            in_cell_mar: false,
                         };
                     }
                     b"tr" if matches!(state, ParseState::InTable { .. }) => {
@@ -90,6 +92,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             width: None,
                             grid_span: 1,
                             vertical_merge: None,
+                            cell_margins: None,
+                            in_cell_mar: false,
                         };
                     }
                     b"t" if matches!(state, ParseState::InRun { .. }) => {
@@ -139,6 +143,16 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                 page_margins: None,
                             },
                         };
+                    }
+                    b"tblCellMar" if matches!(state, ParseState::InTable { .. }) => {
+                        if let ParseState::InTable { ref mut in_cell_mar, .. } = state {
+                            *in_cell_mar = true;
+                        }
+                    }
+                    b"tcMar" if matches!(state, ParseState::InTableCell { .. }) => {
+                        if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
+                            *in_cell_mar = true;
+                        }
                     }
                     _ => {}
                 }
@@ -292,9 +306,9 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         }
                     }
                     b"tbl" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { rows, grid_cols } = state {
+                        if let ParseState::InTable { rows, grid_cols, default_cell_margins, .. } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table { rows, grid_cols });
+                            let table = Block::Table(Table { rows, grid_cols, default_cell_margins, cell_spacing: None });
                             push_block(&mut state, &mut blocks, table);
                         }
                     }
@@ -312,6 +326,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             width: cell_width,
                             grid_span,
                             vertical_merge,
+                            cell_margins,
+                            ..
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
@@ -321,6 +337,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                     width: cell_width,
                                     grid_span,
                                     vertical_merge,
+                                    cell_margins,
                                 });
                             }
                         }
@@ -420,6 +437,16 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             *depth -= 1;
                         }
                     }
+                    b"tblCellMar" if matches!(state, ParseState::InTable { in_cell_mar: true, .. }) => {
+                        if let ParseState::InTable { ref mut in_cell_mar, .. } = state {
+                            *in_cell_mar = false;
+                        }
+                    }
+                    b"tcMar" if matches!(state, ParseState::InTableCell { in_cell_mar: true, .. }) => {
+                        if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
+                            *in_cell_mar = false;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -434,6 +461,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
         default_font_size: 24,
         default_font_family: "Helvetica".to_string(),
         default_spacing: Spacing::default(),
+        default_cell_margins: CellMargins::default(),
+        table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
     })
 }
 
@@ -466,6 +495,8 @@ enum ParseState {
     InTable {
         rows: Vec<TableRow>,
         grid_cols: Vec<u32>,
+        default_cell_margins: Option<CellMargins>,
+        in_cell_mar: bool,
     },
     InTableRow {
         cells: Vec<TableCell>,
@@ -475,6 +506,8 @@ enum ParseState {
         width: Option<u32>,
         grid_span: u32,
         vertical_merge: Option<VerticalMerge>,
+        cell_margins: Option<CellMargins>,
+        in_cell_mar: bool,
     },
     InDrawing {
         depth: u32,

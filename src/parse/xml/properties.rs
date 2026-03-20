@@ -4,6 +4,36 @@ use crate::model::*;
 use super::ParseState;
 use super::helpers::{get_attr, is_val_false};
 
+/// Parse a margin value from an element like `<w:top w:w="0" w:type="dxa"/>`.
+fn parse_margin_value(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, Error> {
+    let w_type = get_attr(e, b"type")?.unwrap_or_default();
+    if w_type == "dxa" {
+        if let Some(val) = get_attr(e, b"w")? {
+            return Ok(val.parse::<u32>().ok());
+        }
+    }
+    Ok(None)
+}
+
+/// Apply a margin element to a CellMargins struct, creating it if needed.
+fn apply_margin(
+    margins: &mut Option<CellMargins>,
+    local: &[u8],
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<(), Error> {
+    if let Some(val) = parse_margin_value(e)? {
+        let m = margins.get_or_insert(CellMargins::default());
+        match local {
+            b"top" => m.top = val,
+            b"bottom" => m.bottom = val,
+            b"left" | b"start" => m.left = val,
+            b"right" | b"end" => m.right = val,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Handle empty elements that set properties on runs, paragraphs, tables, and cells.
 pub fn handle_empty_element(
     local: &[u8],
@@ -110,8 +140,15 @@ pub fn handle_empty_element(
                 _ => {}
             }
         }
-        ParseState::InTable { ref mut grid_cols, .. } => {
-            if local == b"gridCol" {
+        ParseState::InTable {
+            ref mut grid_cols,
+            ref mut default_cell_margins,
+            in_cell_mar,
+            ..
+        } => {
+            if *in_cell_mar {
+                apply_margin(default_cell_margins, local, e)?;
+            } else if local == b"gridCol" {
                 if let Some(val) = get_attr(e, b"w")? {
                     if let Ok(w) = val.parse::<u32>() {
                         grid_cols.push(w);
@@ -123,8 +160,14 @@ pub fn handle_empty_element(
             ref mut width,
             ref mut grid_span,
             ref mut vertical_merge,
+            ref mut cell_margins,
+            ref in_cell_mar,
             ..
         } => {
+            if *in_cell_mar {
+                apply_margin(cell_margins, local, e)?;
+                return Ok(());
+            }
             match local {
                 b"tcW" => {
                     let w_type = get_attr(e, b"type")?.unwrap_or_default();
