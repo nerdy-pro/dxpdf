@@ -289,7 +289,7 @@ impl Layouter {
                     x2: cell_x,
                     y2: row_bottom,
                     color: (0, 0, 0),
-                    width: 0.5,
+                    width: TABLE_BORDER_WIDTH,
                 });
 
                 self.current_page.commands.push(DrawCommand::Line {
@@ -298,7 +298,7 @@ impl Layouter {
                     x2: cell_x + cw,
                     y2: row_bottom,
                     color: (0, 0, 0),
-                    width: 0.5,
+                    width: TABLE_BORDER_WIDTH,
                 });
 
                 self.current_page.commands.push(DrawCommand::Line {
@@ -307,7 +307,7 @@ impl Layouter {
                     x2: cell_x + cw,
                     y2: row_bottom,
                     color: (0, 0, 0),
-                    width: 0.5,
+                    width: TABLE_BORDER_WIDTH,
                 });
 
                 for cmd in commands {
