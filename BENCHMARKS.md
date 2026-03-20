@@ -32,7 +32,8 @@ Conversion benchmarks for `docx-pdf` using the test document:
 | 2026-03-20 | borders | 85.0 ms ± 3.1 ms | 80.4 ms | 90.1 ms | 18.8 MB | +table borders, cell margins, font subs, units.rs, code review refactor |
 | 2026-03-20 | spacing | 84.1 ms ± 0.7 ms | 82.4 ms | 85.3 ms | 18.7 MB | +row heights, adjacent tables, hyphen breaks, natural line spacing |
 | 2026-03-20 | shading | 85.4 ms ± 3.5 ms | 83.0 ms | 98.9 ms | 18.8 MB | +cell shading/backgrounds, DrawCommand::Rect |
-| 2026-03-20 | latest | 89.6 ms ± 0.8 ms | 88.2 ms | 90.8 ms | 18.8 MB | +space handling, render order fix (shading→content→borders), hyphen wrapping |
+| 2026-03-20 | spaces | 89.6 ms ± 0.8 ms | 88.2 ms | 90.8 ms | 18.8 MB | +space handling, render order fix (shading→content→borders), hyphen wrapping |
+| 2026-03-20 | latest | 112.3 ms ± 2.1 ms | 109.7 ms | 119.5 ms | 19.0 MB | +headers/footers, signed EMU offsets, float align, header extent push-down |
 
 ### Methodology
 
