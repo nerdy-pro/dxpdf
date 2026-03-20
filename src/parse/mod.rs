@@ -32,6 +32,9 @@ fn resolve_image_data(
 pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     let contents = archive::extract_docx_contents(docx_bytes)?;
     let mut document = xml::parse_document_xml(&contents.document_xml)?;
+    if let Some(dts) = contents.default_tab_stop {
+        document.default_tab_stop = dts;
+    }
     resolve_images(
         &mut document,
         &contents.relationships,

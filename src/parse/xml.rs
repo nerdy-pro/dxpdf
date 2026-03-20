@@ -369,7 +369,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
         }
     }
 
-    Ok(Document { blocks, final_section })
+    Ok(Document { blocks, final_section, default_tab_stop: 720 })
 }
 
 enum ParseState {
@@ -551,6 +551,27 @@ fn handle_empty_element(
                         }
                     }
                     props.indentation = Some(indent);
+                }
+                b"tab" => {
+                    // Tab stop definition inside w:tabs > w:tab
+                    if let (Some(val), Some(pos)) =
+                        (get_attr(e, b"val")?, get_attr(e, b"pos")?)
+                    {
+                        let stop_type = match val.as_str() {
+                            "left" => Some(TabStopType::Left),
+                            "center" => Some(TabStopType::Center),
+                            "right" => Some(TabStopType::Right),
+                            "decimal" => Some(TabStopType::Decimal),
+                            "clear" => None, // "clear" removes an inherited stop
+                            _ => Some(TabStopType::Left),
+                        };
+                        if let (Some(st), Ok(p)) = (stop_type, pos.parse::<u32>()) {
+                            props.tab_stops.push(TabStop {
+                                position: p,
+                                stop_type: st,
+                            });
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1075,5 +1096,30 @@ mod tests {
         assert_eq!(ps2.height, 11906);
         let pm2 = final_sect.page_margins.unwrap();
         assert_eq!(pm2.top, 1440);
+    }
+
+    #[test]
+    fn parse_tab_stops() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:pPr>
+                    <w:tabs>
+                        <w:tab w:val="left" w:pos="2880"/>
+                        <w:tab w:val="center" w:pos="4320"/>
+                        <w:tab w:val="right" w:pos="9360"/>
+                    </w:tabs>
+                </w:pPr>
+                <w:r><w:t>Col1</w:t></w:r>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        assert_eq!(p.properties.tab_stops.len(), 3);
+        assert_eq!(p.properties.tab_stops[0].position, 2880);
+        assert_eq!(p.properties.tab_stops[0].stop_type, TabStopType::Left);
+        assert_eq!(p.properties.tab_stops[1].position, 4320);
+        assert_eq!(p.properties.tab_stops[1].stop_type, TabStopType::Center);
+        assert_eq!(p.properties.tab_stops[2].position, 9360);
+        assert_eq!(p.properties.tab_stops[2].stop_type, TabStopType::Right);
     }
 }

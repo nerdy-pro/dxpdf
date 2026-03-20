@@ -5,6 +5,9 @@ pub struct Document {
     /// Final section properties (from `w:body/w:sectPr`), applies to
     /// all content after the last mid-document section break.
     pub final_section: Option<SectionProperties>,
+    /// Default tab stop interval in twips (from `word/settings.xml`).
+    /// Defaults to 720 twips (0.5 inch) if not specified.
+    pub default_tab_stop: u32,
 }
 
 /// A block-level element.
@@ -81,6 +84,31 @@ pub struct ParagraphProperties {
     pub alignment: Option<Alignment>,
     pub spacing: Option<Spacing>,
     pub indentation: Option<Indentation>,
+    /// Custom tab stops defined for this paragraph.
+    pub tab_stops: Vec<TabStop>,
+}
+
+/// A tab stop alignment type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabStopType {
+    Left,
+    Center,
+    Right,
+    Decimal,
+}
+
+/// A custom tab stop definition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TabStop {
+    /// Position in twips.
+    pub position: u32,
+    pub stop_type: TabStopType,
+}
+
+impl TabStop {
+    pub fn position_pt(&self) -> f32 {
+        self.position as f32 / 20.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

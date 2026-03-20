@@ -13,6 +13,8 @@ pub struct DocxContents {
     pub relationships: HashMap<String, String>,
     /// Path (relative to `word/`, e.g. "media/image1.png") -> raw bytes.
     pub media_files: HashMap<String, Vec<u8>>,
+    /// Default tab stop interval in twips (from `word/settings.xml`).
+    pub default_tab_stop: Option<u32>,
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -63,10 +65,21 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         media_files.insert(rel_path, data);
     }
 
+    // 4. Extract defaultTabStop from word/settings.xml
+    let default_tab_stop = match archive.by_name("word/settings.xml") {
+        Ok(mut file) => {
+            let mut settings_xml = String::new();
+            file.read_to_string(&mut settings_xml)?;
+            parse_default_tab_stop(&settings_xml)
+        }
+        Err(_) => None,
+    };
+
     Ok(DocxContents {
         document_xml,
         relationships,
         media_files,
+        default_tab_stop,
     })
 }
 
@@ -111,6 +124,32 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, String>, Error> {
     }
 
     Ok(rels)
+}
+
+/// Parse `word/settings.xml` to find `w:defaultTabStop` value.
+fn parse_default_tab_stop(xml: &str) -> Option<u32> {
+    let mut reader = Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                if local == b"defaultTabStop" {
+                    for attr in e.attributes().flatten() {
+                        let key = local_name(attr.key.as_ref());
+                        if key == b"val" {
+                            let val = String::from_utf8_lossy(&attr.value);
+                            return val.parse().ok();
+                        }
+                    }
+                }
+            }
+            Err(_) => break,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Strip namespace prefix from an element/attribute name.

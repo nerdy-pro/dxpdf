@@ -109,7 +109,8 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse(); // So we can pop from the end
 
-    let mut layouter = Layouter::new(&initial_config, next_configs);
+    let default_tab_stop_pt = doc.default_tab_stop as f32 / 20.0;
+    let mut layouter = Layouter::new(&initial_config, next_configs, default_tab_stop_pt);
 
     for block in &doc.blocks {
         layouter.layout_block(block);
@@ -147,10 +148,12 @@ struct Layouter {
     active_floats: Vec<ActiveFloat>,
     /// Queue of section configs to apply at each section break (reversed, pop from end).
     next_section_configs: Vec<LayoutConfig>,
+    /// Default tab stop interval in points.
+    default_tab_stop_pt: f32,
 }
 
 impl Layouter {
-    fn new(config: &LayoutConfig, next_section_configs: Vec<LayoutConfig>) -> Self {
+    fn new(config: &LayoutConfig, next_section_configs: Vec<LayoutConfig>, default_tab_stop_pt: f32) -> Self {
         Self {
             config: *config,
             pages: Vec::new(),
@@ -162,6 +165,7 @@ impl Layouter {
             cursor_y: config.margin_top,
             active_floats: Vec::new(),
             next_section_configs,
+            default_tab_stop_pt,
         }
     }
 
@@ -388,6 +392,15 @@ impl Layouter {
                         });
                         x += width;
                     }
+                    Fragment::Tab => {
+                        let rel_x = x - base_x;
+                        let next_stop = find_next_tab_stop(
+                            rel_x,
+                            &para.properties.tab_stops,
+                            self.default_tab_stop_pt,
+                        );
+                        x = base_x + next_stop;
+                    }
                 }
             }
 
@@ -527,7 +540,7 @@ impl Layouter {
     }
 }
 
-/// A flattened fragment for layout — either text or an image.
+/// A flattened fragment for layout — either text, an image, or a tab.
 enum Fragment {
     Text {
         text: String,
@@ -543,13 +556,19 @@ enum Fragment {
         height: f32,
         data: Vec<u8>,
     },
+    /// A tab character. Its actual width depends on the current x position
+    /// and is resolved during layout, not during fragment collection.
+    Tab,
 }
 
 impl Fragment {
+    /// Estimated width. For Tab, returns a minimum width; actual advancement
+    /// is computed in the layout loop based on tab stops.
     fn width(&self) -> f32 {
         match self {
             Fragment::Text { text, font_size, .. } => estimate_text_width(text, *font_size),
             Fragment::Image { width, .. } => *width,
+            Fragment::Tab => 12.0, // minimum tab width for line fitting
         }
     }
 
@@ -557,6 +576,7 @@ impl Fragment {
         match self {
             Fragment::Text { font_size, .. } => *font_size * 1.2,
             Fragment::Image { height, .. } => *height,
+            Fragment::Tab => 12.0 * 1.2,
         }
     }
 }
@@ -605,20 +625,31 @@ fn collect_fragments(runs: &[Inline], content_width: f32, content_height: f32) -
                 });
             }
             Inline::Tab => {
-                fragments.push(Fragment::Text {
-                    text: "    ".to_string(),
-                    font_family: "Helvetica".to_string(),
-                    font_size: 12.0,
-                    bold: false,
-                    italic: false,
-                    underline: false,
-                    color: None,
-                });
+                fragments.push(Fragment::Tab);
             }
             Inline::LineBreak | Inline::Image(_) => {}
         }
     }
     fragments
+}
+
+/// Find the next tab stop position (in points, relative to paragraph left edge)
+/// given the current x position relative to paragraph left edge.
+fn find_next_tab_stop(current_x: f32, custom_stops: &[TabStop], default_interval: f32) -> f32 {
+    // First, check custom tab stops (sorted by position)
+    for stop in custom_stops {
+        let pos = stop.position_pt();
+        if pos > current_x + 1.0 {
+            return pos;
+        }
+    }
+    // Fall back to default tab interval
+    if default_interval > 0.0 {
+        let next_multiple = ((current_x / default_interval).floor() + 1.0) * default_interval;
+        return next_multiple;
+    }
+    // Absolute fallback
+    current_x + 36.0
 }
 
 /// Collapse runs of more than 2 consecutive spaces into a single space.
@@ -677,7 +708,7 @@ mod tests {
     use super::*;
 
     fn make_doc(blocks: Vec<Block>) -> Document {
-        Document { blocks, final_section: None }
+        Document { blocks, final_section: None, default_tab_stop: 720 }
     }
 
     fn simple_paragraph(text: &str) -> Block {
@@ -758,5 +789,35 @@ mod tests {
             // Centered text should not start at the left margin
             assert!(*x > config.margin_left);
         }
+    }
+
+    #[test]
+    fn tab_stop_default_interval() {
+        // Default interval of 36pt (720 twips), current x at 10pt
+        let pos = find_next_tab_stop(10.0, &[], 36.0);
+        assert!((pos - 36.0).abs() < 0.1);
+
+        // Current x at 37pt, should go to 72pt
+        let pos = find_next_tab_stop(37.0, &[], 36.0);
+        assert!((pos - 72.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn tab_stop_custom() {
+        let stops = vec![
+            TabStop { position: 2880, stop_type: TabStopType::Left },  // 144pt
+            TabStop { position: 5760, stop_type: TabStopType::Left },  // 288pt
+        ];
+        // Current x at 10pt, should go to first custom stop (144pt)
+        let pos = find_next_tab_stop(10.0, &stops, 36.0);
+        assert!((pos - 144.0).abs() < 0.1);
+
+        // Current x at 145pt, should go to second custom stop (288pt)
+        let pos = find_next_tab_stop(145.0, &stops, 36.0);
+        assert!((pos - 288.0).abs() < 0.1);
+
+        // Current x past all custom stops, falls back to default interval
+        let pos = find_next_tab_stop(300.0, &stops, 36.0);
+        assert!((pos - 324.0).abs() < 0.1); // 9 * 36 = 324
     }
 }

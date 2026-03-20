@@ -95,6 +95,7 @@ The core ADT uses two sum types as extension points:
 
 - **`Block`** = `Paragraph` | `Table`
 - **`Inline`** = `TextRun` | `LineBreak` | `Tab` | `Image`
+- **`TabStop`** — custom tab stop definitions (left, center, right, decimal) with positions
 
 Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML spec. Paragraphs can carry `FloatingImage` elements for anchored images with text wrapping. Type-safe newtypes (`RelId`, `FormatHint`) prevent accidental misuse of string fields.
 
@@ -103,11 +104,12 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 ### Parsing
 
 - **Text runs** with direct formatting: bold, italic, underline, font size (`w:sz`), font family (`w:rFonts`), color (`w:color`)
-- **Paragraph properties**: alignment (`w:jc`), spacing before/after/line (`w:spacing`), indentation with first-line and hanging (`w:ind`)
+- **Paragraph properties**: alignment (`w:jc`), spacing before/after/line (`w:spacing`), indentation with first-line and hanging (`w:ind`), custom tab stops (`w:tabs` > `w:tab` with position and type)
 - **Tables**: rows, cells, nested content (cells can contain paragraphs or nested tables)
 - **Inline images**: `w:drawing` > `wp:inline` with dimensions from `wp:extent` and image data via relationship IDs
 - **Floating images**: `w:drawing` > `wp:anchor` with position offsets (`wp:positionH`, `wp:positionV`) and text wrapping (`wrapTight`, `wrapSquare`, `wrapThrough`)
 - **Section properties**: `w:sectPr` both mid-document (in `w:pPr`) and final (in `w:body`), including page size (`w:pgSz` with width, height, orientation) and page margins (`w:pgMar`)
+- **Default tab stop**: `w:defaultTabStop` from `word/settings.xml` (falls back to 720 twips / 0.5 inch)
 - **Relationships**: `word/_rels/document.xml.rels` parsed to resolve image references
 - **Media files**: all files under `word/media/` extracted and linked to their relationship IDs
 
@@ -120,6 +122,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Word wrapping**: text fragments split at spaces and wrapped to fit available width
 - **Pagination**: automatic page breaks when content exceeds the page content area
 - **Floating image layout**: text flow adjusts around anchored images (left-anchored floats shift text to the right)
+- **Tab stops**: tabs advance to custom tab stop positions (left, center, right, decimal) or the default tab interval
 - **Multi-section documents**: each section can have its own page size and margins; section breaks trigger new pages with updated dimensions
 
 ## Running Tests
@@ -149,7 +152,6 @@ The test suite includes unit tests for the model, XML parser, and layout engine,
 - **Text measurement**: Character widths are estimated (0.5x font size for letters, 0.25x for spaces) rather than measured via Skia font metrics. Line wrapping and alignment are approximate, especially with proportional fonts.
 - **Table column widths**: All columns are evenly distributed across the page width. Column width specifications from the DOCX are ignored.
 - **Merged cells**: Row and column spans in tables are not handled.
-- **Tab stops**: Tabs render as four spaces rather than honoring defined tab stop positions.
 - **Line spacing**: Only basic before/after/line spacing is supported. Exact and at-least spacing modes are not distinguished.
 - **Fonts**: Falls back to Helvetica if the specified font is not available on the system. Font embedding and subsetting depend on Skia's PDF backend behavior.
 - **Right-to-left text**: Not supported.
