@@ -22,6 +22,7 @@ pub struct DocDefaults {
     pub cell_margins: Option<crate::model::CellMargins>,
     /// Default paragraph spacing inside table cells (from table grid style).
     pub table_cell_spacing: Option<crate::model::Spacing>,
+    pub table_borders: Option<crate::model::TableBorders>,
 }
 
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
@@ -250,8 +251,10 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
     let mut cell_margins: Option<crate::model::CellMargins> = None;
     let mut in_tbl_cell_mar = false;
     let mut table_cell_spacing: Option<crate::model::Spacing> = None;
+    let mut table_borders: Option<crate::model::TableBorders> = None;
     let mut in_table_style = false;
     let mut in_table_style_ppr = false;
+    let mut in_table_style_borders = false;
 
     loop {
         match reader.read_event() {
@@ -277,6 +280,9 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                     b"pPr" if in_table_style => {
                         in_table_style_ppr = true;
                     }
+                    b"tblBorders" if in_table_style => {
+                        in_table_style_borders = true;
+                    }
                     _ => {}
                 }
             }
@@ -298,6 +304,9 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                     }
                     b"pPr" if in_table_style => {
                         in_table_style_ppr = false;
+                    }
+                    b"tblBorders" => {
+                        in_table_style_borders = false;
                     }
                     _ => {}
                 }
@@ -369,6 +378,46 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         }
                     }
                 }
+                if in_table_style_borders && table_borders.is_none() {
+                    // Parse border children (top/bottom/left/right/insideH/insideV)
+                    let val = e.attributes().flatten()
+                        .find(|a| local_name(a.key.as_ref()) == b"val")
+                        .map(|a| String::from_utf8_lossy(&a.value).into_owned())
+                        .unwrap_or_default();
+                    let style = match val.as_str() {
+                        "none" | "nil" => crate::model::BorderStyle::None,
+                        "single" => crate::model::BorderStyle::Single,
+                        "double" => crate::model::BorderStyle::Double,
+                        "dashed" => crate::model::BorderStyle::Dashed,
+                        "dotted" => crate::model::BorderStyle::Dotted,
+                        _ => crate::model::BorderStyle::Single,
+                    };
+                    let size: u32 = e.attributes().flatten()
+                        .find(|a| local_name(a.key.as_ref()) == b"sz")
+                        .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok())
+                        .unwrap_or(4);
+                    let color_str: String = e.attributes().flatten()
+                        .find(|a| local_name(a.key.as_ref()) == b"color")
+                        .map(|a| String::from_utf8_lossy(&a.value).into_owned())
+                        .unwrap_or_default();
+                    let color = if color_str == "auto" || color_str.is_empty() {
+                        crate::model::Color { r: 0, g: 0, b: 0 }
+                    } else {
+                        crate::model::Color::from_hex(&color_str)
+                            .unwrap_or(crate::model::Color { r: 0, g: 0, b: 0 })
+                    };
+                    let def = crate::model::BorderDef { style, size, color };
+                    let b = table_borders.get_or_insert(crate::model::TableBorders::default());
+                    match local {
+                        b"top" => b.top = def,
+                        b"bottom" => b.bottom = def,
+                        b"left" | b"start" => b.left = def,
+                        b"right" | b"end" => b.right = def,
+                        b"insideH" => b.inside_h = def,
+                        b"insideV" => b.inside_v = def,
+                        _ => {}
+                    }
+                }
                 if in_table_style_ppr && local == b"spacing"
                     && table_cell_spacing.is_none()
                 {
@@ -398,6 +447,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
         || spacing_line.is_some()
         || cell_margins.is_some()
         || table_cell_spacing.is_some()
+        || table_borders.is_some()
     {
         Some(DocDefaults {
             font_size,
@@ -407,6 +457,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
             spacing_line,
             cell_margins,
             table_cell_spacing,
+            table_borders,
         })
     } else {
         None

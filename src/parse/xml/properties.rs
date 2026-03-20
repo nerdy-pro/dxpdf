@@ -5,6 +5,69 @@ use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
 use super::ParseState;
 use super::helpers::{get_attr, is_val_false};
 
+/// Parse a border element like `<w:top w:val="single" w:sz="4" w:color="auto"/>`.
+pub fn parse_border_def(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<BorderDef, Error> {
+    let val = get_attr(e, b"val")?.unwrap_or_default();
+    let style = match val.as_str() {
+        "none" | "nil" => BorderStyle::None,
+        "single" => BorderStyle::Single,
+        "double" => BorderStyle::Double,
+        "dashed" | "dashSmallGap" => BorderStyle::Dashed,
+        "dotted" => BorderStyle::Dotted,
+        _ => BorderStyle::Single, // treat unknown styles as single
+    };
+
+    let size = get_attr(e, b"sz")?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(4);
+
+    let color_str = get_attr(e, b"color")?.unwrap_or_default();
+    let color = if color_str == "auto" || color_str.is_empty() {
+        Color { r: 0, g: 0, b: 0 }
+    } else {
+        Color::from_hex(&color_str).unwrap_or(Color { r: 0, g: 0, b: 0 })
+    };
+
+    Ok(BorderDef { style, size, color })
+}
+
+/// Apply a border element to the appropriate side of a TableBorders or CellBorders.
+pub fn apply_table_border(
+    borders: &mut TableBorders,
+    local: &[u8],
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<(), Error> {
+    let def = parse_border_def(e)?;
+    match local {
+        b"top" => borders.top = def,
+        b"bottom" => borders.bottom = def,
+        b"left" | b"start" => borders.left = def,
+        b"right" | b"end" => borders.right = def,
+        b"insideH" => borders.inside_h = def,
+        b"insideV" => borders.inside_v = def,
+        _ => {}
+    }
+    Ok(())
+}
+
+pub fn apply_cell_border(
+    borders: &mut CellBorders,
+    local: &[u8],
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<(), Error> {
+    let def = parse_border_def(e)?;
+    match local {
+        b"top" => borders.top = Some(def),
+        b"bottom" => borders.bottom = Some(def),
+        b"left" | b"start" => borders.left = Some(def),
+        b"right" | b"end" => borders.right = Some(def),
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Parse a margin value from an element like `<w:top w:w="0" w:type="dxa"/>`.
 fn parse_margin_value(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, Error> {
     let w_type = get_attr(e, b"type")?.unwrap_or_default();
@@ -144,9 +207,16 @@ pub fn handle_empty_element(
         ParseState::InTable {
             ref mut grid_cols,
             ref mut default_cell_margins,
-            in_cell_mar,
+            ref in_cell_mar,
+            ref mut borders,
+            ref in_borders,
             ..
         } => {
+            if *in_borders {
+                let b = borders.get_or_insert(TableBorders::default());
+                apply_table_border(b, local, e)?;
+                return Ok(());
+            }
             if *in_cell_mar {
                 apply_margin(default_cell_margins, local, e)?;
             } else if local == b"gridCol" {
@@ -163,8 +233,15 @@ pub fn handle_empty_element(
             ref mut vertical_merge,
             ref mut cell_margins,
             ref in_cell_mar,
+            ref mut cell_borders,
+            ref in_borders,
             ..
         } => {
+            if *in_borders {
+                let b = cell_borders.get_or_insert(CellBorders::default());
+                apply_cell_border(b, local, e)?;
+                return Ok(());
+            }
             if *in_cell_mar {
                 apply_margin(cell_margins, local, e)?;
                 return Ok(());

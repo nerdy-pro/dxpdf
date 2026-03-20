@@ -10,6 +10,7 @@ pub struct DocDefaultsLayout {
     pub default_spacing: Spacing,
     pub default_cell_margins: CellMargins,
     pub table_cell_spacing: Spacing,
+    pub default_table_borders: TableBorders,
 }
 
 /// A flattened fragment for layout — either text, an image, a tab, or a line break.

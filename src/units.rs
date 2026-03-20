@@ -67,8 +67,8 @@ pub const UNDERLINE_Y_OFFSET: f32 = 2.0;
 /// Underline stroke width (in points).
 pub const UNDERLINE_STROKE_WIDTH: f32 = 0.5;
 
-/// Table cell border stroke width (in points).
-pub const TABLE_BORDER_WIDTH: f32 = 0.5;
+/// Number of border size units per point (w:sz is in eighths of a point).
+pub const BORDER_SIZE_PER_POINT: f32 = 8.0;
 
 /// Minimum table row height (in points).
 pub const MIN_ROW_HEIGHT_PT: f32 = 12.0;

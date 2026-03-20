@@ -77,6 +77,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             grid_cols: Vec::new(),
                             default_cell_margins: None,
                             in_cell_mar: false,
+                            borders: None,
+                            in_borders: false,
                         };
                     }
                     b"tr" if matches!(state, ParseState::InTable { .. }) => {
@@ -94,6 +96,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             vertical_merge: None,
                             cell_margins: None,
                             in_cell_mar: false,
+                            cell_borders: None,
+                            in_borders: false,
                         };
                     }
                     b"t" if matches!(state, ParseState::InRun { .. }) => {
@@ -149,9 +153,19 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             *in_cell_mar = true;
                         }
                     }
+                    b"tblBorders" if matches!(state, ParseState::InTable { .. }) => {
+                        if let ParseState::InTable { ref mut in_borders, .. } = state {
+                            *in_borders = true;
+                        }
+                    }
                     b"tcMar" if matches!(state, ParseState::InTableCell { .. }) => {
                         if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
                             *in_cell_mar = true;
+                        }
+                    }
+                    b"tcBorders" if matches!(state, ParseState::InTableCell { .. }) => {
+                        if let ParseState::InTableCell { ref mut in_borders, .. } = state {
+                            *in_borders = true;
                         }
                     }
                     _ => {}
@@ -306,9 +320,9 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         }
                     }
                     b"tbl" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { rows, grid_cols, default_cell_margins, .. } = state {
+                        if let ParseState::InTable { rows, grid_cols, default_cell_margins, borders, .. } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table { rows, grid_cols, default_cell_margins, cell_spacing: None });
+                            let table = Block::Table(Table { rows, grid_cols, default_cell_margins, cell_spacing: None, borders });
                             push_block(&mut state, &mut blocks, table);
                         }
                     }
@@ -327,6 +341,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             grid_span,
                             vertical_merge,
                             cell_margins,
+                            cell_borders,
                             ..
                         } = state
                         {
@@ -338,6 +353,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                     grid_span,
                                     vertical_merge,
                                     cell_margins,
+                                    cell_borders,
                                 });
                             }
                         }
@@ -442,9 +458,19 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             *in_cell_mar = false;
                         }
                     }
+                    b"tblBorders" if matches!(state, ParseState::InTable { in_borders: true, .. }) => {
+                        if let ParseState::InTable { ref mut in_borders, .. } = state {
+                            *in_borders = false;
+                        }
+                    }
                     b"tcMar" if matches!(state, ParseState::InTableCell { in_cell_mar: true, .. }) => {
                         if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
                             *in_cell_mar = false;
+                        }
+                    }
+                    b"tcBorders" if matches!(state, ParseState::InTableCell { in_borders: true, .. }) => {
+                        if let ParseState::InTableCell { ref mut in_borders, .. } = state {
+                            *in_borders = false;
                         }
                     }
                     _ => {}
@@ -492,6 +518,8 @@ enum ParseState {
         grid_cols: Vec<u32>,
         default_cell_margins: Option<CellMargins>,
         in_cell_mar: bool,
+        borders: Option<TableBorders>,
+        in_borders: bool,
     },
     InTableRow {
         cells: Vec<TableCell>,
@@ -503,6 +531,8 @@ enum ParseState {
         vertical_merge: Option<VerticalMerge>,
         cell_margins: Option<CellMargins>,
         in_cell_mar: bool,
+        cell_borders: Option<CellBorders>,
+        in_borders: bool,
     },
     InDrawing {
         depth: u32,

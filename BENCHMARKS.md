@@ -29,6 +29,7 @@ Conversion benchmarks for `docx-pdf` using the test document:
 | Date | Commit | Mean time | Min | Max | Peak RSS | Notes |
 |---|---|---|---|---|---|---|
 | 2026-03-20 | initial | 88.9 ms ± 2.2 ms | 84.9 ms | 91.9 ms | 19.3 MB | Baseline with Skia text measurement, Carlito font substitution |
+| 2026-03-20 | latest | 85.0 ms ± 3.1 ms | 80.4 ms | 90.1 ms | 18.8 MB | +table borders, cell margins, font subs, units.rs, code review refactor |
 
 ### Methodology
 

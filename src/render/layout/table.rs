@@ -15,6 +15,36 @@ fn resolve_cell_margins(
         .unwrap_or(*doc_default)
 }
 
+/// Resolve the border for a cell edge, considering cell overrides, table borders,
+/// and whether this is an outer or inner edge.
+fn resolve_border(
+    cell_border: Option<BorderDef>,
+    table_border: BorderDef,
+) -> BorderDef {
+    cell_border.unwrap_or(table_border)
+}
+
+/// Emit a border line if the border is visible.
+fn emit_border(
+    commands: &mut Vec<DrawCommand>,
+    border: &BorderDef,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+) {
+    if border.is_visible() {
+        commands.push(DrawCommand::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            color: border.color_rgb(),
+            width: border.width_pt(),
+        });
+    }
+}
+
 impl Layouter {
     pub(super) fn layout_table(&mut self, table: &Table) {
         if table.rows.is_empty() {
@@ -46,7 +76,7 @@ impl Layouter {
             vec![content_width / num_cols as f32; num_cols]
         };
 
-        for row in &table.rows {
+        for (row_idx, row) in table.rows.iter().enumerate() {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
             let mut row_height = MIN_ROW_HEIGHT_PT;
 
@@ -208,7 +238,7 @@ impl Layouter {
                                                     x2: x + measured_width,
                                                     y2: cell_y + UNDERLINE_Y_OFFSET,
                                                     color: c,
-                                                    width: TABLE_BORDER_WIDTH,
+                                                    width: UNDERLINE_STROKE_WIDTH,
                                                 },
                                             );
                                         }
@@ -265,50 +295,73 @@ impl Layouter {
 
             let row_top = self.cursor_y;
 
+            // Resolve table borders
+            let tbl_borders = table.borders
+                .unwrap_or(self.doc_defaults.default_table_borders);
+            let num_rows = table.rows.len();
+            let num_cells = row.cells.len();
+
             // Emit cell borders and content
             for (col_idx, commands) in cell_layouts.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
                 let cw = cell_widths_computed[col_idx];
                 let cell = &row.cells[col_idx];
                 let row_bottom = row_top + row_height;
+                let cell_b = cell.cell_borders.unwrap_or_default();
+                let is_first_row = row_idx == 0;
+                let is_last_row = row_idx == num_rows - 1;
+                let is_first_col = col_idx == 0;
+                let is_last_col = col_idx == num_cells - 1;
 
+                // Top border
                 if !cell.is_vmerge_continue() {
-                    self.current_page.commands.push(DrawCommand::Line {
-                        x1: cell_x,
-                        y1: row_top,
-                        x2: cell_x + cw,
-                        y2: row_top,
-                        color: (0, 0, 0),
-                        width: TABLE_BORDER_WIDTH,
-                    });
+                    let tbl_top = if is_first_row {
+                        tbl_borders.top
+                    } else {
+                        tbl_borders.inside_h
+                    };
+                    let border = resolve_border(cell_b.top, tbl_top);
+                    emit_border(
+                        &mut self.current_page.commands,
+                        &border, cell_x, row_top, cell_x + cw, row_top,
+                    );
                 }
 
-                self.current_page.commands.push(DrawCommand::Line {
-                    x1: cell_x,
-                    y1: row_top,
-                    x2: cell_x,
-                    y2: row_bottom,
-                    color: (0, 0, 0),
-                    width: TABLE_BORDER_WIDTH,
-                });
+                // Left border
+                let tbl_left = if is_first_col {
+                    tbl_borders.left
+                } else {
+                    tbl_borders.inside_v
+                };
+                let border = resolve_border(cell_b.left, tbl_left);
+                emit_border(
+                    &mut self.current_page.commands,
+                    &border, cell_x, row_top, cell_x, row_bottom,
+                );
 
-                self.current_page.commands.push(DrawCommand::Line {
-                    x1: cell_x + cw,
-                    y1: row_top,
-                    x2: cell_x + cw,
-                    y2: row_bottom,
-                    color: (0, 0, 0),
-                    width: TABLE_BORDER_WIDTH,
-                });
+                // Right border
+                let tbl_right = if is_last_col {
+                    tbl_borders.right
+                } else {
+                    tbl_borders.inside_v
+                };
+                let border = resolve_border(cell_b.right, tbl_right);
+                emit_border(
+                    &mut self.current_page.commands,
+                    &border, cell_x + cw, row_top, cell_x + cw, row_bottom,
+                );
 
-                self.current_page.commands.push(DrawCommand::Line {
-                    x1: cell_x,
-                    y1: row_bottom,
-                    x2: cell_x + cw,
-                    y2: row_bottom,
-                    color: (0, 0, 0),
-                    width: TABLE_BORDER_WIDTH,
-                });
+                // Bottom border
+                let tbl_bottom = if is_last_row {
+                    tbl_borders.bottom
+                } else {
+                    tbl_borders.inside_h
+                };
+                let border = resolve_border(cell_b.bottom, tbl_bottom);
+                emit_border(
+                    &mut self.current_page.commands,
+                    &border, cell_x, row_bottom, cell_x + cw, row_bottom,
+                );
 
                 for cmd in commands {
                     let adjusted = offset_command(cmd, row_top);

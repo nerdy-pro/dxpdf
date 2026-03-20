@@ -61,6 +61,9 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         if let Some(tcs) = dd.table_cell_spacing {
             document.table_cell_spacing = tcs;
         }
+        if let Some(tb) = dd.table_borders {
+            document.default_table_borders = tb;
+        }
     }
     resolve_images(
         &mut document,

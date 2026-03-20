@@ -19,6 +19,8 @@ pub struct Document {
     pub default_cell_margins: CellMargins,
     /// Default paragraph spacing inside table cells.
     pub table_cell_spacing: Spacing,
+    /// Default table borders (from table style).
+    pub default_table_borders: TableBorders,
 }
 
 impl Default for Document {
@@ -32,6 +34,7 @@ impl Default for Document {
             default_spacing: Spacing::default(),
             default_cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
+            default_table_borders: TableBorders::default(),
         }
     }
 }
@@ -282,12 +285,94 @@ impl CellMargins {
     }
 }
 
+/// Border line style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderStyle {
+    None,
+    Single,
+    Double,
+    Dashed,
+    Dotted,
+}
+
+/// A single border edge definition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BorderDef {
+    pub style: BorderStyle,
+    /// Width in eighths of a point (OOXML native for w:sz).
+    pub size: u32,
+    pub color: Color,
+}
+
+impl BorderDef {
+    /// Width in points.
+    pub fn width_pt(&self) -> f32 {
+        self.size as f32 / 8.0
+    }
+
+    /// Returns true if this border should be drawn.
+    pub fn is_visible(&self) -> bool {
+        self.style != BorderStyle::None && self.size > 0
+    }
+
+    /// Color as an RGB tuple.
+    pub fn color_rgb(&self) -> (u8, u8, u8) {
+        (self.color.r, self.color.g, self.color.b)
+    }
+}
+
+impl Default for BorderDef {
+    fn default() -> Self {
+        Self {
+            style: BorderStyle::Single,
+            size: 4, // 0.5pt
+            color: Color { r: 0, g: 0, b: 0 },
+        }
+    }
+}
+
+/// Table-level border definitions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TableBorders {
+    pub top: BorderDef,
+    pub bottom: BorderDef,
+    pub left: BorderDef,
+    pub right: BorderDef,
+    /// Horizontal borders between rows.
+    pub inside_h: BorderDef,
+    /// Vertical borders between columns.
+    pub inside_v: BorderDef,
+}
+
+impl Default for TableBorders {
+    fn default() -> Self {
+        Self {
+            top: BorderDef::default(),
+            bottom: BorderDef::default(),
+            left: BorderDef::default(),
+            right: BorderDef::default(),
+            inside_h: BorderDef::default(),
+            inside_v: BorderDef::default(),
+        }
+    }
+}
+
+/// Per-cell border overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CellBorders {
+    pub top: Option<BorderDef>,
+    pub bottom: Option<BorderDef>,
+    pub left: Option<BorderDef>,
+    pub right: Option<BorderDef>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     pub rows: Vec<TableRow>,
     pub grid_cols: Vec<u32>,
     pub default_cell_margins: Option<CellMargins>,
     pub cell_spacing: Option<Spacing>,
+    pub borders: Option<TableBorders>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -309,6 +394,7 @@ pub struct TableCell {
     pub grid_span: u32,
     pub vertical_merge: Option<VerticalMerge>,
     pub cell_margins: Option<CellMargins>,
+    pub cell_borders: Option<CellBorders>,
 }
 
 impl TableCell {

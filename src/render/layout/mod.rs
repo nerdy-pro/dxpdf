@@ -117,6 +117,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         default_spacing: doc.default_spacing,
         default_cell_margins: doc.default_cell_margins,
         table_cell_spacing: doc.table_cell_spacing,
+        default_table_borders: doc.default_table_borders,
     };
     let mut layouter =
         Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
@@ -339,6 +340,7 @@ mod tests {
             grid_span: 1,
             vertical_merge: None,
             cell_margins: None,
+            cell_borders: None,
         }
     }
 
@@ -474,6 +476,7 @@ mod tests {
             grid_cols: vec![2880, 2880],
             default_cell_margins: None,
             cell_spacing: None,
+            borders: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -512,6 +515,7 @@ mod tests {
             grid_cols: vec![2000, 2000, 2000],
             default_cell_margins: None,
             cell_spacing: None,
+            borders: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -572,6 +576,7 @@ mod tests {
             grid_cols: vec![1000, 1000, 1000, 1000],
             default_cell_margins: None,
             cell_spacing: None,
+            borders: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();
@@ -642,6 +647,7 @@ mod tests {
             grid_cols: vec![100, 200, 300],
             default_cell_margins: None,
             cell_spacing: None,
+            borders: None,
         };
         let doc = make_doc(vec![Block::Table(table)]);
         let config = LayoutConfig::default();

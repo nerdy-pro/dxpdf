@@ -117,6 +117,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Tables**: `w:tbl` with rows (`w:tr`), cells (`w:tc`), column grid (`w:tblGrid` > `w:gridCol`), cell widths (`w:tcW` with `type="dxa"` only — percentage widths fall back to grid)
 - **Merged cells**: horizontal spans (`w:gridSpan`) and vertical merges (`w:vMerge` with `val="restart"` / continue)
 - **Cell margins**: per-table defaults (`w:tblCellMar`) and per-cell overrides (`w:tcMar`) with top/right/bottom/left in twips
+- **Table borders**: `w:tblBorders` at the table level and `w:tcBorders` at the cell level, with `w:val` (style), `w:sz` (width in eighths of a point), `w:color` (hex or `auto`). Supports `top`/`bottom`/`left`/`right`/`insideH`/`insideV`
 - **Self-closing paragraphs**: `<w:p/>` parsed as empty paragraphs (produce blank lines)
 - **Inline images**: `w:drawing` > `wp:inline` with dimensions from `wp:extent` (cx/cy in EMUs) and image data via `a:blip r:embed` relationship IDs
 - **Floating images**: `w:drawing` > `wp:anchor` with horizontal/vertical position offsets (`wp:positionH`, `wp:positionV`, `wp:posOffset`), and text wrapping mode (`wrapTight`, `wrapSquare`, `wrapThrough`, `wrapNone` with `wrapText` attribute)
@@ -129,6 +130,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
   - Default paragraph spacing from `docDefaults/pPrDefault`
   - Default cell margins from the "Normal Table" style's `tblCellMar`
   - Default table cell paragraph spacing from the "Table Grid" style's `pPr/spacing`
+  - Default table borders from the "Table Grid" style's `tblBorders`
 - **Default tab stop interval** from `word/settings.xml` (`w:defaultTabStop`)
 - **Text normalization**: literal newlines/carriage returns in `<w:t>` content are stripped (they are XML formatting artifacts; actual line breaks use `<w:br/>`)
 
@@ -139,7 +141,8 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Text measurement**: uses Skia's `Font::measure_str()` for accurate text widths and `Font::metrics()` for line heights (ascent + descent + leading)
 - **Underlines**: drawn beneath the text baseline
 - **Images**: PNG, JPEG, BMP, WebP, and other formats decoded via `skia_safe::Image::from_encoded` and rendered with `draw_image_rect`. Images are scaled to fit within the content area
-- **Tables**: per-column widths from `w:tblGrid` (scaled proportionally to page width), dynamic row heights computed from cell content, borders on all cell edges, full paragraph layout within cells (formatting, alignment, images, tabs, line breaks)
+- **Tables**: per-column widths from `w:tblGrid` (scaled proportionally to page width), dynamic row heights computed from cell content, full paragraph layout within cells (formatting, alignment, images, tabs, line breaks)
+- **Table borders**: resolved from per-cell overrides (`w:tcBorders`), table-level defaults (`w:tblBorders`), or document style defaults, with correct inner/outer edge distinction (`insideH`/`insideV` vs `top`/`bottom`/`left`/`right`). Border width, color, and style (`single`/`none`) are honored
 - **Table cell alignment**: paragraph alignment (left, center, right) honored within cells
 - **Merged cells**: `gridSpan` cells span multiple grid columns with correct widths; `vMerge` continuation cells skip content rendering and suppress top borders
 - **Cell margins**: resolved per-cell (per-cell override > table default > document default) with separate top/right/bottom/left values
@@ -184,7 +187,7 @@ The test suite includes unit tests for the model, XML parser, layout engine (tab
 
 - **Justify alignment**: Parsed from `w:jc val="both"` but not applied — text renders left-aligned. Implementing justify requires distributing extra space across word gaps.
 - **Tab stop types**: Left, Center, Right, and Decimal tab stop types are parsed into the model but all tab stops are treated as left-aligned in layout. Center/Right/Decimal alignment at the stop position is not implemented.
-- **Table borders from DOCX**: All table borders use a default width and black color. Per-cell and per-table border styles, colors, and widths from the DOCX (`w:tcBorders`, `w:tblBorders`) are ignored.
+- **Table border styles**: Only `single` borders are rendered as solid lines. `double`, `dashed`, `dotted` styles are parsed but all render as solid lines.
 - **Cell shading/background**: Cell background colors (`w:shd`) are not rendered.
 - **Cell vertical alignment**: Vertical alignment within cells (`w:vAlign`) is not applied; content is always top-aligned.
 - **Floating image positioning**: Only left-anchored floats with `relativeFrom="margin"` are handled. Right-anchored, centered, and complex multi-float positioning are not supported.
