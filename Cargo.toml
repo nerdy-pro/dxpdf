@@ -1,0 +1,15 @@
+[package]
+name = "docx-pdf"
+version = "0.1.0"
+edition = "2021"
+description = "Convert DOCX files to PDF using Skia"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+quick-xml = "0.37"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+skia-safe = "0.93"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
