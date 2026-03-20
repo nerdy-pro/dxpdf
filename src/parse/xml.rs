@@ -379,6 +379,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
         default_tab_stop: 720,
         default_font_size: 24,
         default_font_family: "Helvetica".to_string(),
+        default_spacing: Spacing::default(),
     })
 }
 

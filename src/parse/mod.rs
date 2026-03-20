@@ -42,6 +42,15 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         if let Some(ref ff) = dd.font_family {
             document.default_font_family = ff.clone();
         }
+        if let Some(sa) = dd.spacing_after {
+            document.default_spacing.after = Some(sa);
+        }
+        if let Some(sb) = dd.spacing_before {
+            document.default_spacing.before = Some(sb);
+        }
+        if let Some(sl) = dd.spacing_line {
+            document.default_spacing.line = Some(sl);
+        }
     }
     resolve_images(
         &mut document,

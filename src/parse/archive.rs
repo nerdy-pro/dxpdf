@@ -6,12 +6,18 @@ use quick_xml::Reader;
 
 use crate::error::Error;
 
-/// Document-wide default run properties from `word/styles.xml`.
+/// Document-wide default properties from `word/styles.xml`.
 pub struct DocDefaults {
     /// Default font size in half-points.
     pub font_size: Option<u32>,
     /// Default font family.
     pub font_family: Option<String>,
+    /// Default paragraph spacing after in twips.
+    pub spacing_after: Option<u32>,
+    /// Default paragraph spacing before in twips.
+    pub spacing_before: Option<u32>,
+    /// Default line spacing in twips.
+    pub spacing_line: Option<u32>,
 }
 
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
@@ -147,13 +153,17 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, String>, Error> {
     Ok(rels)
 }
 
-/// Parse `word/styles.xml` to extract document default font size and family.
+/// Parse `word/styles.xml` to extract document default font size, family, and spacing.
 fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
     let mut reader = Reader::from_str(xml);
     let mut in_doc_defaults = false;
     let mut in_rpr_default = false;
+    let mut in_ppr_default = false;
     let mut font_size = None;
     let mut font_family = None;
+    let mut spacing_after = None;
+    let mut spacing_before = None;
+    let mut spacing_line = None;
 
     loop {
         match reader.read_event() {
@@ -164,6 +174,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 match local {
                     b"docDefaults" => in_doc_defaults = true,
                     b"rPrDefault" if in_doc_defaults => in_rpr_default = true,
+                    b"pPrDefault" if in_doc_defaults => in_ppr_default = true,
                     _ => {}
                 }
             }
@@ -171,38 +182,51 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 match local {
-                    b"docDefaults" => break, // Done once we leave docDefaults
+                    b"docDefaults" => break,
                     b"rPrDefault" => in_rpr_default = false,
+                    b"pPrDefault" => in_ppr_default = false,
                     _ => {}
                 }
             }
-            Ok(Event::Empty(ref e)) if in_rpr_default => {
+            Ok(Event::Empty(ref e)) => {
                 let name = e.name();
                 let local = local_name(name.as_ref());
-                match local {
-                    b"sz" => {
-                        for attr in e.attributes().flatten() {
-                            if local_name(attr.key.as_ref()) == b"val" {
-                                let val = String::from_utf8_lossy(&attr.value);
-                                font_size = val.parse().ok();
-                            }
-                        }
-                    }
-                    b"rFonts" => {
-                        // Try ascii, then hAnsi
-                        for attr in e.attributes().flatten() {
-                            let key = local_name(attr.key.as_ref());
-                            if key == b"ascii" || key == b"hAnsi" {
-                                let val =
-                                    String::from_utf8_lossy(&attr.value).into_owned();
-                                // Skip theme references like "minorHAnsi"
-                                if font_family.is_none() && !val.is_empty() {
-                                    font_family = Some(val);
+                if in_rpr_default {
+                    match local {
+                        b"sz" => {
+                            for attr in e.attributes().flatten() {
+                                if local_name(attr.key.as_ref()) == b"val" {
+                                    let val = String::from_utf8_lossy(&attr.value);
+                                    font_size = val.parse().ok();
                                 }
                             }
                         }
+                        b"rFonts" => {
+                            for attr in e.attributes().flatten() {
+                                let key = local_name(attr.key.as_ref());
+                                if key == b"ascii" || key == b"hAnsi" {
+                                    let val =
+                                        String::from_utf8_lossy(&attr.value).into_owned();
+                                    if font_family.is_none() && !val.is_empty() {
+                                        font_family = Some(val);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                }
+                if in_ppr_default && local == b"spacing" {
+                    for attr in e.attributes().flatten() {
+                        let key = local_name(attr.key.as_ref());
+                        let val = String::from_utf8_lossy(&attr.value);
+                        match key {
+                            b"after" => spacing_after = val.parse().ok(),
+                            b"before" => spacing_before = val.parse().ok(),
+                            b"line" => spacing_line = val.parse().ok(),
+                            _ => {}
+                        }
+                    }
                 }
             }
             Err(_) => break,
@@ -210,10 +234,18 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
         }
     }
 
-    if font_size.is_some() || font_family.is_some() {
+    if font_size.is_some()
+        || font_family.is_some()
+        || spacing_after.is_some()
+        || spacing_before.is_some()
+        || spacing_line.is_some()
+    {
         Some(DocDefaults {
             font_size,
             font_family,
+            spacing_after,
+            spacing_before,
+            spacing_line,
         })
     } else {
         None

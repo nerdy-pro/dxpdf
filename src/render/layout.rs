@@ -1,4 +1,53 @@
+use skia_safe::{Font, FontMgr, FontStyle};
+
 use crate::model::*;
+
+/// Measures text using Skia font metrics.
+pub struct TextMeasurer {
+    font_mgr: FontMgr,
+}
+
+impl TextMeasurer {
+    pub fn new() -> Self {
+        Self {
+            font_mgr: FontMgr::new(),
+        }
+    }
+
+    /// Get a Skia Font for the given properties.
+    fn make_font(&self, font_family: &str, font_size: f32, bold: bool, italic: bool) -> Font {
+        let style = match (bold, italic) {
+            (true, true) => FontStyle::bold_italic(),
+            (true, false) => FontStyle::bold(),
+            (false, true) => FontStyle::italic(),
+            (false, false) => FontStyle::normal(),
+        };
+
+        let typeface = self
+            .font_mgr
+            .match_family_style(font_family, style)
+            .or_else(|| self.font_mgr.match_family_style("Helvetica", style))
+            .or_else(|| self.font_mgr.legacy_make_typeface(None::<&str>, style))
+            .expect("no fallback typeface available");
+
+        Font::from_typeface(typeface, font_size)
+    }
+
+    /// Measure the width of a text string in points.
+    fn measure_width(&self, text: &str, font_family: &str, font_size: f32, bold: bool, italic: bool) -> f32 {
+        let font = self.make_font(font_family, font_size, bold, italic);
+        let (width, _) = font.measure_str(text, None);
+        width
+    }
+
+    /// Get the line height (ascent + descent + leading) for a font.
+    fn line_height(&self, font_family: &str, font_size: f32, bold: bool, italic: bool) -> f32 {
+        let font = self.make_font(font_family, font_size, bold, italic);
+        let (_, metrics) = font.metrics();
+        // ascent is negative in Skia (upward), descent is positive (downward)
+        -metrics.ascent + metrics.descent + metrics.leading
+    }
+}
 
 /// Page layout configuration in points (1 point = 1/72 inch).
 #[derive(Debug, Clone, Copy)]
@@ -113,6 +162,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     let doc_defaults = DocDefaultsLayout {
         font_size_half_pts: doc.default_font_size,
         font_family: doc.default_font_family.clone(),
+        default_spacing: doc.default_spacing,
     };
     let mut layouter = Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
 
@@ -140,6 +190,7 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
 struct DocDefaultsLayout {
     font_size_half_pts: u32,
     font_family: String,
+    default_spacing: Spacing,
 }
 
 /// A floating image that affects text layout on the current page.
@@ -162,6 +213,8 @@ struct Layouter {
     default_tab_stop_pt: f32,
     /// Document-level default font settings.
     doc_defaults: DocDefaultsLayout,
+    /// Text measurer using Skia font metrics.
+    measurer: TextMeasurer,
 }
 
 impl Layouter {
@@ -171,6 +224,7 @@ impl Layouter {
         default_tab_stop_pt: f32,
         doc_defaults: DocDefaultsLayout,
     ) -> Self {
+        let measurer = TextMeasurer::new();
         Self {
             config: *config,
             pages: Vec::new(),
@@ -184,6 +238,7 @@ impl Layouter {
             next_section_configs,
             default_tab_stop_pt,
             doc_defaults,
+            measurer,
         }
     }
 
@@ -236,6 +291,20 @@ impl Layouter {
         (x_shift, width_reduction)
     }
 
+    /// Resolve paragraph spacing: use the paragraph's explicit spacing,
+    /// falling back to document defaults for unset fields.
+    fn resolve_spacing(&self, para_spacing: Option<Spacing>) -> Spacing {
+        let defaults = &self.doc_defaults.default_spacing;
+        match para_spacing {
+            Some(s) => Spacing {
+                before: s.before.or(defaults.before),
+                after: s.after.or(defaults.after),
+                line: s.line.or(defaults.line),
+            },
+            None => *defaults,
+        }
+    }
+
     /// Get the width of a table cell: use tcW if available, otherwise grid_cols.
     fn cell_width(&self, col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
         cell.width_pt()
@@ -262,7 +331,7 @@ impl Layouter {
     }
 
     fn layout_paragraph(&mut self, para: &Paragraph) {
-        let spacing = para.properties.spacing.unwrap_or_default();
+        let spacing = self.resolve_spacing(para.properties.spacing);
         let indent = para.properties.indentation.unwrap_or_default();
 
         // Space before
@@ -310,7 +379,7 @@ impl Layouter {
             - indent.left_pt()
             - indent.right_pt();
         let content_height = self.config.content_height();
-        let fragments = collect_fragments(&para.runs, base_content_width, content_height, &self.doc_defaults);
+        let fragments = collect_fragments(&para.runs, base_content_width, content_height, &self.doc_defaults, &self.measurer);
         let base_x = self.config.margin_left + indent.left_pt();
 
         let mut line_start = 0;
@@ -374,6 +443,8 @@ impl Layouter {
                         italic,
                         underline,
                         color,
+                        measured_width,
+                        ..
                     } => {
                         let c = color
                             .map(|c| (c.r, c.g, c.b))
@@ -390,20 +461,18 @@ impl Layouter {
                             color: c,
                         });
 
-                        let frag_width = estimate_text_width(text, *font_size);
-
                         if *underline {
                             self.current_page.commands.push(DrawCommand::Underline {
                                 x1: x,
                                 y1: self.cursor_y + 2.0,
-                                x2: x + frag_width,
+                                x2: x + measured_width,
                                 y2: self.cursor_y + 2.0,
                                 color: c,
                                 width: 0.5,
                             });
                         }
 
-                        x += frag_width;
+                        x += measured_width;
                     }
                     Fragment::Image { width, height, data } => {
                         // Draw image positioned so its bottom aligns with the text baseline
@@ -416,7 +485,7 @@ impl Layouter {
                         });
                         x += width;
                     }
-                    Fragment::Tab => {
+                    Fragment::Tab { .. } => {
                         let rel_x = x - base_x;
                         let next_stop = find_next_tab_stop(
                             rel_x,
@@ -487,7 +556,7 @@ impl Layouter {
 
                 for block in &cell.blocks {
                     if let Block::Paragraph(p) = block {
-                        let spacing = p.properties.spacing.unwrap_or_default();
+                        let spacing = self.resolve_spacing(p.properties.spacing);
                         cell_y += spacing.before_pt();
 
                         // Render floating images within the cell.
@@ -529,6 +598,7 @@ impl Layouter {
                             cell_content_width,
                             self.config.content_height(),
                             &self.doc_defaults,
+                            &self.measurer,
                         );
 
                         if fragments.is_empty() && p.floats.is_empty() {
@@ -569,16 +639,16 @@ impl Layouter {
                                         italic,
                                         underline,
                                         color,
+                                        measured_width,
+                                        ..
                                     } => {
                                         let c = color
                                             .map(|c| (c.r, c.g, c.b))
                                             .unwrap_or((0, 0, 0));
 
-                                        // y offset is relative to row top; will be
-                                        // adjusted when we know the final row_top
                                         commands.push(DrawCommand::Text {
                                             x,
-                                            y: cell_y, // relative to cell top
+                                            y: cell_y,
                                             text: text.clone(),
                                             font_family: font_family.clone(),
                                             font_size: *font_size,
@@ -587,21 +657,18 @@ impl Layouter {
                                             color: c,
                                         });
 
-                                        let frag_width =
-                                            estimate_text_width(text, *font_size);
-
                                         if *underline {
                                             commands.push(DrawCommand::Underline {
                                                 x1: x,
                                                 y1: cell_y + 2.0,
-                                                x2: x + frag_width,
+                                                x2: x + measured_width,
                                                 y2: cell_y + 2.0,
                                                 color: c,
                                                 width: 0.5,
                                             });
                                         }
 
-                                        x += frag_width;
+                                        x += measured_width;
                                     }
                                     Fragment::Image { width, height, data } => {
                                         commands.push(DrawCommand::Image {
@@ -613,7 +680,7 @@ impl Layouter {
                                         });
                                         x += width;
                                     }
-                                    Fragment::Tab => {
+                                    Fragment::Tab { .. } => {
                                         let rel_x = x - (cell_x + cell_padding);
                                         let next_stop = find_next_tab_stop(
                                             rel_x,
@@ -767,6 +834,10 @@ enum Fragment {
         italic: bool,
         underline: bool,
         color: Option<Color>,
+        /// Measured width from Skia.
+        measured_width: f32,
+        /// Measured line height from Skia font metrics.
+        measured_height: f32,
     },
     Image {
         width: f32,
@@ -775,25 +846,25 @@ enum Fragment {
     },
     /// A tab character. Its actual width depends on the current x position
     /// and is resolved during layout, not during fragment collection.
-    Tab,
+    Tab {
+        line_height: f32,
+    },
 }
 
 impl Fragment {
-    /// Estimated width. For Tab, returns a minimum width; actual advancement
-    /// is computed in the layout loop based on tab stops.
     fn width(&self) -> f32 {
         match self {
-            Fragment::Text { text, font_size, .. } => estimate_text_width(text, *font_size),
+            Fragment::Text { measured_width, .. } => *measured_width,
             Fragment::Image { width, .. } => *width,
-            Fragment::Tab => 12.0, // minimum tab width for line fitting
+            Fragment::Tab { .. } => 12.0, // minimum tab width for line fitting
         }
     }
 
     fn height(&self) -> f32 {
         match self {
-            Fragment::Text { font_size, .. } => *font_size * 1.2,
+            Fragment::Text { measured_height, .. } => *measured_height,
             Fragment::Image { height, .. } => *height,
-            Fragment::Tab => 12.0 * 1.2,
+            Fragment::Tab { line_height } => *line_height,
         }
     }
 }
@@ -803,6 +874,7 @@ fn collect_fragments(
     content_width: f32,
     content_height: f32,
     defaults: &DocDefaultsLayout,
+    measurer: &TextMeasurer,
 ) -> Vec<Fragment> {
     let mut fragments = Vec::new();
     for run in runs {
@@ -810,29 +882,36 @@ fn collect_fragments(
             Inline::TextRun(tr) => {
                 let collapsed = collapse_spaces(&tr.text);
                 let words: Vec<&str> = collapsed.split_inclusive(' ').collect();
+                let font_family = tr
+                    .properties
+                    .font_family
+                    .clone()
+                    .unwrap_or_else(|| defaults.font_family.clone());
+                let font_size = tr.properties.font_size_pt_with_default(
+                    defaults.font_size_half_pts,
+                );
+                let bold = tr.properties.bold;
+                let italic = tr.properties.italic;
+                let line_height = measurer.line_height(&font_family, font_size, bold, italic);
                 for word in words {
                     if word.is_empty() {
                         continue;
                     }
+                    let measured_width = measurer.measure_width(word, &font_family, font_size, bold, italic);
                     fragments.push(Fragment::Text {
                         text: word.to_string(),
-                        font_family: tr
-                            .properties
-                            .font_family
-                            .clone()
-                            .unwrap_or_else(|| defaults.font_family.clone()),
-                        font_size: tr.properties.font_size_pt_with_default(
-                            defaults.font_size_half_pts,
-                        ),
-                        bold: tr.properties.bold,
-                        italic: tr.properties.italic,
+                        font_family: font_family.clone(),
+                        font_size,
+                        bold,
+                        italic,
                         underline: tr.properties.underline,
                         color: tr.properties.color,
+                        measured_width,
+                        measured_height: line_height,
                     });
                 }
             }
             Inline::Image(img) if !img.data.is_empty() => {
-                // Scale image to fit within page content area
                 let scale = f32::min(
                     1.0,
                     f32::min(
@@ -847,7 +926,9 @@ fn collect_fragments(
                 });
             }
             Inline::Tab => {
-                fragments.push(Fragment::Tab);
+                let default_size = defaults.font_size_half_pts as f32 / 2.0;
+                let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
+                fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak | Inline::Image(_) => {}
         }
@@ -893,20 +974,6 @@ fn collapse_spaces(text: &str) -> String {
     result
 }
 
-/// Estimate text width using different widths for spaces vs other characters.
-/// Average character width ~0.5 * font_size, space ~0.25 * font_size.
-fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    let mut width = 0.0;
-    for ch in text.chars() {
-        if ch == ' ' {
-            width += font_size * 0.25;
-        } else {
-            width += font_size * 0.5;
-        }
-    }
-    width
-}
-
 fn measure_fragments(fragments: &[Fragment]) -> f32 {
     fragments.iter().map(|f| f.width()).sum()
 }
@@ -936,6 +1003,7 @@ mod tests {
             default_tab_stop: 720,
             default_font_size: 24,
             default_font_family: "Helvetica".to_string(),
+            default_spacing: Spacing::default(),
         }
     }
 

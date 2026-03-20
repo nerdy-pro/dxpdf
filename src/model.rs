@@ -13,6 +13,8 @@ pub struct Document {
     pub default_font_size: u32,
     /// Default font family (from `word/styles.xml` docDefaults).
     pub default_font_family: String,
+    /// Default paragraph spacing (from `word/styles.xml` docDefaults).
+    pub default_spacing: Spacing,
 }
 
 /// A block-level element.
