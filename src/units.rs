@@ -81,9 +81,6 @@ pub const MIN_ROW_HEIGHT_PT: f32 = 0.0;
 /// Minimum bottom padding in cells to prevent descender overlap (in points).
 pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 1.0;
 
-/// Spacing after a table (in points).
-pub const TABLE_AFTER_SPACING_PT: f32 = 0.0;
-
 /// Border size units per point (w:sz is in eighths of a point).
 pub const BORDER_SIZE_UNITS_PER_POINT: f32 = 8.0;
 
