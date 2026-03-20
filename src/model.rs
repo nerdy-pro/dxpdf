@@ -50,6 +50,34 @@ pub struct Indentation {
     pub first_line: Option<i32>,
 }
 
+/// A type-safe wrapper for OOXML relationship IDs (e.g., "rId5").
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RelId(pub String);
+
+impl RelId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A type-safe wrapper for image format hints (e.g., "png", "jpeg").
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FormatHint(pub String);
+
+impl FormatHint {
+    pub fn new(hint: impl Into<String>) -> Self {
+        Self(hint.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// An inline-level element within a paragraph.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Inline {
@@ -62,7 +90,7 @@ pub enum Inline {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImage {
     /// Relationship ID referencing the image file (e.g., "rId5").
-    pub rel_id: String,
+    pub rel_id: RelId,
     /// Width in points (converted from EMUs at parse time).
     pub width_pt: f32,
     /// Height in points (converted from EMUs at parse time).
@@ -70,7 +98,7 @@ pub struct InlineImage {
     /// Raw image bytes, populated after archive extraction.
     pub data: Vec<u8>,
     /// File extension hint for decoding (e.g., "png", "jpeg").
-    pub format_hint: String,
+    pub format_hint: FormatHint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,11 +110,11 @@ pub enum WrapSide {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FloatingImage {
-    pub rel_id: String,
+    pub rel_id: RelId,
     pub width_pt: f32,
     pub height_pt: f32,
     pub data: Vec<u8>,
-    pub format_hint: String,
+    pub format_hint: FormatHint,
     /// Horizontal offset from margin in points.
     pub offset_x_pt: f32,
     /// Vertical offset from paragraph in points.

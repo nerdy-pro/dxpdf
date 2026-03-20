@@ -255,7 +255,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                         width_pt: w,
                                         height_pt: h,
                                         data: Vec::new(),
-                                        format_hint: String::new(),
+                                        format_hint: FormatHint::default(),
                                         offset_x_pt: emu_to_pt(
                                             pos_h_emu.unwrap_or(0).unsigned_abs(),
                                         ),
@@ -273,7 +273,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                         width_pt: w,
                                         height_pt: h,
                                         data: Vec::new(),
-                                        format_hint: String::new(),
+                                        format_hint: FormatHint::default(),
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
                                         if let Some(para_state) =
@@ -350,7 +350,7 @@ enum ParseState {
     /// Inside a `w:drawing` subtree. We track nested depth and collect image info.
     InDrawing {
         depth: u32,
-        rel_id: Option<String>,
+        rel_id: Option<RelId>,
         width_emu: Option<u64>,
         height_emu: Option<u64>,
         is_anchor: bool,
@@ -562,7 +562,7 @@ fn handle_drawing_element(
             }
             b"blip" => {
                 if let Some(embed) = get_attr(e, b"embed")? {
-                    *rel_id = Some(embed);
+                    *rel_id = Some(RelId::new(embed));
                 }
             }
             b"positionH" => {
@@ -885,7 +885,7 @@ mod tests {
         let Inline::Image(img) = &p.runs[0] else {
             panic!("Expected Image, got {:?}", p.runs[0]);
         };
-        assert_eq!(img.rel_id, "rId5");
+        assert_eq!(img.rel_id, RelId::new("rId5"));
         // 914400 EMU = 72pt (1 inch)
         assert!((img.width_pt - 72.0).abs() < 0.1);
         // 457200 EMU = 36pt (0.5 inch)
