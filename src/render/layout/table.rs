@@ -93,7 +93,7 @@ impl Layouter {
         // PASS 1: MEASURE all cells
         // ============================
         let measured_rows: Vec<MeasuredRow> = table.rows.iter().map(|row| {
-            let min_height = row.height.map(twips_to_pt).unwrap_or(MIN_ROW_HEIGHT_PT);
+            let min_height = row.height.map(twips_to_pt).unwrap_or(0.0);
             let row_height_limit = self.config.content_height();
 
             let mut col_x_positions = Vec::with_capacity(row.cells.len());
@@ -201,7 +201,9 @@ impl Layouter {
                     }
                 }
 
-                let effective_pad_bottom = pad_bottom.max(MIN_CELL_BOTTOM_PAD_PT);
+                // Ensure minimum bottom padding to account for font descender space
+                // not captured by line height metrics.
+                let effective_pad_bottom = pad_bottom.max(1.0);
                 let content_height = cell_y + effective_pad_bottom;
 
                 measured_cells.push(MeasuredCell {

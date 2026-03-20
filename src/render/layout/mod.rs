@@ -145,7 +145,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
             default_tab_stop_pt,
         );
         if header_bottom > effective_config.margin_top {
-            effective_config.margin_top = header_bottom + HEADER_BODY_GAP_PT;
+            effective_config.margin_top = header_bottom;
         }
     }
 

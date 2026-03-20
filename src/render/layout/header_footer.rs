@@ -1,5 +1,4 @@
 use crate::model::*;
-use crate::units::*;
 
 use super::fragment::*;
 use super::measurer;
@@ -127,7 +126,7 @@ pub(super) fn layout_header_footer_blocks(
             let fragments = collect_fragments(
                 &para.runs,
                 content_width,
-                HF_MAX_IMAGE_HEIGHT,
+                margin_extent,
                 defaults,
                 measurer,
             );
