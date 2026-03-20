@@ -105,17 +105,17 @@ fn resolve_headers_footers(
     }
 
     for sect in &mut all_sections {
-        // Resolve header
-        if let Some(ref rid) = sect.header_rel_id.clone() {
-            if let Some(hf) = resolve_hf(rid, rels, hf_xml, hf_rels, media) {
+        if let Some(rid) = sect.header_rel_id.take() {
+            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels, media) {
                 sect.header = Some(hf);
             }
+            sect.header_rel_id = Some(rid);
         }
-        // Resolve footer
-        if let Some(ref rid) = sect.footer_rel_id.clone() {
-            if let Some(hf) = resolve_hf(rid, rels, hf_xml, hf_rels, media) {
+        if let Some(rid) = sect.footer_rel_id.take() {
+            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels, media) {
                 sect.footer = Some(hf);
             }
+            sect.footer_rel_id = Some(rid);
         }
     }
 

@@ -237,9 +237,8 @@ fn extract_theme_fonts(
                             let val =
                                 String::from_utf8_lossy(&attr.value).into_owned();
                             if in_minor && minor.is_none() {
-                                minor = Some(val.clone());
-                            }
-                            if in_major && major.is_none() {
+                                minor = Some(val);
+                            } else if in_major && major.is_none() {
                                 major = Some(val);
                             }
                         }
