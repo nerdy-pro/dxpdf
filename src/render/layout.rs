@@ -494,6 +494,9 @@ impl Layouter {
                         );
                         x = base_x + next_stop;
                     }
+                    Fragment::LineBreak { .. } => {
+                        // Consumed by fit_fragments; no draw command needed
+                    }
                 }
             }
 
@@ -627,7 +630,19 @@ impl Layouter {
 
                             cell_y += line_height;
 
-                            let mut x = cell_x + cell_padding;
+                            let used_width = measure_fragments(
+                                &fragments[line_start..actual_end],
+                            );
+                            let align_offset = match p.properties.alignment {
+                                Some(Alignment::Center) => {
+                                    (cell_content_width - used_width) / 2.0
+                                }
+                                Some(Alignment::Right) => {
+                                    cell_content_width - used_width
+                                }
+                                _ => 0.0,
+                            };
+                            let mut x = cell_x + cell_padding + align_offset;
 
                             for frag in &fragments[line_start..actual_end] {
                                 match frag {
@@ -689,6 +704,7 @@ impl Layouter {
                                         );
                                         x = cell_x + cell_padding + next_stop;
                                     }
+                                    Fragment::LineBreak { .. } => {}
                                 }
                             }
 
@@ -849,6 +865,10 @@ enum Fragment {
     Tab {
         line_height: f32,
     },
+    /// A forced line break (`<w:br/>`).
+    LineBreak {
+        line_height: f32,
+    },
 }
 
 impl Fragment {
@@ -856,7 +876,8 @@ impl Fragment {
         match self {
             Fragment::Text { measured_width, .. } => *measured_width,
             Fragment::Image { width, .. } => *width,
-            Fragment::Tab { .. } => 12.0, // minimum tab width for line fitting
+            Fragment::Tab { .. } => 12.0,
+            Fragment::LineBreak { .. } => 0.0,
         }
     }
 
@@ -864,8 +885,12 @@ impl Fragment {
         match self {
             Fragment::Text { measured_height, .. } => *measured_height,
             Fragment::Image { height, .. } => *height,
-            Fragment::Tab { line_height } => *line_height,
+            Fragment::Tab { line_height } | Fragment::LineBreak { line_height } => *line_height,
         }
+    }
+
+    fn is_line_break(&self) -> bool {
+        matches!(self, Fragment::LineBreak { .. })
     }
 }
 
@@ -881,7 +906,6 @@ fn collect_fragments(
         match run {
             Inline::TextRun(tr) => {
                 let collapsed = collapse_spaces(&tr.text);
-                let words: Vec<&str> = collapsed.split_inclusive(' ').collect();
                 let font_family = tr
                     .properties
                     .font_family
@@ -893,18 +917,19 @@ fn collect_fragments(
                 let bold = tr.properties.bold;
                 let italic = tr.properties.italic;
                 let line_height = measurer.line_height(&font_family, font_size, bold, italic);
-                for word in words {
-                    if word.is_empty() {
-                        continue;
-                    }
-                    let measured_width = measurer.measure_width(word, &font_family, font_size, bold, italic);
+                // Split into alternating word and space fragments.
+                // This allows the line-break logic to not count trailing
+                // spaces toward line width.
+                for part in split_words_and_spaces(&collapsed) {
+                    let measured_width = measurer.measure_width(part, &font_family, font_size, bold, italic);
+                    let is_space = part.chars().all(|c| c == ' ');
                     fragments.push(Fragment::Text {
-                        text: word.to_string(),
+                        text: part.to_string(),
                         font_family: font_family.clone(),
                         font_size,
                         bold,
                         italic,
-                        underline: tr.properties.underline,
+                        underline: !is_space && tr.properties.underline,
                         color: tr.properties.color,
                         measured_width,
                         measured_height: line_height,
@@ -930,7 +955,12 @@ fn collect_fragments(
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
-            Inline::LineBreak | Inline::Image(_) => {}
+            Inline::LineBreak => {
+                let default_size = defaults.font_size_half_pts as f32 / 2.0;
+                let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
+                fragments.push(Fragment::LineBreak { line_height: lh });
+            }
+            Inline::Image(_) => {}
         }
     }
     fragments
@@ -953,6 +983,30 @@ fn find_next_tab_stop(current_x: f32, custom_stops: &[TabStop], default_interval
     }
     // Absolute fallback
     current_x + 36.0
+}
+
+/// Split text into alternating word and space segments.
+/// E.g., "RCD Messung" -> ["RCD", " ", "Messung"]
+fn split_words_and_spaces(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let bytes = text.as_bytes();
+    let mut in_space = bytes.first() == Some(&b' ');
+
+    for (i, &b) in bytes.iter().enumerate() {
+        let is_space = b == b' ';
+        if is_space != in_space {
+            if start < i {
+                parts.push(&text[start..i]);
+            }
+            start = i;
+            in_space = is_space;
+        }
+    }
+    if start < text.len() {
+        parts.push(&text[start..]);
+    }
+    parts
 }
 
 /// Collapse runs of more than 2 consecutive spaces into a single space.
@@ -980,14 +1034,35 @@ fn measure_fragments(fragments: &[Fragment]) -> f32 {
 
 /// Find how many fragments fit within the available width.
 /// Returns (count, total_width).
+/// Trailing space fragments at a line break are included in the count
+/// but not in the returned width, so they don't affect alignment.
 fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f32) {
     let mut total_width = 0.0;
+    let mut last_break_point = 0;
+    let mut width_at_break = 0.0;
+
     for (i, frag) in fragments.iter().enumerate() {
+        // Forced line break: consume it and stop
+        if frag.is_line_break() {
+            return (i + 1, total_width);
+        }
+
         let w = frag.width();
+        let is_space = matches!(frag, Fragment::Text { ref text, .. } if text.trim().is_empty());
+
         if total_width + w > available_width && i > 0 {
+            if last_break_point > 0 {
+                return (last_break_point, width_at_break);
+            }
             return (i, total_width);
         }
+
         total_width += w;
+
+        if is_space {
+            last_break_point = i + 1;
+            width_at_break = total_width - w;
+        }
     }
     (fragments.len(), total_width)
 }

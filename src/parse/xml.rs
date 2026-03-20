@@ -136,7 +136,51 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
             Event::Empty(ref e) => {
                 let name = e.name();
                 let local = local_name(name.as_ref());
-                if matches!(state, ParseState::InDrawing { .. }) {
+                if local == b"p" && matches_body_or_cell(&state) {
+                    // Self-closing empty paragraph: <w:p/>
+                    let paragraph = Block::Paragraph(Paragraph {
+                        properties: ParagraphProperties::default(),
+                        runs: Vec::new(),
+                        floats: Vec::new(),
+                        section_properties: None,
+                    });
+                    push_block(&mut state, &mut blocks, paragraph);
+                } else if (local == b"br" || local == b"tab")
+                    && matches!(state, ParseState::InRun { .. })
+                {
+                    // <w:br/> or <w:tab/> inside a run: flush current text
+                    // and push the inline element to the paragraph
+                    if let ParseState::InRun {
+                        ref props,
+                        ref mut text,
+                        ..
+                    } = state
+                    {
+                        let flushed_text = std::mem::take(text);
+                        let inline_to_push = if local == b"br" {
+                            Inline::LineBreak
+                        } else {
+                            Inline::Tab
+                        };
+                        // Find the paragraph on the stack and push
+                        if let Some(para_state) = stack.iter_mut().rev().find(
+                            |s| matches!(s, ParseState::InParagraph { .. }),
+                        ) {
+                            if let ParseState::InParagraph {
+                                ref mut runs, ..
+                            } = para_state
+                            {
+                                if !flushed_text.is_empty() {
+                                    runs.push(Inline::TextRun(TextRun {
+                                        text: flushed_text,
+                                        properties: props.clone(),
+                                    }));
+                                }
+                                runs.push(inline_to_push);
+                            }
+                        }
+                    }
+                } else if matches!(state, ParseState::InDrawing { .. }) {
                     handle_drawing_element(local, e, &mut state)?;
                 } else if matches!(state, ParseState::InSectionProperties { .. }) {
                     handle_section_element(local, e, &mut state)?;
@@ -233,7 +277,15 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                 text: ref mut t, ..
                             } = state
                             {
-                                t.push_str(&text);
+                                // Strip newlines/carriage returns — in OOXML,
+                                // literal newlines in <w:t> are XML formatting
+                                // artifacts, not meaningful line breaks (those
+                                // use <w:br/>).
+                                let cleaned: String = text
+                                    .chars()
+                                    .filter(|c| *c != '\n' && *c != '\r')
+                                    .collect();
+                                t.push_str(&cleaned);
                             }
                         }
                     }
