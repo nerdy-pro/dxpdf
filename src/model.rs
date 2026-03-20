@@ -6,6 +6,32 @@ use crate::units::{self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR
 /// Shared image data — avoids cloning large byte buffers during layout.
 pub type ImageData = Rc<Vec<u8>>;
 
+use std::collections::HashMap;
+
+/// Resolved paragraph style properties.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ResolvedParagraphStyle {
+    pub alignment: Option<Alignment>,
+    pub spacing: Option<Spacing>,
+    pub indentation: Option<Indentation>,
+    /// Run properties from the style's rPr (applied to all runs in the paragraph).
+    pub run_props: ResolvedRunStyle,
+}
+
+/// Resolved run (character) style properties.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ResolvedRunStyle {
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub font_size: Option<u32>,
+    pub font_family: Option<Rc<str>>,
+    pub color: Option<Color>,
+}
+
+/// Map of style IDs to resolved properties.
+pub type StyleMap = HashMap<String, ResolvedParagraphStyle>;
+
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -26,6 +52,8 @@ pub struct Document {
     pub table_cell_spacing: Spacing,
     /// Default table borders (from table style).
     pub default_table_borders: TableBorders,
+    /// Named paragraph/run styles resolved from `word/styles.xml`.
+    pub styles: StyleMap,
     /// Default header content (from first/final section).
     pub default_header: Option<HeaderFooter>,
     /// Default footer content (from first/final section).
@@ -44,6 +72,7 @@ impl Default for Document {
             default_cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
             default_table_borders: TableBorders::default(),
+            styles: StyleMap::new(),
             default_header: None,
             default_footer: None,
         }
@@ -145,6 +174,8 @@ pub struct ParagraphProperties {
     pub tab_stops: Vec<TabStop>,
     /// Paragraph background shading from `w:shd`.
     pub shading: Option<Color>,
+    /// Referenced paragraph style ID (e.g., "Kopfzeile").
+    pub style_id: Option<String>,
 }
 
 /// A tab stop alignment type.

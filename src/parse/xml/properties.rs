@@ -221,6 +221,11 @@ pub fn handle_empty_element(
                         }
                     }
                 }
+                b"pStyle" => {
+                    if let Some(val) = get_attr(e, b"val")? {
+                        props.style_id = Some(val);
+                    }
+                }
                 _ => {}
             }
         }

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::error::Error;
-use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties};
+use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties, StyleMap};
 
 fn resolve_image_data(
     rel_id: &RelId,
@@ -66,12 +66,19 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         if let Some(tb) = dd.table_borders {
             document.default_table_borders = tb;
         }
+        if !dd.styles.is_empty() {
+            document.styles = dd.styles.clone();
+        }
     }
     resolve_images(
         &mut document,
         &contents.relationships,
         &contents.media_files,
     );
+
+    // Apply named styles to paragraphs and runs
+    let styles = document.styles.clone();
+    apply_styles(&mut document.blocks, &styles);
 
     // Resolve headers/footers on sections
     resolve_headers_footers(
@@ -166,6 +173,62 @@ fn resolve_hf(
     }
 
     Some(hf)
+}
+
+/// Apply named styles to paragraphs — style properties are defaults
+/// that direct formatting overrides.
+fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => {
+                if let Some(ref sid) = p.properties.style_id {
+                    if let Some(style) = styles.get(sid) {
+                        // Merge style properties as defaults (direct formatting wins)
+                        let props = &mut p.properties;
+                        if props.alignment.is_none() {
+                            props.alignment = style.alignment;
+                        }
+                        if props.spacing.is_none() {
+                            props.spacing = style.spacing;
+                        }
+                        if props.indentation.is_none() {
+                            props.indentation = style.indentation;
+                        }
+
+                        // Apply style's run properties to all runs that lack
+                        // direct formatting
+                        for run in &mut p.runs {
+                            if let Inline::TextRun(tr) = run {
+                                let rp = &mut tr.properties;
+                                if !rp.bold && style.run_props.bold == Some(true) {
+                                    rp.bold = true;
+                                }
+                                if !rp.italic && style.run_props.italic == Some(true) {
+                                    rp.italic = true;
+                                }
+                                if rp.font_size.is_none() {
+                                    rp.font_size = style.run_props.font_size;
+                                }
+                                if rp.font_family.is_none() {
+                                    rp.font_family = style.run_props.font_family.clone();
+                                }
+                                if rp.color.is_none() {
+                                    rp.color = style.run_props.color;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        apply_styles(&mut cell.blocks, styles);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Walk the document tree and populate image data from the archive.
