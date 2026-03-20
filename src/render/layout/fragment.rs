@@ -139,7 +139,7 @@ pub fn collect_fragments(
                 });
             }
             Inline::Tab => {
-                let default_size = defaults.font_size_half_pts as f32 / 2.0;
+                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
                 let lh = measurer.line_height(
                     &defaults.font_family,
                     default_size,
@@ -149,7 +149,7 @@ pub fn collect_fragments(
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = defaults.font_size_half_pts as f32 / 2.0;
+                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
                 let lh = measurer.line_height(
                     &defaults.font_family,
                     default_size,

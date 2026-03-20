@@ -119,10 +119,11 @@ fn draw_rect(
 }
 
 fn color_to_4f(color: (u8, u8, u8)) -> Color4f {
+    const MAX_U8: f32 = u8::MAX as f32;
     Color4f::new(
-        color.0 as f32 / 255.0,
-        color.1 as f32 / 255.0,
-        color.2 as f32 / 255.0,
+        color.0 as f32 / MAX_U8,
+        color.1 as f32 / MAX_U8,
+        color.2 as f32 / MAX_U8,
         1.0,
     )
 }
