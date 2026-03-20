@@ -83,7 +83,7 @@ pub enum DrawCommand {
         y: f32,
         width: f32,
         height: f32,
-        data: Vec<u8>,
+        data: ImageData,
     },
     Rect {
         x: f32,

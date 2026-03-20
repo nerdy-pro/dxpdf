@@ -46,7 +46,7 @@ pub enum Fragment {
     Image {
         width: f32,
         height: f32,
-        data: Vec<u8>,
+        data: ImageData,
     },
     Tab {
         line_height: f32,

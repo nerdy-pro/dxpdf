@@ -1,5 +1,10 @@
+use std::sync::Arc;
+
 use crate::units::{self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS,
     DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS};
+
+/// Shared image data — avoids cloning large byte buffers during layout.
+pub type ImageData = Arc<Vec<u8>>;
 
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -247,7 +252,7 @@ pub struct InlineImage {
     pub rel_id: RelId,
     pub width_pt: f32,
     pub height_pt: f32,
-    pub data: Vec<u8>,
+    pub data: ImageData,
     pub format_hint: FormatHint,
 }
 
@@ -263,7 +268,7 @@ pub struct FloatingImage {
     pub rel_id: RelId,
     pub width_pt: f32,
     pub height_pt: f32,
-    pub data: Vec<u8>,
+    pub data: ImageData,
     pub format_hint: FormatHint,
     pub offset_x_pt: f32,
     pub offset_y_pt: f32,

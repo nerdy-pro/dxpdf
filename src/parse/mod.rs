@@ -4,19 +4,21 @@ pub mod xml;
 use std::collections::HashMap;
 use std::path::Path;
 
+use std::sync::Arc;
+
 use crate::error::Error;
-use crate::model::{Block, Document, FormatHint, HeaderFooter, Inline, RelId, SectionProperties};
+use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties};
 
 fn resolve_image_data(
     rel_id: &RelId,
-    data: &mut Vec<u8>,
+    data: &mut ImageData,
     format_hint: &mut FormatHint,
     rels: &HashMap<String, String>,
     media: &HashMap<String, Vec<u8>>,
 ) {
     if let Some(target) = rels.get(rel_id.as_str()) {
         if let Some(bytes) = media.get(target) {
-            *data = bytes.clone();
+            *data = Arc::new(bytes.clone());
             *format_hint = FormatHint::from(
                 Path::new(target)
                     .extension()
