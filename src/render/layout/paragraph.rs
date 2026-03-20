@@ -16,7 +16,13 @@ impl Layouter {
             if float.data.is_empty() {
                 continue;
             }
-            let img_x = self.config.margin_left + float.offset_x_pt;
+            let content_w = self.config.content_width();
+            let img_x = match float.align_h.as_deref() {
+                Some("right") => self.config.margin_left + content_w - float.width_pt,
+                Some("center") => self.config.margin_left + (content_w - float.width_pt) / 2.0,
+                Some("left") => self.config.margin_left,
+                _ => self.config.margin_left + float.offset_x_pt,
+            };
             let img_y = self.cursor_y + float.offset_y_pt;
 
             self.current_page.commands.push(DrawCommand::Image {

@@ -24,6 +24,11 @@ pub fn emu_to_pt(emu: u64) -> f32 {
     emu as f32 / EMU_PER_INCH * POINTS_PER_INCH
 }
 
+/// Convert signed English Metric Units to points.
+pub fn emu_to_pt_signed(emu: i64) -> f32 {
+    emu as f32 / EMU_PER_INCH * POINTS_PER_INCH
+}
+
 // --- Document defaults ---
 
 /// Default font family when nothing is specified.
@@ -71,7 +76,7 @@ pub const UNDERLINE_STROKE_WIDTH: f32 = 0.5;
 pub const BORDER_SIZE_PER_POINT: f32 = 8.0;
 
 /// Minimum table row height (in points).
-pub const MIN_ROW_HEIGHT_PT: f32 = 12.0;
+pub const MIN_ROW_HEIGHT_PT: f32 = 0.0;
 
 /// Minimum bottom padding in cells to prevent descender overlap (in points).
 pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 2.0;

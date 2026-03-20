@@ -19,6 +19,7 @@ pub fn handle_drawing_element(
         ref mut in_position_h,
         ref mut in_position_v,
         ref mut reading_pos_offset,
+        ref mut reading_align,
         ..
     } = state
     {
@@ -53,6 +54,14 @@ pub fn handle_drawing_element(
                     *reading_pos_offset = Some('V');
                 }
             }
+            b"align" => {
+                // wp:align contains text like "left", "right", "center"
+                if *in_position_h {
+                    *reading_align = Some('H');
+                } else if *in_position_v {
+                    *reading_align = Some('V');
+                }
+            }
             b"wrapTight" | b"wrapSquare" | b"wrapThrough" => {
                 if let Some(val) = get_attr(e, b"wrapText")? {
                     *wrap_side = match val.as_str() {
@@ -78,6 +87,7 @@ pub fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
         ref mut in_position_h,
         ref mut in_position_v,
         ref mut reading_pos_offset,
+        ref mut reading_align,
         ..
     } = state
     {
@@ -96,6 +106,9 @@ pub fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
             }
             b"posOffset" => {
                 *reading_pos_offset = None;
+            }
+            b"align" => {
+                *reading_align = None;
             }
             _ => {}
         }

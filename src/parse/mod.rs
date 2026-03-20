@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::Error;
-use crate::model::{Block, Document, FormatHint, Inline, RelId};
+use crate::model::{Block, Document, FormatHint, HeaderFooter, Inline, RelId, SectionProperties};
 
 fn resolve_image_data(
     rel_id: &RelId,
@@ -70,7 +70,100 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         &contents.relationships,
         &contents.media_files,
     );
+
+    // Resolve headers/footers on sections
+    resolve_headers_footers(
+        &mut document,
+        &contents.relationships,
+        &contents.header_footer_xml,
+        &contents.header_footer_rels,
+        &contents.media_files,
+    );
+
     Ok(document)
+}
+
+/// Resolve headers and footers from XML files, linking them to sections.
+fn resolve_headers_footers(
+    doc: &mut Document,
+    rels: &HashMap<String, String>,
+    hf_xml: &HashMap<String, String>,
+    hf_rels: &HashMap<String, HashMap<String, String>>,
+    media: &HashMap<String, Vec<u8>>,
+) {
+    // Resolve headers/footers on section properties (both mid-document and final)
+    let mut all_sections: Vec<&mut SectionProperties> = Vec::new();
+    for block in &mut doc.blocks {
+        if let Block::Paragraph(p) = block {
+            if let Some(ref mut sect) = p.section_properties {
+                all_sections.push(sect);
+            }
+        }
+    }
+    if let Some(ref mut sect) = doc.final_section {
+        all_sections.push(sect);
+    }
+
+    for sect in &mut all_sections {
+        // Resolve header
+        if let Some(ref rid) = sect.header_rel_id.clone() {
+            if let Some(hf) = resolve_hf(rid, rels, hf_xml, hf_rels, media) {
+                sect.header = Some(hf);
+            }
+        }
+        // Resolve footer
+        if let Some(ref rid) = sect.footer_rel_id.clone() {
+            if let Some(hf) = resolve_hf(rid, rels, hf_xml, hf_rels, media) {
+                sect.footer = Some(hf);
+            }
+        }
+    }
+
+    // Set document defaults from the first section that has header/footer
+    for block in &doc.blocks {
+        if let Block::Paragraph(p) = block {
+            if let Some(ref sect) = p.section_properties {
+                if doc.default_header.is_none() {
+                    doc.default_header = sect.header.clone();
+                }
+                if doc.default_footer.is_none() {
+                    doc.default_footer = sect.footer.clone();
+                }
+            }
+        }
+    }
+    if let Some(ref sect) = doc.final_section {
+        if doc.default_header.is_none() {
+            doc.default_header = sect.header.clone();
+        }
+        if doc.default_footer.is_none() {
+            doc.default_footer = sect.footer.clone();
+        }
+    }
+}
+
+/// Resolve a single header or footer from its relationship ID.
+fn resolve_hf(
+    rid: &str,
+    rels: &HashMap<String, String>,
+    hf_xml: &HashMap<String, String>,
+    hf_rels: &HashMap<String, HashMap<String, String>>,
+    media: &HashMap<String, Vec<u8>>,
+) -> Option<HeaderFooter> {
+    // Map rId -> filename (e.g., "header2.xml")
+    let target = rels.get(rid)?;
+    let xml_content = hf_xml.get(target)?;
+
+    let mut hf = xml::parse_header_footer_xml(xml_content).ok()?;
+
+    // Resolve images in the header/footer using its own rels
+    let empty_rels = HashMap::new();
+    let own_rels = hf_rels.get(target).unwrap_or(&empty_rels);
+    for block in &mut hf.blocks {
+        resolve_images_in_block(block, own_rels, media);
+    }
+
+    Some(hf)
 }
 
 /// Walk the document tree and populate image data from the archive.

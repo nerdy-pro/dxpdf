@@ -18,6 +18,10 @@ pub struct LayoutConfig {
     pub margin_bottom: f32,
     pub margin_left: f32,
     pub margin_right: f32,
+    /// Distance from page top to header content.
+    pub header_margin: f32,
+    /// Distance from page bottom to footer content.
+    pub footer_margin: f32,
 }
 
 impl Default for LayoutConfig {
@@ -29,6 +33,8 @@ impl Default for LayoutConfig {
             margin_bottom: DEFAULT_PAGE_MARGIN_PT,
             margin_left: DEFAULT_PAGE_MARGIN_PT,
             margin_right: DEFAULT_PAGE_MARGIN_PT,
+            header_margin: DEFAULT_PAGE_MARGIN_PT / 2.0,
+            footer_margin: DEFAULT_PAGE_MARGIN_PT / 2.0,
         }
     }
 }
@@ -125,6 +131,8 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         default_cell_margins: doc.default_cell_margins,
         table_cell_spacing: doc.table_cell_spacing,
         default_table_borders: doc.default_table_borders,
+        default_header: doc.default_header.clone(),
+        default_footer: doc.default_footer.clone(),
     };
     let mut layouter =
         Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
@@ -135,7 +143,254 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         layouter.layout_block(block, next_is_table);
     }
 
-    layouter.finish()
+    let mut pages = layouter.finish();
+
+    // Render headers and footers on each page
+    let hf_defaults = DocDefaultsLayout {
+        font_size_half_pts: doc.default_font_size,
+        font_family: doc.default_font_family.clone(),
+        default_spacing: doc.default_spacing,
+        default_cell_margins: doc.default_cell_margins,
+        table_cell_spacing: doc.table_cell_spacing,
+        default_table_borders: doc.default_table_borders,
+        default_header: doc.default_header.clone(),
+        default_footer: doc.default_footer.clone(),
+    };
+    render_headers_footers(&mut pages, &hf_defaults, default_tab_stop_pt, &initial_config);
+
+    pages
+}
+
+/// Render header and footer content on each page.
+fn render_headers_footers(
+    pages: &mut [LayoutedPage],
+    doc_defaults: &DocDefaultsLayout,
+    default_tab_stop_pt: f32,
+    config: &LayoutConfig,
+) {
+    let measurer = measurer::TextMeasurer::new();
+
+    for page in pages.iter_mut() {
+        let page_width = page.page_width;
+        let page_height = page.page_height;
+        let margin_left = config.margin_left;
+        let margin_right = config.margin_right;
+        let content_width = page_width - margin_left - margin_right;
+        let header_y = config.header_margin;
+        // Footer starts at the body's bottom margin boundary
+        let footer_y = page_height - config.margin_bottom;
+
+        let margin_top = config.margin_top;
+        let margin_bottom = config.margin_bottom;
+
+        // Render header
+        if let Some(ref header) = doc_defaults.default_header {
+            let commands = layout_header_footer_blocks(
+                &header.blocks,
+                margin_left,
+                header_y,
+                content_width,
+                margin_top,      // margin area for vertical centering of floats
+                margin_top,      // clip: don't render past top margin
+                doc_defaults,
+                &measurer,
+                default_tab_stop_pt,
+            );
+            // Insert header commands at the beginning so they render behind body
+            let body_commands = std::mem::take(&mut page.commands);
+            page.commands = commands;
+            page.commands.extend(body_commands);
+        }
+
+        // Render footer
+        if let Some(ref footer) = doc_defaults.default_footer {
+            let commands = layout_header_footer_blocks(
+                &footer.blocks,
+                margin_left,
+                footer_y,
+                content_width,
+                margin_bottom,   // margin area for vertical centering of floats
+                page_height,     // clip: don't render past page bottom
+                doc_defaults,
+                &measurer,
+                default_tab_stop_pt,
+            );
+            page.commands.extend(commands);
+        }
+    }
+}
+
+/// Layout header/footer blocks at a fixed position, returning draw commands.
+/// Content is clipped at `y_limit` — paragraphs past that boundary are not rendered.
+fn layout_header_footer_blocks(
+    blocks: &[Block],
+    x_start: f32,
+    y_start: f32,
+    content_width: f32,
+    margin_extent: f32,  // margin area height for vertical centering of floats
+    y_limit: f32,        // absolute y coordinate to stop rendering
+    defaults: &DocDefaultsLayout,
+    measurer: &measurer::TextMeasurer,
+    default_tab_stop_pt: f32,
+) -> Vec<DrawCommand> {
+    use fragment::*;
+
+    let mut commands = Vec::new();
+    let mut cursor_y = y_start;
+
+    for block in blocks {
+        // Stop rendering if we've exceeded the allowed area
+        if cursor_y >= y_limit {
+            break;
+        }
+        if let Block::Paragraph(para) = block {
+            let spacing = match para.properties.spacing {
+                Some(s) => s,
+                None => Spacing::default(),
+            };
+            cursor_y += spacing.before_pt();
+
+            // Render floating images with alignment support
+            for float in &para.floats {
+                if float.data.is_empty() {
+                    continue;
+                }
+                let scale = f32::min(
+                    1.0,
+                    content_width / float.width_pt.max(1.0),
+                );
+                let img_w = float.width_pt * scale;
+                let img_h = float.height_pt * scale;
+                // Use alignment if specified, otherwise offset
+                let img_x = match float.align_h.as_deref() {
+                    Some("right") => x_start + content_width - img_w,
+                    Some("center") => x_start + (content_width - img_w) / 2.0,
+                    Some("left") => x_start,
+                    _ => x_start + float.offset_x_pt,
+                };
+                let img_y = match float.align_v.as_deref() {
+                    Some("center") => (margin_extent - img_h) / 2.0,
+                    Some("bottom") => margin_extent - img_h,
+                    Some("top") => 0.0,
+                    _ => cursor_y + float.offset_y_pt,
+                };
+                commands.push(DrawCommand::Image {
+                    x: img_x,
+                    y: img_y,
+                    width: img_w,
+                    height: img_h,
+                    data: float.data.clone(),
+                });
+            }
+
+            let fragments = collect_fragments(
+                &para.runs,
+                content_width,
+                100.0, // max height for images
+                defaults,
+                measurer,
+            );
+
+            if fragments.is_empty() {
+                cursor_y += spacing.line_pt();
+                cursor_y += spacing.after_pt();
+                continue;
+            }
+
+            let indent = para.properties.indentation.unwrap_or_default();
+            let mut line_start = 0;
+            let mut is_first_line = true;
+
+            while line_start < fragments.len() {
+                // Skip leading spaces
+                if !is_first_line {
+                    while line_start < fragments.len() {
+                        if let Fragment::Text { ref text, .. } = fragments[line_start] {
+                            if text.trim().is_empty() {
+                                line_start += 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                    if line_start >= fragments.len() {
+                        break;
+                    }
+                }
+
+                let avail = content_width - indent.left_pt() - indent.right_pt();
+                let (line_end, _) = fit_fragments(&fragments[line_start..], avail);
+                let actual_end = line_start + line_end.max(1);
+
+                let frag_height = fragments[line_start..actual_end]
+                    .iter()
+                    .map(|f| f.height())
+                    .fold(0.0_f32, f32::max);
+                let line_height = match spacing.line_pt_opt() {
+                    Some(lh) => frag_height.max(lh),
+                    None => frag_height,
+                };
+                cursor_y += line_height;
+
+                let used_width = measure_fragments(&fragments[line_start..actual_end]);
+                let x_offset = match para.properties.alignment {
+                    Some(Alignment::Center) => (avail - used_width) / 2.0,
+                    Some(Alignment::Right) => avail - used_width,
+                    _ => 0.0,
+                };
+                let mut x = x_start + indent.left_pt() + x_offset;
+
+                for frag in &fragments[line_start..actual_end] {
+                    match frag {
+                        Fragment::Text {
+                            text, font_family, font_size, bold, italic,
+                            underline, color, measured_width, ..
+                        } => {
+                            let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+                            commands.push(DrawCommand::Text {
+                                x, y: cursor_y, text: text.clone(),
+                                font_family: font_family.clone(),
+                                font_size: *font_size, bold: *bold, italic: *italic,
+                                color: c,
+                            });
+                            if *underline {
+                                commands.push(DrawCommand::Underline {
+                                    x1: x, y1: cursor_y + crate::units::UNDERLINE_Y_OFFSET,
+                                    x2: x + measured_width,
+                                    y2: cursor_y + crate::units::UNDERLINE_Y_OFFSET,
+                                    color: c, width: crate::units::UNDERLINE_STROKE_WIDTH,
+                                });
+                            }
+                            x += measured_width;
+                        }
+                        Fragment::Image { width, height, data } => {
+                            commands.push(DrawCommand::Image {
+                                x, y: cursor_y - height,
+                                width: *width, height: *height,
+                                data: data.clone(),
+                            });
+                            x += width;
+                        }
+                        Fragment::Tab { .. } => {
+                            let rel_x = x - x_start;
+                            let next = find_next_tab_stop(
+                                rel_x, &para.properties.tab_stops, default_tab_stop_pt,
+                            );
+                            x = x_start + next;
+                        }
+                        Fragment::LineBreak { .. } => {}
+                    }
+                }
+
+                line_start = actual_end;
+                is_first_line = false;
+            }
+
+            cursor_y += spacing.after_pt();
+        }
+    }
+
+    commands
 }
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
@@ -148,6 +403,8 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
         config.margin_right = pm.right_pt();
         config.margin_bottom = pm.bottom_pt();
         config.margin_left = pm.left_pt();
+        config.header_margin = pm.header_pt();
+        config.footer_margin = pm.footer_pt();
     }
 }
 

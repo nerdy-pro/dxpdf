@@ -21,6 +21,10 @@ pub struct Document {
     pub table_cell_spacing: Spacing,
     /// Default table borders (from table style).
     pub default_table_borders: TableBorders,
+    /// Default header content (from first/final section).
+    pub default_header: Option<HeaderFooter>,
+    /// Default footer content (from first/final section).
+    pub default_footer: Option<HeaderFooter>,
 }
 
 impl Default for Document {
@@ -35,6 +39,8 @@ impl Default for Document {
             default_cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
             default_table_borders: TableBorders::default(),
+            default_header: None,
+            default_footer: None,
         }
     }
 }
@@ -70,6 +76,10 @@ pub struct PageMargins {
     pub right: u32,
     pub bottom: u32,
     pub left: u32,
+    /// Distance from page top to header content.
+    pub header: u32,
+    /// Distance from page bottom to footer content.
+    pub footer: u32,
 }
 
 impl PageMargins {
@@ -85,6 +95,18 @@ impl PageMargins {
     pub fn left_pt(&self) -> f32 {
         twips_to_pt(self.left)
     }
+    pub fn header_pt(&self) -> f32 {
+        twips_to_pt(self.header)
+    }
+    pub fn footer_pt(&self) -> f32 {
+        twips_to_pt(self.footer)
+    }
+}
+
+/// Header or footer content — same structure as the document body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeaderFooter {
+    pub blocks: Vec<Block>,
 }
 
 /// Section properties from `w:sectPr`.
@@ -92,6 +114,14 @@ impl PageMargins {
 pub struct SectionProperties {
     pub page_size: Option<PageSize>,
     pub page_margins: Option<PageMargins>,
+    /// Default header content (type="default").
+    pub header: Option<HeaderFooter>,
+    /// Default footer content (type="default").
+    pub footer: Option<HeaderFooter>,
+    /// Relationship ID for the default header (used during parsing to resolve content).
+    pub header_rel_id: Option<String>,
+    /// Relationship ID for the default footer.
+    pub footer_rel_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +253,10 @@ pub struct FloatingImage {
     pub format_hint: FormatHint,
     pub offset_x_pt: f32,
     pub offset_y_pt: f32,
+    /// Horizontal alignment (e.g., "left", "right", "center") — alternative to offset.
+    pub align_h: Option<String>,
+    /// Vertical alignment (e.g., "top", "center", "bottom") — alternative to offset.
+    pub align_v: Option<String>,
     pub wrap_side: WrapSide,
 }
 

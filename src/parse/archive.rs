@@ -36,6 +36,10 @@ pub struct DocxContents {
     pub default_tab_stop: Option<u32>,
     /// Document-wide default run properties from `word/styles.xml`.
     pub doc_defaults: Option<DocDefaults>,
+    /// Header/footer XML contents keyed by relationship ID.
+    pub header_footer_xml: HashMap<String, String>,
+    /// Header/footer relationships (rId -> media targets).
+    pub header_footer_rels: HashMap<String, HashMap<String, String>>,
     /// Minor (body) font name from theme (e.g., "Calibri").
     pub theme_minor_font: Option<String>,
     /// Major (heading) font name from theme (e.g., "Calibri Light").
@@ -113,10 +117,68 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
     // 6. Extract theme fonts from word/theme/theme1.xml
     let (theme_minor_font, theme_major_font) = extract_theme_fonts(&mut archive);
 
+    // 7. Extract header/footer XML files
+    let mut header_footer_xml = HashMap::new();
+    let mut header_footer_rels = HashMap::new();
+    let hf_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let file = archive.by_index(i).ok()?;
+            let name = file.name().to_string();
+            if (name.starts_with("word/header") || name.starts_with("word/footer"))
+                && name.ends_with(".xml")
+                && !name.contains("_rels")
+            {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for name in &hf_names {
+        if let Ok(mut file) = archive.by_name(name) {
+            let mut xml = String::new();
+            if file.read_to_string(&mut xml).is_ok() {
+                let short = name.strip_prefix("word/").unwrap_or(name).to_string();
+                header_footer_xml.insert(short, xml);
+            }
+        }
+    }
+    // Extract rels for each header/footer (for images inside headers)
+    let hf_rel_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let file = archive.by_index(i).ok()?;
+            let name = file.name().to_string();
+            if name.starts_with("word/_rels/header") || name.starts_with("word/_rels/footer") {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for name in &hf_rel_names {
+        if let Ok(mut file) = archive.by_name(name) {
+            let mut xml = String::new();
+            if file.read_to_string(&mut xml).is_ok() {
+                if let Ok(rels) = parse_relationships(&xml) {
+                    // Key by the header/footer filename (e.g., "header2.xml")
+                    let hf_name = name
+                        .strip_prefix("word/_rels/")
+                        .unwrap_or(name)
+                        .strip_suffix(".rels")
+                        .unwrap_or(name)
+                        .to_string();
+                    header_footer_rels.insert(hf_name, rels);
+                }
+            }
+        }
+    }
+
     Ok(DocxContents {
         document_xml,
         relationships,
         media_files,
+        header_footer_xml,
+        header_footer_rels,
         default_tab_stop,
         doc_defaults,
         theme_minor_font,

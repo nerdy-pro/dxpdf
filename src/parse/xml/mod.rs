@@ -8,6 +8,7 @@ use quick_xml::Reader;
 
 use crate::error::Error;
 use crate::model::*;
+use crate::units;
 
 use drawing::{handle_drawing_element, handle_drawing_end};
 use helpers::*;
@@ -29,7 +30,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 match local {
-                    b"body" => {
+                    b"body" | b"hdr" | b"ftr" => {
                         state = ParseState::InBody;
                     }
                     b"p" if matches_body_or_cell(&state) => {
@@ -123,11 +124,18 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             is_anchor: false,
                             pos_h_emu: None,
                             pos_v_emu: None,
+                            align_h: None,
+                            align_v: None,
+                            reading_align: None,
                             wrap_side: None,
                             reading_pos_offset: None,
                             in_position_h: false,
                             in_position_v: false,
                         };
+                    }
+                    _ if matches!(state, ParseState::InSectionProperties { .. }) => {
+                        // Handle headerReference/footerReference etc. as Start events
+                        handle_section_element(local, e, &mut state)?;
                     }
                     _ if matches!(state, ParseState::InDrawing { .. }) => {
                         if let ParseState::InDrawing { ref mut depth, .. } = state {
@@ -147,6 +155,10 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             section: SectionProperties {
                                 page_size: None,
                                 page_margins: None,
+                                header: None,
+                                footer: None,
+                                header_rel_id: None,
+                                footer_rel_id: None,
                             },
                         };
                     }
@@ -229,12 +241,23 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                     text.push_str(&e.unescape()?);
                 } else if let ParseState::InDrawing {
                     ref reading_pos_offset,
+                    ref reading_align,
                     ref mut pos_h_emu,
                     ref mut pos_v_emu,
+                    ref mut align_h,
+                    ref mut align_v,
                     ..
                 } = state
                 {
-                    if let Some(axis) = reading_pos_offset {
+                    if let Some(axis) = reading_align {
+                        let val_str = e.unescape().unwrap_or_default();
+                        let val = val_str.trim().to_string();
+                        match axis {
+                            'H' => *align_h = Some(val),
+                            'V' => *align_v = Some(val),
+                            _ => {}
+                        }
+                    } else if let Some(axis) = reading_pos_offset {
                         let val_str = e.unescape().unwrap_or_default();
                         if let Ok(val) = val_str.trim().parse::<i64>() {
                             match axis {
@@ -250,7 +273,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 match local {
-                    b"body" => {
+                    b"body" | b"hdr" | b"ftr" => {
                         state = ParseState::Idle;
                     }
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
@@ -371,6 +394,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             is_anchor,
                             pos_h_emu,
                             pos_v_emu,
+                            align_h,
+                            align_v,
                             wrap_side,
                             ..
                         } = old
@@ -387,12 +412,14 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                         height_pt: h,
                                         data: Vec::new(),
                                         format_hint: FormatHint::default(),
-                                        offset_x_pt: emu_to_pt(
-                                            pos_h_emu.unwrap_or(0).unsigned_abs(),
+                                        offset_x_pt: units::emu_to_pt_signed(
+                                            pos_h_emu.unwrap_or(0),
                                         ),
-                                        offset_y_pt: emu_to_pt(
-                                            pos_v_emu.unwrap_or(0).unsigned_abs(),
+                                        offset_y_pt: units::emu_to_pt_signed(
+                                            pos_v_emu.unwrap_or(0),
                                         ),
+                                        align_h,
+                                        align_v,
                                         wrap_side: wrap_side
                                             .unwrap_or(WrapSide::BothSides),
                                     };
@@ -491,6 +518,14 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
     })
 }
 
+/// Parse a header or footer XML file into a list of blocks.
+/// Header/footer XML has the same structure as document body
+/// but with `w:hdr` or `w:ftr` as the root element.
+pub fn parse_header_footer_xml(xml: &str) -> Result<HeaderFooter, Error> {
+    let doc = parse_document_xml(xml)?;
+    Ok(HeaderFooter { blocks: doc.blocks })
+}
+
 enum ParseState {
     Idle,
     InBody,
@@ -548,6 +583,10 @@ enum ParseState {
         is_anchor: bool,
         pos_h_emu: Option<i64>,
         pos_v_emu: Option<i64>,
+        align_h: Option<String>,
+        align_v: Option<String>,
+        /// Tracks whether we're reading text for posOffset ('H'/'V') or align ('h'/'v').
+        reading_align: Option<char>,
         wrap_side: Option<WrapSide>,
         reading_pos_offset: Option<char>,
         in_position_h: bool,

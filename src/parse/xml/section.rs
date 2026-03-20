@@ -5,7 +5,10 @@ use crate::units::DEFAULT_PAGE_MARGIN_TWIPS;
 use super::ParseState;
 use super::helpers::get_attr;
 
-/// Handle elements inside a `w:sectPr` to extract page size and margins.
+/// Default header/footer distance from page edge in twips (0.5 inch).
+const DEFAULT_HF_MARGIN_TWIPS: u32 = 720;
+
+/// Handle elements inside a `w:sectPr` to extract page size, margins, and header/footer refs.
 pub fn handle_section_element(
     local: &[u8],
     e: &quick_xml::events::BytesStart<'_>,
@@ -36,12 +39,39 @@ pub fn handle_section_element(
                 let left = get_attr(e, b"left")?
                     .and_then(|v| v.parse::<u32>().ok())
                     .unwrap_or(DEFAULT_PAGE_MARGIN_TWIPS);
+                let header = get_attr(e, b"header")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(DEFAULT_HF_MARGIN_TWIPS);
+                let footer = get_attr(e, b"footer")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(DEFAULT_HF_MARGIN_TWIPS);
                 section.page_margins = Some(PageMargins {
                     top,
                     right,
                     bottom,
                     left,
+                    header,
+                    footer,
                 });
+            }
+            b"headerReference" => {
+                // Store the relationship ID for the default header
+                if let Some(hf_type) = get_attr(e, b"type")? {
+                    if hf_type == "default" {
+                        if let Some(rid) = get_attr(e, b"id")? {
+                            section.header_rel_id = Some(rid);
+                        }
+                    }
+                }
+            }
+            b"footerReference" => {
+                if let Some(hf_type) = get_attr(e, b"type")? {
+                    if hf_type == "default" {
+                        if let Some(rid) = get_attr(e, b"id")? {
+                            section.footer_rel_id = Some(rid);
+                        }
+                    }
+                }
             }
             _ => {}
         }
