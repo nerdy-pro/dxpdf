@@ -250,16 +250,35 @@ pub struct TableRow {
     pub cells: Vec<TableCell>,
 }
 
+/// Vertical merge state for a table cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerticalMerge {
+    /// This cell starts a vertical merge group.
+    Restart,
+    /// This cell continues a vertical merge from the row above.
+    Continue,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
     /// Cell width in twips from `w:tcW`, if specified.
     pub width: Option<u32>,
+    /// Number of grid columns this cell spans (from `w:gridSpan`). Default is 1.
+    pub grid_span: u32,
+    /// Vertical merge state (from `w:vMerge`).
+    pub vertical_merge: Option<VerticalMerge>,
 }
 
 impl TableCell {
     pub fn width_pt(&self) -> Option<f32> {
         self.width.map(|w| w as f32 / 20.0)
+    }
+
+    /// Returns true if this cell is a continuation of a vertical merge
+    /// (its content should not be rendered; only the restart cell renders).
+    pub fn is_vmerge_continue(&self) -> bool {
+        self.vertical_merge == Some(VerticalMerge::Continue)
     }
 }
 

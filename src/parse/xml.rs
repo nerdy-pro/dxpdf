@@ -78,6 +78,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         state = ParseState::InTableCell {
                             blocks: Vec::new(),
                             width: None,
+                            grid_span: 1,
+                            vertical_merge: None,
                         };
                     }
                     b"t" if matches!(state, ParseState::InRun { .. }) => {
@@ -308,6 +310,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         if let ParseState::InTableCell {
                             blocks: cell_blocks,
                             width: cell_width,
+                            grid_span,
+                            vertical_merge,
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
@@ -315,6 +319,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                 cells.push(TableCell {
                                     blocks: cell_blocks,
                                     width: cell_width,
+                                    grid_span,
+                                    vertical_merge,
                                 });
                             }
                         }
@@ -471,6 +477,8 @@ enum ParseState {
     InTableCell {
         blocks: Vec<Block>,
         width: Option<u32>,
+        grid_span: u32,
+        vertical_merge: Option<VerticalMerge>,
     },
     /// Inside a `w:drawing` subtree. We track nested depth and collect image info.
     InDrawing {
@@ -650,17 +658,41 @@ fn handle_empty_element(
                 }
             }
         }
-        ParseState::InTableCell { ref mut width, .. } => {
-            if local == b"tcW" {
-                // Only store width if type is "dxa" (twips), not "pct" or "auto"
-                let w_type = get_attr(e, b"type")?.unwrap_or_default();
-                if w_type == "dxa" {
-                    if let Some(val) = get_attr(e, b"w")? {
-                        if let Ok(w) = val.parse::<u32>() {
-                            *width = Some(w);
+        ParseState::InTableCell {
+            ref mut width,
+            ref mut grid_span,
+            ref mut vertical_merge,
+            ..
+        } => {
+            match local {
+                b"tcW" => {
+                    let w_type = get_attr(e, b"type")?.unwrap_or_default();
+                    if w_type == "dxa" {
+                        if let Some(val) = get_attr(e, b"w")? {
+                            if let Ok(w) = val.parse::<u32>() {
+                                *width = Some(w);
+                            }
                         }
                     }
                 }
+                b"gridSpan" => {
+                    if let Some(val) = get_attr(e, b"val")? {
+                        if let Ok(gs) = val.parse::<u32>() {
+                            *grid_span = gs;
+                        }
+                    }
+                }
+                b"vMerge" => {
+                    // <w:vMerge val="restart"/> starts a merge group.
+                    // <w:vMerge/> (no val or val="continue") continues it.
+                    let val = get_attr(e, b"val")?.unwrap_or_default();
+                    *vertical_merge = if val == "restart" {
+                        Some(VerticalMerge::Restart)
+                    } else {
+                        Some(VerticalMerge::Continue)
+                    };
+                }
+                _ => {}
             }
         }
         _ => {}

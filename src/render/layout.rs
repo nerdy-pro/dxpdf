@@ -305,10 +305,20 @@ impl Layouter {
         }
     }
 
-    /// Get the width of a table cell: use tcW if available, otherwise grid_cols.
-    fn cell_width(&self, col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
-        cell.width_pt()
-            .unwrap_or_else(|| col_widths.get(col_idx).copied().unwrap_or(72.0))
+    /// Get the width of a table cell, accounting for grid_span.
+    /// `grid_col_idx` is the index into the grid columns (not the cell index).
+    /// When grid columns are defined (col_widths is non-empty), always use
+    /// the scaled grid widths — tcW is unreliable after scaling.
+    fn cell_width(&self, grid_col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
+        if !col_widths.is_empty() {
+            // Sum scaled grid column widths for the span
+            let span = cell.grid_span.max(1) as usize;
+            return (grid_col_idx..grid_col_idx + span)
+                .map(|i| col_widths.get(i).copied().unwrap_or(72.0))
+                .sum();
+        }
+        // No grid — fall back to tcW or a default
+        cell.width_pt().unwrap_or(72.0)
     }
 
     /// Prune floats that the cursor has moved past.
@@ -541,21 +551,32 @@ impl Layouter {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
             let mut row_height = cell_padding * 2.0 + 12.0; // minimum row height
 
-            // Compute x positions for each cell
+            // Compute x positions and widths using grid column indices.
+            // Each cell may span multiple grid columns via grid_span.
             let mut col_x_positions: Vec<f32> = Vec::with_capacity(row.cells.len());
-            let mut x_acc = self.config.margin_left;
-            for i in 0..row.cells.len() {
-                col_x_positions.push(x_acc);
-                let w = self.cell_width(i, &row.cells[i], &col_widths);
-                x_acc += w;
+            let mut cell_widths_computed: Vec<f32> = Vec::with_capacity(row.cells.len());
+            let mut grid_col_idx = 0;
+            for cell in &row.cells {
+                let x = self.config.margin_left
+                    + col_widths[..grid_col_idx].iter().sum::<f32>();
+                let w = self.cell_width(grid_col_idx, cell, &col_widths);
+                col_x_positions.push(x);
+                cell_widths_computed.push(w);
+                grid_col_idx += cell.grid_span.max(1) as usize;
             }
 
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
-                let col_width = self.cell_width(col_idx, cell, &col_widths);
+                let col_width = cell_widths_computed[col_idx];
                 let cell_content_width = (col_width - cell_padding * 2.0).max(1.0);
                 let mut commands = Vec::new();
                 let mut cell_y = cell_padding;
+
+                // Skip content for vertically-merged continuation cells
+                if cell.is_vmerge_continue() {
+                    cell_layouts.push(commands);
+                    continue;
+                }
 
                 for block in &cell.blocks {
                     if let Block::Paragraph(p) = block {
@@ -729,40 +750,57 @@ impl Layouter {
 
             let row_top = self.cursor_y;
 
-            // Second pass: emit cell content with correct row_top y offset
+            // Second pass: emit cell borders and content with correct row_top y offset
             for (col_idx, commands) in cell_layouts.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
-                let cw = self.cell_width(col_idx, &row.cells[col_idx], &col_widths);
+                let cw = cell_widths_computed[col_idx];
+                let cell = &row.cells[col_idx];
+                let row_bottom = row_top + row_height;
 
-                // Cell borders: top and left
-                self.current_page.commands.push(DrawCommand::Line {
-                    x1: cell_x,
-                    y1: row_top,
-                    x2: cell_x + cw,
-                    y2: row_top,
-                    color: (0, 0, 0),
-                    width: 0.5,
-                });
-                self.current_page.commands.push(DrawCommand::Line {
-                    x1: cell_x,
-                    y1: row_top,
-                    x2: cell_x,
-                    y2: row_top + row_height,
-                    color: (0, 0, 0),
-                    width: 0.5,
-                });
-
-                // Right border for last column
-                if col_idx == row.cells.len() - 1 {
+                // Top border (skip for vMerge continue — merged from above)
+                if !cell.is_vmerge_continue() {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: cell_x + cw,
+                        x1: cell_x,
                         y1: row_top,
                         x2: cell_x + cw,
-                        y2: row_top + row_height,
+                        y2: row_top,
                         color: (0, 0, 0),
                         width: 0.5,
                     });
                 }
+
+                // Left border
+                self.current_page.commands.push(DrawCommand::Line {
+                    x1: cell_x,
+                    y1: row_top,
+                    x2: cell_x,
+                    y2: row_bottom,
+                    color: (0, 0, 0),
+                    width: 0.5,
+                });
+
+                // Right border
+                self.current_page.commands.push(DrawCommand::Line {
+                    x1: cell_x + cw,
+                    y1: row_top,
+                    x2: cell_x + cw,
+                    y2: row_bottom,
+                    color: (0, 0, 0),
+                    width: 0.5,
+                });
+
+                // Bottom border (skip for vMerge restart if the next row
+                // continues the merge — but we don't have lookahead here,
+                // so always draw it; the continue row's missing top border
+                // creates the visual merge effect)
+                self.current_page.commands.push(DrawCommand::Line {
+                    x1: cell_x,
+                    y1: row_bottom,
+                    x2: cell_x + cw,
+                    y2: row_bottom,
+                    color: (0, 0, 0),
+                    width: 0.5,
+                });
 
                 // Emit content commands with y offset by row_top
                 for cmd in commands {
@@ -806,19 +844,6 @@ impl Layouter {
             }
 
             self.cursor_y += row_height;
-
-            // Bottom border
-            let table_width: f32 = (0..row.cells.len())
-                .map(|i| self.cell_width(i, &row.cells[i], &col_widths))
-                .sum();
-            self.current_page.commands.push(DrawCommand::Line {
-                x1: self.config.margin_left,
-                y1: self.cursor_y,
-                x2: self.config.margin_left + table_width,
-                y2: self.cursor_y,
-                color: (0, 0, 0),
-                width: 0.5,
-            });
         }
 
         self.cursor_y += 8.0; // Space after table
@@ -1190,5 +1215,322 @@ mod tests {
         // Current x past all custom stops, falls back to default interval
         let pos = find_next_tab_stop(300.0, &stops, 36.0);
         assert!((pos - 324.0).abs() < 0.1); // 9 * 36 = 324
+    }
+
+    fn make_cell(text: &str) -> TableCell {
+        TableCell {
+            blocks: vec![Block::Paragraph(Paragraph {
+                properties: ParagraphProperties::default(),
+                runs: vec![Inline::TextRun(TextRun {
+                    text: text.to_string(),
+                    properties: RunProperties::default(),
+                })],
+                floats: Vec::new(),
+                section_properties: None,
+            })],
+            width: None,
+            grid_span: 1,
+            vertical_merge: None,
+        }
+    }
+
+    fn make_spanned_cell(text: &str, span: u32) -> TableCell {
+        let mut cell = make_cell(text);
+        cell.grid_span = span;
+        cell
+    }
+
+    /// Extract all Line draw commands as (x1, y1, x2, y2) tuples.
+    fn extract_lines(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
+        let mut lines = Vec::new();
+        for page in pages {
+            for cmd in &page.commands {
+                if let DrawCommand::Line { x1, y1, x2, y2, .. } = cmd {
+                    lines.push((*x1, *y1, *x2, *y2));
+                }
+            }
+        }
+        lines
+    }
+
+    /// Check that a horizontal line exists at y, from x1 to x2.
+    fn has_h_line(lines: &[(f32, f32, f32, f32)], x1: f32, x2: f32, y: f32) -> bool {
+        lines.iter().any(|(lx1, ly1, lx2, ly2)| {
+            (ly1 - y).abs() < 0.5
+                && (ly2 - y).abs() < 0.5
+                && (lx1 - x1).abs() < 0.5
+                && (lx2 - x2).abs() < 0.5
+        })
+    }
+
+    /// Check that a vertical line exists at x, from y1 to y2.
+    fn has_v_line(lines: &[(f32, f32, f32, f32)], x: f32, y1: f32, y2: f32) -> bool {
+        lines.iter().any(|(lx1, ly1, lx2, ly2)| {
+            (lx1 - x).abs() < 0.5
+                && (lx2 - x).abs() < 0.5
+                && (ly1 - y1).abs() < 0.5
+                && (ly2 - y2).abs() < 0.5
+        })
+    }
+
+    #[test]
+    fn table_borders_simple_2x2() {
+        // 2 columns of equal width, 2 rows
+        // Grid: [2880, 2880] twips = [144pt, 144pt]
+        // With 72pt margins, content starts at x=72
+        let table = Table {
+            rows: vec![
+                TableRow { cells: vec![make_cell("A1"), make_cell("B1")] },
+                TableRow { cells: vec![make_cell("A2"), make_cell("B2")] },
+            ],
+            grid_cols: vec![2880, 2880],
+        };
+        let doc = make_doc(vec![Block::Table(table)]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let lines = extract_lines(&pages);
+
+        let margin = config.margin_left; // 72
+        let col1_right = margin + 144.0;
+        let col2_right = margin + 288.0;
+
+        // Grid [2880, 2880] = [144pt, 144pt], total 288pt
+        // Content width = 468pt, scale = 468/288
+        let scale = config.content_width() / 288.0;
+        let col_w = 144.0 * scale;
+        let x_left = margin;
+        let x_mid = margin + col_w;
+        let x_right = margin + 2.0 * col_w;
+
+        // Every cell must have all 4 borders.
+        // 3 distinct x positions for vertical lines: left edge, col boundary, right edge.
+        let count_v_at = |x: f32| -> usize {
+            lines.iter().filter(|(x1, _, x2, _)| {
+                (x1 - x).abs() < 1.0 && (x2 - x).abs() < 1.0
+            }).count()
+        };
+
+        // 2 rows, each cell has left + right border
+        // x_left: 2 left borders (col 0 in each row)
+        assert!(count_v_at(x_left) >= 2, "Expected >=2 vertical lines at left edge (x={x_left:.1}), got {}", count_v_at(x_left));
+        // x_mid: 2 right borders (col 0) + 2 left borders (col 1) = 4
+        assert!(count_v_at(x_mid) >= 4, "Expected >=4 vertical lines at col boundary (x={x_mid:.1}), got {}", count_v_at(x_mid));
+        // x_right: 2 right borders (col 1)
+        assert!(count_v_at(x_right) >= 2, "Expected >=2 vertical lines at right edge (x={x_right:.1}), got {}", count_v_at(x_right));
+    }
+
+    #[test]
+    fn table_borders_with_gridspan() {
+        // 3 grid columns: [2000, 2000, 2000] twips = [100pt, 100pt, 100pt]
+        // Row 0: cell spanning 2 cols + cell spanning 1 col
+        // Row 1: 3 normal cells
+        let table = Table {
+            rows: vec![
+                TableRow {
+                    cells: vec![
+                        make_spanned_cell("AB", 2),
+                        make_cell("C"),
+                    ],
+                },
+                TableRow {
+                    cells: vec![
+                        make_cell("A"),
+                        make_cell("B"),
+                        make_cell("C"),
+                    ],
+                },
+            ],
+            grid_cols: vec![2000, 2000, 2000],
+        };
+        let doc = make_doc(vec![Block::Table(table)]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let lines = extract_lines(&pages);
+
+        let margin = config.margin_left; // 72
+        // grid_total = 300pt, content_width = 468pt, scale = 468/300 = 1.56
+        let scale = config.content_width() / 300.0;
+        let col_w = 100.0 * scale; // each grid col in points after scaling
+        let x0 = margin;
+        let x1 = margin + col_w;
+        let x2 = margin + 2.0 * col_w;
+        let x3 = margin + 3.0 * col_w;
+
+        // Row 0, spanned cell "AB": should have left at x0, right at x2 (spans 2 cols)
+        // Row 0 top border for "AB" should go from x0 to x2
+        let h_lines_at_top: Vec<_> = lines.iter().filter(|(_, y1, _, y2)| {
+            // Find the topmost horizontal lines (smallest y)
+            let min_y = lines.iter()
+                .filter(|(lx1, _, lx2, _)| (lx1 - lx2).abs() > 1.0) // horizontal
+                .map(|(_, y, _, _)| *y)
+                .fold(f32::MAX, f32::min);
+            (y1 - min_y).abs() < 0.5 && (y2 - min_y).abs() < 0.5
+        }).collect();
+
+        // There should be a horizontal line from x0 to x2 (the spanned cell top)
+        let has_span_top = h_lines_at_top.iter().any(|(lx1, _, lx2, _)| {
+            (lx1 - x0).abs() < 1.0 && (lx2 - x2).abs() < 1.0
+        });
+        assert!(has_span_top, "Expected top border for spanned cell from x={x0} to x={x2}");
+
+        // And a horizontal line from x2 to x3 (the non-spanned cell top)
+        let has_c_top = h_lines_at_top.iter().any(|(lx1, _, lx2, _)| {
+            (lx1 - x2).abs() < 1.0 && (lx2 - x3).abs() < 1.0
+        });
+        assert!(has_c_top, "Expected top border for cell C from x={x2} to x={x3}");
+
+        // Row 1 should have vertical lines at all 4 positions: x0, x1, x2, x3
+        let v_at_x1 = lines.iter().any(|(lx1, _, lx2, _)| {
+            (lx1 - x1).abs() < 1.0 && (lx2 - x1).abs() < 1.0
+        });
+        assert!(v_at_x1, "Expected vertical line at x={x1} (col 1 boundary in row 1)");
+    }
+
+    #[test]
+    fn table_borders_alignment_across_rows() {
+        // 4 grid columns: [1000, 1000, 1000, 1000] twips = [50pt each]
+        // Row 0: [span=2, span=1, span=1] → 3 cells covering 4 grid cols
+        // Row 1: [span=1, span=1, span=1, span=1] → 4 cells
+        // The right edge of the span=2 cell in row 0 must align with
+        // the right edge of the second cell in row 1.
+        let table = Table {
+            rows: vec![
+                TableRow {
+                    cells: vec![
+                        make_spanned_cell("AB", 2),
+                        make_cell("C"),
+                        make_cell("D"),
+                    ],
+                },
+                TableRow {
+                    cells: vec![
+                        make_cell("A"),
+                        make_cell("B"),
+                        make_cell("C"),
+                        make_cell("D"),
+                    ],
+                },
+            ],
+            grid_cols: vec![1000, 1000, 1000, 1000],
+        };
+        let doc = make_doc(vec![Block::Table(table)]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let lines = extract_lines(&pages);
+
+        let scale = config.content_width() / 200.0; // 4 * 50pt = 200pt
+        let cw = 50.0 * scale;
+        let margin = config.margin_left;
+
+        // Verify cell x positions align properly:
+        // Row 0 cell 0 (span=2): x=margin, width=2*cw, right=margin+2*cw
+        // Row 0 cell 1: x=margin+2*cw, width=cw
+        // Row 0 cell 2: x=margin+3*cw, width=cw, right=margin+4*cw
+        // Row 1 cell 0: x=margin, width=cw, right=margin+cw
+        // Row 1 cell 1: x=margin+cw, width=cw, right=margin+2*cw ← must align with row 0 cell 0 right
+
+        let x_after_2cols = margin + 2.0 * cw;
+
+        // Both rows should have vertical lines at x_after_2cols
+        // Row 0: right border of spanned cell
+        // Row 1: right border of cell B (and left border of cell C)
+        let v_count = lines.iter().filter(|(x1, _, x2, _)| {
+            (x1 - x_after_2cols).abs() < 1.0 && (x2 - x_after_2cols).abs() < 1.0
+        }).count();
+
+        // Row 0: 1 right border for span cell + 1 left border for cell C = 2
+        // Row 1: 1 right border for B + 1 left border for C = 2
+        // Total >= 4
+        assert!(v_count >= 4,
+            "Expected >=4 vertical lines at x={x_after_2cols:.1} (2-col boundary), got {v_count}");
+
+        // All rows should have the same total width
+        let total_w = 4.0 * cw;
+        let right_edge = margin + total_w;
+        let v_right = lines.iter().filter(|(x1, _, x2, _)| {
+            (x1 - right_edge).abs() < 1.0 && (x2 - right_edge).abs() < 1.0
+        }).count();
+        assert!(v_right >= 2, "Expected >=2 vertical lines at right edge (x={right_edge:.1}), got {v_right}");
+    }
+
+    #[test]
+    fn table_borders_tcw_vs_grid_alignment() {
+        // Simulate the real scenario: tcW set on cells, grid_cols set on table,
+        // grid is scaled to fit page. tcW must NOT override the scaled width
+        // or borders will misalign between rows with different spans.
+        //
+        // Grid: [100, 200, 300] twips → [5, 10, 15]pt unscaled, total 30pt
+        // Content width 468pt → scale = 15.6
+        // Scaled: [78, 156, 234]pt
+        //
+        // Row 0: [span=2 tcW=300, span=1 tcW=300] → should be [78+156=234, 234]
+        // Row 1: [span=1 tcW=100, span=1 tcW=200, span=1 tcW=300]
+        //
+        // If tcW overrides, row 0 cell 0 = 300/20 = 15pt (wrong!)
+        // If grid is used, row 0 cell 0 = 234pt (correct!)
+        let table = Table {
+            rows: vec![
+                TableRow {
+                    cells: vec![
+                        {
+                            let mut c = make_spanned_cell("AB", 2);
+                            c.width = Some(300); // tcW=300 twips = 15pt unscaled
+                            c
+                        },
+                        {
+                            let mut c = make_cell("C");
+                            c.width = Some(300);
+                            c
+                        },
+                    ],
+                },
+                TableRow {
+                    cells: vec![
+                        {
+                            let mut c = make_cell("A");
+                            c.width = Some(100);
+                            c
+                        },
+                        {
+                            let mut c = make_cell("B");
+                            c.width = Some(200);
+                            c
+                        },
+                        {
+                            let mut c = make_cell("C");
+                            c.width = Some(300);
+                            c
+                        },
+                    ],
+                },
+            ],
+            grid_cols: vec![100, 200, 300],
+        };
+        let doc = make_doc(vec![Block::Table(table)]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let lines = extract_lines(&pages);
+
+        let scale = config.content_width() / 30.0; // total grid = 30pt
+        let margin = config.margin_left;
+
+        // The boundary between grid cols 1 and 2 (x = margin + (5+10)*scale)
+        let boundary_12 = margin + 15.0 * scale;
+
+        // Row 0 spanned cell right edge should be at boundary_12
+        // Row 1 cell B right edge should also be at boundary_12
+        // Both rows must have vertical lines at this x.
+        //
+        // If tcW overrides scaled grid, row 0 span cell right edge would be
+        // at margin + tcW/20 = 72 + 15 = 87pt instead of boundary_12.
+        // That would mean NO vertical lines from row 0 at boundary_12.
+        let v_at_boundary_row0 = lines.iter().filter(|(x1, y1, x2, y2)| {
+            (x1 - boundary_12).abs() < 1.0
+                && (x2 - boundary_12).abs() < 1.0
+                && *y1 < (margin + 50.0) // row 0 region
+        }).count();
+        assert!(v_at_boundary_row0 >= 1,
+            "Expected >=1 vertical line from row 0 at col 1/2 boundary (x={boundary_12:.1}), \
+             got {v_at_boundary_row0}. tcW must not override scaled grid widths.");
     }
 }
