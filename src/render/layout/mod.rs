@@ -183,6 +183,33 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
     }
 }
 
+/// Offset all y-coordinates in a draw command by a given amount.
+/// Used to translate relative-positioned commands to absolute page positions.
+pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
+    match cmd {
+        DrawCommand::Text {
+            x, y, text, font_family, char_spacing_pt, font_size,
+            bold, italic, color,
+        } => DrawCommand::Text {
+            x: *x, y: y_offset + y,
+            text: text.clone(), font_family: font_family.clone(),
+            char_spacing_pt: *char_spacing_pt,
+            font_size: *font_size, bold: *bold, italic: *italic, color: *color,
+        },
+        DrawCommand::Underline { x1, y1, x2, y2, color, width } => DrawCommand::Underline {
+            x1: *x1, y1: y_offset + y1, x2: *x2, y2: y_offset + y2,
+            color: *color, width: *width,
+        },
+        DrawCommand::Image { x, y, width, height, data } => DrawCommand::Image {
+            x: *x, y: y_offset + y, width: *width, height: *height, data: data.clone(),
+        },
+        DrawCommand::Rect { x, y, width, height, color } => DrawCommand::Rect {
+            x: *x, y: y_offset + y, width: *width, height: *height, color: *color,
+        },
+        DrawCommand::Line { .. } => cmd.clone(),
+    }
+}
+
 /// A floating image that affects text layout on the current page.
 struct ActiveFloat {
     page_x: f32,

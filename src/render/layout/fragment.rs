@@ -4,6 +4,7 @@ use crate::model::*;
 use crate::units::*;
 
 use super::measurer::TextMeasurer;
+use super::DrawCommand;
 
 /// Document-level defaults for layout.
 pub struct DocDefaultsLayout {
@@ -283,4 +284,155 @@ pub fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f3
         }
     }
     (fragments.len(), total_width)
+}
+
+// ============================================================
+// Shared measure→paint infrastructure for paragraphs
+// ============================================================
+
+/// A single laid-out line with draw commands at positions relative to an origin.
+/// The y-coordinates in commands are relative: 0.0 = top of the paragraph/cell content.
+pub struct MeasuredLine {
+    pub commands: Vec<DrawCommand>,
+    pub height: f32,
+}
+
+/// Result of measuring paragraph text content (lines only, no spacing or floats).
+pub struct MeasuredLines {
+    pub lines: Vec<MeasuredLine>,
+    pub total_height: f32,
+}
+
+/// Measure paragraph runs into lines with relative-positioned draw commands.
+///
+/// This is the single source of truth for converting fragments into draw commands.
+/// Used by: body paragraphs, table cell paragraphs, header/footer paragraphs.
+///
+/// `x_origin` is the left edge for content (e.g., margin_left + indent.left).
+/// `available_width` is the width for line fitting (content_width - indents).
+/// All y-coordinates in the returned commands are relative to 0.0.
+pub fn measure_lines(
+    fragments: &[Fragment],
+    x_origin: f32,
+    available_width: f32,
+    first_line_offset: f32,
+    alignment: Option<Alignment>,
+    line_spacing: Option<LineSpacing>,
+    tab_stops: &[TabStop],
+    default_tab_stop_pt: f32,
+) -> MeasuredLines {
+    let mut lines = Vec::new();
+    let mut cursor_y = 0.0_f32;
+    let mut line_start = 0;
+    let mut first_line = true;
+
+    while line_start < fragments.len() {
+        // Skip leading space fragments at the start of a new line
+        if !first_line {
+            while line_start < fragments.len() {
+                if let Fragment::Text { ref text, .. } = fragments[line_start] {
+                    if text.trim().is_empty() {
+                        line_start += 1;
+                        continue;
+                    }
+                }
+                break;
+            }
+            if line_start >= fragments.len() {
+                break;
+            }
+        }
+
+        let fl_offset = if first_line { first_line_offset } else { 0.0 };
+        let line_avail = (available_width - fl_offset).max(0.0);
+
+        let (line_end, _) = fit_fragments(&fragments[line_start..], line_avail);
+        let actual_end = line_start + line_end.max(1);
+
+        let frag_height = fragments[line_start..actual_end]
+            .iter()
+            .map(|f| f.height())
+            .fold(0.0_f32, f32::max);
+        let line_height = resolve_line_height(frag_height, line_spacing);
+
+        let used_width = if actual_end > line_start {
+            measure_fragments(&fragments[line_start..actual_end])
+        } else {
+            0.0
+        };
+        let x_offset = match alignment {
+            Some(Alignment::Center) => (line_avail - used_width) / 2.0,
+            Some(Alignment::Right) => line_avail - used_width,
+            _ => 0.0,
+        };
+
+        cursor_y += line_height;
+        let mut commands = Vec::new();
+        let mut x = x_origin + fl_offset + x_offset;
+
+        for frag in &fragments[line_start..actual_end] {
+            match frag {
+                Fragment::Text {
+                    text, font_family, font_size, bold, italic,
+                    underline, color, shading, char_spacing_pt,
+                    measured_width, ..
+                } => {
+                    let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+                    if let Some(bg) = shading {
+                        commands.push(DrawCommand::Rect {
+                            x,
+                            y: cursor_y - line_height,
+                            width: *measured_width,
+                            height: line_height,
+                            color: (bg.r, bg.g, bg.b),
+                        });
+                    }
+                    commands.push(DrawCommand::Text {
+                        x,
+                        y: cursor_y,
+                        text: text.clone(),
+                        font_family: font_family.clone(),
+                        char_spacing_pt: *char_spacing_pt,
+                        font_size: *font_size,
+                        bold: *bold,
+                        italic: *italic,
+                        color: c,
+                    });
+                    if *underline {
+                        commands.push(DrawCommand::Underline {
+                            x1: x,
+                            y1: cursor_y + UNDERLINE_Y_OFFSET,
+                            x2: x + measured_width,
+                            y2: cursor_y + UNDERLINE_Y_OFFSET,
+                            color: c,
+                            width: UNDERLINE_STROKE_WIDTH,
+                        });
+                    }
+                    x += measured_width;
+                }
+                Fragment::Image { width, height, data } => {
+                    commands.push(DrawCommand::Image {
+                        x,
+                        y: cursor_y - height,
+                        width: *width,
+                        height: *height,
+                        data: data.clone(),
+                    });
+                    x += width;
+                }
+                Fragment::Tab { .. } => {
+                    let rel_x = x - x_origin;
+                    let next_stop = find_next_tab_stop(rel_x, tab_stops, default_tab_stop_pt);
+                    x = x_origin + next_stop;
+                }
+                Fragment::LineBreak { .. } => {}
+            }
+        }
+
+        lines.push(MeasuredLine { commands, height: line_height });
+        line_start = actual_end;
+        first_line = false;
+    }
+
+    MeasuredLines { total_height: cursor_y, lines }
 }

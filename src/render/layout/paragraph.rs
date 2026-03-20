@@ -4,7 +4,7 @@ use crate::model::*;
 use crate::units::*;
 
 use super::fragment::*;
-use super::{ActiveFloat, DrawCommand, Layouter};
+use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
 
 impl Layouter {
     pub(super) fn layout_paragraph(&mut self, para: &Paragraph) {
@@ -48,7 +48,6 @@ impl Layouter {
         }
 
         if para.runs.is_empty() && para.floats.is_empty() {
-            // For empty paragraphs, compute line height from the default font
             let default_size = self.doc_defaults.font_size_half_pts as f32
                 / HALF_POINTS_PER_POINT;
             let natural_height = self.measurer.line_height(
@@ -66,12 +65,11 @@ impl Layouter {
 
         // Apply list indentation (overrides paragraph indentation)
         let (list_label_text, list_label_x) = if let Some((ref label, left, hanging)) = list_label {
-            // List indentation: left = total indent, hanging = label offset
             if indent.left.is_none() {
-                indent.left = Some((left * crate::units::TWIPS_PER_POINT) as u32);
+                indent.left = Some((left * TWIPS_PER_POINT) as u32);
             }
             if indent.first_line.is_none() {
-                indent.first_line = Some(-((hanging * crate::units::TWIPS_PER_POINT) as i32));
+                indent.first_line = Some(-((hanging * TWIPS_PER_POINT) as i32));
             }
             let label_x = self.config.margin_left + left - hanging;
             (Some(label.clone()), Some(label_x))
@@ -91,16 +89,152 @@ impl Layouter {
             &self.measurer,
         );
         let base_x = self.config.margin_left + indent.left_pt();
-        let mut para_cmd_start = self.current_page.commands.len();
-        // Track the text area (excluding before/after spacing) for paragraph shading
-        let mut text_area_top: Option<f32> = None;
-        let mut text_area_bottom: f32 = self.cursor_y;
 
+        // ============================
+        // PASS 1: MEASURE — produce lines with relative y-coordinates
+        // ============================
+        let measured = self.measure_paragraph_lines(
+            &fragments,
+            base_x,
+            base_content_width,
+            indent.first_line_pt(),
+            para.properties.alignment,
+            spacing.line_spacing(),
+            &para.properties.tab_stops,
+        );
+
+        // ============================
+        // PASS 2+3: LAYOUT & PAINT — assign to pages, emit commands
+        // ============================
+        // These passes are combined because page breaks require emitting
+        // shading on the correct page before switching.
+
+        let mut text_area_top: Option<f32> = None;
+        let mut text_area_bottom = self.cursor_y;
+        let mut shading_insert_idx = self.current_page.commands.len();
+        let mut first_line_painted = false;
+
+        for (i, line) in measured.lines.iter().enumerate() {
+            // Page break check
+            if self.cursor_y + line.height > self.content_bottom() {
+                // Paint paragraph shading for the current page before breaking
+                self.paint_paragraph_shading(
+                    &para.properties.shading,
+                    text_area_top,
+                    text_area_bottom,
+                    shading_insert_idx,
+                );
+
+                self.new_page();
+
+                // Reset shading tracking for new page
+                text_area_top = None;
+                shading_insert_idx = self.current_page.commands.len();
+            }
+
+            // List label on the first line
+            if !first_line_painted {
+                if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
+                    let font = &self.doc_defaults.font_family;
+                    let fs = self.doc_defaults.font_size_half_pts as f32
+                        / HALF_POINTS_PER_POINT;
+                    self.current_page.commands.push(DrawCommand::Text {
+                        x: lx,
+                        y: self.cursor_y,
+                        text: label.clone(),
+                        font_family: Rc::clone(font),
+                        char_spacing_pt: 0.0,
+                        font_size: fs,
+                        bold: false,
+                        italic: false,
+                        color: (0, 0, 0),
+                    });
+                }
+                first_line_painted = true;
+            }
+
+            // Track text area for shading
+            if text_area_top.is_none() {
+                text_area_top = Some(self.cursor_y);
+            }
+
+            // Paint line content at absolute position
+            // Line commands have y relative to measure start; we offset by cursor_y
+            // minus the accumulated relative y of lines before this one.
+            let rel_y_before: f32 = measured.lines[..i].iter().map(|l| l.height).sum();
+            let y_offset = self.cursor_y - rel_y_before;
+            // But we can simplify: the relative y in commands already accounts for
+            // all prior lines' heights. So the offset maps relative y=0 to the
+            // paragraph's absolute start on the current page.
+            // For the first line on each page, cursor_y is the page start position.
+            // We need: absolute_y = cursor_y + (relative_y_in_line - relative_y_at_line_start)
+            // Since line commands have y from 0..total_height, and this line's y range is
+            // [rel_y_before .. rel_y_before + line.height], we offset by (cursor_y - rel_y_before).
+
+            for cmd in &line.commands {
+                self.current_page.commands.push(offset_command(cmd, y_offset));
+            }
+
+            self.cursor_y += line.height;
+            text_area_bottom = self.cursor_y;
+        }
+
+        // Paint paragraph shading for the last page
+        self.paint_paragraph_shading(
+            &para.properties.shading,
+            text_area_top,
+            text_area_bottom,
+            shading_insert_idx,
+        );
+
+        self.cursor_y += spacing.after_pt();
+    }
+
+    /// Paint paragraph background shading covering the text area.
+    fn paint_paragraph_shading(
+        &mut self,
+        shading: &Option<Color>,
+        text_area_top: Option<f32>,
+        text_area_bottom: f32,
+        insert_idx: usize,
+    ) {
+        if let Some(bg) = shading {
+            if let Some(top) = text_area_top {
+                let height = text_area_bottom - top;
+                if height > 0.0 {
+                    self.current_page.commands.insert(
+                        insert_idx,
+                        DrawCommand::Rect {
+                            x: self.config.margin_left,
+                            y: top,
+                            width: self.config.content_width(),
+                            height,
+                            color: (bg.r, bg.g, bg.b),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// MEASURE: Produce lines with relative y-coordinates from fragments.
+    /// Handles float adjustment using current absolute cursor_y.
+    fn measure_paragraph_lines(
+        &self,
+        fragments: &[Fragment],
+        base_x: f32,
+        base_content_width: f32,
+        first_line_offset: f32,
+        alignment: Option<Alignment>,
+        line_spacing: Option<LineSpacing>,
+        tab_stops: &[TabStop],
+    ) -> MeasuredLines {
+        let mut lines = Vec::new();
+        let mut rel_y = 0.0_f32;
         let mut line_start = 0;
         let mut first_line = true;
 
         while line_start < fragments.len() {
-            // Skip leading space fragments at the start of a new line
             if !first_line {
                 while line_start < fragments.len() {
                     if let Fragment::Text { ref text, .. } = fragments[line_start] {
@@ -116,115 +250,66 @@ impl Layouter {
                 }
             }
 
-            let first_line_offset = if first_line {
-                indent.first_line_pt()
-            } else {
-                0.0
-            };
+            let fl_offset = if first_line { first_line_offset } else { 0.0 };
 
-            let tentative_frag_height = fragments[line_start..]
+            // Float adjustment: use absolute position for overlap detection
+            let abs_line_top = self.cursor_y + rel_y;
+            let tentative_height = fragments[line_start..]
                 .iter()
                 .take(1)
                 .map(|f| f.height())
                 .fold(0.0_f32, f32::max);
-            let tentative_line_height = resolve_line_height(
-                tentative_frag_height, spacing.line_spacing(),
-            );
-            let line_top = self.cursor_y;
-            let line_bottom = self.cursor_y + tentative_line_height;
+            let tentative_line_height = resolve_line_height(tentative_height, line_spacing);
             let (float_x_shift, float_width_reduction) =
-                self.float_adjustment(line_top, line_bottom);
+                self.float_adjustment(abs_line_top, abs_line_top + tentative_line_height);
 
             let available_width =
-                base_content_width - first_line_offset - float_width_reduction;
+                (base_content_width - fl_offset - float_width_reduction).max(0.0);
 
-            let (line_end, _) =
-                fit_fragments(&fragments[line_start..], available_width.max(0.0));
+            let (line_end, _) = fit_fragments(&fragments[line_start..], available_width);
             let actual_end = line_start + line_end.max(1);
 
             let frag_height = fragments[line_start..actual_end]
                 .iter()
                 .map(|f| f.height())
                 .fold(0.0_f32, f32::max);
-            let line_height = resolve_line_height(frag_height, spacing.line_spacing());
-
-            if self.cursor_y + line_height > self.content_bottom() {
-                self.new_page();
-                // Reset shading tracking for the new page
-                para_cmd_start = self.current_page.commands.len();
-                text_area_top = None;
-            }
+            let line_height = resolve_line_height(frag_height, line_spacing);
 
             let used_width = if actual_end > line_start {
                 measure_fragments(&fragments[line_start..actual_end])
             } else {
                 0.0
             };
-            let x_offset = match para.properties.alignment {
+            let x_offset = match alignment {
                 Some(Alignment::Center) => (available_width - used_width) / 2.0,
                 Some(Alignment::Right) => available_width - used_width,
                 _ => 0.0,
             };
 
-            let mut x = base_x + first_line_offset + float_x_shift + x_offset;
-
-            // Draw list label on the first line
-            if first_line {
-                if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
-                    let font = &self.doc_defaults.font_family;
-                    let fs = self.doc_defaults.font_size_half_pts as f32
-                        / crate::units::HALF_POINTS_PER_POINT;
-                    self.current_page.commands.push(DrawCommand::Text {
-                        x: lx,
-                        y: self.cursor_y,
-                        text: label.clone(),
-                        font_family: Rc::clone(font),
-                        char_spacing_pt: 0.0,
-                        font_size: fs,
-                        bold: false,
-                        italic: false,
-                        color: (0, 0, 0),
-                    });
-                }
-            }
-
-            // Track text area for paragraph shading
-            if text_area_top.is_none() {
-                text_area_top = Some(self.cursor_y);
-            }
-            self.cursor_y += line_height;
-            text_area_bottom = self.cursor_y;
+            rel_y += line_height;
+            let mut commands = Vec::new();
+            let mut x = base_x + fl_offset + float_x_shift + x_offset;
 
             for frag in &fragments[line_start..actual_end] {
                 match frag {
                     Fragment::Text {
-                        text,
-                        font_family,
-                        font_size,
-                        bold,
-                        italic,
-                        underline,
-                        color,
-                        shading,
-                        char_spacing_pt,
-                        measured_width,
-                        ..
+                        text, font_family, font_size, bold, italic,
+                        underline, color, shading, char_spacing_pt,
+                        measured_width, ..
                     } => {
                         let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
-
                         if let Some(bg) = shading {
-                            self.current_page.commands.push(DrawCommand::Rect {
+                            commands.push(DrawCommand::Rect {
                                 x,
-                                y: self.cursor_y - line_height,
+                                y: rel_y - line_height,
                                 width: *measured_width,
                                 height: line_height,
                                 color: (bg.r, bg.g, bg.b),
                             });
                         }
-
-                        self.current_page.commands.push(DrawCommand::Text {
+                        commands.push(DrawCommand::Text {
                             x,
-                            y: self.cursor_y,
+                            y: rel_y,
                             text: text.clone(),
                             font_family: font_family.clone(),
                             char_spacing_pt: *char_spacing_pt,
@@ -233,24 +318,22 @@ impl Layouter {
                             italic: *italic,
                             color: c,
                         });
-
                         if *underline {
-                            self.current_page.commands.push(DrawCommand::Underline {
+                            commands.push(DrawCommand::Underline {
                                 x1: x,
-                                y1: self.cursor_y + UNDERLINE_Y_OFFSET,
+                                y1: rel_y + UNDERLINE_Y_OFFSET,
                                 x2: x + measured_width,
-                                y2: self.cursor_y + UNDERLINE_Y_OFFSET,
+                                y2: rel_y + UNDERLINE_Y_OFFSET,
                                 color: c,
                                 width: UNDERLINE_STROKE_WIDTH,
                             });
                         }
-
                         x += measured_width;
                     }
                     Fragment::Image { width, height, data } => {
-                        self.current_page.commands.push(DrawCommand::Image {
+                        commands.push(DrawCommand::Image {
                             x,
-                            y: self.cursor_y - height,
+                            y: rel_y - height,
                             width: *width,
                             height: *height,
                             data: data.clone(),
@@ -260,9 +343,7 @@ impl Layouter {
                     Fragment::Tab { .. } => {
                         let rel_x = x - base_x;
                         let next_stop = find_next_tab_stop(
-                            rel_x,
-                            &para.properties.tab_stops,
-                            self.default_tab_stop_pt,
+                            rel_x, tab_stops, self.default_tab_stop_pt,
                         );
                         x = base_x + next_stop;
                     }
@@ -270,30 +351,11 @@ impl Layouter {
                 }
             }
 
+            lines.push(MeasuredLine { commands, height: line_height });
             line_start = actual_end;
             first_line = false;
         }
 
-        // Paragraph background shading — covers the text area only,
-        // not before/after spacing
-        if let Some(bg) = &para.properties.shading {
-            if let Some(top) = text_area_top {
-                let height = text_area_bottom - top;
-                if height > 0.0 {
-                    self.current_page.commands.insert(
-                        para_cmd_start,
-                        DrawCommand::Rect {
-                            x: self.config.margin_left,
-                            y: top,
-                            width: self.config.content_width(),
-                            height,
-                            color: (bg.r, bg.g, bg.b),
-                        },
-                    );
-                }
-            }
-        }
-
-        self.cursor_y += spacing.after_pt();
+        MeasuredLines { total_height: rel_y, lines }
     }
 }

@@ -2,7 +2,7 @@ use crate::model::*;
 use crate::units::*;
 
 use super::fragment::*;
-use super::{DrawCommand, Layouter};
+use super::{offset_command, DrawCommand, Layouter};
 
 // ============================================================
 // Types for the measure→layout→paint pipeline
@@ -24,13 +24,8 @@ struct MeasuredRow {
 
 /// A vMerge span tracking entry.
 struct VmergeSpan {
-    /// Column index where the span starts.
-    _col_idx: usize,
-    /// Total content height of the restart cell.
     total_height: f32,
-    /// Row index where the span starts.
     start_row: usize,
-    /// Number of rows in the span.
     row_count: usize,
 }
 
@@ -69,31 +64,6 @@ fn emit_border(
     }
 }
 
-fn offset_command(cmd: &DrawCommand, row_top: f32) -> DrawCommand {
-    match cmd {
-        DrawCommand::Text {
-            x, y, text, font_family, char_spacing_pt, font_size,
-            bold, italic, color,
-        } => DrawCommand::Text {
-            x: *x, y: row_top + y,
-            text: text.clone(), font_family: font_family.clone(),
-            char_spacing_pt: *char_spacing_pt,
-            font_size: *font_size, bold: *bold, italic: *italic, color: *color,
-        },
-        DrawCommand::Underline { x1, y1, x2, y2, color, width } => DrawCommand::Underline {
-            x1: *x1, y1: row_top + y1, x2: *x2, y2: row_top + y2,
-            color: *color, width: *width,
-        },
-        DrawCommand::Image { x, y, width, height, data } => DrawCommand::Image {
-            x: *x, y: row_top + y, width: *width, height: *height, data: data.clone(),
-        },
-        DrawCommand::Rect { x, y, width, height, color } => DrawCommand::Rect {
-            x: *x, y: row_top + y, width: *width, height: *height, color: *color,
-        },
-        DrawCommand::Line { .. } => cmd.clone(),
-    }
-}
-
 // ============================================================
 // Main entry point
 // ============================================================
@@ -122,7 +92,7 @@ impl Layouter {
         // ============================
         // PASS 1: MEASURE all cells
         // ============================
-        let measured_rows: Vec<MeasuredRow> = table.rows.iter().enumerate().map(|(_row_idx, row)| {
+        let measured_rows: Vec<MeasuredRow> = table.rows.iter().map(|row| {
             let min_height = row.height.map(twips_to_pt).unwrap_or(MIN_ROW_HEIGHT_PT);
             let row_height_limit = self.config.content_height();
 
@@ -150,19 +120,18 @@ impl Layouter {
                 let pad_bottom = margins.bottom_pt();
                 let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
 
-                let mut commands = Vec::new();
-                let mut cell_y = pad_top;
-
                 if cell.is_vmerge_continue() {
                     measured_cells.push(MeasuredCell {
-                        commands,
+                        commands: Vec::new(),
                         content_height: 0.0,
                         col_width,
                     });
                     continue;
                 }
 
-                // Measure cell content (same logic as before, but no cursor_y mutation)
+                let mut commands = Vec::new();
+                let mut cell_y = pad_top;
+
                 for block in &cell.blocks {
                     if let Block::Paragraph(p) = block {
                         let spacing = self.resolve_cell_spacing(
@@ -209,94 +178,25 @@ impl Layouter {
                             continue;
                         }
 
-                        let mut line_start = 0;
-                        let mut is_first_line = true;
-                        while line_start < fragments.len() {
-                            if !is_first_line {
-                                while line_start < fragments.len() {
-                                    if let Fragment::Text { ref text, .. } = fragments[line_start] {
-                                        if text.trim().is_empty() { line_start += 1; continue; }
-                                    }
-                                    break;
-                                }
-                                if line_start >= fragments.len() { break; }
+                        // Use shared measure_lines for fragment → command conversion
+                        let measured = measure_lines(
+                            &fragments,
+                            cell_x + pad_left,
+                            cell_content_width,
+                            0.0, // no first-line indent in cells
+                            p.properties.alignment,
+                            spacing.line_spacing(),
+                            &p.properties.tab_stops,
+                            self.default_tab_stop_pt,
+                        );
+
+                        // Offset measured commands by cell_y and accumulate
+                        for line in &measured.lines {
+                            for cmd in &line.commands {
+                                commands.push(offset_command(cmd, cell_y));
                             }
-
-                            let (line_end, _) = fit_fragments(
-                                &fragments[line_start..], cell_content_width,
-                            );
-                            let actual_end = line_start + line_end.max(1);
-
-                            let frag_height = fragments[line_start..actual_end]
-                                .iter().map(|f| f.height()).fold(0.0_f32, f32::max);
-                            let line_height = resolve_line_height(
-                                frag_height, spacing.line_spacing(),
-                            );
-                            cell_y += line_height;
-
-                            let used_width = measure_fragments(&fragments[line_start..actual_end]);
-                            let align_offset = match p.properties.alignment {
-                                Some(Alignment::Center) => (cell_content_width - used_width) / 2.0,
-                                Some(Alignment::Right) => cell_content_width - used_width,
-                                _ => 0.0,
-                            };
-                            let mut x = cell_x + pad_left + align_offset;
-
-                            for frag in &fragments[line_start..actual_end] {
-                                match frag {
-                                    Fragment::Text {
-                                        text, font_family, font_size, bold, italic,
-                                        underline, color, shading, char_spacing_pt,
-                                        measured_width, ..
-                                    } => {
-                                        let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
-                                        if let Some(bg) = shading {
-                                            commands.push(DrawCommand::Rect {
-                                                x, y: cell_y - line_height,
-                                                width: *measured_width, height: line_height,
-                                                color: (bg.r, bg.g, bg.b),
-                                            });
-                                        }
-                                        commands.push(DrawCommand::Text {
-                                            x, y: cell_y,
-                                            text: text.clone(),
-                                            font_family: font_family.clone(),
-                                            char_spacing_pt: *char_spacing_pt,
-                                            font_size: *font_size, bold: *bold, italic: *italic,
-                                            color: c,
-                                        });
-                                        if *underline {
-                                            commands.push(DrawCommand::Underline {
-                                                x1: x, y1: cell_y + UNDERLINE_Y_OFFSET,
-                                                x2: x + measured_width,
-                                                y2: cell_y + UNDERLINE_Y_OFFSET,
-                                                color: c, width: UNDERLINE_STROKE_WIDTH,
-                                            });
-                                        }
-                                        x += measured_width;
-                                    }
-                                    Fragment::Image { width, height, data } => {
-                                        commands.push(DrawCommand::Image {
-                                            x, y: cell_y - height,
-                                            width: *width, height: *height,
-                                            data: data.clone(),
-                                        });
-                                        x += width;
-                                    }
-                                    Fragment::Tab { .. } => {
-                                        let rel_x = x - (cell_x + pad_left);
-                                        let next_stop = find_next_tab_stop(
-                                            rel_x, &p.properties.tab_stops,
-                                            self.default_tab_stop_pt,
-                                        );
-                                        x = cell_x + pad_left + next_stop;
-                                    }
-                                    Fragment::LineBreak { .. } => {}
-                                }
-                            }
-                            line_start = actual_end;
-                            is_first_line = false;
                         }
+                        cell_y += measured.total_height;
                         cell_y += spacing.after_pt();
                     }
                 }
@@ -322,7 +222,6 @@ impl Layouter {
         // PASS 2: LAYOUT — compute row heights with vMerge distribution
         // ============================
 
-        // First, find all vMerge spans
         let mut vmerge_spans: Vec<VmergeSpan> = Vec::new();
         for (row_idx, row) in table.rows.iter().enumerate() {
             for (col_idx, cell) in row.cells.iter().enumerate() {
@@ -335,7 +234,6 @@ impl Layouter {
                         .count();
                     let content_height = measured_rows[row_idx].cells[col_idx].content_height;
                     vmerge_spans.push(VmergeSpan {
-                        _col_idx: col_idx,
                         total_height: content_height,
                         start_row: row_idx,
                         row_count: span_count,
@@ -345,7 +243,6 @@ impl Layouter {
         }
 
         // Compute base row heights from non-merged cells only.
-        // Cells with vertical_merge (Restart or Continue) are handled by vMerge distribution.
         let mut row_heights: Vec<f32> = measured_rows.iter().enumerate().map(|(row_idx, mr)| {
             let mut h = mr.min_height;
             for (col_idx, mc) in mr.cells.iter().enumerate() {
@@ -362,7 +259,6 @@ impl Layouter {
             let current_total: f32 = row_heights[span.start_row..span.start_row + span.row_count]
                 .iter().sum();
             if span.total_height > current_total {
-                // Need to add extra height. Distribute evenly.
                 let deficit = span.total_height - current_total;
                 let per_row = deficit / span.row_count as f32;
                 for i in 0..span.row_count {
