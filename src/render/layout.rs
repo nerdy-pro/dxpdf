@@ -442,14 +442,53 @@ impl Layouter {
                         let spacing = p.properties.spacing.unwrap_or_default();
                         cell_y += spacing.before_pt();
 
+                        // Render floating images within the cell.
+                        // In table cells, use offset_x if it fits, otherwise center.
+                        for float in &p.floats {
+                            if float.data.is_empty() {
+                                continue;
+                            }
+                            let scale = f32::min(
+                                1.0,
+                                f32::min(
+                                    cell_content_width / float.width_pt.max(1.0),
+                                    self.config.content_height() / float.height_pt.max(1.0),
+                                ),
+                            );
+                            let img_w = float.width_pt * scale;
+                            let img_h = float.height_pt * scale;
+                            // Use the horizontal offset if it places the image
+                            // within the cell; otherwise center it.
+                            let img_x = if float.offset_x_pt > 0.0
+                                && float.offset_x_pt + img_w <= cell_content_width
+                            {
+                                cell_x + cell_padding + float.offset_x_pt
+                            } else {
+                                cell_x + (col_width - img_w) / 2.0
+                            };
+                            commands.push(DrawCommand::Image {
+                                x: img_x,
+                                y: cell_y,
+                                width: img_w,
+                                height: img_h,
+                                data: float.data.clone(),
+                            });
+                            cell_y += img_h;
+                        }
+
                         let fragments = collect_fragments(
                             &p.runs,
                             cell_content_width,
                             self.config.content_height(),
                         );
 
-                        if fragments.is_empty() {
+                        if fragments.is_empty() && p.floats.is_empty() {
                             cell_y += spacing.line_pt();
+                            cell_y += spacing.after_pt();
+                            continue;
+                        }
+
+                        if fragments.is_empty() {
                             cell_y += spacing.after_pt();
                             continue;
                         }
