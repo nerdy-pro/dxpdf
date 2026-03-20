@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::model::*;
+use crate::units::DEFAULT_PAGE_MARGIN_TWIPS;
 
 use super::ParseState;
 use super::helpers::get_attr;
@@ -25,16 +26,16 @@ pub fn handle_section_element(
             b"pgMar" => {
                 let top = get_attr(e, b"top")?
                     .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(1440);
+                    .unwrap_or(DEFAULT_PAGE_MARGIN_TWIPS);
                 let right = get_attr(e, b"right")?
                     .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(1440);
+                    .unwrap_or(DEFAULT_PAGE_MARGIN_TWIPS);
                 let bottom = get_attr(e, b"bottom")?
                     .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(1440);
+                    .unwrap_or(DEFAULT_PAGE_MARGIN_TWIPS);
                 let left = get_attr(e, b"left")?
                     .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(1440);
+                    .unwrap_or(DEFAULT_PAGE_MARGIN_TWIPS);
                 section.page_margins = Some(PageMargins {
                     top,
                     right,

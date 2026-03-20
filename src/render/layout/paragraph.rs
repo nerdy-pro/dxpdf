@@ -1,4 +1,5 @@
 use crate::model::*;
+use crate::units::*;
 
 use super::fragment::*;
 use super::{ActiveFloat, DrawCommand, Layouter};
@@ -137,11 +138,11 @@ impl Layouter {
                         if *underline {
                             self.current_page.commands.push(DrawCommand::Underline {
                                 x1: x,
-                                y1: self.cursor_y + 2.0,
+                                y1: self.cursor_y + UNDERLINE_Y_OFFSET,
                                 x2: x + measured_width,
-                                y2: self.cursor_y + 2.0,
+                                y2: self.cursor_y + UNDERLINE_Y_OFFSET,
                                 color: c,
-                                width: 0.5,
+                                width: UNDERLINE_STROKE_WIDTH,
                             });
                         }
 

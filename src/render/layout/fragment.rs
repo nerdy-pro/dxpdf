@@ -1,4 +1,5 @@
 use crate::model::*;
+use crate::units::*;
 
 use super::measurer::TextMeasurer;
 
@@ -42,7 +43,7 @@ impl Fragment {
         match self {
             Fragment::Text { measured_width, .. } => *measured_width,
             Fragment::Image { width, .. } => *width,
-            Fragment::Tab { .. } => 12.0,
+            Fragment::Tab { .. } => MIN_TAB_WIDTH_PT,
             Fragment::LineBreak { .. } => 0.0,
         }
     }
@@ -163,7 +164,7 @@ pub fn find_next_tab_stop(
             ((current_x / default_interval).floor() + 1.0) * default_interval;
         return next_multiple;
     }
-    current_x + 36.0
+    current_x + TAB_FALLBACK_PT
 }
 
 /// Split text into alternating word and space segments.
@@ -196,7 +197,7 @@ fn collapse_spaces(text: &str) -> String {
     for ch in text.chars() {
         if ch == ' ' {
             space_count += 1;
-            if space_count <= 2 {
+            if space_count <= SPACE_COLLAPSE_THRESHOLD {
                 result.push(ch);
             }
         } else {

@@ -6,6 +6,7 @@ mod table;
 pub use measurer::TextMeasurer;
 
 use crate::model::*;
+use crate::units::*;
 use fragment::DocDefaultsLayout;
 
 /// Page layout configuration in points (1 point = 1/72 inch).
@@ -22,12 +23,12 @@ pub struct LayoutConfig {
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
-            page_width: 612.0,
-            page_height: 792.0,
-            margin_top: 72.0,
-            margin_bottom: 72.0,
-            margin_left: 72.0,
-            margin_right: 72.0,
+            page_width: US_LETTER_WIDTH_PT,
+            page_height: US_LETTER_HEIGHT_PT,
+            margin_top: DEFAULT_PAGE_MARGIN_PT,
+            margin_bottom: DEFAULT_PAGE_MARGIN_PT,
+            margin_left: DEFAULT_PAGE_MARGIN_PT,
+            margin_right: DEFAULT_PAGE_MARGIN_PT,
         }
     }
 }
@@ -214,7 +215,7 @@ impl Layouter {
     }
 
     fn float_adjustment(&self, line_top: f32, line_bottom: f32) -> (f32, f32) {
-        let gap = 4.0;
+        let gap = FLOAT_TEXT_GAP_PT;
         let mut x_shift = 0.0_f32;
         let mut width_reduction = 0.0_f32;
         for f in &self.active_floats {
@@ -308,16 +309,7 @@ mod tests {
     use super::*;
 
     fn make_doc(blocks: Vec<Block>) -> Document {
-        Document {
-            blocks,
-            final_section: None,
-            default_tab_stop: 720,
-            default_font_size: 24,
-            default_font_family: "Helvetica".to_string(),
-            default_spacing: Spacing::default(),
-            default_cell_margins: CellMargins::default(),
-            table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
-        }
+        Document { blocks, ..Document::default() }
     }
 
     fn simple_paragraph(text: &str) -> Block {

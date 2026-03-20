@@ -1,4 +1,5 @@
 use crate::model::*;
+use crate::units::*;
 
 use super::fragment::*;
 use super::{DrawCommand, Layouter};
@@ -30,7 +31,7 @@ impl Layouter {
 
         let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
             let grid_total: f32 =
-                table.grid_cols.iter().map(|w| *w as f32 / 20.0).sum();
+                table.grid_cols.iter().map(|w| twips_to_pt(*w)).sum();
             let scale = if grid_total > 0.0 {
                 content_width / grid_total
             } else {
@@ -39,7 +40,7 @@ impl Layouter {
             table
                 .grid_cols
                 .iter()
-                .map(|w| *w as f32 / 20.0 * scale)
+                .map(|w| twips_to_pt(*w) * scale)
                 .collect()
         } else {
             vec![content_width / num_cols as f32; num_cols]
@@ -47,7 +48,7 @@ impl Layouter {
 
         for row in &table.rows {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
-            let mut row_height = 12.0; // minimum row height
+            let mut row_height = MIN_ROW_HEIGHT_PT;
 
             let mut col_x_positions: Vec<f32> = Vec::with_capacity(row.cells.len());
             let mut cell_widths_computed: Vec<f32> =
@@ -203,11 +204,11 @@ impl Layouter {
                                             commands.push(
                                                 DrawCommand::Underline {
                                                     x1: x,
-                                                    y1: cell_y + 2.0,
+                                                    y1: cell_y + UNDERLINE_Y_OFFSET,
                                                     x2: x + measured_width,
-                                                    y2: cell_y + 2.0,
+                                                    y2: cell_y + UNDERLINE_Y_OFFSET,
                                                     color: c,
-                                                    width: 0.5,
+                                                    width: TABLE_BORDER_WIDTH,
                                                 },
                                             );
                                         }
@@ -250,7 +251,7 @@ impl Layouter {
 
                 // Ensure minimum bottom padding to prevent text descenders
                 // from overlapping the cell border
-                let effective_pad_bottom = pad_bottom.max(2.0);
+                let effective_pad_bottom = pad_bottom.max(MIN_CELL_BOTTOM_PAD_PT);
                 let total_cell_height = cell_y + effective_pad_bottom;
                 if total_cell_height > row_height {
                     row_height = total_cell_height;
@@ -278,7 +279,7 @@ impl Layouter {
                         x2: cell_x + cw,
                         y2: row_top,
                         color: (0, 0, 0),
-                        width: 0.5,
+                        width: TABLE_BORDER_WIDTH,
                     });
                 }
 
@@ -318,7 +319,7 @@ impl Layouter {
             self.cursor_y += row_height;
         }
 
-        self.cursor_y += 8.0;
+        self.cursor_y += TABLE_AFTER_SPACING_PT;
     }
 }
 

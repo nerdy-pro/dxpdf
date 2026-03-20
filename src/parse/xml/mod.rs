@@ -457,12 +457,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
     Ok(Document {
         blocks,
         final_section,
-        default_tab_stop: 720,
-        default_font_size: 24,
-        default_font_family: "Helvetica".to_string(),
-        default_spacing: Spacing::default(),
-        default_cell_margins: CellMargins::default(),
-        table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
+        ..Document::default()
     })
 }
 
@@ -685,7 +680,7 @@ mod tests {
         let doc = parse_document_xml(&xml).unwrap();
         let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
         let Inline::Image(img) = &p.runs[0] else { panic!() };
-        assert_eq!(img.rel_id, RelId::new("rId5"));
+        assert_eq!(img.rel_id, RelId::from("rId5"));
         assert!((img.width_pt - 72.0).abs() < 0.1);
         assert!((img.height_pt - 36.0).abs() < 0.1);
     }

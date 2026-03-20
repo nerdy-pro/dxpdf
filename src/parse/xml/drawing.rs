@@ -37,7 +37,7 @@ pub fn handle_drawing_element(
             }
             b"blip" => {
                 if let Some(embed) = get_attr(e, b"embed")? {
-                    *rel_id = Some(RelId::new(embed));
+                    *rel_id = Some(RelId::from(embed));
                 }
             }
             b"positionH" => {

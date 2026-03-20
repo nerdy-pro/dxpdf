@@ -1,24 +1,39 @@
+use crate::units::{self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS,
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS};
+
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub blocks: Vec<Block>,
-    /// Final section properties (from `w:body/w:sectPr`), applies to
-    /// all content after the last mid-document section break.
+    /// Final section properties (from `w:body/w:sectPr`).
     pub final_section: Option<SectionProperties>,
-    /// Default tab stop interval in twips (from `word/settings.xml`).
-    /// Defaults to 720 twips (0.5 inch) if not specified.
+    /// Default tab stop interval in twips.
     pub default_tab_stop: u32,
-    /// Default font size in half-points (from `word/styles.xml` docDefaults).
-    /// Defaults to 24 (12pt) if not specified.
+    /// Default font size in half-points.
     pub default_font_size: u32,
-    /// Default font family (from `word/styles.xml` docDefaults).
+    /// Default font family.
     pub default_font_family: String,
-    /// Default paragraph spacing (from `word/styles.xml` docDefaults).
+    /// Default paragraph spacing.
     pub default_spacing: Spacing,
-    /// Default table cell margins (from table style in `word/styles.xml`).
+    /// Default table cell margins.
     pub default_cell_margins: CellMargins,
-    /// Default paragraph spacing inside table cells (from table style).
+    /// Default paragraph spacing inside table cells.
     pub table_cell_spacing: Spacing,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            blocks: Vec::new(),
+            final_section: None,
+            default_tab_stop: DEFAULT_TAB_STOP_TWIPS,
+            default_font_size: DEFAULT_FONT_SIZE_HALF_PTS,
+            default_font_family: DEFAULT_FONT_FAMILY.to_string(),
+            default_spacing: Spacing::default(),
+            default_cell_margins: CellMargins::default(),
+            table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
+        }
+    }
 }
 
 /// A block-level element.
@@ -31,19 +46,17 @@ pub enum Block {
 /// Page size in twips.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageSize {
-    /// Width in twips.
     pub width: u32,
-    /// Height in twips.
     pub height: u32,
 }
 
 impl PageSize {
     pub fn width_pt(&self) -> f32 {
-        self.width as f32 / 20.0
+        twips_to_pt(self.width)
     }
 
     pub fn height_pt(&self) -> f32 {
-        self.height as f32 / 20.0
+        twips_to_pt(self.height)
     }
 }
 
@@ -58,16 +71,16 @@ pub struct PageMargins {
 
 impl PageMargins {
     pub fn top_pt(&self) -> f32 {
-        self.top as f32 / 20.0
+        twips_to_pt(self.top)
     }
     pub fn right_pt(&self) -> f32 {
-        self.right as f32 / 20.0
+        twips_to_pt(self.right)
     }
     pub fn bottom_pt(&self) -> f32 {
-        self.bottom as f32 / 20.0
+        twips_to_pt(self.bottom)
     }
     pub fn left_pt(&self) -> f32 {
-        self.left as f32 / 20.0
+        twips_to_pt(self.left)
     }
 }
 
@@ -82,11 +95,7 @@ pub struct SectionProperties {
 pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub runs: Vec<Inline>,
-    /// Floating/anchored images attached to this paragraph.
     pub floats: Vec<FloatingImage>,
-    /// If present, this paragraph ends a section with these properties.
-    /// All content from the previous section break up to (and including)
-    /// this paragraph uses this section's page size and margins.
     pub section_properties: Option<SectionProperties>,
 }
 
@@ -95,7 +104,6 @@ pub struct ParagraphProperties {
     pub alignment: Option<Alignment>,
     pub spacing: Option<Spacing>,
     pub indentation: Option<Indentation>,
-    /// Custom tab stops defined for this paragraph.
     pub tab_stops: Vec<TabStop>,
 }
 
@@ -118,7 +126,7 @@ pub struct TabStop {
 
 impl TabStop {
     pub fn position_pt(&self) -> f32 {
-        self.position as f32 / 20.0
+        twips_to_pt(self.position)
     }
 }
 
@@ -130,7 +138,7 @@ pub enum Alignment {
     Justify,
 }
 
-/// Spacing in twentieths of a point (OOXML native unit).
+/// Spacing in twips.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Spacing {
     pub before: Option<u32>,
@@ -138,7 +146,7 @@ pub struct Spacing {
     pub line: Option<u32>,
 }
 
-/// Indentation in twentieths of a point.
+/// Indentation in twips.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Indentation {
     pub left: Option<u32>,
@@ -151,12 +159,14 @@ pub struct Indentation {
 pub struct RelId(pub String);
 
 impl RelId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<T: Into<String>> From<T> for RelId {
+    fn from(s: T) -> Self {
+        Self(s.into())
     }
 }
 
@@ -165,12 +175,14 @@ impl RelId {
 pub struct FormatHint(pub String);
 
 impl FormatHint {
-    pub fn new(hint: impl Into<String>) -> Self {
-        Self(hint.into())
-    }
-
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<T: Into<String>> From<T> for FormatHint {
+    fn from(s: T) -> Self {
+        Self(s.into())
     }
 }
 
@@ -185,15 +197,10 @@ pub enum Inline {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImage {
-    /// Relationship ID referencing the image file (e.g., "rId5").
     pub rel_id: RelId,
-    /// Width in points (converted from EMUs at parse time).
     pub width_pt: f32,
-    /// Height in points (converted from EMUs at parse time).
     pub height_pt: f32,
-    /// Raw image bytes, populated after archive extraction.
     pub data: Vec<u8>,
-    /// File extension hint for decoding (e.g., "png", "jpeg").
     pub format_hint: FormatHint,
 }
 
@@ -211,9 +218,7 @@ pub struct FloatingImage {
     pub height_pt: f32,
     pub data: Vec<u8>,
     pub format_hint: FormatHint,
-    /// Horizontal offset from margin in points.
     pub offset_x_pt: f32,
-    /// Vertical offset from paragraph in points.
     pub offset_y_pt: f32,
     pub wrap_side: WrapSide,
 }
@@ -242,7 +247,7 @@ pub struct Color {
     pub b: u8,
 }
 
-/// Cell margins (padding) in twips, applied to all four sides.
+/// Cell margins (padding) in twips.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellMargins {
     pub top: u32,
@@ -253,39 +258,35 @@ pub struct CellMargins {
 
 impl Default for CellMargins {
     fn default() -> Self {
-        // OOXML default: 0 top/bottom, 108 twips (5.4pt) left/right
         Self {
             top: 0,
-            right: 108,
+            right: DEFAULT_CELL_MARGIN_LR_TWIPS,
             bottom: 0,
-            left: 108,
+            left: DEFAULT_CELL_MARGIN_LR_TWIPS,
         }
     }
 }
 
 impl CellMargins {
     pub fn top_pt(&self) -> f32 {
-        self.top as f32 / 20.0
+        twips_to_pt(self.top)
     }
     pub fn right_pt(&self) -> f32 {
-        self.right as f32 / 20.0
+        twips_to_pt(self.right)
     }
     pub fn bottom_pt(&self) -> f32 {
-        self.bottom as f32 / 20.0
+        twips_to_pt(self.bottom)
     }
     pub fn left_pt(&self) -> f32 {
-        self.left as f32 / 20.0
+        twips_to_pt(self.left)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     pub rows: Vec<TableRow>,
-    /// Column widths from `w:tblGrid` in twips.
     pub grid_cols: Vec<u32>,
-    /// Default cell margins for this table (from `w:tblCellMar`).
     pub default_cell_margins: Option<CellMargins>,
-    /// Default paragraph spacing for cells in this table (from table style).
     pub cell_spacing: Option<Spacing>,
 }
 
@@ -297,44 +298,30 @@ pub struct TableRow {
 /// Vertical merge state for a table cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalMerge {
-    /// This cell starts a vertical merge group.
     Restart,
-    /// This cell continues a vertical merge from the row above.
     Continue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
-    /// Cell width in twips from `w:tcW`, if specified.
     pub width: Option<u32>,
-    /// Number of grid columns this cell spans (from `w:gridSpan`). Default is 1.
     pub grid_span: u32,
-    /// Vertical merge state (from `w:vMerge`).
     pub vertical_merge: Option<VerticalMerge>,
-    /// Per-cell margins override (from `w:tcMar`).
     pub cell_margins: Option<CellMargins>,
 }
 
 impl TableCell {
     pub fn width_pt(&self) -> Option<f32> {
-        self.width.map(|w| w as f32 / 20.0)
+        self.width.map(twips_to_pt)
     }
 
-    /// Returns true if this cell is a continuation of a vertical merge
-    /// (its content should not be rendered; only the restart cell renders).
     pub fn is_vmerge_continue(&self) -> bool {
         self.vertical_merge == Some(VerticalMerge::Continue)
     }
 }
 
-/// Convert English Metric Units to points (914400 EMU = 1 inch = 72 points).
-pub fn emu_to_pt(emu: u64) -> f32 {
-    emu as f32 / 914400.0 * 72.0
-}
-
 impl Color {
-    /// Parse a 6-digit hex color string (e.g., "FF0000" for red).
     pub fn from_hex(hex: &str) -> Option<Self> {
         if hex.len() != 6 {
             return None;
@@ -347,49 +334,49 @@ impl Color {
 }
 
 impl RunProperties {
-    /// Font size in points (converts from half-points).
-    /// Falls back to 12pt if not specified.
     pub fn font_size_pt(&self) -> f32 {
-        self.font_size.map(|s| s as f32 / 2.0).unwrap_or(12.0)
+        self.font_size.map(|s| s as f32 / 2.0).unwrap_or(
+            DEFAULT_FONT_SIZE_HALF_PTS as f32 / 2.0,
+        )
     }
 
-    /// Font size in points using a document-level default (in half-points).
     pub fn font_size_pt_with_default(&self, default_half_pts: u32) -> f32 {
-        self.font_size
-            .unwrap_or(default_half_pts) as f32 / 2.0
+        self.font_size.unwrap_or(default_half_pts) as f32 / 2.0
     }
 }
 
 impl Spacing {
-    /// Convert `before` from twips to points.
     pub fn before_pt(&self) -> f32 {
-        self.before.map(|v| v as f32 / 20.0).unwrap_or(0.0)
+        self.before.map(twips_to_pt).unwrap_or(0.0)
     }
 
-    /// Convert `after` from twips to points.
     pub fn after_pt(&self) -> f32 {
-        self.after.map(|v| v as f32 / 20.0).unwrap_or(0.0)
+        self.after.map(twips_to_pt).unwrap_or(0.0)
     }
 
-    /// Convert `line` spacing from twips to points. Default is single spacing (240 twips = 12pt).
     pub fn line_pt(&self) -> f32 {
-        self.line.map(|v| v as f32 / 20.0).unwrap_or(12.0)
+        self.line.map(twips_to_pt).unwrap_or(
+            twips_to_pt(240), // single spacing = 12pt
+        )
     }
 }
 
 impl Indentation {
     pub fn left_pt(&self) -> f32 {
-        self.left.map(|v| v as f32 / 20.0).unwrap_or(0.0)
+        self.left.map(twips_to_pt).unwrap_or(0.0)
     }
 
     pub fn right_pt(&self) -> f32 {
-        self.right.map(|v| v as f32 / 20.0).unwrap_or(0.0)
+        self.right.map(twips_to_pt).unwrap_or(0.0)
     }
 
     pub fn first_line_pt(&self) -> f32 {
-        self.first_line.map(|v| v as f32 / 20.0).unwrap_or(0.0)
+        self.first_line.map(twips_to_pt_signed).unwrap_or(0.0)
     }
 }
+
+// Re-export emu_to_pt from units for backward compatibility
+pub use units::emu_to_pt;
 
 #[cfg(test)]
 mod tests {
@@ -421,10 +408,8 @@ mod tests {
 
     #[test]
     fn emu_to_pt_conversion() {
-        // 914400 EMU = 1 inch = 72 points
         let pt = emu_to_pt(914400);
         assert!((pt - 72.0).abs() < 0.01);
-        // 0 EMU = 0 points
         assert_eq!(emu_to_pt(0), 0.0);
     }
 
@@ -434,5 +419,19 @@ mod tests {
         assert_eq!(s.before_pt(), 12.0);
         assert_eq!(s.after_pt(), 6.0);
         assert_eq!(s.line_pt(), 18.0);
+    }
+
+    #[test]
+    fn rel_id_from_str() {
+        let rid: RelId = "rId5".into();
+        assert_eq!(rid.as_str(), "rId5");
+        let rid2: RelId = String::from("rId6").into();
+        assert_eq!(rid2.as_str(), "rId6");
+    }
+
+    #[test]
+    fn format_hint_from_str() {
+        let fh: FormatHint = "png".into();
+        assert_eq!(fh.as_str(), "png");
     }
 }

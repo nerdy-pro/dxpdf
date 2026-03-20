@@ -2,6 +2,7 @@ pub mod error;
 pub mod model;
 pub mod parse;
 pub mod render;
+pub mod units;
 
 pub use error::Error;
 

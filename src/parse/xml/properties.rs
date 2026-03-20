@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::model::*;
+use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
 
 use super::ParseState;
 use super::helpers::{get_attr, is_val_false};
@@ -51,7 +52,7 @@ pub fn handle_empty_element(
                 }
                 b"u" => {
                     let val = get_attr(e, b"val")?;
-                    props.underline = val.as_deref() != Some("none");
+                    props.underline = val.as_deref() != Some(UNDERLINE_NONE);
                 }
                 b"sz" => {
                     if let Some(val) = get_attr(e, b"val")? {
@@ -171,7 +172,7 @@ pub fn handle_empty_element(
             match local {
                 b"tcW" => {
                     let w_type = get_attr(e, b"type")?.unwrap_or_default();
-                    if w_type == "dxa" {
+                    if w_type == WIDTH_TYPE_DXA {
                         if let Some(val) = get_attr(e, b"w")? {
                             if let Ok(w) = val.parse::<u32>() {
                                 *width = Some(w);

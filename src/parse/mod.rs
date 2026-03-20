@@ -17,7 +17,7 @@ fn resolve_image_data(
     if let Some(target) = rels.get(rel_id.as_str()) {
         if let Some(bytes) = media.get(target) {
             *data = bytes.clone();
-            *format_hint = FormatHint::new(
+            *format_hint = FormatHint::from(
                 Path::new(target)
                     .extension()
                     .and_then(|e| e.to_str())
