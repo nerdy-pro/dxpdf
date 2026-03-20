@@ -15,6 +15,8 @@ pub enum Block {
 pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub runs: Vec<Inline>,
+    /// Floating/anchored images attached to this paragraph.
+    pub floats: Vec<FloatingImage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -54,6 +56,42 @@ pub enum Inline {
     TextRun(TextRun),
     LineBreak,
     Tab,
+    Image(InlineImage),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineImage {
+    /// Relationship ID referencing the image file (e.g., "rId5").
+    pub rel_id: String,
+    /// Width in points (converted from EMUs at parse time).
+    pub width_pt: f32,
+    /// Height in points (converted from EMUs at parse time).
+    pub height_pt: f32,
+    /// Raw image bytes, populated after archive extraction.
+    pub data: Vec<u8>,
+    /// File extension hint for decoding (e.g., "png", "jpeg").
+    pub format_hint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapSide {
+    Left,
+    Right,
+    BothSides,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FloatingImage {
+    pub rel_id: String,
+    pub width_pt: f32,
+    pub height_pt: f32,
+    pub data: Vec<u8>,
+    pub format_hint: String,
+    /// Horizontal offset from margin in points.
+    pub offset_x_pt: f32,
+    /// Vertical offset from paragraph in points.
+    pub offset_y_pt: f32,
+    pub wrap_side: WrapSide,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +131,11 @@ pub struct TableRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
+}
+
+/// Convert English Metric Units to points (914400 EMU = 1 inch = 72 points).
+pub fn emu_to_pt(emu: u64) -> f32 {
+    emu as f32 / 914400.0 * 72.0
 }
 
 impl Color {
@@ -172,6 +215,15 @@ mod tests {
     fn default_font_size() {
         let rp = RunProperties::default();
         assert_eq!(rp.font_size_pt(), 12.0);
+    }
+
+    #[test]
+    fn emu_to_pt_conversion() {
+        // 914400 EMU = 1 inch = 72 points
+        let pt = emu_to_pt(914400);
+        assert!((pt - 72.0).abs() < 0.01);
+        // 0 EMU = 0 points
+        assert_eq!(emu_to_pt(0), 0.0);
     }
 
     #[test]

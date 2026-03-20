@@ -26,13 +26,15 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         state = ParseState::InParagraph {
                             props: ParagraphProperties::default(),
                             runs: Vec::new(),
+                            floats: Vec::new(),
                         };
                     }
                     b"pPr" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs) = take_paragraph(&mut state);
+                        let (props, runs, floats) = take_paragraph(&mut state);
                         stack.push(ParseState::InParagraph {
                             props: ParagraphProperties::default(),
                             runs,
+                            floats,
                         });
                         state = ParseState::InParagraphProperties { props };
                     }
@@ -75,17 +77,67 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             text: String::new(),
                         };
                     }
+                    b"drawing"
+                        if matches!(
+                            state,
+                            ParseState::InRun { .. } | ParseState::InParagraph { .. }
+                        ) =>
+                    {
+                        stack.push(state);
+                        state = ParseState::InDrawing {
+                            depth: 1,
+                            rel_id: None,
+                            width_emu: None,
+                            height_emu: None,
+                            is_anchor: false,
+                            pos_h_emu: None,
+                            pos_v_emu: None,
+                            wrap_side: None,
+                            reading_pos_offset: None,
+                            in_position_h: false,
+                            in_position_v: false,
+                        };
+                    }
+                    _ if matches!(state, ParseState::InDrawing { .. }) => {
+                        // Track depth of nested elements inside drawing
+                        if let ParseState::InDrawing { ref mut depth, .. } = state {
+                            *depth += 1;
+                        }
+                        // Check for extent and blip on Start elements too
+                        handle_drawing_element(local, e, &mut state)?;
+                    }
                     _ => {}
                 }
             }
             Event::Empty(ref e) => {
                 let name = e.name();
                 let local = local_name(name.as_ref());
-                handle_empty_element(local, e, &mut state)?;
+                if matches!(state, ParseState::InDrawing { .. }) {
+                    handle_drawing_element(local, e, &mut state)?;
+                } else {
+                    handle_empty_element(local, e, &mut state)?;
+                }
             }
             Event::Text(ref e) => {
                 if let ParseState::InText { ref mut text, .. } = state {
                     text.push_str(&e.unescape()?);
+                } else if let ParseState::InDrawing {
+                    ref reading_pos_offset,
+                    ref mut pos_h_emu,
+                    ref mut pos_v_emu,
+                    ..
+                } = state
+                {
+                    if let Some(axis) = reading_pos_offset {
+                        let val_str = e.unescape().unwrap_or_default();
+                        if let Ok(val) = val_str.trim().parse::<i64>() {
+                            match axis {
+                                'H' => *pos_h_emu = Some(val),
+                                'V' => *pos_v_emu = Some(val),
+                                _ => {}
+                            }
+                        }
+                    }
                 }
             }
             Event::End(ref e) => {
@@ -96,11 +148,12 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         state = ParseState::Idle;
                     }
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs) = take_paragraph(&mut state);
+                        let (props, runs, floats) = take_paragraph(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
                         let paragraph = Block::Paragraph(Paragraph {
                             properties: props,
                             runs,
+                            floats,
                         });
                         push_block(&mut state, &mut blocks, paragraph);
                     }
@@ -177,6 +230,83 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             }
                         }
                     }
+                    b"drawing" if matches!(state, ParseState::InDrawing { .. }) => {
+                        let old = std::mem::replace(&mut state, ParseState::Idle);
+                        if let ParseState::InDrawing {
+                            rel_id,
+                            width_emu,
+                            height_emu,
+                            is_anchor,
+                            pos_h_emu,
+                            pos_v_emu,
+                            wrap_side,
+                            ..
+                        } = old
+                        {
+                            state = stack.pop().unwrap_or(ParseState::Idle);
+                            if let Some(rid) = rel_id {
+                                let w = emu_to_pt(width_emu.unwrap_or(0));
+                                let h = emu_to_pt(height_emu.unwrap_or(0));
+
+                                if is_anchor {
+                                    // Floating/anchored image
+                                    let float = FloatingImage {
+                                        rel_id: rid,
+                                        width_pt: w,
+                                        height_pt: h,
+                                        data: Vec::new(),
+                                        format_hint: String::new(),
+                                        offset_x_pt: emu_to_pt(
+                                            pos_h_emu.unwrap_or(0).unsigned_abs(),
+                                        ),
+                                        offset_y_pt: emu_to_pt(
+                                            pos_v_emu.unwrap_or(0).unsigned_abs(),
+                                        ),
+                                        wrap_side: wrap_side
+                                            .unwrap_or(WrapSide::BothSides),
+                                    };
+                                    push_float(&mut state, &mut stack, float);
+                                } else {
+                                    // Inline image
+                                    let image = Inline::Image(InlineImage {
+                                        rel_id: rid,
+                                        width_pt: w,
+                                        height_pt: h,
+                                        data: Vec::new(),
+                                        format_hint: String::new(),
+                                    });
+                                    if matches!(state, ParseState::InRun { .. }) {
+                                        if let Some(para_state) =
+                                            stack.iter_mut().rev().find(|s| {
+                                                matches!(
+                                                    s,
+                                                    ParseState::InParagraph { .. }
+                                                )
+                                            })
+                                        {
+                                            if let ParseState::InParagraph {
+                                                ref mut runs,
+                                                ..
+                                            } = para_state
+                                            {
+                                                runs.push(image);
+                                            }
+                                        }
+                                    } else {
+                                        push_inline(&mut state, image);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ if matches!(state, ParseState::InDrawing { .. }) => {
+                        // Handle sub-element End events (positionH, positionV, posOffset)
+                        handle_drawing_end(local, &mut state);
+                        // Track depth of nested elements inside drawing
+                        if let ParseState::InDrawing { ref mut depth, .. } = state {
+                            *depth -= 1;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -193,6 +323,7 @@ enum ParseState {
     InParagraph {
         props: ParagraphProperties,
         runs: Vec<Inline>,
+        floats: Vec<FloatingImage>,
     },
     InParagraphProperties {
         props: ParagraphProperties,
@@ -216,6 +347,21 @@ enum ParseState {
     InTableCell {
         blocks: Vec<Block>,
     },
+    /// Inside a `w:drawing` subtree. We track nested depth and collect image info.
+    InDrawing {
+        depth: u32,
+        rel_id: Option<String>,
+        width_emu: Option<u64>,
+        height_emu: Option<u64>,
+        is_anchor: bool,
+        pos_h_emu: Option<i64>,
+        pos_v_emu: Option<i64>,
+        wrap_side: Option<WrapSide>,
+        /// Which position offset we're currently reading text for: 'H' or 'V'.
+        reading_pos_offset: Option<char>,
+        in_position_h: bool,
+        in_position_v: bool,
+    },
 }
 
 fn matches_body_or_cell(state: &ParseState) -> bool {
@@ -225,11 +371,11 @@ fn matches_body_or_cell(state: &ParseState) -> bool {
     )
 }
 
-fn take_paragraph(state: &mut ParseState) -> (ParagraphProperties, Vec<Inline>) {
+fn take_paragraph(state: &mut ParseState) -> (ParagraphProperties, Vec<Inline>, Vec<FloatingImage>) {
     let old = std::mem::replace(state, ParseState::Idle);
     match old {
-        ParseState::InParagraph { props, runs } => (props, runs),
-        _ => (ParagraphProperties::default(), Vec::new()),
+        ParseState::InParagraph { props, runs, floats } => (props, runs, floats),
+        _ => (ParagraphProperties::default(), Vec::new(), Vec::new()),
     }
 }
 
@@ -349,6 +495,139 @@ fn handle_empty_element(
     }
 
     Ok(())
+}
+
+/// Push a floating image into the nearest paragraph context.
+fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: FloatingImage) {
+    // Try current state first
+    if let ParseState::InParagraph { ref mut floats, .. } = state {
+        floats.push(float);
+        return;
+    }
+    // Search the stack for the nearest paragraph
+    for s in stack.iter_mut().rev() {
+        if let ParseState::InParagraph { ref mut floats, .. } = s {
+            floats.push(float);
+            return;
+        }
+    }
+}
+
+/// Push an inline element into the current paragraph or run context.
+fn push_inline(state: &mut ParseState, inline: Inline) {
+    match state {
+        ParseState::InParagraph { ref mut runs, .. } => {
+            runs.push(inline);
+        }
+        ParseState::InRun { .. } => {
+            // If we're in a run, we can't push directly; this shouldn't normally happen
+            // since drawing End pops back to paragraph level
+        }
+        _ => {}
+    }
+}
+
+/// Handle elements inside a `w:drawing` subtree to extract image info.
+fn handle_drawing_element(
+    local: &[u8],
+    e: &quick_xml::events::BytesStart<'_>,
+    state: &mut ParseState,
+) -> Result<(), Error> {
+    if let ParseState::InDrawing {
+        ref mut rel_id,
+        ref mut width_emu,
+        ref mut height_emu,
+        ref mut is_anchor,
+        ref mut wrap_side,
+        ref mut in_position_h,
+        ref mut in_position_v,
+        ref mut reading_pos_offset,
+        ..
+    } = state
+    {
+        match local {
+            b"anchor" => {
+                *is_anchor = true;
+            }
+            b"inline" => {
+                // Explicit inline — already the default (is_anchor = false)
+            }
+            b"extent" => {
+                if let Some(cx) = get_attr(e, b"cx")? {
+                    *width_emu = cx.parse().ok();
+                }
+                if let Some(cy) = get_attr(e, b"cy")? {
+                    *height_emu = cy.parse().ok();
+                }
+            }
+            b"blip" => {
+                if let Some(embed) = get_attr(e, b"embed")? {
+                    *rel_id = Some(embed);
+                }
+            }
+            b"positionH" => {
+                *in_position_h = true;
+            }
+            b"positionV" => {
+                *in_position_v = true;
+            }
+            b"posOffset" => {
+                // This is a Start element — text content will follow
+                if *in_position_h {
+                    *reading_pos_offset = Some('H');
+                } else if *in_position_v {
+                    *reading_pos_offset = Some('V');
+                }
+            }
+            b"wrapTight" | b"wrapSquare" | b"wrapThrough" => {
+                if let Some(val) = get_attr(e, b"wrapText")? {
+                    *wrap_side = match val.as_str() {
+                        "bothSides" => Some(WrapSide::BothSides),
+                        "left" => Some(WrapSide::Left),
+                        "right" => Some(WrapSide::Right),
+                        _ => Some(WrapSide::BothSides),
+                    };
+                } else {
+                    *wrap_side = Some(WrapSide::BothSides);
+                }
+            }
+            b"wrapNone" => {
+                // No text wrapping — still a float but text ignores it
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Handle End events inside a drawing subtree for position tracking.
+fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
+    if let ParseState::InDrawing {
+        ref mut in_position_h,
+        ref mut in_position_v,
+        ref mut reading_pos_offset,
+        ..
+    } = state
+    {
+        match local {
+            b"positionH" => {
+                *in_position_h = false;
+                if *reading_pos_offset == Some('H') {
+                    *reading_pos_offset = None;
+                }
+            }
+            b"positionV" => {
+                *in_position_v = false;
+                if *reading_pos_offset == Some('V') {
+                    *reading_pos_offset = None;
+                }
+            }
+            b"posOffset" => {
+                *reading_pos_offset = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Check if a toggle element has w:val="false" or w:val="0".
@@ -576,5 +855,74 @@ mod tests {
             panic!();
         };
         assert_eq!(tr.properties.font_family.as_deref(), Some("Arial"));
+    }
+
+    #[test]
+    fn parse_inline_image() {
+        let xml = wrap_body(
+            r#"<w:p><w:r>
+                <w:drawing>
+                    <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                        <wp:extent cx="914400" cy="457200"/>
+                        <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                            <a:graphicData>
+                                <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                    <pic:blipFill>
+                                        <a:blip r:embed="rId5" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                                    </pic:blipFill>
+                                </pic:pic>
+                            </a:graphicData>
+                        </a:graphic>
+                    </wp:inline>
+                </w:drawing>
+            </w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else {
+            panic!("Expected Paragraph");
+        };
+        assert_eq!(p.runs.len(), 1);
+        let Inline::Image(img) = &p.runs[0] else {
+            panic!("Expected Image, got {:?}", p.runs[0]);
+        };
+        assert_eq!(img.rel_id, "rId5");
+        // 914400 EMU = 72pt (1 inch)
+        assert!((img.width_pt - 72.0).abs() < 0.1);
+        // 457200 EMU = 36pt (0.5 inch)
+        assert!((img.height_pt - 36.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn parse_image_with_text() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:r><w:t>Before </w:t></w:r>
+                <w:r>
+                    <w:drawing>
+                        <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                            <wp:extent cx="914400" cy="914400"/>
+                            <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                                <a:graphicData>
+                                    <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                        <pic:blipFill>
+                                            <a:blip r:embed="rId3" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                                        </pic:blipFill>
+                                    </pic:pic>
+                                </a:graphicData>
+                            </a:graphic>
+                        </wp:inline>
+                    </w:drawing>
+                </w:r>
+                <w:r><w:t> After</w:t></w:r>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else {
+            panic!();
+        };
+        assert_eq!(p.runs.len(), 3);
+        assert!(matches!(p.runs[0], Inline::TextRun(_)));
+        assert!(matches!(p.runs[1], Inline::Image(_)));
+        assert!(matches!(p.runs[2], Inline::TextRun(_)));
     }
 }

@@ -1,4 +1,4 @@
-use skia_safe::{pdf, Color4f, Font, FontMgr, FontStyle, Paint};
+use skia_safe::{pdf, Color4f, Data, Font, FontMgr, FontStyle, Image, Paint, Rect};
 
 use super::layout::{DrawCommand, LayoutConfig, LayoutedPage};
 use crate::error::Error;
@@ -98,6 +98,24 @@ fn render_page(
                 );
 
                 canvas.draw_line((*x1, *y1), (*x2, *y2), &paint);
+            }
+            DrawCommand::Image {
+                x,
+                y,
+                width,
+                height,
+                data,
+            } => {
+                let skia_data = Data::new_copy(data);
+                if let Some(image) = Image::from_encoded(skia_data) {
+                    let rect = Rect::from_xywh(*x, *y, *width, *height);
+                    canvas.draw_image_rect(
+                        image,
+                        None,
+                        rect,
+                        &Paint::default(),
+                    );
+                }
             }
         }
     }

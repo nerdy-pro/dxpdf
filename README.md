@@ -105,7 +105,7 @@ The test suite includes unit tests for the model, XML parser, and layout engine,
 ### Parsing
 
 - **Styles**: Only direct formatting (`w:rPr`, `w:pPr`) is supported. Document-level styles from `word/styles.xml` are not resolved, so text relying on named styles (e.g., "Heading 1") will render with default formatting.
-- **Images**: Embedded images (`w:drawing`, `w:pict`) are not extracted or rendered.
+- **Images**: Inline images (`w:drawing` > `wp:inline`) are supported (PNG, JPEG, etc.). Floating/anchored images (`wp:anchor`) and legacy VML images (`w:pict`) are not supported.
 - **Headers/Footers**: `word/header.xml` and `word/footer.xml` are not parsed.
 - **Lists**: Numbered and bulleted lists (`w:numPr`) are not recognized. List items render as plain paragraphs without bullets or numbering.
 - **Footnotes/Endnotes**: Not supported.

@@ -63,6 +63,13 @@ pub enum DrawCommand {
         color: (u8, u8, u8),
         width: f32,
     },
+    Image {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -81,11 +88,20 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     layouter.finish()
 }
 
+/// A floating image that affects text layout on the current page.
+struct ActiveFloat {
+    page_x: f32,
+    page_y_start: f32,
+    page_y_end: f32,
+    width: f32,
+}
+
 struct Layouter {
     config: LayoutConfig,
     pages: Vec<LayoutedPage>,
     current_page: LayoutedPage,
     cursor_y: f32,
+    active_floats: Vec<ActiveFloat>,
 }
 
 impl Layouter {
@@ -97,6 +113,7 @@ impl Layouter {
                 commands: Vec::new(),
             },
             cursor_y: config.margin_top,
+            active_floats: Vec::new(),
         }
     }
 
@@ -113,9 +130,34 @@ impl Layouter {
         );
         self.pages.push(page);
         self.cursor_y = self.config.margin_top;
+        self.active_floats.clear();
+    }
+
+    /// Compute how much the text start position shifts right and width reduces
+    /// due to active floats overlapping the given vertical range.
+    fn float_adjustment(&self, line_top: f32, line_bottom: f32) -> (f32, f32) {
+        let gap = 4.0;
+        let mut x_shift = 0.0_f32;
+        let mut width_reduction = 0.0_f32;
+        for f in &self.active_floats {
+            if line_top < f.page_y_end && line_bottom > f.page_y_start {
+                // Float overlaps this line; assume left-anchored
+                let shift = (f.page_x - self.config.margin_left) + f.width + gap;
+                x_shift = x_shift.max(shift);
+                width_reduction = width_reduction.max(shift);
+            }
+        }
+        (x_shift, width_reduction)
+    }
+
+    /// Prune floats that the cursor has moved past.
+    fn prune_floats(&mut self) {
+        self.active_floats
+            .retain(|f| self.cursor_y < f.page_y_end);
     }
 
     fn layout_block(&mut self, block: &Block) {
+        self.prune_floats();
         match block {
             Block::Paragraph(p) => self.layout_paragraph(p),
             Block::Table(t) => self.layout_table(t),
@@ -129,21 +171,51 @@ impl Layouter {
         // Space before
         self.cursor_y += spacing.before_pt();
 
-        if para.runs.is_empty() {
+        // Register floating images attached to this paragraph
+        for float in &para.floats {
+            if float.data.is_empty() {
+                continue;
+            }
+            let img_x = self.config.margin_left + float.offset_x_pt;
+            let img_y = self.cursor_y + float.offset_y_pt;
+
+            // Emit the image draw command
+            self.current_page.commands.push(DrawCommand::Image {
+                x: img_x,
+                y: img_y,
+                width: float.width_pt,
+                height: float.height_pt,
+                data: float.data.clone(),
+            });
+
+            // Register as active float for text wrapping
+            self.active_floats.push(ActiveFloat {
+                page_x: img_x,
+                page_y_start: img_y,
+                page_y_end: img_y + float.height_pt,
+                width: float.width_pt,
+            });
+        }
+
+        if para.runs.is_empty() && para.floats.is_empty() {
             // Empty paragraph - just add line spacing
             self.cursor_y += spacing.line_pt();
             self.cursor_y += spacing.after_pt();
             return;
         }
 
-        // Collect all text fragments with their properties for line wrapping
-        let fragments = collect_fragments(&para.runs);
-        let content_width = self.config.content_width()
+        if para.runs.is_empty() {
+            self.cursor_y += spacing.after_pt();
+            return;
+        }
+
+        let base_content_width = self.config.content_width()
             - indent.left_pt()
             - indent.right_pt();
+        let content_height = self.config.content_height();
+        let fragments = collect_fragments(&para.runs, base_content_width, content_height);
         let base_x = self.config.margin_left + indent.left_pt();
 
-        // Simple line wrapping: estimate character width from font size
         let mut line_start = 0;
         let mut first_line = true;
 
@@ -153,29 +225,38 @@ impl Layouter {
             } else {
                 0.0
             };
-            let available_width = content_width - first_line_offset;
 
-            // Find how many fragments fit on this line
-            let (line_end, line_width) =
-                fit_fragments(&fragments[line_start..], available_width);
-            let actual_end = line_start + line_end.max(1); // Always consume at least one fragment
+            // Compute float adjustment for this line's vertical position
+            let tentative_line_height = fragments[line_start..]
+                .iter()
+                .take(1)
+                .map(|f| f.height())
+                .fold(spacing.line_pt(), f32::max);
+            let line_top = self.cursor_y;
+            let line_bottom = self.cursor_y + tentative_line_height;
+            let (float_x_shift, float_width_reduction) =
+                self.float_adjustment(line_top, line_bottom);
 
-            // Determine line height from the tallest fragment on this line
+            let available_width =
+                base_content_width - first_line_offset - float_width_reduction;
+
+            let (line_end, _line_width) =
+                fit_fragments(&fragments[line_start..], available_width.max(0.0));
+            let actual_end = line_start + line_end.max(1);
+
             let line_height = fragments[line_start..actual_end]
                 .iter()
-                .map(|f| f.font_size * 1.2)
+                .map(|f| f.height())
                 .fold(spacing.line_pt(), f32::max);
 
-            // Check for page break
             if self.cursor_y + line_height > self.content_bottom() {
                 self.new_page();
             }
 
-            // Calculate x offset for alignment
             let used_width = if actual_end > line_start {
                 measure_fragments(&fragments[line_start..actual_end])
             } else {
-                line_width
+                0.0
             };
             let x_offset = match para.properties.alignment {
                 Some(Alignment::Center) => (available_width - used_width) / 2.0,
@@ -183,40 +264,62 @@ impl Layouter {
                 _ => 0.0,
             };
 
-            let mut x = base_x + first_line_offset + x_offset;
+            let mut x = base_x + first_line_offset + float_x_shift + x_offset;
             self.cursor_y += line_height;
 
             for frag in &fragments[line_start..actual_end] {
-                let color = frag
-                    .color
-                    .map(|c| (c.r, c.g, c.b))
-                    .unwrap_or((0, 0, 0));
-
-                self.current_page.commands.push(DrawCommand::Text {
-                    x,
-                    y: self.cursor_y,
-                    text: frag.text.clone(),
-                    font_family: frag.font_family.clone(),
-                    font_size: frag.font_size,
-                    bold: frag.bold,
-                    italic: frag.italic,
-                    color,
-                });
-
-                let frag_width = estimate_text_width(&frag.text, frag.font_size);
-
-                if frag.underline {
-                    self.current_page.commands.push(DrawCommand::Underline {
-                        x1: x,
-                        y1: self.cursor_y + 2.0,
-                        x2: x + frag_width,
-                        y2: self.cursor_y + 2.0,
+                match frag {
+                    Fragment::Text {
+                        text,
+                        font_family,
+                        font_size,
+                        bold,
+                        italic,
+                        underline,
                         color,
-                        width: 0.5,
-                    });
-                }
+                    } => {
+                        let c = color
+                            .map(|c| (c.r, c.g, c.b))
+                            .unwrap_or((0, 0, 0));
 
-                x += frag_width;
+                        self.current_page.commands.push(DrawCommand::Text {
+                            x,
+                            y: self.cursor_y,
+                            text: text.clone(),
+                            font_family: font_family.clone(),
+                            font_size: *font_size,
+                            bold: *bold,
+                            italic: *italic,
+                            color: c,
+                        });
+
+                        let frag_width = estimate_text_width(text, *font_size);
+
+                        if *underline {
+                            self.current_page.commands.push(DrawCommand::Underline {
+                                x1: x,
+                                y1: self.cursor_y + 2.0,
+                                x2: x + frag_width,
+                                y2: self.cursor_y + 2.0,
+                                color: c,
+                                width: 0.5,
+                            });
+                        }
+
+                        x += frag_width;
+                    }
+                    Fragment::Image { width, height, data } => {
+                        // Draw image positioned so its bottom aligns with the text baseline
+                        self.current_page.commands.push(DrawCommand::Image {
+                            x,
+                            y: self.cursor_y - height,
+                            width: *width,
+                            height: *height,
+                            data: data.clone(),
+                        });
+                        x += width;
+                    }
+                }
             }
 
             line_start = actual_end;
@@ -281,6 +384,7 @@ impl Layouter {
                             Inline::TextRun(tr) => Some(tr.text.as_str()),
                             Inline::Tab => Some("\t"),
                             Inline::LineBreak => Some("\n"),
+                            Inline::Image(_) => None,
                         })
                         .collect();
 
@@ -352,26 +456,54 @@ impl Layouter {
     }
 }
 
-/// A flattened text fragment for layout.
-struct Fragment {
-    text: String,
-    font_family: String,
-    font_size: f32,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    color: Option<Color>,
+/// A flattened fragment for layout — either text or an image.
+enum Fragment {
+    Text {
+        text: String,
+        font_family: String,
+        font_size: f32,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+        color: Option<Color>,
+    },
+    Image {
+        width: f32,
+        height: f32,
+        data: Vec<u8>,
+    },
 }
 
-fn collect_fragments(runs: &[Inline]) -> Vec<Fragment> {
+impl Fragment {
+    fn width(&self) -> f32 {
+        match self {
+            Fragment::Text { text, font_size, .. } => estimate_text_width(text, *font_size),
+            Fragment::Image { width, .. } => *width,
+        }
+    }
+
+    fn height(&self) -> f32 {
+        match self {
+            Fragment::Text { font_size, .. } => *font_size * 1.2,
+            Fragment::Image { height, .. } => *height,
+        }
+    }
+}
+
+fn collect_fragments(runs: &[Inline], content_width: f32, content_height: f32) -> Vec<Fragment> {
     let mut fragments = Vec::new();
     for run in runs {
         match run {
             Inline::TextRun(tr) => {
-                // Split by spaces to allow word wrapping
-                let words: Vec<&str> = tr.text.split_inclusive(' ').collect();
+                // Collapse runs of excessive whitespace (>3 consecutive spaces)
+                // These are typically used for manual alignment in Word
+                let collapsed = collapse_spaces(&tr.text);
+                let words: Vec<&str> = collapsed.split_inclusive(' ').collect();
                 for word in words {
-                    fragments.push(Fragment {
+                    if word.is_empty() {
+                        continue;
+                    }
+                    fragments.push(Fragment::Text {
                         text: word.to_string(),
                         font_family: tr
                             .properties
@@ -386,8 +518,23 @@ fn collect_fragments(runs: &[Inline]) -> Vec<Fragment> {
                     });
                 }
             }
+            Inline::Image(img) if !img.data.is_empty() => {
+                // Scale image to fit within page content area
+                let scale = f32::min(
+                    1.0,
+                    f32::min(
+                        content_width / img.width_pt.max(1.0),
+                        content_height / img.height_pt.max(1.0),
+                    ),
+                );
+                fragments.push(Fragment::Image {
+                    width: img.width_pt * scale,
+                    height: img.height_pt * scale,
+                    data: img.data.clone(),
+                });
+            }
             Inline::Tab => {
-                fragments.push(Fragment {
+                fragments.push(Fragment::Text {
                     text: "    ".to_string(),
                     font_family: "Helvetica".to_string(),
                     font_size: 12.0,
@@ -397,25 +544,47 @@ fn collect_fragments(runs: &[Inline]) -> Vec<Fragment> {
                     color: None,
                 });
             }
-            Inline::LineBreak => {
-                // Force a new line by pushing a special fragment
-                // For simplicity, we just add a newline marker
-            }
+            Inline::LineBreak | Inline::Image(_) => {}
         }
     }
     fragments
 }
 
-/// Estimate text width using average character width (0.5 * font_size).
+/// Collapse runs of more than 2 consecutive spaces into a single space.
+/// Word documents often use long runs of spaces for manual alignment.
+fn collapse_spaces(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut space_count = 0;
+    for ch in text.chars() {
+        if ch == ' ' {
+            space_count += 1;
+            if space_count <= 2 {
+                result.push(ch);
+            }
+        } else {
+            space_count = 0;
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Estimate text width using different widths for spaces vs other characters.
+/// Average character width ~0.5 * font_size, space ~0.25 * font_size.
 fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    text.len() as f32 * font_size * 0.5
+    let mut width = 0.0;
+    for ch in text.chars() {
+        if ch == ' ' {
+            width += font_size * 0.25;
+        } else {
+            width += font_size * 0.5;
+        }
+    }
+    width
 }
 
 fn measure_fragments(fragments: &[Fragment]) -> f32 {
-    fragments
-        .iter()
-        .map(|f| estimate_text_width(&f.text, f.font_size))
-        .sum()
+    fragments.iter().map(|f| f.width()).sum()
 }
 
 /// Find how many fragments fit within the available width.
@@ -423,7 +592,7 @@ fn measure_fragments(fragments: &[Fragment]) -> f32 {
 fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f32) {
     let mut total_width = 0.0;
     for (i, frag) in fragments.iter().enumerate() {
-        let w = estimate_text_width(&frag.text, frag.font_size);
+        let w = frag.width();
         if total_width + w > available_width && i > 0 {
             return (i, total_width);
         }
@@ -447,6 +616,7 @@ mod tests {
                 text: text.to_string(),
                 properties: RunProperties::default(),
             })],
+            floats: Vec::new(),
         })
     }
 
@@ -487,6 +657,7 @@ mod tests {
                     text: format!("Paragraph {i}"),
                     properties: RunProperties::default(),
                 })],
+                floats: Vec::new(),
             }));
         }
         let doc = make_doc(blocks);
@@ -505,6 +676,7 @@ mod tests {
                 text: "Center".to_string(),
                 properties: RunProperties::default(),
             })],
+            floats: Vec::new(),
         })]);
         let config = LayoutConfig::default();
         let pages = layout(&doc, &config);
