@@ -79,6 +79,13 @@ pub enum DrawCommand {
         height: f32,
         data: Vec<u8>,
     },
+    Rect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: (u8, u8, u8),
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +350,7 @@ mod tests {
             vertical_merge: None,
             cell_margins: None,
             cell_borders: None,
+            shading: None,
         }
     }
 

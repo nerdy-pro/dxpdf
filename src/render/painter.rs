@@ -41,6 +41,9 @@ fn render_page(
             DrawCommand::Image { x, y, width, height, data } => {
                 draw_image(canvas, *x, *y, *width, *height, data);
             }
+            DrawCommand::Rect { x, y, width, height, color } => {
+                draw_rect(canvas, *x, *y, *width, *height, *color);
+            }
         }
     }
 
@@ -98,6 +101,21 @@ fn draw_image(
         let rect = Rect::from_xywh(x, y, width, height);
         canvas.draw_image_rect(image, None, rect, &Paint::default());
     }
+}
+
+fn draw_rect(
+    canvas: &skia_safe::Canvas,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: (u8, u8, u8),
+) {
+    let rect = Rect::from_xywh(x, y, width, height);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    paint.set_color4f(color_to_4f(color), None);
+    canvas.draw_rect(rect, &paint);
 }
 
 fn color_to_4f(color: (u8, u8, u8)) -> Color4f {

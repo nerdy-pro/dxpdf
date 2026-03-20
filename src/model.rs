@@ -397,6 +397,8 @@ pub struct TableCell {
     pub vertical_merge: Option<VerticalMerge>,
     pub cell_margins: Option<CellMargins>,
     pub cell_borders: Option<CellBorders>,
+    /// Background fill color from `w:shd`.
+    pub shading: Option<Color>,
 }
 
 impl TableCell {

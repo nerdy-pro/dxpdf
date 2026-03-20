@@ -99,6 +99,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             in_cell_mar: false,
                             cell_borders: None,
                             in_borders: false,
+                            shading: None,
                         };
                     }
                     b"t" if matches!(state, ParseState::InRun { .. }) => {
@@ -343,6 +344,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             vertical_merge,
                             cell_margins,
                             cell_borders,
+                            shading,
                             ..
                         } = state
                         {
@@ -355,6 +357,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                     vertical_merge,
                                     cell_margins,
                                     cell_borders,
+                                    shading,
                                 });
                             }
                         }
@@ -535,6 +538,7 @@ enum ParseState {
         in_cell_mar: bool,
         cell_borders: Option<CellBorders>,
         in_borders: bool,
+        shading: Option<Color>,
     },
     InDrawing {
         depth: u32,

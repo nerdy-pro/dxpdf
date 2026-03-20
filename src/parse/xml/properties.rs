@@ -242,6 +242,7 @@ pub fn handle_empty_element(
             ref in_cell_mar,
             ref mut cell_borders,
             ref in_borders,
+            ref mut shading,
             ..
         } => {
             if *in_borders {
@@ -278,6 +279,13 @@ pub fn handle_empty_element(
                     } else {
                         Some(VerticalMerge::Continue)
                     };
+                }
+                b"shd" => {
+                    if let Some(fill) = get_attr(e, b"fill")? {
+                        if fill != "auto" && !fill.is_empty() {
+                            *shading = Color::from_hex(&fill);
+                        }
+                    }
                 }
                 _ => {}
             }

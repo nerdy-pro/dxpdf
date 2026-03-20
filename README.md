@@ -119,6 +119,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Row heights**: `w:trHeight` parsed as minimum row height (content can grow beyond it)
 - **Cell margins**: per-table defaults (`w:tblCellMar`) and per-cell overrides (`w:tcMar`) with top/right/bottom/left in twips
 - **Table borders**: `w:tblBorders` at the table level and `w:tcBorders` at the cell level, with `w:val` (style), `w:sz` (width in eighths of a point), `w:color` (hex or `auto`). Supports `top`/`bottom`/`left`/`right`/`insideH`/`insideV`
+- **Cell shading**: `w:shd` with `w:fill` as hex color (e.g., `D9E2F3` for light blue)
 - **Self-closing paragraphs**: `<w:p/>` parsed as empty paragraphs (produce blank lines)
 - **Inline images**: `w:drawing` > `wp:inline` with dimensions from `wp:extent` (cx/cy in EMUs) and image data via `a:blip r:embed` relationship IDs
 - **Floating images**: `w:drawing` > `wp:anchor` with horizontal/vertical position offsets (`wp:positionH`, `wp:positionV`, `wp:posOffset`), and text wrapping mode (`wrapTight`, `wrapSquare`, `wrapThrough`, `wrapNone` with `wrapText` attribute)
@@ -147,6 +148,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Table cell alignment**: paragraph alignment (left, center, right) honored within cells
 - **Merged cells**: `gridSpan` cells span multiple grid columns with correct widths; `vMerge` continuation cells skip content rendering and suppress top borders
 - **Cell margins**: resolved per-cell (per-cell override > table default > document default) with separate top/right/bottom/left values
+- **Cell shading**: background fill colors from `w:shd` rendered as filled rectangles behind cell content
 - **Table cell spacing**: table style paragraph spacing (e.g., `after=0` from Table Grid style) applied inside cells, distinct from document-level paragraph spacing
 - **Word wrapping**: text split into fragments at spaces and hyphens; line breaks occur at space and hyphen boundaries. Trailing spaces excluded from line width for correct alignment
 - **Forced line breaks**: `<w:br/>` forces a new line within a paragraph
@@ -191,7 +193,7 @@ The test suite includes unit tests for the model, XML parser, layout engine (tab
 - **Justify alignment**: Parsed from `w:jc val="both"` but not applied — text renders left-aligned. Implementing justify requires distributing extra space across word gaps.
 - **Tab stop types**: Left, Center, Right, and Decimal tab stop types are parsed into the model but all tab stops are treated as left-aligned in layout. Center/Right/Decimal alignment at the stop position is not implemented.
 - **Table border styles**: Only `single` borders are rendered as solid lines. `double`, `dashed`, `dotted` styles are parsed but all render as solid lines.
-- **Cell shading/background**: Cell background colors (`w:shd`) are not rendered.
+- **Cell shading patterns**: Only solid fill colors are rendered. Shading patterns (e.g., `val="pct25"`) are not supported — only `val="clear"` with a `fill` color.
 - **Cell vertical alignment**: Vertical alignment within cells (`w:vAlign`) is not applied; content is always top-aligned.
 - **Floating image positioning**: Only left-anchored floats with `relativeFrom="margin"` are handled. Right-anchored, centered, and complex multi-float positioning are not supported.
 - **Line spacing modes**: Only the basic `w:line` value in twips is used. Exact and at-least spacing modes (`w:lineRule="exact"` / `"atLeast"`) are not distinguished from auto spacing.

@@ -316,6 +316,17 @@ impl Layouter {
                 let cw = cell_widths_computed[col_idx];
                 let cell = &row.cells[col_idx];
                 let row_bottom = row_top + row_height;
+                // Cell shading (background fill) — render before borders and content
+                if let Some(color) = &cell.shading {
+                    self.current_page.commands.push(DrawCommand::Rect {
+                        x: cell_x,
+                        y: row_top,
+                        width: cw,
+                        height: row_height,
+                        color: (color.r, color.g, color.b),
+                    });
+                }
+
                 let cell_b = cell.cell_borders.unwrap_or_default();
                 let is_first_row = row_idx == 0;
                 let is_last_row = row_idx == num_rows - 1;
@@ -438,5 +449,14 @@ fn offset_command(cmd: &DrawCommand, row_top: f32) -> DrawCommand {
             data: data.clone(),
         },
         DrawCommand::Line { .. } => cmd.clone(),
+        DrawCommand::Rect {
+            x, y, width, height, color,
+        } => DrawCommand::Rect {
+            x: *x,
+            y: row_top + y,
+            width: *width,
+            height: *height,
+            color: *color,
+        },
     }
 }
