@@ -34,6 +34,8 @@ pub(super) fn render_headers_footers(
                 content_width,
                 margin_top,
                 page_height,
+                page_width,
+                page_height,
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
@@ -51,6 +53,8 @@ pub(super) fn render_headers_footers(
                 footer_y,
                 content_width,
                 margin_bottom,
+                page_height,
+                page_width,
                 page_height,
                 doc_defaults,
                 &measurer,
@@ -70,6 +74,8 @@ pub(super) fn layout_header_footer_blocks(
     content_width: f32,
     margin_extent: f32,
     y_limit: f32,
+    page_width: f32,
+    page_height: f32,
     defaults: &DocDefaultsLayout,
     measurer: &measurer::TextMeasurer,
     default_tab_stop_pt: f32,
@@ -100,17 +106,25 @@ pub(super) fn layout_header_footer_blocks(
                 );
                 let img_w = float.width_pt * scale;
                 let img_h = float.height_pt * scale;
-                let img_x = match float.align_h.as_deref() {
-                    Some("right") => x_start + content_width - img_w,
-                    Some("center") => x_start + (content_width - img_w) / 2.0,
-                    Some("left") => x_start,
-                    _ => x_start + float.offset_x_pt,
+                let img_x = if let Some(pct) = float.pct_pos_h {
+                    pct as f32 / 100_000.0 * page_width
+                } else {
+                    match float.align_h.as_deref() {
+                        Some("right") => x_start + content_width - img_w,
+                        Some("center") => x_start + (content_width - img_w) / 2.0,
+                        Some("left") => x_start,
+                        _ => x_start + float.offset_x_pt,
+                    }
                 };
-                let img_y = match float.align_v.as_deref() {
-                    Some("center") => (margin_extent - img_h) / 2.0,
-                    Some("bottom") => margin_extent - img_h,
-                    Some("top") => 0.0,
-                    _ => cursor_y + float.offset_y_pt,
+                let img_y = if let Some(pct) = float.pct_pos_v {
+                    pct as f32 / 100_000.0 * page_height
+                } else {
+                    match float.align_v.as_deref() {
+                        Some("center") => (margin_extent - img_h) / 2.0,
+                        Some("bottom") => margin_extent - img_h,
+                        Some("top") => 0.0,
+                        _ => cursor_y + float.offset_y_pt,
+                    }
                 };
                 max_y = max_y.max(img_y + img_h);
                 commands.push(DrawCommand::Image {

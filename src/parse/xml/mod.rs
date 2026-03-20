@@ -131,6 +131,9 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             reading_pos_offset: None,
                             in_position_h: false,
                             in_position_v: false,
+                            pct_pos_h: None,
+                            pct_pos_v: None,
+                            reading_pct_pos: None,
                         };
                     }
                     _ if matches!(state, ParseState::InSectionProperties { .. }) => {
@@ -242,10 +245,13 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                 } else if let ParseState::InDrawing {
                     ref reading_pos_offset,
                     ref reading_align,
+                    ref reading_pct_pos,
                     ref mut pos_h_emu,
                     ref mut pos_v_emu,
                     ref mut align_h,
                     ref mut align_v,
+                    ref mut pct_pos_h,
+                    ref mut pct_pos_v,
                     ..
                 } = state
                 {
@@ -256,6 +262,15 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             'H' => *align_h = Some(val),
                             'V' => *align_v = Some(val),
                             _ => {}
+                        }
+                    } else if let Some(axis) = reading_pct_pos {
+                        let val_str = e.unescape().unwrap_or_default();
+                        if let Ok(val) = val_str.trim().parse::<i32>() {
+                            match axis {
+                                'H' => *pct_pos_h = Some(val),
+                                'V' => *pct_pos_v = Some(val),
+                                _ => {}
+                            }
                         }
                     } else if let Some(axis) = reading_pos_offset {
                         let val_str = e.unescape().unwrap_or_default();
@@ -397,6 +412,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             align_h,
                             align_v,
                             wrap_side,
+                            pct_pos_h,
+                            pct_pos_v,
                             ..
                         } = old
                         {
@@ -422,6 +439,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                         align_v,
                                         wrap_side: wrap_side
                                             .unwrap_or(WrapSide::BothSides),
+                                        pct_pos_h,
+                                        pct_pos_v,
                                     };
                                     push_float(&mut state, &mut stack, float);
                                 } else {
@@ -591,6 +610,12 @@ enum ParseState {
         reading_pos_offset: Option<char>,
         in_position_h: bool,
         in_position_v: bool,
+        /// wp14:pctPosHOffset value (percentage × 1000).
+        pct_pos_h: Option<i32>,
+        /// wp14:pctPosVOffset value (percentage × 1000).
+        pct_pos_v: Option<i32>,
+        /// Tracks whether reading text for pctPosHOffset ('H') or pctPosVOffset ('V').
+        reading_pct_pos: Option<char>,
     },
 }
 

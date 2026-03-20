@@ -384,6 +384,12 @@ pub struct FloatingImage {
     /// Vertical alignment (e.g., "top", "center", "bottom") — alternative to offset.
     pub align_v: Option<String>,
     pub wrap_side: WrapSide,
+    /// Percentage-based horizontal position (wp14:pctPosHOffset).
+    /// Value is percentage × 1000 (e.g., 5000 = 5% of page width).
+    pub pct_pos_h: Option<i32>,
+    /// Percentage-based vertical position (wp14:pctPosVOffset).
+    /// Value is percentage × 1000 (e.g., 3000 = 3% of page height).
+    pub pct_pos_v: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

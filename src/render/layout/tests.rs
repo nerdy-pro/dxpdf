@@ -1421,6 +1421,8 @@ use super::*;
             align_h: Some("left".to_string()),
             align_v: None,
             wrap_side: WrapSide::BothSides,
+            pct_pos_h: None,
+            pct_pos_v: None,
         };
         let doc = make_doc(vec![Block::Paragraph(Paragraph {
             properties: ParagraphProperties::default(),
@@ -1557,4 +1559,91 @@ use super::*;
         let y_without = extract_texts(&pages_without).iter().find(|(_, _, t)| t == "After").unwrap().1;
         assert!(y_with > y_without + 5.0,
             "With after-spacing y={y_with} should be further than without y={y_without}");
+    }
+
+    // ==============================================================
+    // Percentage-based float positioning (wp14:pctPosVOffset)
+    // ==============================================================
+
+    fn extract_images(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
+        let mut imgs = Vec::new();
+        for page in pages {
+            for cmd in &page.commands {
+                if let DrawCommand::Image { x, y, width, height, .. } = cmd {
+                    imgs.push((*x, *y, *width, *height));
+                }
+            }
+        }
+        imgs
+    }
+
+    #[test]
+    fn pct_pos_offset_positions_float_by_page_percentage() {
+        // pct_pos_v = 10000 → 10% of page height (792pt) = 79.2pt
+        // pct_pos_h = 50000 → 50% of page width (612pt) = 306pt
+        let float_img = FloatingImage {
+            rel_id: RelId::from("rId1"),
+            width_pt: 50.0,
+            height_pt: 50.0,
+            offset_x_pt: 0.0,
+            offset_y_pt: 0.0,
+            data: Rc::new(vec![0u8; 10]),
+            format_hint: FormatHint::from("png"),
+            align_h: None,
+            align_v: None,
+            wrap_side: WrapSide::BothSides,
+            pct_pos_h: Some(50000),
+            pct_pos_v: Some(10000),
+        };
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties::default(),
+            runs: vec![Inline::TextRun(TextRun {
+                text: "Body".into(),
+                properties: RunProperties::default(),
+            })],
+            floats: vec![float_img],
+            section_properties: None,
+        })]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let imgs = extract_images(&pages);
+        assert!(!imgs.is_empty(), "Should have an image");
+        let (ix, iy, _, _) = imgs[0];
+        // 50% of 612 = 306
+        assert!((ix - 306.0).abs() < 1.0, "Image x={ix}, expected ~306");
+        // 10% of 792 = 79.2
+        assert!((iy - 79.2).abs() < 1.0, "Image y={iy}, expected ~79.2");
+    }
+
+    #[test]
+    fn pct_pos_none_uses_regular_offset() {
+        let float_img = FloatingImage {
+            rel_id: RelId::from("rId1"),
+            width_pt: 50.0,
+            height_pt: 50.0,
+            offset_x_pt: 20.0,
+            offset_y_pt: 10.0,
+            data: Rc::new(vec![0u8; 10]),
+            format_hint: FormatHint::from("png"),
+            align_h: None,
+            align_v: None,
+            wrap_side: WrapSide::BothSides,
+            pct_pos_h: None,
+            pct_pos_v: None,
+        };
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties::default(),
+            runs: vec![Inline::TextRun(TextRun {
+                text: "Body".into(),
+                properties: RunProperties::default(),
+            })],
+            floats: vec![float_img],
+            section_properties: None,
+        })]);
+        let config = LayoutConfig::default();
+        let pages = layout(&doc, &config);
+        let imgs = extract_images(&pages);
+        let (ix, iy, _, _) = imgs[0];
+        // Should use margin_left + offset_x_pt = 72 + 20 = 92
+        assert!((ix - 92.0).abs() < 1.0, "Image x={ix}, expected ~92");
     }

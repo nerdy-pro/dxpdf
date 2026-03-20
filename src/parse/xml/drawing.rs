@@ -20,6 +20,7 @@ pub fn handle_drawing_element(
         ref mut in_position_v,
         ref mut reading_pos_offset,
         ref mut reading_align,
+        ref mut reading_pct_pos,
         ..
     } = state
     {
@@ -62,6 +63,16 @@ pub fn handle_drawing_element(
                     *reading_align = Some('V');
                 }
             }
+            b"pctPosHOffset" => {
+                if *in_position_h {
+                    *reading_pct_pos = Some('H');
+                }
+            }
+            b"pctPosVOffset" => {
+                if *in_position_v {
+                    *reading_pct_pos = Some('V');
+                }
+            }
             b"wrapTight" | b"wrapSquare" | b"wrapThrough" => {
                 if let Some(val) = get_attr(e, b"wrapText")? {
                     *wrap_side = match val.as_str() {
@@ -88,6 +99,7 @@ pub fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
         ref mut in_position_v,
         ref mut reading_pos_offset,
         ref mut reading_align,
+        ref mut reading_pct_pos,
         ..
     } = state
     {
@@ -97,15 +109,24 @@ pub fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
                 if *reading_pos_offset == Some('H') {
                     *reading_pos_offset = None;
                 }
+                if *reading_pct_pos == Some('H') {
+                    *reading_pct_pos = None;
+                }
             }
             b"positionV" => {
                 *in_position_v = false;
                 if *reading_pos_offset == Some('V') {
                     *reading_pos_offset = None;
                 }
+                if *reading_pct_pos == Some('V') {
+                    *reading_pct_pos = None;
+                }
             }
             b"posOffset" => {
                 *reading_pos_offset = None;
+            }
+            b"pctPosHOffset" | b"pctPosVOffset" => {
+                *reading_pct_pos = None;
             }
             b"align" => {
                 *reading_align = None;

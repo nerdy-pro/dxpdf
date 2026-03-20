@@ -244,3 +244,74 @@ use super::*;
         assert_eq!(p.properties.tab_stops[2].position, 9360);
         assert_eq!(p.properties.tab_stops[2].stop_type, TabStopType::Right);
     }
+
+    #[test]
+    fn parse_floating_image_with_pct_pos_offset() {
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:drawing>
+                <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                           xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing">
+                    <wp:extent cx="914400" cy="457200"/>
+                    <wp:positionH relativeFrom="page">
+                        <wp14:pctPosHOffset>5000</wp14:pctPosHOffset>
+                    </wp:positionH>
+                    <wp:positionV relativeFrom="page">
+                        <wp14:pctPosVOffset>3000</wp14:pctPosVOffset>
+                    </wp:positionV>
+                    <wp:wrapNone/>
+                    <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                        <a:graphicData>
+                            <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:blipFill>
+                                    <a:blip r:embed="rId7" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                                </pic:blipFill>
+                            </pic:pic>
+                        </a:graphicData>
+                    </a:graphic>
+                </wp:anchor>
+            </w:drawing></w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        assert_eq!(p.floats.len(), 1);
+        let float = &p.floats[0];
+        assert_eq!(float.rel_id, RelId::from("rId7"));
+        // pctPosHOffset = 5000 → 5% of page width
+        assert_eq!(float.pct_pos_h, Some(5000));
+        // pctPosVOffset = 3000 → 3% of page height
+        assert_eq!(float.pct_pos_v, Some(3000));
+    }
+
+    #[test]
+    fn parse_floating_image_without_pct_pos_has_none() {
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:drawing>
+                <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                    <wp:extent cx="914400" cy="457200"/>
+                    <wp:positionH relativeFrom="margin">
+                        <wp:posOffset>320675</wp:posOffset>
+                    </wp:positionH>
+                    <wp:positionV relativeFrom="margin">
+                        <wp:posOffset>114300</wp:posOffset>
+                    </wp:positionV>
+                    <wp:wrapNone/>
+                    <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                        <a:graphicData>
+                            <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:blipFill>
+                                    <a:blip r:embed="rId8" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                                </pic:blipFill>
+                            </pic:pic>
+                        </a:graphicData>
+                    </a:graphic>
+                </wp:anchor>
+            </w:drawing></w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        let float = &p.floats[0];
+        assert_eq!(float.pct_pos_h, None);
+        assert_eq!(float.pct_pos_v, None);
+        // Should still have absolute offset
+        assert!((float.offset_x_pt - 25.25).abs() < 0.5, "offset_x_pt={}", float.offset_x_pt);
+    }

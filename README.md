@@ -224,7 +224,7 @@ Visual regression tests compare rendered PDFs against Word-generated references 
 - **Cell shading patterns**: Only solid fill colors are rendered. Shading patterns (e.g., `val="pct25"`) are not supported — only `val="clear"` with a `fill` color.
 - **Cell vertical alignment**: Vertical alignment within cells (`w:vAlign`) is not applied; content is always top-aligned.
 - **Floating image distance**: Float-to-text gap uses a fixed 4pt default; `wp:distL`/`wp:distR`/`wp:distT`/`wp:distB` attributes are not parsed yet.
-- **Floating image positioning**: `wp14:pctPosVOffset` (percentage-based positioning) is not supported; only absolute offsets and alignment keywords.
+- **Floating image positioning**: `wp14:pctPosVOffset`/`wp14:pctPosHOffset` percentage-based positioning is supported (relative to page dimensions). `relativeFrom` variants other than `page` are not yet distinguished.
 - **Fonts**: System fonts are used via Skia's font manager with automatic substitution for common proprietary fonts. If neither the requested font nor any substitute is installed, Helvetica is used. Font embedding and subsetting depend on Skia's PDF backend.
 - **Right-to-left text**: Not supported.
 - **Hyphenation**: No automatic hyphenation. Words break at spaces and existing hyphens, but no new hyphenation points are inserted.

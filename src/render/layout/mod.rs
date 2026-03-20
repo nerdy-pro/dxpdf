@@ -140,6 +140,8 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
             initial_config.content_width(),
             initial_config.margin_top,
             initial_config.page_height,
+            initial_config.page_width,
+            initial_config.page_height,
             &doc_defaults,
             &pre_measurer,
             default_tab_stop_pt,

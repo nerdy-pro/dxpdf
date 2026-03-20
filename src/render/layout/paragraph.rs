@@ -23,13 +23,21 @@ impl Layouter {
                 continue;
             }
             let content_w = self.config.content_width();
-            let img_x = match float.align_h.as_deref() {
-                Some("right") => self.config.margin_left + content_w - float.width_pt,
-                Some("center") => self.config.margin_left + (content_w - float.width_pt) / 2.0,
-                Some("left") => self.config.margin_left,
-                _ => self.config.margin_left + float.offset_x_pt,
+            let img_x = if let Some(pct) = float.pct_pos_h {
+                pct as f32 / 100_000.0 * self.config.page_width
+            } else {
+                match float.align_h.as_deref() {
+                    Some("right") => self.config.margin_left + content_w - float.width_pt,
+                    Some("center") => self.config.margin_left + (content_w - float.width_pt) / 2.0,
+                    Some("left") => self.config.margin_left,
+                    _ => self.config.margin_left + float.offset_x_pt,
+                }
             };
-            let img_y = self.cursor_y + float.offset_y_pt;
+            let img_y = if let Some(pct) = float.pct_pos_v {
+                pct as f32 / 100_000.0 * self.config.page_height
+            } else {
+                self.cursor_y + float.offset_y_pt
+            };
 
             self.current_page.commands.push(DrawCommand::Image {
                 x: img_x,
