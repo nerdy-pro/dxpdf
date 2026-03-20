@@ -75,17 +75,60 @@ pub enum DrawCommand {
 #[derive(Debug, Clone)]
 pub struct LayoutedPage {
     pub commands: Vec<DrawCommand>,
+    pub page_width: f32,
+    pub page_height: f32,
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
 pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
-    let mut layouter = Layouter::new(config);
+    // Collect all section configs in document order.
+    // In DOCX, sectPr on a paragraph describes the section it ENDS.
+    // The sequence is: [sect1_props, sect2_props, ..., final_section].
+    // sect1 applies to content before the first break,
+    // sect2 applies to content between break 1 and break 2, etc.
+    let mut section_configs: Vec<LayoutConfig> = Vec::new();
+    for block in &doc.blocks {
+        if let Block::Paragraph(p) = block {
+            if let Some(ref sect) = p.section_properties {
+                let mut cfg = *config;
+                apply_section_to_config(&mut cfg, sect);
+                section_configs.push(cfg);
+            }
+        }
+    }
+    if let Some(ref sect) = doc.final_section {
+        let mut cfg = *config;
+        apply_section_to_config(&mut cfg, sect);
+        section_configs.push(cfg);
+    }
+
+    // The first config in the list applies to the initial pages.
+    // If no sections found, use the default config.
+    let initial_config = section_configs.first().copied().unwrap_or(*config);
+    // Remaining configs are applied at each section break in order.
+    let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
+    next_configs.reverse(); // So we can pop from the end
+
+    let mut layouter = Layouter::new(&initial_config, next_configs);
 
     for block in &doc.blocks {
         layouter.layout_block(block);
     }
 
     layouter.finish()
+}
+
+fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
+    if let Some(ps) = &sect.page_size {
+        config.page_width = ps.width_pt();
+        config.page_height = ps.height_pt();
+    }
+    if let Some(pm) = &sect.page_margins {
+        config.margin_top = pm.top_pt();
+        config.margin_right = pm.right_pt();
+        config.margin_bottom = pm.bottom_pt();
+        config.margin_left = pm.left_pt();
+    }
 }
 
 /// A floating image that affects text layout on the current page.
@@ -102,18 +145,23 @@ struct Layouter {
     current_page: LayoutedPage,
     cursor_y: f32,
     active_floats: Vec<ActiveFloat>,
+    /// Queue of section configs to apply at each section break (reversed, pop from end).
+    next_section_configs: Vec<LayoutConfig>,
 }
 
 impl Layouter {
-    fn new(config: &LayoutConfig) -> Self {
+    fn new(config: &LayoutConfig, next_section_configs: Vec<LayoutConfig>) -> Self {
         Self {
             config: *config,
             pages: Vec::new(),
             current_page: LayoutedPage {
                 commands: Vec::new(),
+                page_width: config.page_width,
+                page_height: config.page_height,
             },
             cursor_y: config.margin_top,
             active_floats: Vec::new(),
+            next_section_configs,
         }
     }
 
@@ -126,11 +174,27 @@ impl Layouter {
             &mut self.current_page,
             LayoutedPage {
                 commands: Vec::new(),
+                page_width: self.config.page_width,
+                page_height: self.config.page_height,
             },
         );
         self.pages.push(page);
         self.cursor_y = self.config.margin_top;
         self.active_floats.clear();
+    }
+
+    /// Handle a section break: finish current page, then switch to
+    /// the next section's config for subsequent pages.
+    fn section_break(&mut self) {
+        self.new_page();
+        // Pop the next section config from the queue
+        if let Some(next_config) = self.next_section_configs.pop() {
+            self.config = next_config;
+            // Update current (new) page dimensions
+            self.current_page.page_width = self.config.page_width;
+            self.current_page.page_height = self.config.page_height;
+            self.cursor_y = self.config.margin_top;
+        }
     }
 
     /// Compute how much the text start position shifts right and width reduces
@@ -159,7 +223,12 @@ impl Layouter {
     fn layout_block(&mut self, block: &Block) {
         self.prune_floats();
         match block {
-            Block::Paragraph(p) => self.layout_paragraph(p),
+            Block::Paragraph(p) => {
+                self.layout_paragraph(p);
+                if p.section_properties.is_some() {
+                    self.section_break();
+                }
+            }
             Block::Table(t) => self.layout_table(t),
         }
     }
@@ -450,6 +519,8 @@ impl Layouter {
         if self.pages.is_empty() {
             self.pages.push(LayoutedPage {
                 commands: Vec::new(),
+                page_width: self.config.page_width,
+                page_height: self.config.page_height,
             });
         }
         self.pages
@@ -606,7 +677,7 @@ mod tests {
     use super::*;
 
     fn make_doc(blocks: Vec<Block>) -> Document {
-        Document { blocks }
+        Document { blocks, final_section: None }
     }
 
     fn simple_paragraph(text: &str) -> Block {
@@ -617,6 +688,7 @@ mod tests {
                 properties: RunProperties::default(),
             })],
             floats: Vec::new(),
+            section_properties: None,
         })
     }
 
@@ -658,6 +730,7 @@ mod tests {
                     properties: RunProperties::default(),
                 })],
                 floats: Vec::new(),
+                section_properties: None,
             }));
         }
         let doc = make_doc(blocks);
@@ -677,6 +750,7 @@ mod tests {
                 properties: RunProperties::default(),
             })],
             floats: Vec::new(),
+            section_properties: None,
         })]);
         let config = LayoutConfig::default();
         let pages = layout(&doc, &config);

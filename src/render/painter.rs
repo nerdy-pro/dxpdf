@@ -1,16 +1,17 @@
 use skia_safe::{pdf, Color4f, Data, Font, FontMgr, FontStyle, Image, Paint, Rect};
 
-use super::layout::{DrawCommand, LayoutConfig, LayoutedPage};
+use super::layout::{DrawCommand, LayoutedPage};
 use crate::error::Error;
 
 /// Render laid-out pages to a PDF byte buffer.
-pub fn render_to_pdf(pages: &[LayoutedPage], config: &LayoutConfig) -> Result<Vec<u8>, Error> {
+pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
     let font_mgr = FontMgr::new();
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
 
     for page in pages {
-        let mut on_page = doc.begin_page((config.page_width, config.page_height), None);
+        let mut on_page =
+            doc.begin_page((page.page_width, page.page_height), None);
         {
             let canvas = on_page.canvas();
             render_page(canvas, page, &font_mgr)?;

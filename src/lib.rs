@@ -15,5 +15,5 @@ pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
 pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
     let config = render::layout::LayoutConfig::default();
     let pages = render::layout::layout(document, &config);
-    render::painter::render_to_pdf(&pages, &config)
+    render::painter::render_to_pdf(&pages)
 }

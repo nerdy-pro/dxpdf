@@ -2,6 +2,9 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub blocks: Vec<Block>,
+    /// Final section properties (from `w:body/w:sectPr`), applies to
+    /// all content after the last mid-document section break.
+    pub final_section: Option<SectionProperties>,
 }
 
 /// A block-level element.
@@ -11,12 +14,66 @@ pub enum Block {
     Table(Table),
 }
 
+/// Page size in twips.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageSize {
+    /// Width in twips.
+    pub width: u32,
+    /// Height in twips.
+    pub height: u32,
+}
+
+impl PageSize {
+    pub fn width_pt(&self) -> f32 {
+        self.width as f32 / 20.0
+    }
+
+    pub fn height_pt(&self) -> f32 {
+        self.height as f32 / 20.0
+    }
+}
+
+/// Page margins in twips.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageMargins {
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+    pub left: u32,
+}
+
+impl PageMargins {
+    pub fn top_pt(&self) -> f32 {
+        self.top as f32 / 20.0
+    }
+    pub fn right_pt(&self) -> f32 {
+        self.right as f32 / 20.0
+    }
+    pub fn bottom_pt(&self) -> f32 {
+        self.bottom as f32 / 20.0
+    }
+    pub fn left_pt(&self) -> f32 {
+        self.left as f32 / 20.0
+    }
+}
+
+/// Section properties from `w:sectPr`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionProperties {
+    pub page_size: Option<PageSize>,
+    pub page_margins: Option<PageMargins>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub runs: Vec<Inline>,
     /// Floating/anchored images attached to this paragraph.
     pub floats: Vec<FloatingImage>,
+    /// If present, this paragraph ends a section with these properties.
+    /// All content from the previous section break up to (and including)
+    /// this paragraph uses this section's page size and margins.
+    pub section_properties: Option<SectionProperties>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

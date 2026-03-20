@@ -10,6 +10,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut stack: Vec<ParseState> = Vec::new();
     let mut state = ParseState::Idle;
+    let mut final_section: Option<SectionProperties> = None;
 
     loop {
         match reader.read_event()? {
@@ -27,16 +28,22 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             props: ParagraphProperties::default(),
                             runs: Vec::new(),
                             floats: Vec::new(),
+                            section_props: None,
                         };
                     }
                     b"pPr" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs, floats) = take_paragraph(&mut state);
+                        let (props, runs, floats, section_props) =
+                            take_paragraph(&mut state);
                         stack.push(ParseState::InParagraph {
                             props: ParagraphProperties::default(),
                             runs,
                             floats,
+                            section_props,
                         });
-                        state = ParseState::InParagraphProperties { props };
+                        state = ParseState::InParagraphProperties {
+                            props,
+                            section_props: None,
+                        };
                     }
                     b"r" if matches!(state, ParseState::InParagraph { .. }) => {
                         stack.push(state);
@@ -106,6 +113,21 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         // Check for extent and blip on Start elements too
                         handle_drawing_element(local, e, &mut state)?;
                     }
+                    b"sectPr"
+                        if matches!(
+                            state,
+                            ParseState::InParagraphProperties { .. }
+                                | ParseState::InBody
+                        ) =>
+                    {
+                        stack.push(state);
+                        state = ParseState::InSectionProperties {
+                            section: SectionProperties {
+                                page_size: None,
+                                page_margins: None,
+                            },
+                        };
+                    }
                     _ => {}
                 }
             }
@@ -114,6 +136,8 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                 let local = local_name(name.as_ref());
                 if matches!(state, ParseState::InDrawing { .. }) {
                     handle_drawing_element(local, e, &mut state)?;
+                } else if matches!(state, ParseState::InSectionProperties { .. }) {
+                    handle_section_element(local, e, &mut state)?;
                 } else {
                     handle_empty_element(local, e, &mut state)?;
                 }
@@ -148,23 +172,32 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         state = ParseState::Idle;
                     }
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs, floats) = take_paragraph(&mut state);
+                        let (props, runs, floats, section_props) =
+                            take_paragraph(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
                         let paragraph = Block::Paragraph(Paragraph {
                             properties: props,
                             runs,
                             floats,
+                            section_properties: section_props,
                         });
                         push_block(&mut state, &mut blocks, paragraph);
                     }
                     b"pPr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
-                        if let ParseState::InParagraphProperties { props } = state {
+                        if let ParseState::InParagraphProperties {
+                            props,
+                            section_props,
+                        } = state
+                        {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             if let ParseState::InParagraph {
-                                props: ref mut p, ..
+                                props: ref mut p,
+                                section_props: ref mut sp,
+                                ..
                             } = state
                             {
                                 *p = props;
+                                *sp = section_props;
                             }
                         }
                     }
@@ -299,6 +332,28 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             }
                         }
                     }
+                    b"sectPr"
+                        if matches!(
+                            state,
+                            ParseState::InSectionProperties { .. }
+                        ) =>
+                    {
+                        if let ParseState::InSectionProperties { section } = state {
+                            state = stack.pop().unwrap_or(ParseState::Idle);
+                            match state {
+                                ParseState::InParagraphProperties {
+                                    ref mut section_props,
+                                    ..
+                                } => {
+                                    *section_props = Some(section);
+                                }
+                                ParseState::InBody => {
+                                    final_section = Some(section);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     _ if matches!(state, ParseState::InDrawing { .. }) => {
                         // Handle sub-element End events (positionH, positionV, posOffset)
                         handle_drawing_end(local, &mut state);
@@ -314,7 +369,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
         }
     }
 
-    Ok(Document { blocks })
+    Ok(Document { blocks, final_section })
 }
 
 enum ParseState {
@@ -324,9 +379,14 @@ enum ParseState {
         props: ParagraphProperties,
         runs: Vec<Inline>,
         floats: Vec<FloatingImage>,
+        section_props: Option<SectionProperties>,
     },
     InParagraphProperties {
         props: ParagraphProperties,
+        section_props: Option<SectionProperties>,
+    },
+    InSectionProperties {
+        section: SectionProperties,
     },
     InRun {
         props: RunProperties,
@@ -371,11 +431,15 @@ fn matches_body_or_cell(state: &ParseState) -> bool {
     )
 }
 
-fn take_paragraph(state: &mut ParseState) -> (ParagraphProperties, Vec<Inline>, Vec<FloatingImage>) {
+fn take_paragraph(
+    state: &mut ParseState,
+) -> (ParagraphProperties, Vec<Inline>, Vec<FloatingImage>, Option<SectionProperties>) {
     let old = std::mem::replace(state, ParseState::Idle);
     match old {
-        ParseState::InParagraph { props, runs, floats } => (props, runs, floats),
-        _ => (ParagraphProperties::default(), Vec::new(), Vec::new()),
+        ParseState::InParagraph { props, runs, floats, section_props } => {
+            (props, runs, floats, section_props)
+        }
+        _ => (ParagraphProperties::default(), Vec::new(), Vec::new(), None),
     }
 }
 
@@ -444,7 +508,7 @@ fn handle_empty_element(
                 _ => {}
             }
         }
-        ParseState::InParagraphProperties { ref mut props } => {
+        ParseState::InParagraphProperties { ref mut props, .. } => {
             match local {
                 b"jc" => {
                     if let Some(val) = get_attr(e, b"val")? {
@@ -525,6 +589,50 @@ fn push_inline(state: &mut ParseState, inline: Inline) {
         }
         _ => {}
     }
+}
+
+/// Handle elements inside a `w:sectPr` to extract page size and margins.
+fn handle_section_element(
+    local: &[u8],
+    e: &quick_xml::events::BytesStart<'_>,
+    state: &mut ParseState,
+) -> Result<(), Error> {
+    if let ParseState::InSectionProperties { ref mut section } = state {
+        match local {
+            b"pgSz" => {
+                let w = get_attr(e, b"w")?.and_then(|v| v.parse::<u32>().ok());
+                let h = get_attr(e, b"h")?.and_then(|v| v.parse::<u32>().ok());
+                if let (Some(w), Some(h)) = (w, h) {
+                    section.page_size = Some(PageSize {
+                        width: w,
+                        height: h,
+                    });
+                }
+            }
+            b"pgMar" => {
+                let top = get_attr(e, b"top")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1440);
+                let right = get_attr(e, b"right")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1440);
+                let bottom = get_attr(e, b"bottom")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1440);
+                let left = get_attr(e, b"left")?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1440);
+                section.page_margins = Some(PageMargins {
+                    top,
+                    right,
+                    bottom,
+                    left,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Handle elements inside a `w:drawing` subtree to extract image info.
@@ -924,5 +1032,48 @@ mod tests {
         assert!(matches!(p.runs[0], Inline::TextRun(_)));
         assert!(matches!(p.runs[1], Inline::Image(_)));
         assert!(matches!(p.runs[2], Inline::TextRun(_)));
+    }
+
+    #[test]
+    fn parse_section_properties() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:pPr>
+                    <w:sectPr>
+                        <w:pgSz w:w="11906" w:h="16838"/>
+                        <w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/>
+                    </w:sectPr>
+                </w:pPr>
+                <w:r><w:t>Section 1</w:t></w:r>
+            </w:p>
+            <w:p><w:r><w:t>Section 2</w:t></w:r></w:p>
+            <w:sectPr>
+                <w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>
+                <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+            </w:sectPr>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        assert_eq!(doc.blocks.len(), 2);
+
+        // First paragraph should have section properties (mid-document break)
+        let Block::Paragraph(p1) = &doc.blocks[0] else { panic!() };
+        let sect1 = p1.section_properties.as_ref().expect("section_properties missing");
+        let ps1 = sect1.page_size.unwrap();
+        assert_eq!(ps1.width, 11906); // A4 portrait
+        assert_eq!(ps1.height, 16838);
+        let pm1 = sect1.page_margins.unwrap();
+        assert_eq!(pm1.top, 720);
+
+        // Second paragraph should NOT have section properties
+        let Block::Paragraph(p2) = &doc.blocks[1] else { panic!() };
+        assert!(p2.section_properties.is_none());
+
+        // Final section should be on the document
+        let final_sect = doc.final_section.as_ref().expect("final_section missing");
+        let ps2 = final_sect.page_size.unwrap();
+        assert_eq!(ps2.width, 16838); // A4 landscape
+        assert_eq!(ps2.height, 11906);
+        let pm2 = final_sect.page_margins.unwrap();
+        assert_eq!(pm2.top, 1440);
     }
 }
