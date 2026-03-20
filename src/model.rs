@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::units::{self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS,
     DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS};
 
 /// Shared image data — avoids cloning large byte buffers during layout.
-pub type ImageData = Arc<Vec<u8>>;
+pub type ImageData = Rc<Vec<u8>>;
 
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +17,7 @@ pub struct Document {
     /// Default font size in half-points.
     pub default_font_size: u32,
     /// Default font family.
-    pub default_font_family: String,
+    pub default_font_family: Rc<str>,
     /// Default paragraph spacing.
     pub default_spacing: Spacing,
     /// Default table cell margins.
@@ -39,7 +39,7 @@ impl Default for Document {
             final_section: None,
             default_tab_stop: DEFAULT_TAB_STOP_TWIPS,
             default_font_size: DEFAULT_FONT_SIZE_HALF_PTS,
-            default_font_family: DEFAULT_FONT_FAMILY.to_string(),
+            default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
             default_spacing: Spacing::default(),
             default_cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
@@ -292,7 +292,7 @@ pub struct RunProperties {
     pub underline: bool,
     /// Font size in half-points (OOXML native for w:sz).
     pub font_size: Option<u32>,
-    pub font_family: Option<String>,
+    pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
 }
 

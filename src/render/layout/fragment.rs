@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::model::*;
 use crate::units::*;
 
@@ -6,7 +8,7 @@ use super::measurer::TextMeasurer;
 /// Document-level defaults for layout.
 pub struct DocDefaultsLayout {
     pub font_size_half_pts: u32,
-    pub font_family: String,
+    pub font_family: Rc<str>,
     pub default_spacing: Spacing,
     pub default_cell_margins: CellMargins,
     pub table_cell_spacing: Spacing,
@@ -19,7 +21,7 @@ impl DocDefaultsLayout {
     pub fn from_document(doc: &crate::model::Document) -> Self {
         Self {
             font_size_half_pts: doc.default_font_size,
-            font_family: doc.default_font_family.clone(),
+            font_family: Rc::clone(&doc.default_font_family),
             default_spacing: doc.default_spacing,
             default_cell_margins: doc.default_cell_margins,
             table_cell_spacing: doc.table_cell_spacing,
@@ -34,7 +36,7 @@ impl DocDefaultsLayout {
 pub enum Fragment {
     Text {
         text: String,
-        font_family: String,
+        font_family: Rc<str>,
         font_size: f32,
         bold: bool,
         italic: bool,

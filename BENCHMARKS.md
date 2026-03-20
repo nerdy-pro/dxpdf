@@ -35,7 +35,8 @@ Conversion benchmarks for `docx-pdf` using the test document:
 | 2026-03-20 | spaces | 89.6 ms ± 0.8 ms | 88.2 ms | 90.8 ms | 18.8 MB | +space handling, render order fix (shading→content→borders), hyphen wrapping |
 | 2026-03-20 | hdr/ftr | 112.3 ms ± 2.1 ms | 109.7 ms | 119.5 ms | 19.0 MB | +headers/footers, signed EMU offsets, float align, header extent push-down |
 | 2026-03-20 | review | 114.4 ms ± 2.4 ms | 111.7 ms | 120.5 ms | 19.0 MB | Code review: constants, DocDefaultsLayout factory, private newtype fields, Deref impls |
-| 2026-03-20 | latest | 113.7 ms ± 1.8 ms | 112.3 ms | 119.2 ms | 19.0 MB | Arc\<Vec\<u8\>\> for image data — avoids deep cloning in layout pipeline |
+| 2026-03-20 | arc | 113.7 ms ± 1.8 ms | 112.3 ms | 119.2 ms | 19.0 MB | Arc\<Vec\<u8\>\> for image data — avoids deep cloning in layout pipeline |
+| 2026-03-20 | latest | 114.0 ms ± 1.3 ms | 111.0 ms | 117.8 ms | 18.8 MB | Rc\<Vec\<u8\>\> for images, Rc\<str\> for font families — no atomic overhead |
 
 ### Methodology
 

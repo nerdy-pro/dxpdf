@@ -4,7 +4,7 @@ pub mod xml;
 use std::collections::HashMap;
 use std::path::Path;
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::error::Error;
 use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties};
@@ -18,7 +18,7 @@ fn resolve_image_data(
 ) {
     if let Some(target) = rels.get(rel_id.as_str()) {
         if let Some(bytes) = media.get(target) {
-            *data = Arc::new(bytes.clone());
+            *data = Rc::new(bytes.clone());
             *format_hint = FormatHint::from(
                 Path::new(target)
                     .extension()
@@ -39,14 +39,14 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     }
     // Apply theme font as default (can be overridden by docDefaults)
     if let Some(ref tf) = contents.theme_minor_font {
-        document.default_font_family = tf.clone();
+        document.default_font_family = Rc::from(tf.as_str());
     }
     if let Some(dd) = &contents.doc_defaults {
         if let Some(fs) = dd.font_size {
             document.default_font_size = fs;
         }
         if let Some(ref ff) = dd.font_family {
-            document.default_font_family = ff.clone();
+            document.default_font_family = Rc::from(ff.as_str());
         }
         if let Some(sa) = dd.spacing_after {
             document.default_spacing.after = Some(sa);

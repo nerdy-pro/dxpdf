@@ -56,7 +56,7 @@ pub enum DrawCommand {
         x: f32,
         y: f32,
         text: String,
-        font_family: String,
+        font_family: std::rc::Rc<str>,
         font_size: f32,
         bold: bool,
         italic: bool,

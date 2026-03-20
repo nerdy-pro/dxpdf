@@ -124,9 +124,9 @@ pub fn handle_empty_element(
                 }
                 b"rFonts" => {
                     if let Some(val) = get_attr(e, b"ascii")? {
-                        props.font_family = Some(val);
+                        props.font_family = Some(std::rc::Rc::from(val.as_str()));
                     } else if let Some(val) = get_attr(e, b"hAnsi")? {
-                        props.font_family = Some(val);
+                        props.font_family = Some(std::rc::Rc::from(val.as_str()));
                     }
                 }
                 b"color" => {
