@@ -63,6 +63,22 @@ impl Layouter {
         let mut first_line = true;
 
         while line_start < fragments.len() {
+            // Skip leading space fragments at the start of a new line
+            if !first_line {
+                while line_start < fragments.len() {
+                    if let Fragment::Text { ref text, .. } = fragments[line_start] {
+                        if text.trim().is_empty() {
+                            line_start += 1;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                if line_start >= fragments.len() {
+                    break;
+                }
+            }
+
             let first_line_offset = if first_line {
                 indent.first_line_pt()
             } else {

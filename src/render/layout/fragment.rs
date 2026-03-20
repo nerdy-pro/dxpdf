@@ -73,7 +73,6 @@ pub fn collect_fragments(
     for run in runs {
         match run {
             Inline::TextRun(tr) => {
-                let collapsed = collapse_spaces(&tr.text);
                 let font_family = tr
                     .properties
                     .font_family
@@ -86,7 +85,7 @@ pub fn collect_fragments(
                 let italic = tr.properties.italic;
                 let line_height =
                     measurer.line_height(&font_family, font_size, bold, italic);
-                for part in split_words_and_spaces(&collapsed) {
+                for part in split_words_and_spaces(&tr.text) {
                     let measured_width = measurer.measure_width(
                         part,
                         &font_family,
@@ -200,24 +199,6 @@ fn split_words_and_spaces(text: &str) -> Vec<&str> {
         parts.push(&text[start..]);
     }
     parts
-}
-
-/// Collapse runs of more than 2 consecutive spaces into a single space.
-fn collapse_spaces(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut space_count = 0;
-    for ch in text.chars() {
-        if ch == ' ' {
-            space_count += 1;
-            if space_count <= SPACE_COLLAPSE_THRESHOLD {
-                result.push(ch);
-            }
-        } else {
-            space_count = 0;
-            result.push(ch);
-        }
-    }
-    result
 }
 
 pub fn measure_fragments(fragments: &[Fragment]) -> f32 {

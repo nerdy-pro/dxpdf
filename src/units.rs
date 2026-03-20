@@ -79,9 +79,6 @@ pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 2.0;
 /// Spacing after a table (in points).
 pub const TABLE_AFTER_SPACING_PT: f32 = 8.0;
 
-/// Maximum consecutive spaces before collapsing.
-pub const SPACE_COLLAPSE_THRESHOLD: usize = 2;
-
 /// OOXML width type for twips.
 pub const WIDTH_TYPE_DXA: &str = "dxa";
 

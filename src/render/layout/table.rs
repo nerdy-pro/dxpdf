@@ -177,7 +177,24 @@ impl Layouter {
                         }
 
                         let mut line_start = 0;
+                        let mut is_first_line = true;
                         while line_start < fragments.len() {
+                            // Skip leading spaces at start of new lines
+                            if !is_first_line {
+                                while line_start < fragments.len() {
+                                    if let Fragment::Text { ref text, .. } = fragments[line_start] {
+                                        if text.trim().is_empty() {
+                                            line_start += 1;
+                                            continue;
+                                        }
+                                    }
+                                    break;
+                                }
+                                if line_start >= fragments.len() {
+                                    break;
+                                }
+                            }
+
                             let (line_end, _) = fit_fragments(
                                 &fragments[line_start..],
                                 cell_content_width,
@@ -282,6 +299,7 @@ impl Layouter {
                             }
 
                             line_start = actual_end;
+                            is_first_line = false;
                         }
 
                         cell_y += spacing.after_pt();
