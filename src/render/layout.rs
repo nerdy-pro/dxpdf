@@ -425,21 +425,144 @@ impl Layouter {
         let content_width = self.config.content_width();
         let col_width = content_width / num_cols as f32;
         let cell_padding = 4.0;
+        let cell_content_width = col_width - cell_padding * 2.0;
 
         for row in &table.rows {
-            // Estimate row height
-            let row_height = 20.0_f32; // Simple fixed row height for now
+            // First pass: lay out each cell's content to compute row height
+            let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
+            let mut row_height = cell_padding * 2.0 + 12.0; // minimum row height
 
+            for (col_idx, cell) in row.cells.iter().enumerate() {
+                let cell_x = self.config.margin_left + col_idx as f32 * col_width;
+                let mut commands = Vec::new();
+                let mut cell_y = cell_padding;
+
+                for block in &cell.blocks {
+                    if let Block::Paragraph(p) = block {
+                        let spacing = p.properties.spacing.unwrap_or_default();
+                        cell_y += spacing.before_pt();
+
+                        let fragments = collect_fragments(
+                            &p.runs,
+                            cell_content_width,
+                            self.config.content_height(),
+                        );
+
+                        if fragments.is_empty() {
+                            cell_y += spacing.line_pt();
+                            cell_y += spacing.after_pt();
+                            continue;
+                        }
+
+                        let mut line_start = 0;
+                        while line_start < fragments.len() {
+                            let (line_end, _) = fit_fragments(
+                                &fragments[line_start..],
+                                cell_content_width,
+                            );
+                            let actual_end = line_start + line_end.max(1);
+
+                            let line_height = fragments[line_start..actual_end]
+                                .iter()
+                                .map(|f| f.height())
+                                .fold(spacing.line_pt(), f32::max);
+
+                            cell_y += line_height;
+
+                            let mut x = cell_x + cell_padding;
+
+                            for frag in &fragments[line_start..actual_end] {
+                                match frag {
+                                    Fragment::Text {
+                                        text,
+                                        font_family,
+                                        font_size,
+                                        bold,
+                                        italic,
+                                        underline,
+                                        color,
+                                    } => {
+                                        let c = color
+                                            .map(|c| (c.r, c.g, c.b))
+                                            .unwrap_or((0, 0, 0));
+
+                                        // y offset is relative to row top; will be
+                                        // adjusted when we know the final row_top
+                                        commands.push(DrawCommand::Text {
+                                            x,
+                                            y: cell_y, // relative to cell top
+                                            text: text.clone(),
+                                            font_family: font_family.clone(),
+                                            font_size: *font_size,
+                                            bold: *bold,
+                                            italic: *italic,
+                                            color: c,
+                                        });
+
+                                        let frag_width =
+                                            estimate_text_width(text, *font_size);
+
+                                        if *underline {
+                                            commands.push(DrawCommand::Underline {
+                                                x1: x,
+                                                y1: cell_y + 2.0,
+                                                x2: x + frag_width,
+                                                y2: cell_y + 2.0,
+                                                color: c,
+                                                width: 0.5,
+                                            });
+                                        }
+
+                                        x += frag_width;
+                                    }
+                                    Fragment::Image { width, height, data } => {
+                                        commands.push(DrawCommand::Image {
+                                            x,
+                                            y: cell_y - height,
+                                            width: *width,
+                                            height: *height,
+                                            data: data.clone(),
+                                        });
+                                        x += width;
+                                    }
+                                    Fragment::Tab => {
+                                        let rel_x = x - (cell_x + cell_padding);
+                                        let next_stop = find_next_tab_stop(
+                                            rel_x,
+                                            &p.properties.tab_stops,
+                                            self.default_tab_stop_pt,
+                                        );
+                                        x = cell_x + cell_padding + next_stop;
+                                    }
+                                }
+                            }
+
+                            line_start = actual_end;
+                        }
+
+                        cell_y += spacing.after_pt();
+                    }
+                }
+
+                let total_cell_height = cell_y + cell_padding;
+                if total_cell_height > row_height {
+                    row_height = total_cell_height;
+                }
+                cell_layouts.push(commands);
+            }
+
+            // Page break if needed
             if self.cursor_y + row_height > self.content_bottom() {
                 self.new_page();
             }
 
             let row_top = self.cursor_y;
 
-            for (col_idx, cell) in row.cells.iter().enumerate() {
+            // Second pass: emit cell content with correct row_top y offset
+            for (col_idx, commands) in cell_layouts.iter().enumerate() {
                 let cell_x = self.config.margin_left + col_idx as f32 * col_width;
 
-                // Draw cell border (top and left)
+                // Cell borders: top and left
                 self.current_page.commands.push(DrawCommand::Line {
                     x1: cell_x,
                     y1: row_top,
@@ -457,42 +580,6 @@ impl Layouter {
                     width: 0.5,
                 });
 
-                // Render cell text (first paragraph only for simplicity)
-                if let Some(Block::Paragraph(p)) = cell.blocks.first() {
-                    let text: String = p
-                        .runs
-                        .iter()
-                        .filter_map(|r| match r {
-                            Inline::TextRun(tr) => Some(tr.text.as_str()),
-                            Inline::Tab => Some("\t"),
-                            Inline::LineBreak => Some("\n"),
-                            Inline::Image(_) => None,
-                        })
-                        .collect();
-
-                    if !text.is_empty() {
-                        let font_size = p
-                            .runs
-                            .iter()
-                            .find_map(|r| match r {
-                                Inline::TextRun(tr) => Some(tr.properties.font_size_pt()),
-                                _ => None,
-                            })
-                            .unwrap_or(12.0);
-
-                        self.current_page.commands.push(DrawCommand::Text {
-                            x: cell_x + cell_padding,
-                            y: row_top + row_height - cell_padding,
-                            text,
-                            font_family: "Helvetica".to_string(),
-                            font_size,
-                            bold: false,
-                            italic: false,
-                            color: (0, 0, 0),
-                        });
-                    }
-                }
-
                 // Right border for last column
                 if col_idx == row.cells.len() - 1 {
                     self.current_page.commands.push(DrawCommand::Line {
@@ -504,13 +591,52 @@ impl Layouter {
                         width: 0.5,
                     });
                 }
+
+                // Emit content commands with y offset by row_top
+                for cmd in commands {
+                    let adjusted = match cmd {
+                        DrawCommand::Text {
+                            x, y, text, font_family, font_size,
+                            bold, italic, color,
+                        } => DrawCommand::Text {
+                            x: *x,
+                            y: row_top + y,
+                            text: text.clone(),
+                            font_family: font_family.clone(),
+                            font_size: *font_size,
+                            bold: *bold,
+                            italic: *italic,
+                            color: *color,
+                        },
+                        DrawCommand::Underline {
+                            x1, y1, x2, y2, color, width,
+                        } => DrawCommand::Underline {
+                            x1: *x1,
+                            y1: row_top + y1,
+                            x2: *x2,
+                            y2: row_top + y2,
+                            color: *color,
+                            width: *width,
+                        },
+                        DrawCommand::Image {
+                            x, y, width, height, data,
+                        } => DrawCommand::Image {
+                            x: *x,
+                            y: row_top + y,
+                            width: *width,
+                            height: *height,
+                            data: data.clone(),
+                        },
+                        DrawCommand::Line { .. } => cmd.clone(),
+                    };
+                    self.current_page.commands.push(adjusted);
+                }
             }
 
             self.cursor_y += row_height;
 
             // Bottom border
-            let cols_in_row = row.cells.len();
-            let table_width = cols_in_row as f32 * col_width;
+            let table_width = row.cells.len() as f32 * col_width;
             self.current_page.commands.push(DrawCommand::Line {
                 x1: self.config.margin_left,
                 y1: self.cursor_y,
