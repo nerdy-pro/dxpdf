@@ -173,10 +173,9 @@ pub(super) fn layout_header_footer_blocks(
                     .iter()
                     .map(|f| f.height())
                     .fold(0.0_f32, f32::max);
-                let line_height = match spacing.line_pt_opt() {
-                    Some(lh) => frag_height.max(lh),
-                    None => frag_height,
-                };
+                let line_height = resolve_line_height(
+                    frag_height, spacing.line_spacing(),
+                );
                 cursor_y += line_height;
 
                 let used_width = measure_fragments(&fragments[line_start..actual_end]);

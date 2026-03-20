@@ -254,12 +254,41 @@ pub enum Alignment {
     Justify,
 }
 
+/// Line spacing rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineRule {
+    /// `line` value is a multiplier: 240 = single (100%), 480 = double (200%).
+    Auto,
+    /// `line` value is an exact height in twips.
+    Exact,
+    /// `line` value is a minimum height in twips.
+    AtLeast,
+}
+
+impl Default for LineRule {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Resolved line spacing value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineSpacing {
+    /// Multiplier of font's natural line height (1.0 = single, 1.15 = 1.15x).
+    Multiplier(f32),
+    /// Fixed height in points.
+    Fixed(f32),
+    /// Minimum height in points.
+    AtLeast(f32),
+}
+
 /// Spacing in twips.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Spacing {
     pub before: Option<u32>,
     pub after: Option<u32>,
     pub line: Option<u32>,
+    pub line_rule: LineRule,
 }
 
 /// Indentation in twips.
@@ -579,16 +608,26 @@ impl Spacing {
         self.after.map(twips_to_pt).unwrap_or(0.0)
     }
 
-    /// Line spacing in points, or `None` if not explicitly set
-    /// (meaning the font's natural line height should be used).
-    pub fn line_pt_opt(&self) -> Option<f32> {
-        self.line.map(twips_to_pt)
+    /// Line spacing: returns (value, is_multiplier).
+    /// For `Auto`: value is multiplier (1.0 = single spacing).
+    /// For `Exact`/`AtLeast`: value is points.
+    /// Returns `None` if not explicitly set.
+    pub fn line_spacing(&self) -> Option<LineSpacing> {
+        self.line.map(|v| match self.line_rule {
+            LineRule::Auto => LineSpacing::Multiplier(v as f32 / 240.0),
+            LineRule::Exact => LineSpacing::Fixed(twips_to_pt(v)),
+            LineRule::AtLeast => LineSpacing::AtLeast(twips_to_pt(v)),
+        })
     }
 
     /// Line spacing in points with a fixed fallback of 12pt.
-    /// Prefer `line_pt_opt()` when natural font height should be used.
+    /// For `Auto` rule, returns the multiplier * 12pt as a rough estimate.
     pub fn line_pt(&self) -> f32 {
-        self.line_pt_opt().unwrap_or(twips_to_pt(240))
+        match self.line_spacing() {
+            Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => pt,
+            Some(LineSpacing::Multiplier(m)) => m * twips_to_pt(240),
+            None => twips_to_pt(240),
+        }
     }
 }
 
@@ -646,7 +685,7 @@ mod tests {
 
     #[test]
     fn spacing_conversion() {
-        let s = Spacing { before: Some(240), after: Some(120), line: Some(360) };
+        let s = Spacing { before: Some(240), after: Some(120), line: Some(360), ..Default::default() };
         assert_eq!(s.before_pt(), 12.0);
         assert_eq!(s.after_pt(), 6.0);
         assert_eq!(s.line_pt(), 18.0);

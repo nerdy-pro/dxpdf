@@ -87,6 +87,7 @@ use super::*;
                         before: Some(100),
                         after: Some(100),
                         line: Some(240),
+                        ..Default::default()
                     }),
                     ..Default::default()
                 },
@@ -406,9 +407,10 @@ use super::*;
                 Block::Paragraph(Paragraph {
                     properties: ParagraphProperties {
                         spacing: Some(Spacing {
-                            before: Some(200), // 10pt
-                            after: Some(200),  // 10pt
+                            before: Some(200),
+                            after: Some(200),
                             line: None,
+                            ..Default::default()
                         }),
                         ..Default::default()
                     },
@@ -422,9 +424,10 @@ use super::*;
                 Block::Paragraph(Paragraph {
                     properties: ParagraphProperties {
                         spacing: Some(Spacing {
-                            before: Some(100), // 5pt
+                            before: Some(100),
                             after: None,
                             line: None,
+                            ..Default::default()
                         }),
                         ..Default::default()
                     },
@@ -620,7 +623,7 @@ use super::*;
     fn paragraph_shading_excludes_spacing() {
         let doc = make_doc(vec![Block::Paragraph(Paragraph {
             properties: ParagraphProperties {
-                spacing: Some(Spacing { before: Some(200), after: Some(200), line: None }),
+                spacing: Some(Spacing { before: Some(200), after: Some(200), line: None, ..Default::default() }),
                 shading: Some(Color { r: 200, g: 200, b: 200 }),
                 ..Default::default()
             },

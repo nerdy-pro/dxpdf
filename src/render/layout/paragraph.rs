@@ -121,10 +121,9 @@ impl Layouter {
                 .take(1)
                 .map(|f| f.height())
                 .fold(0.0_f32, f32::max);
-            let tentative_line_height = match spacing.line_pt_opt() {
-                Some(lh) => tentative_frag_height.max(lh),
-                None => tentative_frag_height,
-            };
+            let tentative_line_height = resolve_line_height(
+                tentative_frag_height, spacing.line_spacing(),
+            );
             let line_top = self.cursor_y;
             let line_bottom = self.cursor_y + tentative_line_height;
             let (float_x_shift, float_width_reduction) =
@@ -141,10 +140,7 @@ impl Layouter {
                 .iter()
                 .map(|f| f.height())
                 .fold(0.0_f32, f32::max);
-            let line_height = match spacing.line_pt_opt() {
-                Some(lh) => frag_height.max(lh),
-                None => frag_height,
-            };
+            let line_height = resolve_line_height(frag_height, spacing.line_spacing());
 
             if self.cursor_y + line_height > self.content_bottom() {
                 self.new_page();

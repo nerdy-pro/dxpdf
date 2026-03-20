@@ -174,6 +174,14 @@ pub fn handle_empty_element(
                     if let Some(val) = get_attr(e, b"line")? {
                         spacing.line = val.parse().ok();
                     }
+                    if let Some(val) = get_attr(e, b"lineRule")? {
+                        spacing.line_rule = match val.as_str() {
+                            "auto" => LineRule::Auto,
+                            "exact" => LineRule::Exact,
+                            "atLeast" => LineRule::AtLeast,
+                            _ => LineRule::Auto,
+                        };
+                    }
                     props.spacing = Some(spacing);
                 }
                 b"ind" => {

@@ -280,6 +280,7 @@ impl Layouter {
                 before: s.before.or(defaults.before),
                 after: s.after.or(defaults.after),
                 line: s.line.or(defaults.line),
+                line_rule: if s.line.is_some() { s.line_rule } else { defaults.line_rule },
             },
             None => *defaults,
         }
@@ -299,6 +300,7 @@ impl Layouter {
                 before: s.before.or(table_defaults.before),
                 after: s.after.or(table_defaults.after),
                 line: s.line.or(table_defaults.line),
+                line_rule: if s.line.is_some() { s.line_rule } else { table_defaults.line_rule },
             },
             None => table_defaults,
         }

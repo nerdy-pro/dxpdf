@@ -233,6 +233,16 @@ fn split_words_and_spaces(text: &str) -> Vec<&str> {
     parts
 }
 
+/// Resolve line height from fragment height and spacing rule.
+pub fn resolve_line_height(frag_height: f32, spacing: Option<LineSpacing>) -> f32 {
+    match spacing {
+        Some(LineSpacing::Multiplier(m)) => frag_height * m,
+        Some(LineSpacing::Fixed(pt)) => pt,
+        Some(LineSpacing::AtLeast(pt)) => frag_height.max(pt),
+        None => frag_height,
+    }
+}
+
 pub fn measure_fragments(fragments: &[Fragment]) -> f32 {
     fragments.iter().map(|f| f.width()).sum()
 }
