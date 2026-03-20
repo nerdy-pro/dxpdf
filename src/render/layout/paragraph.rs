@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::model::*;
 use crate::units::*;
 
@@ -7,7 +9,11 @@ use super::{ActiveFloat, DrawCommand, Layouter};
 impl Layouter {
     pub(super) fn layout_paragraph(&mut self, para: &Paragraph) {
         let spacing = self.resolve_spacing(para.properties.spacing);
-        let indent = para.properties.indentation.unwrap_or_default();
+        let mut indent = para.properties.indentation.unwrap_or_default();
+
+        // Resolve list label and override indentation
+        let list_label = para.properties.list_ref.as_ref()
+            .and_then(|lr| self.resolve_list_label(lr));
 
         self.cursor_y += spacing.before_pt();
 
@@ -51,6 +57,21 @@ impl Layouter {
             self.cursor_y += spacing.after_pt();
             return;
         }
+
+        // Apply list indentation (overrides paragraph indentation)
+        let (list_label_text, list_label_x) = if let Some((ref label, left, hanging)) = list_label {
+            // List indentation: left = total indent, hanging = label offset
+            if indent.left.is_none() {
+                indent.left = Some((left * crate::units::TWIPS_PER_POINT) as u32);
+            }
+            if indent.first_line.is_none() {
+                indent.first_line = Some(-((hanging * crate::units::TWIPS_PER_POINT) as i32));
+            }
+            let label_x = self.config.margin_left + left - hanging;
+            (Some(label.clone()), Some(label_x))
+        } else {
+            (None, None)
+        };
 
         let base_content_width = self.config.content_width()
             - indent.left_pt()
@@ -144,6 +165,27 @@ impl Layouter {
             };
 
             let mut x = base_x + first_line_offset + float_x_shift + x_offset;
+
+            // Draw list label on the first line
+            if first_line {
+                if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
+                    let font = &self.doc_defaults.font_family;
+                    let fs = self.doc_defaults.font_size_half_pts as f32
+                        / crate::units::HALF_POINTS_PER_POINT;
+                    self.current_page.commands.push(DrawCommand::Text {
+                        x: lx,
+                        y: self.cursor_y,
+                        text: label.clone(),
+                        font_family: Rc::clone(font),
+                        char_spacing_pt: 0.0,
+                        font_size: fs,
+                        bold: false,
+                        italic: false,
+                        color: (0, 0, 0),
+                    });
+                }
+            }
+
             // Track text area for paragraph shading
             if text_area_top.is_none() {
                 text_area_top = Some(self.cursor_y);

@@ -28,6 +28,7 @@ pub struct DocDefaults {
 }
 
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
+#[derive(Debug)]
 pub struct DocxContents {
     pub document_xml: String,
     /// Relationship ID -> target path (relative to `word/`).
@@ -44,6 +45,8 @@ pub struct DocxContents {
     pub header_footer_rels: HashMap<String, HashMap<String, String>>,
     /// Minor (body) font name from theme (e.g., "Calibri").
     pub theme_minor_font: Option<String>,
+    /// Numbering definitions from `word/numbering.xml`.
+    pub numbering: crate::model::NumberingMap,
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -117,7 +120,17 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         dd.styles = parsed_styles;
     }
 
-    // 6. Extract theme fonts from word/theme/theme1.xml
+    // 6. Extract numbering definitions from word/numbering.xml
+    let numbering = match archive.by_name("word/numbering.xml") {
+        Ok(mut file) => {
+            let mut xml = String::new();
+            file.read_to_string(&mut xml)?;
+            parse_numbering(&xml)
+        }
+        Err(_) => crate::model::NumberingMap::new(),
+    };
+
+    // 7. Extract theme fonts from word/theme/theme1.xml
     let (theme_minor_font, _theme_major_font) = extract_theme_fonts(&mut archive);
 
     // 7. Extract header/footer XML files
@@ -185,6 +198,7 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         default_tab_stop,
         doc_defaults,
         theme_minor_font,
+        numbering,
     })
 }
 
@@ -552,6 +566,194 @@ fn parse_default_tab_stop(xml: &str) -> Option<u32> {
         }
     }
     None
+}
+
+/// Parse numbering definitions from word/numbering.xml.
+fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
+    use crate::model::{NumberFormat, NumberingDef, NumberingLevel};
+
+    let mut reader = Reader::from_str(xml);
+    let mut abstract_nums: HashMap<u32, Vec<NumberingLevel>> = HashMap::new();
+    let mut num_to_abstract: HashMap<u32, u32> = HashMap::new();
+
+    let mut in_abstract = false;
+    let mut abstract_id: u32 = 0;
+    let mut in_lvl = false;
+    let mut lvl_ilvl: u32 = 0;
+    let mut lvl_fmt = String::new();
+    let mut lvl_text = String::new();
+    let mut lvl_start: u32 = 1;
+    let mut lvl_ind_left: u32 = 0;
+    let mut lvl_ind_hanging: u32 = 0;
+    let mut current_levels: Vec<NumberingLevel> = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"abstractNum" => {
+                        in_abstract = true;
+                        current_levels.clear();
+                        if let Some(v) = attr_val(e, b"abstractNumId") {
+                            abstract_id = v.parse().unwrap_or(0);
+                        }
+                    }
+                    b"lvl" if in_abstract => {
+                        in_lvl = true;
+                        lvl_fmt.clear();
+                        lvl_text.clear();
+                        lvl_start = 1;
+                        lvl_ind_left = 0;
+                        lvl_ind_hanging = 0;
+                        if let Some(v) = attr_val(e, b"ilvl") {
+                            lvl_ilvl = v.parse().unwrap_or(0);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                match local {
+                    b"abstractNum" => {
+                        abstract_nums.insert(abstract_id, current_levels.clone());
+                        in_abstract = false;
+                    }
+                    b"lvl" => {
+                        if in_lvl {
+                            let format = match lvl_fmt.as_str() {
+                                "bullet" => NumberFormat::Bullet(lvl_text.clone()),
+                                "decimal" => NumberFormat::Decimal,
+                                "lowerLetter" => NumberFormat::LowerLetter,
+                                "upperLetter" => NumberFormat::UpperLetter,
+                                "lowerRoman" => NumberFormat::LowerRoman,
+                                "upperRoman" => NumberFormat::UpperRoman,
+                                _ => NumberFormat::Decimal,
+                            };
+                            // Ensure levels vec is large enough
+                            while current_levels.len() <= lvl_ilvl as usize {
+                                current_levels.push(NumberingLevel {
+                                    format: NumberFormat::Decimal,
+                                    level_text: String::new(),
+                                    start: 1,
+                                    indent_left: 0,
+                                    indent_hanging: 0,
+                                });
+                            }
+                            current_levels[lvl_ilvl as usize] = NumberingLevel {
+                                format,
+                                level_text: lvl_text.clone(),
+                                start: lvl_start,
+                                indent_left: lvl_ind_left,
+                                indent_hanging: lvl_ind_hanging,
+                            };
+                            in_lvl = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let name = e.name();
+                let local = local_name(name.as_ref());
+                if in_lvl {
+                    match local {
+                        b"numFmt" => {
+                            if let Some(v) = attr_val(e, b"val") {
+                                lvl_fmt = v;
+                            }
+                        }
+                        b"lvlText" => {
+                            if let Some(v) = attr_val(e, b"val") {
+                                lvl_text = v;
+                            }
+                        }
+                        b"start" => {
+                            if let Some(v) = attr_val(e, b"val") {
+                                lvl_start = v.parse().unwrap_or(1);
+                            }
+                        }
+                        b"ind" => {
+                            if let Some(v) = attr_val(e, b"left") {
+                                lvl_ind_left = v.parse().unwrap_or(0);
+                            }
+                            if let Some(v) = attr_val(e, b"hanging") {
+                                lvl_ind_hanging = v.parse().unwrap_or(0);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(_) => break,
+            _ => {}
+        }
+    }
+
+    // Second pass for num -> abstractNum mapping (simpler with regex)
+    for m in regex_like_find_nums(xml) {
+        num_to_abstract.insert(m.0, m.1);
+    }
+
+    // Build final map
+    let mut result = crate::model::NumberingMap::new();
+    for (num_id, abstract_id) in &num_to_abstract {
+        if let Some(levels) = abstract_nums.get(abstract_id) {
+            result.insert(
+                *num_id,
+                NumberingDef {
+                    levels: levels.clone(),
+                },
+            );
+        }
+    }
+    result
+}
+
+/// Simple extraction of num -> abstractNum mappings.
+fn regex_like_find_nums(xml: &str) -> Vec<(u32, u32)> {
+    let mut result = Vec::new();
+    let bytes = xml.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Find <w:num w:numId="X">
+        if let Some(pos) = xml[i..].find("<w:num ") {
+            let abs_pos = i + pos;
+            let end = xml[abs_pos..].find('>').map(|p| abs_pos + p).unwrap_or(xml.len());
+            let tag = &xml[abs_pos..end + 1];
+            // Extract numId
+            if let Some(nid_start) = tag.find("w:numId=\"") {
+                let nid_start = nid_start + 9;
+                if let Some(nid_end) = tag[nid_start..].find('"') {
+                    if let Ok(num_id) = tag[nid_start..nid_start + nid_end].parse::<u32>() {
+                        // Find abstractNumId inside this num element
+                        let num_end = xml[abs_pos..].find("</w:num>")
+                            .map(|p| abs_pos + p)
+                            .unwrap_or(xml.len());
+                        let num_body = &xml[abs_pos..num_end];
+                        if let Some(aid_pos) = num_body.find("w:abstractNumId") {
+                            if let Some(val_start) = num_body[aid_pos..].find("w:val=\"") {
+                                let vs = aid_pos + val_start + 7;
+                                if let Some(val_end) = num_body[vs..].find('"') {
+                                    if let Ok(abstract_id) = num_body[vs..vs + val_end].parse::<u32>() {
+                                        result.push((num_id, abstract_id));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = end + 1;
+        } else {
+            break;
+        }
+    }
+    result
 }
 
 /// Parse named paragraph styles from word/styles.xml.

@@ -412,6 +412,22 @@ fn layout_header_footer_blocks(
     (commands, max_y)
 }
 
+fn to_roman(mut n: u32) -> String {
+    let table = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+    let mut result = String::new();
+    for &(value, numeral) in &table {
+        while n >= value {
+            result.push_str(numeral);
+            n -= value;
+        }
+    }
+    result
+}
+
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
     if let Some(ps) = &sect.page_size {
         config.page_width = ps.width_pt();
@@ -445,6 +461,8 @@ struct Layouter {
     default_tab_stop_pt: f32,
     doc_defaults: DocDefaultsLayout,
     measurer: TextMeasurer,
+    /// Counters for numbered lists: (numId, level) -> current count.
+    list_counters: std::collections::HashMap<(u32, u32), u32>,
 }
 
 impl Layouter {
@@ -469,6 +487,7 @@ impl Layouter {
             default_tab_stop_pt,
             doc_defaults,
             measurer,
+            list_counters: std::collections::HashMap::new(),
         }
     }
 
@@ -554,6 +573,58 @@ impl Layouter {
                 .sum();
         }
         cell.width_pt().unwrap_or(72.0)
+    }
+
+    /// Resolve list label text and indentation for a paragraph with a list reference.
+    fn resolve_list_label(&mut self, list_ref: &ListRef) -> Option<(String, f32, f32)> {
+        let def = self.doc_defaults.numbering.get(&list_ref.num_id)?;
+        let level = def.levels.get(list_ref.level as usize)?;
+
+        let label = match &level.format {
+            NumberFormat::Bullet(ch) => ch.clone(),
+            NumberFormat::Decimal => {
+                let counter = self.list_counters
+                    .entry((list_ref.num_id, list_ref.level))
+                    .or_insert(level.start.saturating_sub(1));
+                *counter += 1;
+                level.level_text.replace("%1", &counter.to_string())
+            }
+            NumberFormat::LowerLetter => {
+                let counter = self.list_counters
+                    .entry((list_ref.num_id, list_ref.level))
+                    .or_insert(level.start.saturating_sub(1));
+                *counter += 1;
+                let ch = (b'a' + ((*counter - 1) % 26) as u8) as char;
+                level.level_text.replace("%1", &ch.to_string())
+            }
+            NumberFormat::UpperLetter => {
+                let counter = self.list_counters
+                    .entry((list_ref.num_id, list_ref.level))
+                    .or_insert(level.start.saturating_sub(1));
+                *counter += 1;
+                let ch = (b'A' + ((*counter - 1) % 26) as u8) as char;
+                level.level_text.replace("%1", &ch.to_string())
+            }
+            NumberFormat::LowerRoman | NumberFormat::UpperRoman => {
+                let counter = self.list_counters
+                    .entry((list_ref.num_id, list_ref.level))
+                    .or_insert(level.start.saturating_sub(1));
+                *counter += 1;
+                // Simple roman numeral conversion
+                let roman = to_roman(*counter);
+                let roman = if matches!(level.format, NumberFormat::LowerRoman) {
+                    roman.to_lowercase()
+                } else {
+                    roman
+                };
+                level.level_text.replace("%1", &roman)
+            }
+        };
+
+        let indent_left = twips_to_pt(level.indent_left);
+        let indent_hanging = twips_to_pt(level.indent_hanging);
+
+        Some((label, indent_left, indent_hanging))
     }
 
     fn prune_floats(&mut self) {

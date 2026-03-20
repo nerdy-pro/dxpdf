@@ -15,6 +15,7 @@ pub struct DocDefaultsLayout {
     pub default_table_borders: TableBorders,
     pub default_header: Option<HeaderFooter>,
     pub default_footer: Option<HeaderFooter>,
+    pub numbering: NumberingMap,
 }
 
 impl DocDefaultsLayout {
@@ -28,6 +29,7 @@ impl DocDefaultsLayout {
             default_table_borders: doc.default_table_borders,
             default_header: doc.default_header.clone(),
             default_footer: doc.default_footer.clone(),
+            numbering: doc.numbering.clone(),
         }
     }
 }

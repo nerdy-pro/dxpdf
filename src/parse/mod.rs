@@ -70,6 +70,9 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
             document.styles = dd.styles.clone();
         }
     }
+    if !contents.numbering.is_empty() {
+        document.numbering = contents.numbering.clone();
+    }
     resolve_images(
         &mut document,
         &contents.relationships,

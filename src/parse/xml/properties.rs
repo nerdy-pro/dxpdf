@@ -226,6 +226,30 @@ pub fn handle_empty_element(
                         props.style_id = Some(val);
                     }
                 }
+                b"ilvl" => {
+                    // Part of w:numPr — set level on existing list ref
+                    if let Some(val) = get_attr(e, b"val")? {
+                        if let Ok(lvl) = val.parse::<u32>() {
+                            let lr = props.list_ref.get_or_insert(ListRef {
+                                num_id: 0,
+                                level: 0,
+                            });
+                            lr.level = lvl;
+                        }
+                    }
+                }
+                b"numId" => {
+                    // Part of w:numPr — set numId on existing list ref
+                    if let Some(val) = get_attr(e, b"val")? {
+                        if let Ok(nid) = val.parse::<u32>() {
+                            let lr = props.list_ref.get_or_insert(ListRef {
+                                num_id: 0,
+                                level: 0,
+                            });
+                            lr.num_id = nid;
+                        }
+                    }
+                }
                 _ => {}
             }
         }

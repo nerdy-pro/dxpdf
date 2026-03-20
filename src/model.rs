@@ -32,6 +32,46 @@ pub struct ResolvedRunStyle {
 /// Map of style IDs to resolved properties.
 pub type StyleMap = HashMap<String, ResolvedParagraphStyle>;
 
+/// Number format type for list items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumberFormat {
+    Bullet(String),     // The bullet character
+    Decimal,            // 1, 2, 3
+    LowerLetter,        // a, b, c
+    UpperLetter,        // A, B, C
+    LowerRoman,         // i, ii, iii
+    UpperRoman,         // I, II, III
+}
+
+/// A single numbering level definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NumberingLevel {
+    pub format: NumberFormat,
+    /// Format pattern (e.g., "%1." for "1.")
+    pub level_text: String,
+    pub start: u32,
+    /// Indentation: left margin in twips.
+    pub indent_left: u32,
+    /// Indentation: hanging indent in twips.
+    pub indent_hanging: u32,
+}
+
+/// A numbering definition (abstractNum + num mapping).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NumberingDef {
+    pub levels: Vec<NumberingLevel>,
+}
+
+/// Map of numId -> NumberingDef.
+pub type NumberingMap = HashMap<u32, NumberingDef>;
+
+/// List reference on a paragraph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListRef {
+    pub num_id: u32,
+    pub level: u32,
+}
+
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -54,6 +94,8 @@ pub struct Document {
     pub default_table_borders: TableBorders,
     /// Named paragraph/run styles resolved from `word/styles.xml`.
     pub styles: StyleMap,
+    /// Numbering definitions from `word/numbering.xml`.
+    pub numbering: NumberingMap,
     /// Default header content (from first/final section).
     pub default_header: Option<HeaderFooter>,
     /// Default footer content (from first/final section).
@@ -73,6 +115,7 @@ impl Default for Document {
             table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
             default_table_borders: TableBorders::default(),
             styles: StyleMap::new(),
+            numbering: NumberingMap::new(),
             default_header: None,
             default_footer: None,
         }
@@ -176,6 +219,8 @@ pub struct ParagraphProperties {
     pub shading: Option<Color>,
     /// Referenced paragraph style ID (e.g., "Kopfzeile").
     pub style_id: Option<String>,
+    /// List reference (numId + level) from `w:numPr`.
+    pub list_ref: Option<ListRef>,
 }
 
 /// A tab stop alignment type.
