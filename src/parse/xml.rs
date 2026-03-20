@@ -64,6 +64,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         stack.push(state);
                         state = ParseState::InTable {
                             rows: Vec::new(),
+                            grid_cols: Vec::new(),
                         };
                     }
                     b"tr" if matches!(state, ParseState::InTable { .. }) => {
@@ -76,6 +77,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         stack.push(state);
                         state = ParseState::InTableCell {
                             blocks: Vec::new(),
+                            width: None,
                         };
                     }
                     b"t" if matches!(state, ParseState::InRun { .. }) => {
@@ -236,16 +238,16 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         }
                     }
                     b"tbl" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { rows } = state {
+                        if let ParseState::InTable { rows, grid_cols } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table { rows });
+                            let table = Block::Table(Table { rows, grid_cols });
                             push_block(&mut state, &mut blocks, table);
                         }
                     }
                     b"tr" if matches!(state, ParseState::InTableRow { .. }) => {
                         if let ParseState::InTableRow { cells } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            if let ParseState::InTable { ref mut rows } = state {
+                            if let ParseState::InTable { ref mut rows, .. } = state {
                                 rows.push(TableRow { cells });
                             }
                         }
@@ -253,12 +255,14 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                     b"tc" if matches!(state, ParseState::InTableCell { .. }) => {
                         if let ParseState::InTableCell {
                             blocks: cell_blocks,
+                            width: cell_width,
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             if let ParseState::InTableRow { ref mut cells } = state {
                                 cells.push(TableCell {
                                     blocks: cell_blocks,
+                                    width: cell_width,
                                 });
                             }
                         }
@@ -400,12 +404,14 @@ enum ParseState {
     },
     InTable {
         rows: Vec<TableRow>,
+        grid_cols: Vec<u32>,
     },
     InTableRow {
         cells: Vec<TableCell>,
     },
     InTableCell {
         blocks: Vec<Block>,
+        width: Option<u32>,
     },
     /// Inside a `w:drawing` subtree. We track nested depth and collect image info.
     InDrawing {
@@ -454,7 +460,7 @@ fn take_run(state: &mut ParseState) -> (RunProperties, String) {
 fn push_block(state: &mut ParseState, top_blocks: &mut Vec<Block>, block: Block) {
     match state {
         ParseState::InBody => top_blocks.push(block),
-        ParseState::InTableCell { ref mut blocks } => blocks.push(block),
+        ParseState::InTableCell { ref mut blocks, .. } => blocks.push(block),
         _ => top_blocks.push(block),
     }
 }
@@ -574,6 +580,28 @@ fn handle_empty_element(
                     }
                 }
                 _ => {}
+            }
+        }
+        ParseState::InTable { ref mut grid_cols, .. } => {
+            if local == b"gridCol" {
+                if let Some(val) = get_attr(e, b"w")? {
+                    if let Ok(w) = val.parse::<u32>() {
+                        grid_cols.push(w);
+                    }
+                }
+            }
+        }
+        ParseState::InTableCell { ref mut width, .. } => {
+            if local == b"tcW" {
+                // Only store width if type is "dxa" (twips), not "pct" or "auto"
+                let w_type = get_attr(e, b"type")?.unwrap_or_default();
+                if w_type == "dxa" {
+                    if let Some(val) = get_attr(e, b"w")? {
+                        if let Ok(w) = val.parse::<u32>() {
+                            *width = Some(w);
+                        }
+                    }
+                }
             }
         }
         _ => {}

@@ -218,6 +218,12 @@ impl Layouter {
         (x_shift, width_reduction)
     }
 
+    /// Get the width of a table cell: use tcW if available, otherwise grid_cols.
+    fn cell_width(&self, col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
+        cell.width_pt()
+            .unwrap_or_else(|| col_widths.get(col_idx).copied().unwrap_or(72.0))
+    }
+
     /// Prune floats that the cursor has moved past.
     fn prune_floats(&mut self) {
         self.active_floats
@@ -423,17 +429,41 @@ impl Layouter {
         }
 
         let content_width = self.config.content_width();
-        let col_width = content_width / num_cols as f32;
         let cell_padding = 4.0;
-        let cell_content_width = col_width - cell_padding * 2.0;
+
+        // Compute column widths in points
+        let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
+            // Use grid column definitions, scaled to fit content width
+            let grid_total: f32 = table.grid_cols.iter().map(|w| *w as f32 / 20.0).sum();
+            let scale = if grid_total > 0.0 {
+                content_width / grid_total
+            } else {
+                1.0
+            };
+            table.grid_cols.iter().map(|w| *w as f32 / 20.0 * scale).collect()
+        } else {
+            // Fall back to even distribution
+            vec![content_width / num_cols as f32; num_cols]
+        };
 
         for row in &table.rows {
             // First pass: lay out each cell's content to compute row height
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
             let mut row_height = cell_padding * 2.0 + 12.0; // minimum row height
 
+            // Compute x positions for each cell
+            let mut col_x_positions: Vec<f32> = Vec::with_capacity(row.cells.len());
+            let mut x_acc = self.config.margin_left;
+            for i in 0..row.cells.len() {
+                col_x_positions.push(x_acc);
+                let w = self.cell_width(i, &row.cells[i], &col_widths);
+                x_acc += w;
+            }
+
             for (col_idx, cell) in row.cells.iter().enumerate() {
-                let cell_x = self.config.margin_left + col_idx as f32 * col_width;
+                let cell_x = col_x_positions[col_idx];
+                let col_width = self.cell_width(col_idx, cell, &col_widths);
+                let cell_content_width = (col_width - cell_padding * 2.0).max(1.0);
                 let mut commands = Vec::new();
                 let mut cell_y = cell_padding;
 
@@ -599,13 +629,14 @@ impl Layouter {
 
             // Second pass: emit cell content with correct row_top y offset
             for (col_idx, commands) in cell_layouts.iter().enumerate() {
-                let cell_x = self.config.margin_left + col_idx as f32 * col_width;
+                let cell_x = col_x_positions[col_idx];
+                let cw = self.cell_width(col_idx, &row.cells[col_idx], &col_widths);
 
                 // Cell borders: top and left
                 self.current_page.commands.push(DrawCommand::Line {
                     x1: cell_x,
                     y1: row_top,
-                    x2: cell_x + col_width,
+                    x2: cell_x + cw,
                     y2: row_top,
                     color: (0, 0, 0),
                     width: 0.5,
@@ -622,9 +653,9 @@ impl Layouter {
                 // Right border for last column
                 if col_idx == row.cells.len() - 1 {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: cell_x + col_width,
+                        x1: cell_x + cw,
                         y1: row_top,
-                        x2: cell_x + col_width,
+                        x2: cell_x + cw,
                         y2: row_top + row_height,
                         color: (0, 0, 0),
                         width: 0.5,
@@ -675,7 +706,9 @@ impl Layouter {
             self.cursor_y += row_height;
 
             // Bottom border
-            let table_width = row.cells.len() as f32 * col_width;
+            let table_width: f32 = (0..row.cells.len())
+                .map(|i| self.cell_width(i, &row.cells[i], &col_widths))
+                .sum();
             self.current_page.commands.push(DrawCommand::Line {
                 x1: self.config.margin_left,
                 y1: self.cursor_y,

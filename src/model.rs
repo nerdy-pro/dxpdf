@@ -234,6 +234,8 @@ pub struct Color {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     pub rows: Vec<TableRow>,
+    /// Column widths from `w:tblGrid` in twips.
+    pub grid_cols: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -244,6 +246,14 @@ pub struct TableRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
+    /// Cell width in twips from `w:tcW`, if specified.
+    pub width: Option<u32>,
+}
+
+impl TableCell {
+    pub fn width_pt(&self) -> Option<f32> {
+        self.width.map(|w| w as f32 / 20.0)
+    }
 }
 
 /// Convert English Metric Units to points (914400 EMU = 1 inch = 72 points).
