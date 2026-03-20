@@ -96,6 +96,8 @@ impl Layouter {
                 grid_col_idx += cell.grid_span.max(1) as usize;
             }
 
+            let row_height_limit = self.content_bottom() - self.cursor_y;
+
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
                 let col_width = cell_widths_computed[col_idx];
@@ -134,19 +136,18 @@ impl Layouter {
                                 1.0,
                                 f32::min(
                                     cell_content_width / float.width_pt.max(1.0),
-                                    self.config.content_height()
+                                    (row_height_limit - cell_y)
+                                        .max(1.0)
+                                        .min(self.config.content_height())
                                         / float.height_pt.max(1.0),
                                 ),
                             );
                             let img_w = float.width_pt * scale;
                             let img_h = float.height_pt * scale;
-                            let img_x = if float.offset_x_pt > 0.0
-                                && float.offset_x_pt + img_w <= cell_content_width
-                            {
-                                cell_x + pad_left + float.offset_x_pt
-                            } else {
-                                cell_x + (col_width - img_w) / 2.0
-                            };
+                            // In table cells, center the image horizontally.
+                            // Page-relative offsets don't apply inside cells.
+                            let img_x =
+                                cell_x + (col_width - img_w) / 2.0;
                             commands.push(DrawCommand::Image {
                                 x: img_x,
                                 y: cell_y,
@@ -328,13 +329,14 @@ impl Layouter {
             let num_rows = table.rows.len();
             let num_cells = row.cells.len();
 
-            // Emit cell borders and content
+            // Emit shading, content, then borders (borders on top)
             for (col_idx, commands) in cell_layouts.iter().enumerate() {
                 let cell_x = col_x_positions[col_idx];
                 let cw = cell_widths_computed[col_idx];
                 let cell = &row.cells[col_idx];
                 let row_bottom = row_top + row_height;
-                // Cell shading (background fill) — render before borders and content
+
+                // 1. Cell shading (background fill) — behind everything
                 if let Some(color) = &cell.shading {
                     self.current_page.commands.push(DrawCommand::Rect {
                         x: cell_x,
@@ -345,6 +347,13 @@ impl Layouter {
                     });
                 }
 
+                // 2. Cell content (text, images) — on top of shading
+                for cmd in commands {
+                    let adjusted = offset_command(cmd, row_top);
+                    self.current_page.commands.push(adjusted);
+                }
+
+                // 3. Cell borders — on top of everything
                 let cell_b = cell.cell_borders.unwrap_or_default();
                 let is_first_row = row_idx == 0;
                 let is_last_row = row_idx == num_rows - 1;
@@ -400,11 +409,6 @@ impl Layouter {
                     &mut self.current_page.commands,
                     &border, cell_x, row_bottom, cell_x + cw, row_bottom,
                 );
-
-                for cmd in commands {
-                    let adjusted = offset_command(cmd, row_top);
-                    self.current_page.commands.push(adjusted);
-                }
             }
 
             self.cursor_y += row_height;

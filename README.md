@@ -159,7 +159,8 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Line spacing**: when no explicit `w:line` is set, the font's natural line height (from Skia metrics) is used rather than a fixed default, matching Word's single-spacing behavior
 - **Multi-section documents**: each section can have its own page size and margins; section breaks trigger new pages with updated dimensions. Section configs are pre-collected and applied in order
 - **Document defaults**: paragraphs without explicit spacing/font settings fall back to the document-level defaults from `word/styles.xml`
-- **Whitespace collapsing**: runs of excessive consecutive spaces are collapsed to prevent manual-alignment whitespace from Word from disrupting layout
+- **Whitespace handling**: `xml:space="preserve"` spaces are measured at their actual width; long space runs naturally overflow the line and wrap, matching Word's behavior. Leading spaces at line boundaries are skipped to prevent blank lines
+- **Render order**: cell shading → cell content (text, images) → cell borders, ensuring borders are always visible on top of content
 
 ## Running Tests
 
