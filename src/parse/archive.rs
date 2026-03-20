@@ -19,6 +19,8 @@ pub struct DocDefaults {
     pub spacing_before: Option<u32>,
     /// Default line spacing in twips.
     pub spacing_line: Option<u32>,
+    /// Default line spacing rule.
+    pub spacing_line_rule: Option<crate::model::LineRule>,
     /// Default table cell margins from the table grid style.
     pub cell_margins: Option<crate::model::CellMargins>,
     /// Default paragraph spacing inside table cells (from table grid style).
@@ -325,6 +327,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
     let mut spacing_after = None;
     let mut spacing_before = None;
     let mut spacing_line = None;
+    let mut spacing_line_rule = None;
     let mut cell_margins: Option<crate::model::CellMargins> = None;
     let mut in_tbl_cell_mar = false;
     let mut table_cell_spacing: Option<crate::model::Spacing> = None;
@@ -424,6 +427,12 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             b"after" => spacing_after = val.parse().ok(),
                             b"before" => spacing_before = val.parse().ok(),
                             b"line" => spacing_line = val.parse().ok(),
+                            b"lineRule" => spacing_line_rule = match val.as_ref() {
+                                "auto" => Some(crate::model::LineRule::Auto),
+                                "exact" => Some(crate::model::LineRule::Exact),
+                                "atLeast" => Some(crate::model::LineRule::AtLeast),
+                                _ => None,
+                            },
                             _ => {}
                         }
                     }
@@ -532,6 +541,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
             spacing_after,
             spacing_before,
             spacing_line,
+            spacing_line_rule,
             cell_margins,
             table_cell_spacing,
             table_borders,

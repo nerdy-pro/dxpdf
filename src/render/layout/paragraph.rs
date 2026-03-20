@@ -48,7 +48,13 @@ impl Layouter {
         }
 
         if para.runs.is_empty() && para.floats.is_empty() {
-            self.cursor_y += spacing.line_pt();
+            // For empty paragraphs, compute line height from the default font
+            let default_size = self.doc_defaults.font_size_half_pts as f32
+                / HALF_POINTS_PER_POINT;
+            let natural_height = self.measurer.line_height(
+                &self.doc_defaults.font_family, default_size, false, false,
+            );
+            self.cursor_y += resolve_line_height(natural_height, spacing.line_spacing());
             self.cursor_y += spacing.after_pt();
             return;
         }

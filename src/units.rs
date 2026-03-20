@@ -79,10 +79,10 @@ pub const BORDER_SIZE_PER_POINT: f32 = 8.0;
 pub const MIN_ROW_HEIGHT_PT: f32 = 0.0;
 
 /// Minimum bottom padding in cells to prevent descender overlap (in points).
-pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 2.0;
+pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 1.0;
 
 /// Spacing after a table (in points).
-pub const TABLE_AFTER_SPACING_PT: f32 = 8.0;
+pub const TABLE_AFTER_SPACING_PT: f32 = 0.0;
 
 /// Border size units per point (w:sz is in eighths of a point).
 pub const BORDER_SIZE_UNITS_PER_POINT: f32 = 8.0;
@@ -94,7 +94,7 @@ pub const HALF_POINTS_PER_POINT: f32 = 2.0;
 pub const HF_MAX_IMAGE_HEIGHT: f32 = 100.0;
 
 /// Gap between header bottom and body content (in points).
-pub const HEADER_BODY_GAP_PT: f32 = 4.0;
+pub const HEADER_BODY_GAP_PT: f32 = 0.0;
 
 /// OOXML width type for twips.
 pub const WIDTH_TYPE_DXA: &str = "dxa";

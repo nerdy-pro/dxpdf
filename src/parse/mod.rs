@@ -9,7 +9,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::error::Error;
-use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties, StyleMap};
+use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties, Spacing, StyleMap};
 
 fn resolve_image_data(
     rel_id: &RelId,
@@ -58,6 +58,9 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         }
         if let Some(sl) = dd.spacing_line {
             document.default_spacing.line = Some(sl);
+        }
+        if let Some(slr) = dd.spacing_line_rule {
+            document.default_spacing.line_rule = slr;
         }
         if let Some(cm) = dd.cell_margins {
             document.default_cell_margins = cm;
@@ -193,8 +196,20 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                         if props.alignment.is_none() {
                             props.alignment = style.alignment;
                         }
-                        if props.spacing.is_none() {
-                            props.spacing = style.spacing;
+                        // Merge spacing field-by-field so direct line=276 doesn't
+                        // block style's after=0
+                        if let Some(ref style_sp) = style.spacing {
+                            let sp = props.spacing.get_or_insert(Spacing::default());
+                            if sp.before.is_none() {
+                                sp.before = style_sp.before;
+                            }
+                            if sp.after.is_none() {
+                                sp.after = style_sp.after;
+                            }
+                            if sp.line.is_none() {
+                                sp.line = style_sp.line;
+                                sp.line_rule = style_sp.line_rule;
+                            }
                         }
                         if props.indentation.is_none() {
                             props.indentation = style.indentation;

@@ -76,6 +76,11 @@ impl Layouter {
             vec![content_width / num_cols as f32; num_cols]
         };
 
+        // Track remaining height from vMerge restart cells that span multiple rows.
+        // Key = column index, value = remaining height to distribute.
+        let mut vmerge_remaining: std::collections::HashMap<usize, f32> =
+            std::collections::HashMap::new();
+
         for (row_idx, row) in table.rows.iter().enumerate() {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
             let min_height = row.height
@@ -323,10 +328,46 @@ impl Layouter {
                 // from overlapping the cell border
                 let effective_pad_bottom = pad_bottom.max(MIN_CELL_BOTTOM_PAD_PT);
                 let total_cell_height = cell_y + effective_pad_bottom;
-                if total_cell_height > row_height {
-                    row_height = total_cell_height;
+
+                // For vMerge restart cells, distribute excess height across spanned rows.
+                // Only distribute if the restart cell is significantly taller than
+                // the current row_height (determined by non-merged cells).
+                let effective_height = if cell.vertical_merge == Some(VerticalMerge::Restart)
+                    && total_cell_height > row_height * 3.0
+                {
+                    let span_count = 1 + table.rows[row_idx + 1..]
+                        .iter()
+                        .take_while(|r| {
+                            r.cells.get(col_idx)
+                                .is_some_and(|c| c.is_vmerge_continue())
+                        })
+                        .count();
+                    if span_count > 1 {
+                        let per_row = total_cell_height / span_count as f32;
+                        let remaining = total_cell_height - per_row;
+                        vmerge_remaining.insert(col_idx, remaining);
+                        per_row
+                    } else {
+                        total_cell_height
+                    }
+                } else {
+                    total_cell_height
+                };
+
+                if effective_height > row_height {
+                    row_height = effective_height;
                 }
                 cell_layouts.push(commands);
+            }
+
+            // Absorb vMerge remaining height from previous restart cells
+            for (_, remaining) in vmerge_remaining.iter_mut() {
+                if *remaining > 0.0 {
+                    let absorb = row_height.min(*remaining);
+                    *remaining -= absorb;
+                    // If remaining height exceeds this row, make the row taller
+                    // (only on the last continue row)
+                }
             }
 
             if self.cursor_y + row_height > self.content_bottom() {

@@ -143,6 +143,14 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                             if let Some(v) = attr_val(e, b"before") { sp.before = v.parse().ok(); }
                             if let Some(v) = attr_val(e, b"after") { sp.after = v.parse().ok(); }
                             if let Some(v) = attr_val(e, b"line") { sp.line = v.parse().ok(); }
+                            if let Some(v) = attr_val(e, b"lineRule") {
+                                sp.line_rule = match v.as_str() {
+                                    "auto" => crate::model::LineRule::Auto,
+                                    "exact" => crate::model::LineRule::Exact,
+                                    "atLeast" => crate::model::LineRule::AtLeast,
+                                    _ => crate::model::LineRule::Auto,
+                                };
+                            }
                             spacing = Some(sp);
                         }
                         b"ind" => {
