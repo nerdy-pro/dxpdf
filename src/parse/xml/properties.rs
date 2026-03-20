@@ -141,6 +141,12 @@ pub fn handle_empty_element(
                         }
                     }
                 }
+                b"spacing" => {
+                    // w:spacing in rPr = character spacing (in twips)
+                    if let Some(val) = get_attr(e, b"val")? {
+                        props.char_spacing = val.parse::<i32>().ok();
+                    }
+                }
                 _ => {}
             }
         }

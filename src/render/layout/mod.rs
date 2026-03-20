@@ -57,6 +57,7 @@ pub enum DrawCommand {
         y: f32,
         text: String,
         font_family: std::rc::Rc<str>,
+        char_spacing_pt: f32,
         font_size: f32,
         bold: bool,
         italic: bool,
@@ -351,7 +352,7 @@ fn layout_header_footer_blocks(
                     match frag {
                         Fragment::Text {
                             text, font_family, font_size, bold, italic,
-                            underline, color, shading, measured_width, ..
+                            underline, color, shading, char_spacing_pt, measured_width, ..
                         } => {
                             let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                             if let Some(bg) = shading {
@@ -366,6 +367,7 @@ fn layout_header_footer_blocks(
                             commands.push(DrawCommand::Text {
                                 x, y: cursor_y, text: text.clone(),
                                 font_family: font_family.clone(),
+                                char_spacing_pt: *char_spacing_pt,
                                 font_size: *font_size, bold: *bold, italic: *italic,
                                 color: c,
                             });

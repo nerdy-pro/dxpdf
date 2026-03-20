@@ -240,6 +240,7 @@ impl Layouter {
                                         underline,
                                         color,
                                         shading,
+                                        char_spacing_pt,
                                         measured_width,
                                         ..
                                     } => {
@@ -262,6 +263,7 @@ impl Layouter {
                                             y: cell_y,
                                             text: text.clone(),
                                             font_family: font_family.clone(),
+                                            char_spacing_pt: *char_spacing_pt,
                                             font_size: *font_size,
                                             bold: *bold,
                                             italic: *italic,
@@ -439,6 +441,7 @@ fn offset_command(cmd: &DrawCommand, row_top: f32) -> DrawCommand {
             y,
             text,
             font_family,
+            char_spacing_pt,
             font_size,
             bold,
             italic,
@@ -448,6 +451,7 @@ fn offset_command(cmd: &DrawCommand, row_top: f32) -> DrawCommand {
             y: row_top + y,
             text: text.clone(),
             font_family: font_family.clone(),
+            char_spacing_pt: *char_spacing_pt,
             font_size: *font_size,
             bold: *bold,
             italic: *italic,

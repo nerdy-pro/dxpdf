@@ -31,8 +31,8 @@ fn render_page(
 ) -> Result<(), Error> {
     for cmd in &page.commands {
         match cmd {
-            DrawCommand::Text { x, y, text, font_family, font_size, bold, italic, color } => {
-                draw_text(canvas, font_mgr, *x, *y, text, font_family, *font_size, *bold, *italic, *color);
+            DrawCommand::Text { x, y, text, font_family, char_spacing_pt, font_size, bold, italic, color } => {
+                draw_text(canvas, font_mgr, *x, *y, text, font_family, *font_size, *bold, *italic, *color, *char_spacing_pt);
             }
             DrawCommand::Underline { x1, y1, x2, y2, color, width }
             | DrawCommand::Line { x1, y1, x2, y2, color, width } => {
@@ -61,8 +61,23 @@ fn draw_text(
     bold: bool,
     italic: bool,
     color: (u8, u8, u8),
+    char_spacing_pt: f32,
 ) {
     let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
+    if char_spacing_pt.abs() > f32::EPSILON {
+        // Apply character spacing by drawing characters individually
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_color4f(color_to_4f(color), None);
+        let mut cx = x;
+        for ch in text.chars() {
+            let s = ch.to_string();
+            canvas.draw_str(&s, (cx, y), &font, &paint);
+            let (w, _) = font.measure_str(&s, None);
+            cx += w + char_spacing_pt;
+        }
+        return;
+    }
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     paint.set_color4f(color_to_4f(color), None);

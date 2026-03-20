@@ -43,6 +43,8 @@ pub enum Fragment {
         underline: bool,
         color: Option<Color>,
         shading: Option<Color>,
+        /// Character spacing in points (positive = expand).
+        char_spacing_pt: f32,
         measured_width: f32,
         measured_height: f32,
     },
@@ -103,16 +105,22 @@ pub fn collect_fragments(
                     .font_size_pt_with_default(defaults.font_size_half_pts);
                 let bold = tr.properties.bold;
                 let italic = tr.properties.italic;
+                let char_spacing_pt = tr.properties.char_spacing
+                    .map(|cs| twips_to_pt_signed(cs))
+                    .unwrap_or(0.0);
                 let line_height =
                     measurer.line_height(&font_family, font_size, bold, italic);
                 for part in split_words_and_spaces(&tr.text) {
-                    let measured_width = measurer.measure_width(
+                    let base_width = measurer.measure_width(
                         part,
                         &font_family,
                         font_size,
                         bold,
                         italic,
                     );
+                    // Character spacing adds extra width per character
+                    let char_count = part.chars().count() as f32;
+                    let measured_width = base_width + char_spacing_pt * char_count;
                     let is_space = part.chars().all(|c| c == ' ');
                     fragments.push(Fragment::Text {
                         text: part.to_string(),
@@ -123,6 +131,7 @@ pub fn collect_fragments(
                         underline: !is_space && tr.properties.underline,
                         color: tr.properties.color,
                         shading: if is_space { None } else { tr.properties.shading },
+                        char_spacing_pt,
                         measured_width,
                         measured_height: line_height,
                     });
