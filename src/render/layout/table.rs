@@ -360,13 +360,26 @@ impl Layouter {
                 cell_layouts.push(commands);
             }
 
-            // Absorb vMerge remaining height from previous restart cells
-            for (_, remaining) in vmerge_remaining.iter_mut() {
+            // Absorb vMerge remaining height from previous restart cells.
+            // Each row absorbs its own height from the remaining budget.
+            // If a continue row is the last in the span, it expands to fit the rest.
+            for (col, remaining) in vmerge_remaining.iter_mut() {
                 if *remaining > 0.0 {
-                    let absorb = row_height.min(*remaining);
-                    *remaining -= absorb;
-                    // If remaining height exceeds this row, make the row taller
-                    // (only on the last continue row)
+                    *remaining -= row_height;
+                    if *remaining < 0.0 {
+                        *remaining = 0.0;
+                    }
+                    // Check if this is the last continue row for this column
+                    let next_continues = row_idx + 1 < table.rows.len()
+                        && table.rows[row_idx + 1]
+                            .cells
+                            .get(*col)
+                            .is_some_and(|c| c.is_vmerge_continue());
+                    if !next_continues && *remaining > 0.0 {
+                        // Last row in the span — expand to absorb remaining
+                        row_height += *remaining;
+                        *remaining = 0.0;
+                    }
                 }
             }
 
