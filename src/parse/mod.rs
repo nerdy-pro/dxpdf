@@ -1,4 +1,6 @@
 mod archive;
+mod numbering;
+mod styles;
 pub mod xml;
 
 use std::collections::HashMap;
