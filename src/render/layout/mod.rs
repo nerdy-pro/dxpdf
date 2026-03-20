@@ -123,32 +123,14 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse();
 
-    let default_tab_stop_pt = doc.default_tab_stop as f32 / 20.0;
-    let doc_defaults = DocDefaultsLayout {
-        font_size_half_pts: doc.default_font_size,
-        font_family: doc.default_font_family.clone(),
-        default_spacing: doc.default_spacing,
-        default_cell_margins: doc.default_cell_margins,
-        table_cell_spacing: doc.table_cell_spacing,
-        default_table_borders: doc.default_table_borders,
-        default_header: doc.default_header.clone(),
-        default_footer: doc.default_footer.clone(),
-    };
+    let default_tab_stop_pt = twips_to_pt(doc.default_tab_stop);
+    let doc_defaults = DocDefaultsLayout::from_document(doc);
+
     // Pre-compute header extent to adjust margin_top if header content
     // (including float images) extends past the declared top margin.
     let mut effective_config = initial_config;
     if let Some(ref header) = doc.default_header {
         let pre_measurer = measurer::TextMeasurer::new();
-        let pre_defaults = DocDefaultsLayout {
-            font_size_half_pts: doc.default_font_size,
-            font_family: doc.default_font_family.clone(),
-            default_spacing: doc.default_spacing,
-            default_cell_margins: doc.default_cell_margins,
-            table_cell_spacing: doc.table_cell_spacing,
-            default_table_borders: doc.default_table_borders,
-            default_header: None,
-            default_footer: None,
-        };
         let (_, header_bottom) = layout_header_footer_blocks(
             &header.blocks,
             initial_config.margin_left,
@@ -156,12 +138,12 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
             initial_config.content_width(),
             initial_config.margin_top,
             initial_config.page_height,
-            &pre_defaults,
+            &doc_defaults,
             &pre_measurer,
             default_tab_stop_pt,
         );
         if header_bottom > effective_config.margin_top {
-            effective_config.margin_top = header_bottom + 4.0; // small gap
+            effective_config.margin_top = header_bottom + HEADER_BODY_GAP_PT;
         }
     }
 
@@ -177,16 +159,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     let mut pages = layouter.finish();
 
     // Render headers and footers on each page
-    let hf_defaults = DocDefaultsLayout {
-        font_size_half_pts: doc.default_font_size,
-        font_family: doc.default_font_family.clone(),
-        default_spacing: doc.default_spacing,
-        default_cell_margins: doc.default_cell_margins,
-        table_cell_spacing: doc.table_cell_spacing,
-        default_table_borders: doc.default_table_borders,
-        default_header: doc.default_header.clone(),
-        default_footer: doc.default_footer.clone(),
-    };
+    let hf_defaults = DocDefaultsLayout::from_document(doc);
     render_headers_footers(&mut pages, &hf_defaults, default_tab_stop_pt, &initial_config);
 
     pages
@@ -320,7 +293,7 @@ fn layout_header_footer_blocks(
             let fragments = collect_fragments(
                 &para.runs,
                 content_width,
-                100.0, // max height for images
+                HF_MAX_IMAGE_HEIGHT,
                 defaults,
                 measurer,
             );

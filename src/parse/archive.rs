@@ -7,6 +7,7 @@ use quick_xml::Reader;
 use crate::error::Error;
 
 /// Document-wide default properties from `word/styles.xml`.
+#[derive(Debug)]
 pub struct DocDefaults {
     /// Default font size in half-points.
     pub font_size: Option<u32>,
@@ -42,8 +43,6 @@ pub struct DocxContents {
     pub header_footer_rels: HashMap<String, HashMap<String, String>>,
     /// Minor (body) font name from theme (e.g., "Calibri").
     pub theme_minor_font: Option<String>,
-    /// Major (heading) font name from theme (e.g., "Calibri Light").
-    pub _theme_major_font: Option<String>,
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -115,7 +114,7 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
     };
 
     // 6. Extract theme fonts from word/theme/theme1.xml
-    let (theme_minor_font, theme_major_font) = extract_theme_fonts(&mut archive);
+    let (theme_minor_font, _theme_major_font) = extract_theme_fonts(&mut archive);
 
     // 7. Extract header/footer XML files
     let mut header_footer_xml = HashMap::new();
@@ -182,7 +181,6 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         default_tab_stop,
         doc_defaults,
         theme_minor_font,
-        _theme_major_font: theme_major_font,
     })
 }
 

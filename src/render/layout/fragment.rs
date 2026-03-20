@@ -15,6 +15,21 @@ pub struct DocDefaultsLayout {
     pub default_footer: Option<HeaderFooter>,
 }
 
+impl DocDefaultsLayout {
+    pub fn from_document(doc: &crate::model::Document) -> Self {
+        Self {
+            font_size_half_pts: doc.default_font_size,
+            font_family: doc.default_font_family.clone(),
+            default_spacing: doc.default_spacing,
+            default_cell_margins: doc.default_cell_margins,
+            table_cell_spacing: doc.table_cell_spacing,
+            default_table_borders: doc.default_table_borders,
+            default_header: doc.default_header.clone(),
+            default_footer: doc.default_footer.clone(),
+        }
+    }
+}
+
 /// A flattened fragment for layout — either text, an image, a tab, or a line break.
 pub enum Fragment {
     Text {

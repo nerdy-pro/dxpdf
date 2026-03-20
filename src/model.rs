@@ -189,10 +189,17 @@ pub struct Indentation {
 
 /// A type-safe wrapper for OOXML relationship IDs (e.g., "rId5").
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RelId(pub String);
+pub struct RelId(String);
 
 impl RelId {
     pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for RelId {
+    type Target = str;
+    fn deref(&self) -> &str {
         &self.0
     }
 }
@@ -205,10 +212,17 @@ impl<T: Into<String>> From<T> for RelId {
 
 /// A type-safe wrapper for image format hints (e.g., "png", "jpeg").
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FormatHint(pub String);
+pub struct FormatHint(String);
 
 impl FormatHint {
     pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for FormatHint {
+    type Target = str;
+    fn deref(&self) -> &str {
         &self.0
     }
 }
@@ -341,7 +355,7 @@ pub struct BorderDef {
 impl BorderDef {
     /// Width in points.
     pub fn width_pt(&self) -> f32 {
-        self.size as f32 / 8.0
+        self.size as f32 / units::BORDER_SIZE_UNITS_PER_POINT
     }
 
     /// Returns true if this border should be drawn.
@@ -459,13 +473,13 @@ impl Color {
 
 impl RunProperties {
     pub fn font_size_pt(&self) -> f32 {
-        self.font_size.map(|s| s as f32 / 2.0).unwrap_or(
-            DEFAULT_FONT_SIZE_HALF_PTS as f32 / 2.0,
+        self.font_size.map(|s| s as f32 / units::HALF_POINTS_PER_POINT).unwrap_or(
+            DEFAULT_FONT_SIZE_HALF_PTS as f32 / units::HALF_POINTS_PER_POINT,
         )
     }
 
     pub fn font_size_pt_with_default(&self, default_half_pts: u32) -> f32 {
-        self.font_size.unwrap_or(default_half_pts) as f32 / 2.0
+        self.font_size.unwrap_or(default_half_pts) as f32 / units::HALF_POINTS_PER_POINT
     }
 }
 

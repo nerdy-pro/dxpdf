@@ -84,6 +84,18 @@ pub const MIN_CELL_BOTTOM_PAD_PT: f32 = 2.0;
 /// Spacing after a table (in points).
 pub const TABLE_AFTER_SPACING_PT: f32 = 8.0;
 
+/// Border size units per point (w:sz is in eighths of a point).
+pub const BORDER_SIZE_UNITS_PER_POINT: f32 = 8.0;
+
+/// Half-points per point (w:sz font sizes are in half-points).
+pub const HALF_POINTS_PER_POINT: f32 = 2.0;
+
+/// Default max image height in header/footer layout (in points).
+pub const HF_MAX_IMAGE_HEIGHT: f32 = 100.0;
+
+/// Gap between header bottom and body content (in points).
+pub const HEADER_BODY_GAP_PT: f32 = 4.0;
+
 /// OOXML width type for twips.
 pub const WIDTH_TYPE_DXA: &str = "dxa";
 
