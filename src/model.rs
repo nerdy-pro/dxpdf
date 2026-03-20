@@ -442,10 +442,16 @@ impl Spacing {
         self.after.map(twips_to_pt).unwrap_or(0.0)
     }
 
+    /// Line spacing in points, or `None` if not explicitly set
+    /// (meaning the font's natural line height should be used).
+    pub fn line_pt_opt(&self) -> Option<f32> {
+        self.line.map(twips_to_pt)
+    }
+
+    /// Line spacing in points with a fixed fallback of 12pt.
+    /// Prefer `line_pt_opt()` when natural font height should be used.
     pub fn line_pt(&self) -> f32 {
-        self.line.map(twips_to_pt).unwrap_or(
-            twips_to_pt(240), // single spacing = 12pt
-        )
+        self.line_pt_opt().unwrap_or(twips_to_pt(240))
     }
 }
 

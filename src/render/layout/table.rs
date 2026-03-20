@@ -184,10 +184,16 @@ impl Layouter {
                             );
                             let actual_end = line_start + line_end.max(1);
 
-                            let line_height = fragments[line_start..actual_end]
+                            let frag_height = fragments[line_start..actual_end]
                                 .iter()
                                 .map(|f| f.height())
-                                .fold(spacing.line_pt(), f32::max);
+                                .fold(0.0_f32, f32::max);
+                            // Use explicit line spacing if set, otherwise
+                            // use the fragment's natural height
+                            let line_height = match spacing.line_pt_opt() {
+                                Some(lh) => frag_height.max(lh),
+                                None => frag_height,
+                            };
 
                             cell_y += line_height;
 

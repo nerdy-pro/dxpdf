@@ -116,6 +116,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Paragraph properties**: alignment (`w:jc` — left/start, center, right/end, both/justify), spacing before/after/line (`w:spacing`), indentation with left, right, first-line, and hanging (`w:ind`), custom tab stops (`w:tabs` > `w:tab` with `val` and `pos`)
 - **Tables**: `w:tbl` with rows (`w:tr`), cells (`w:tc`), column grid (`w:tblGrid` > `w:gridCol`), cell widths (`w:tcW` with `type="dxa"` only — percentage widths fall back to grid)
 - **Merged cells**: horizontal spans (`w:gridSpan`) and vertical merges (`w:vMerge` with `val="restart"` / continue)
+- **Row heights**: `w:trHeight` parsed as minimum row height (content can grow beyond it)
 - **Cell margins**: per-table defaults (`w:tblCellMar`) and per-cell overrides (`w:tcMar`) with top/right/bottom/left in twips
 - **Table borders**: `w:tblBorders` at the table level and `w:tcBorders` at the cell level, with `w:val` (style), `w:sz` (width in eighths of a point), `w:color` (hex or `auto`). Supports `top`/`bottom`/`left`/`right`/`insideH`/`insideV`
 - **Self-closing paragraphs**: `<w:p/>` parsed as empty paragraphs (produce blank lines)
@@ -147,11 +148,13 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Merged cells**: `gridSpan` cells span multiple grid columns with correct widths; `vMerge` continuation cells skip content rendering and suppress top borders
 - **Cell margins**: resolved per-cell (per-cell override > table default > document default) with separate top/right/bottom/left values
 - **Table cell spacing**: table style paragraph spacing (e.g., `after=0` from Table Grid style) applied inside cells, distinct from document-level paragraph spacing
-- **Word wrapping**: text split into separate word and space fragments; line breaks occur at space boundaries. Trailing spaces excluded from line width for correct alignment
+- **Word wrapping**: text split into fragments at spaces and hyphens; line breaks occur at space and hyphen boundaries. Trailing spaces excluded from line width for correct alignment
 - **Forced line breaks**: `<w:br/>` forces a new line within a paragraph
 - **Tab stops**: tabs advance to the next custom tab stop position, or fall back to the document's default tab interval
 - **Floating image layout**: anchored images drawn at their offset position; text flow narrows around left-anchored floats. Floats in table cells are centered within the cell if the offset exceeds cell width
 - **Pagination**: automatic page breaks when content exceeds the page content area
+- **Adjacent tables**: consecutive tables with no content between them render seamlessly without extra spacing
+- **Line spacing**: when no explicit `w:line` is set, the font's natural line height (from Skia metrics) is used rather than a fixed default, matching Word's single-spacing behavior
 - **Multi-section documents**: each section can have its own page size and margins; section breaks trigger new pages with updated dimensions. Section configs are pre-collected and applied in order
 - **Document defaults**: paragraphs without explicit spacing/font settings fall back to the document-level defaults from `word/styles.xml`
 - **Whitespace collapsing**: runs of excessive consecutive spaces are collapsed to prevent manual-alignment whitespace from Word from disrupting layout
@@ -194,7 +197,7 @@ The test suite includes unit tests for the model, XML parser, layout engine (tab
 - **Line spacing modes**: Only the basic `w:line` value in twips is used. Exact and at-least spacing modes (`w:lineRule="exact"` / `"atLeast"`) are not distinguished from auto spacing.
 - **Fonts**: System fonts are used via Skia's font manager with automatic substitution for common proprietary fonts. If neither the requested font nor any substitute is installed, Helvetica is used. Font embedding and subsetting depend on Skia's PDF backend.
 - **Right-to-left text**: Not supported.
-- **Hyphenation**: No automatic hyphenation; words break only at space boundaries.
+- **Hyphenation**: No automatic hyphenation. Words break at spaces and existing hyphens, but no new hyphenation points are inserted.
 - **Kerning and ligatures**: `w:kern` and `w14:ligatures` are parsed by Skia's font engine but not explicitly controlled.
 
 ## Dependencies

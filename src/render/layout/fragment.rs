@@ -168,21 +168,32 @@ pub fn find_next_tab_stop(
     current_x + TAB_FALLBACK_PT
 }
 
-/// Split text into alternating word and space segments.
+/// Split text into segments that can break at spaces and after hyphens.
+/// E.g., "Funktions-kleinspannungs-Stromkreise" → ["Funktions-", "kleinspannungs-", "Stromkreise"]
+/// and "RCD Messung" → ["RCD", " ", "Messung"]
 fn split_words_and_spaces(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     let bytes = text.as_bytes();
-    let mut in_space = bytes.first() == Some(&b' ');
 
     for (i, &b) in bytes.iter().enumerate() {
-        let is_space = b == b' ';
-        if is_space != in_space {
+        if b == b' ' {
+            // Split before space: emit word, then space segment
             if start < i {
                 parts.push(&text[start..i]);
             }
-            start = i;
-            in_space = is_space;
+            // Find end of space run
+            let space_end = bytes[i..]
+                .iter()
+                .position(|&c| c != b' ')
+                .map(|p| i + p)
+                .unwrap_or(bytes.len());
+            parts.push(&text[i..space_end]);
+            start = space_end;
+        } else if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] != b' ' && start < i + 1 {
+            // Split after hyphen: "word-" becomes a breakable fragment
+            parts.push(&text[start..i + 1]);
+            start = i + 1;
         }
     }
     if start < text.len() {
@@ -242,6 +253,10 @@ pub fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f3
         if is_space {
             last_break_point = i + 1;
             width_at_break = total_width - w;
+        } else if matches!(frag, Fragment::Text { ref text, .. } if text.ends_with('-')) {
+            // Allow breaking after hyphens (hyphen stays on the line)
+            last_break_point = i + 1;
+            width_at_break = total_width;
         }
     }
     (fragments.len(), total_width)

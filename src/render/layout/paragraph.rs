@@ -69,11 +69,15 @@ impl Layouter {
                 0.0
             };
 
-            let tentative_line_height = fragments[line_start..]
+            let tentative_frag_height = fragments[line_start..]
                 .iter()
                 .take(1)
                 .map(|f| f.height())
-                .fold(spacing.line_pt(), f32::max);
+                .fold(0.0_f32, f32::max);
+            let tentative_line_height = match spacing.line_pt_opt() {
+                Some(lh) => tentative_frag_height.max(lh),
+                None => tentative_frag_height,
+            };
             let line_top = self.cursor_y;
             let line_bottom = self.cursor_y + tentative_line_height;
             let (float_x_shift, float_width_reduction) =
@@ -86,10 +90,14 @@ impl Layouter {
                 fit_fragments(&fragments[line_start..], available_width.max(0.0));
             let actual_end = line_start + line_end.max(1);
 
-            let line_height = fragments[line_start..actual_end]
+            let frag_height = fragments[line_start..actual_end]
                 .iter()
                 .map(|f| f.height())
-                .fold(spacing.line_pt(), f32::max);
+                .fold(0.0_f32, f32::max);
+            let line_height = match spacing.line_pt_opt() {
+                Some(lh) => frag_height.max(lh),
+                None => frag_height,
+            };
 
             if self.cursor_y + line_height > self.content_bottom() {
                 self.new_page();
