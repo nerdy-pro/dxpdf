@@ -5,19 +5,24 @@ A lightweight Rust binary that parses DOCX files and renders them to PDF using S
 ## Features
 
 - Parses DOCX (Office Open XML) files from ZIP archives
-- Text with formatting: bold, italic, underline, font size, font family, color
-- Paragraph properties: alignment, spacing, indentation, tab stops
+- Text with formatting: bold, italic, underline, font size, font family, color, character spacing
+- Paragraph properties: alignment, spacing (auto/exact/atLeast), indentation, tab stops, shading
+- Named style resolution from `word/styles.xml` with `basedOn` inheritance chains
 - Line breaks (`<w:br/>`) and tab characters (`<w:tab/>`) inside runs
-- Tables with per-column widths, cell margins, merged cells (`gridSpan`/`vMerge`), dynamic row heights
+- Tables with per-column widths, cell margins, merged cells (`gridSpan`/`vMerge`), dynamic row heights, cell shading, borders
+- Three-pass table layout: measure→layout→paint with vMerge height distribution
 - Inline images (PNG, JPEG, and other formats supported by Skia)
-- Floating/anchored images with text wrapping
+- Floating/anchored images with text wrapping and alignment (left/center/right)
+- Headers and footers with images and text
+- Numbered and bulleted lists (decimal, lower/upper letter, lower/upper roman, bullet)
 - Multiple sections with different page sizes and margins (e.g., portrait + landscape)
-- Document defaults from `word/styles.xml` (font size, font family, paragraph spacing, cell margins)
+- Document defaults from `word/styles.xml` (font size, font family, paragraph spacing, cell margins, table borders)
 - Theme font resolution from `word/theme/theme1.xml`
 - Automatic font substitution for proprietary fonts (Calibri → Carlito, etc.)
 - Skia-based text measurement for accurate line wrapping and alignment
+- Flutter-inspired measure→layout→paint pipeline for all elements
 - Automatic pagination with page breaks
-- Centralized unit conversion system (`units.rs`) — no magic numbers
+- Centralized unit conversion system (`units.rs`) — spec-defined constants only
 - Simple CLI interface
 - Cross-platform (macOS, Linux, Windows)
 
@@ -77,11 +82,16 @@ let pdf_bytes = docx_pdf::convert_document(&document)?;
 
 ## Architecture
 
-The converter follows a three-phase pipeline:
+The converter follows a measure→layout→paint pipeline inspired by Flutter's rendering model:
 
 ```
-DOCX (ZIP) → Parse → Document Model (ADT) → Layout (Skia metrics) → Draw Commands → Skia PDF
+DOCX (ZIP) → Parse → Document Model (ADT) → Measure → Layout → Paint → Skia PDF
 ```
+
+Each layout element (paragraphs, table cells, headers/footers) goes through three phases:
+1. **Measure**: Collect fragments, fit lines, produce draw commands with relative y-coordinates
+2. **Layout**: Assign absolute positions, handle page breaks, distribute heights (e.g., vMerge spans)
+3. **Paint**: Emit draw commands at final positions (shading → content → borders)
 
 ### Modules
 
@@ -92,7 +102,7 @@ DOCX (ZIP) → Parse → Document Model (ADT) → Layout (Skia metrics) → Draw
 | `parse/archive` | Extracts `word/document.xml`, relationships, media files, settings, style defaults, and theme fonts from the DOCX ZIP |
 | `parse/xml` | Event-driven XML parser (state machine) split into submodules: `helpers`, `properties`, `drawing`, `section` |
 | `render/fonts` | Font substitution table mapping proprietary fonts to metric-compatible open-source alternatives |
-| `render/layout` | Converts the document model into positioned draw commands, split into: `measurer` (Skia font metrics), `fragment` (text/image/tab fragments and line fitting), `paragraph` (paragraph layout with floats), `table` (table layout with cell margins, merged cells, borders) |
+| `render/layout` | Measure→layout→paint pipeline, split into: `measurer` (Skia font metrics), `fragment` (shared fragment collection, line fitting, and `measure_lines` — the single source of truth for fragment→command conversion), `paragraph` (paragraph layout with floats and page breaks), `table` (three-pass table layout: measure cells, distribute vMerge heights, paint), `header_footer` (header/footer rendering using shared `measure_lines`) |
 | `render/painter` | Translates draw commands into Skia canvas operations (`draw_text`, `draw_line`, `draw_image`) to produce PDF output |
 | `error` | Unified error type across all modules |
 
@@ -109,7 +119,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 
 ### Parsing
 
-- **Text runs** with direct formatting: bold (`w:b`), italic (`w:i`), underline (`w:u`), font size (`w:sz` in half-points), font family (`w:rFonts` — tries `ascii` then `hAnsi`), color (`w:color` as 6-digit hex)
+- **Text runs** with direct formatting: bold (`w:b`), italic (`w:i`), underline (`w:u`), font size (`w:sz` in half-points), font family (`w:rFonts` — tries `ascii` then `hAnsi`), color (`w:color` as 6-digit hex), character spacing (`w:spacing w:val` in twips), run shading (`w:shd w:fill`)
 - **Toggle properties**: `w:b`, `w:i` support `val="false"` / `val="0"` to disable
 - **Line breaks**: `<w:br/>` inside runs parsed as `Inline::LineBreak`, forcing a line break in layout
 - **Tab characters**: `<w:tab/>` inside runs parsed as `Inline::Tab`, advancing to the next tab stop
@@ -135,6 +145,10 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
   - Default table borders from the "Table Grid" style's `tblBorders`
 - **Default tab stop interval** from `word/settings.xml` (`w:defaultTabStop`)
 - **Text normalization**: literal newlines/carriage returns in `<w:t>` content are stripped (they are XML formatting artifacts; actual line breaks use `<w:br/>`)
+- **Named styles**: resolved from `word/styles.xml` with `basedOn` inheritance. Paragraph styles (alignment, spacing, indentation) and run styles (bold, italic, font size/family, color) are merged field-by-field with direct formatting winning
+- **Headers and footers**: `w:headerReference`/`w:footerReference` in section properties resolved to `word/headerN.xml`/`word/footerN.xml`, with separate relationship files for images
+- **Lists/numbering**: `w:numPr` references resolved via `word/numbering.xml` with `abstractNum`→`num` mapping. Supported formats: bullet, decimal, lowerLetter, upperLetter, lowerRoman, upperRoman. Level text, indentation, and hanging indent parsed
+- **Paragraph shading**: `w:shd` with `w:fill` on paragraphs renders as a background rect covering the text area (excluding before/after spacing)
 
 ### Rendering
 
@@ -156,7 +170,11 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Floating image layout**: anchored images drawn at their offset position; text flow narrows around left-anchored floats. Floats in table cells are centered within the cell if the offset exceeds cell width
 - **Pagination**: automatic page breaks when content exceeds the page content area
 - **Adjacent tables**: consecutive tables with no content between them render seamlessly without extra spacing
-- **Line spacing**: when no explicit `w:line` is set, the font's natural line height (from Skia metrics) is used rather than a fixed default, matching Word's single-spacing behavior
+- **Character spacing**: `w:spacing w:val` expands or condenses inter-character spacing; each character drawn individually when non-zero
+- **Line spacing**: `lineRule="auto"` applies the value as a multiplier (240=1.0×) to the font's natural line height; `lineRule="exact"` fixes the line height; `lineRule="atLeast"` sets a minimum. When no `w:line` is set, the font's natural line height from Skia metrics is used
+- **Headers and footers**: rendered on every page from the document's default header/footer. Float images with alignment (left/center/right, top/center/bottom) supported. Header extent pushes body content down if it overflows margin_top
+- **Lists**: bullet and numbered list labels rendered at the hanging indent position. Counters increment per list item. Supported: bullet, decimal, lower/upper letter, lower/upper roman
+- **After-table spacing**: applies the document-default paragraph `spacing.after` after each table (skipped between adjacent tables), matching Word behavior
 - **Multi-section documents**: each section can have its own page size and margins; section breaks trigger new pages with updated dimensions. Section configs are pre-collected and applied in order
 - **Document defaults**: paragraphs without explicit spacing/font settings fall back to the document-level defaults from `word/styles.xml`
 - **Whitespace handling**: `xml:space="preserve"` spaces are measured at their actual width; long space runs naturally overflow the line and wrap, matching Word's behavior. Leading spaces at line boundaries are skipped to prevent blank lines
@@ -168,26 +186,35 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 cargo test
 ```
 
-The test suite includes unit tests for the model, XML parser, layout engine (tab stops, table borders with `gridSpan`), and integration tests that create DOCX files in-memory and verify end-to-end conversion.
+The test suite includes 86 unit tests and 9 integration tests covering:
+
+- **Layout engine**: measure_lines, fit_fragments, resolve_line_height, paragraph spacing, indentation, alignment (center/right), page breaks, paragraph shading across pages
+- **Tables**: borders (2x2, gridSpan, alignment, tcW vs grid), vMerge (skip content, 3-row distribution, multi-column), cell margins, cell shading, empty/single-cell tables, table split across pages, after-table spacing
+- **Lists**: bullet label rendering, decimal counter increment
+- **Floats**: float adjustment shifts text
+- **Headers/footers**: header on every page, footer at bottom
+- **Unit conversions**: twips, EMU, signed variants
+- **XML parser**: paragraphs, runs, formatting, images, tables, sections, spacing, tabs
+- **Integration**: end-to-end DOCX→PDF conversion, error handling
+
+Visual regression tests compare rendered PDFs against Word-generated references using pixel matching (see [VISUAL_COMPARISON.md](VISUAL_COMPARISON.md)).
 
 ## Known Limitations
 
 ### Parsing
 
-- **Named styles**: Only direct formatting (`w:rPr`, `w:pPr`) and document-level defaults (`docDefaults`, table style spacing/margins) are supported. Named styles from `word/styles.xml` (e.g., "Heading 1", "Normal") are not resolved, so text that relies on style inheritance for its formatting will render with document defaults only.
-- **Headers/Footers**: `word/header.xml` and `word/footer.xml` are not extracted or rendered.
-- **Lists**: Numbered and bulleted lists (`w:numPr`, `w:abstractNum`) are not recognized. List items render as plain paragraphs without bullets, numbers, or indentation.
 - **Footnotes/Endnotes**: Not supported.
 - **Comments and tracked changes**: Ignored entirely.
 - **Hyperlinks**: `w:hyperlink` elements are not parsed; linked text renders as unstyled plain text.
-- **Fields and form controls**: Merge fields (`w:fldChar`), checkboxes, dropdowns, and other form elements are not rendered.
+- **Fields and form controls**: Merge fields (`w:fldChar`), checkboxes, dropdowns, and other form elements are not rendered. Page number fields (`PAGE`, `NUMPAGES`) in headers/footers are not evaluated.
 - **Legacy images**: VML images (`w:pict`, `v:imagedata`) are not supported; only DrawingML (`w:drawing`) is handled.
 - **Text boxes and shapes**: Drawing shapes (`wsp:`, `v:shape`) and text boxes are not parsed.
 - **SmartArt and charts**: `dgm:` and `c:chart` elements are not supported.
-- **Strikethrough and other text effects**: `w:strike`, `w:dstrike`, `w:shadow`, `w:outline`, `w:emboss`, `w:imprint` are not parsed.
-- **Background/highlight colors**: Run highlighting (`w:highlight`) and shading (`w:shd`) on paragraphs, runs, and cells are not rendered.
+- **Strikethrough and other text effects**: `w:strike`, `w:dstrike`, `w:shadow`, `w:outline`, `w:emboss`, `w:imprint`, superscript/subscript (`w:vertAlign`) are not parsed.
+- **Run highlighting**: `w:highlight` is not rendered (run shading `w:shd` is supported).
 - **Paragraph borders**: `w:pBdr` is not parsed.
 - **Multi-column layouts**: `w:cols` section properties are parsed but not used for layout.
+- **Per-section headers/footers**: Only the document-default header/footer is rendered; section-specific overrides (first page, even/odd) are not supported.
 
 ### Rendering
 
@@ -196,8 +223,8 @@ The test suite includes unit tests for the model, XML parser, layout engine (tab
 - **Table border styles**: Only `single` borders are rendered as solid lines. `double`, `dashed`, `dotted` styles are parsed but all render as solid lines.
 - **Cell shading patterns**: Only solid fill colors are rendered. Shading patterns (e.g., `val="pct25"`) are not supported — only `val="clear"` with a `fill` color.
 - **Cell vertical alignment**: Vertical alignment within cells (`w:vAlign`) is not applied; content is always top-aligned.
-- **Floating image positioning**: Only left-anchored floats with `relativeFrom="margin"` are handled. Right-anchored, centered, and complex multi-float positioning are not supported.
-- **Line spacing modes**: Only the basic `w:line` value in twips is used. Exact and at-least spacing modes (`w:lineRule="exact"` / `"atLeast"`) are not distinguished from auto spacing.
+- **Floating image distance**: Float-to-text gap uses a fixed 4pt default; `wp:distL`/`wp:distR`/`wp:distT`/`wp:distB` attributes are not parsed yet.
+- **Floating image positioning**: `wp14:pctPosVOffset` (percentage-based positioning) is not supported; only absolute offsets and alignment keywords.
 - **Fonts**: System fonts are used via Skia's font manager with automatic substitution for common proprietary fonts. If neither the requested font nor any substitute is installed, Helvetica is used. Font embedding and subsetting depend on Skia's PDF backend.
 - **Right-to-left text**: Not supported.
 - **Hyphenation**: No automatic hyphenation. Words break at spaces and existing hyphens, but no new hyphenation points are inserted.
