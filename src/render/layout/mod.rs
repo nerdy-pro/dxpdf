@@ -122,8 +122,10 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
     let mut layouter =
         Layouter::new(&initial_config, next_configs, default_tab_stop_pt, doc_defaults);
 
-    for block in &doc.blocks {
-        layouter.layout_block(block);
+    let blocks = &doc.blocks;
+    for (i, block) in blocks.iter().enumerate() {
+        let next_is_table = blocks.get(i + 1).is_some_and(|b| matches!(b, Block::Table(_)));
+        layouter.layout_block(block, next_is_table);
     }
 
     layouter.finish()
@@ -276,7 +278,7 @@ impl Layouter {
             .retain(|f| self.cursor_y < f.page_y_end);
     }
 
-    fn layout_block(&mut self, block: &Block) {
+    fn layout_block(&mut self, block: &Block, next_is_table: bool) {
         self.prune_floats();
         match block {
             Block::Paragraph(p) => {
@@ -285,7 +287,7 @@ impl Layouter {
                     self.section_break();
                 }
             }
-            Block::Table(t) => self.layout_table(t),
+            Block::Table(t) => self.layout_table(t, next_is_table),
         }
     }
 
@@ -467,9 +469,11 @@ mod tests {
         let table = Table {
             rows: vec![
                 TableRow {
+                    height: None,
                     cells: vec![make_cell("A1"), make_cell("B1")],
                 },
                 TableRow {
+                    height: None,
                     cells: vec![make_cell("A2"), make_cell("B2")],
                 },
             ],
@@ -506,9 +510,11 @@ mod tests {
         let table = Table {
             rows: vec![
                 TableRow {
+                    height: None,
                     cells: vec![make_spanned_cell("AB", 2), make_cell("C")],
                 },
                 TableRow {
+                    height: None,
                     cells: vec![make_cell("A"), make_cell("B"), make_cell("C")],
                 },
             ],
@@ -558,6 +564,7 @@ mod tests {
         let table = Table {
             rows: vec![
                 TableRow {
+                    height: None,
                     cells: vec![
                         make_spanned_cell("AB", 2),
                         make_cell("C"),
@@ -565,6 +572,7 @@ mod tests {
                     ],
                 },
                 TableRow {
+                    height: None,
                     cells: vec![
                         make_cell("A"),
                         make_cell("B"),
@@ -611,6 +619,7 @@ mod tests {
         let table = Table {
             rows: vec![
                 TableRow {
+                    height: None,
                     cells: vec![
                         {
                             let mut c = make_spanned_cell("AB", 2);
@@ -625,6 +634,7 @@ mod tests {
                     ],
                 },
                 TableRow {
+                    height: None,
                     cells: vec![
                         {
                             let mut c = make_cell("A");

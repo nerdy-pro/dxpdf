@@ -85,6 +85,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         stack.push(state);
                         state = ParseState::InTableRow {
                             cells: Vec::new(),
+                            height: None,
                         };
                     }
                     b"tc" if matches!(state, ParseState::InTableRow { .. }) => {
@@ -327,10 +328,10 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         }
                     }
                     b"tr" if matches!(state, ParseState::InTableRow { .. }) => {
-                        if let ParseState::InTableRow { cells } = state {
+                        if let ParseState::InTableRow { cells, height } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             if let ParseState::InTable { ref mut rows, .. } = state {
-                                rows.push(TableRow { cells });
+                                rows.push(TableRow { cells, height });
                             }
                         }
                     }
@@ -346,7 +347,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            if let ParseState::InTableRow { ref mut cells } = state {
+                            if let ParseState::InTableRow { ref mut cells, .. } = state {
                                 cells.push(TableCell {
                                     blocks: cell_blocks,
                                     width: cell_width,
@@ -523,6 +524,7 @@ enum ParseState {
     },
     InTableRow {
         cells: Vec<TableCell>,
+        height: Option<u32>,
     },
     InTableCell {
         blocks: Vec<Block>,

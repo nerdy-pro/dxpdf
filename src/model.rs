@@ -378,6 +378,8 @@ pub struct Table {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableRow {
     pub cells: Vec<TableCell>,
+    /// Minimum row height in twips from `w:trHeight`.
+    pub height: Option<u32>,
 }
 
 /// Vertical merge state for a table cell.

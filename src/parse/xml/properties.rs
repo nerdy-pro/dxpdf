@@ -204,6 +204,13 @@ pub fn handle_empty_element(
                 _ => {}
             }
         }
+        ParseState::InTableRow { ref mut height, .. } => {
+            if local == b"trHeight" {
+                if let Some(val) = get_attr(e, b"val")? {
+                    *height = val.parse::<u32>().ok();
+                }
+            }
+        }
         ParseState::InTable {
             ref mut grid_cols,
             ref mut default_cell_margins,

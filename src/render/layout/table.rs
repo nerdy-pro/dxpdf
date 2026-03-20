@@ -46,7 +46,7 @@ fn emit_border(
 }
 
 impl Layouter {
-    pub(super) fn layout_table(&mut self, table: &Table) {
+    pub(super) fn layout_table(&mut self, table: &Table, next_is_table: bool) {
         if table.rows.is_empty() {
             return;
         }
@@ -78,7 +78,10 @@ impl Layouter {
 
         for (row_idx, row) in table.rows.iter().enumerate() {
             let mut cell_layouts: Vec<Vec<DrawCommand>> = Vec::new();
-            let mut row_height = MIN_ROW_HEIGHT_PT;
+            let min_height = row.height
+                .map(twips_to_pt)
+                .unwrap_or(MIN_ROW_HEIGHT_PT);
+            let mut row_height = min_height;
 
             let mut col_x_positions: Vec<f32> = Vec::with_capacity(row.cells.len());
             let mut cell_widths_computed: Vec<f32> =
@@ -372,7 +375,9 @@ impl Layouter {
             self.cursor_y += row_height;
         }
 
-        self.cursor_y += TABLE_AFTER_SPACING_PT;
+        if !next_is_table {
+            self.cursor_y += TABLE_AFTER_SPACING_PT;
+        }
     }
 }
 
