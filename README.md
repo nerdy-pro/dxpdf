@@ -12,7 +12,7 @@ Built by [nerdy.pro](https://nerdy.pro).
 - **Accurate** — Flutter-inspired measure→layout→paint pipeline with pixel-level fidelity
 - **Standalone** — no external dependencies beyond Skia; no Office installation needed
 - **Cross-platform** — runs on macOS, Linux, and Windows
-- **Dual-use** — works as a CLI tool or as a Rust library (`use dxpdf;`)
+- **Dual-use** — works as a CLI tool, Rust library (`use dxpdf;`), or Python package (`import dxpdf`)
 
 ## Quick Start
 
@@ -52,6 +52,22 @@ for block in &document.blocks {
 }
 
 let pdf_bytes = dxpdf::convert_document(&document)?;
+```
+
+### Use from Python
+
+```bash
+pip install dxpdf
+```
+
+```python
+import dxpdf
+
+# Bytes in, bytes out
+pdf_bytes = dxpdf.convert(open("input.docx", "rb").read())
+
+# File to file
+dxpdf.convert_file("input.docx", "output.pdf")
 ```
 
 ## What's Supported
@@ -257,6 +273,7 @@ See [BENCHMARKS.md](BENCHMARKS.md) for full history.
 | `clap` | CLI argument parsing |
 | `thiserror` | Error types |
 | `log` + `env_logger` | Warnings for unsupported features (`RUST_LOG=warn`) |
+| `pyo3` (optional) | Python bindings via `maturin` |
 
 ## Contributing
 
