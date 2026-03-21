@@ -93,6 +93,7 @@ dxpdf handles the most common DOCX features used in real-world business document
 
 - Rust toolchain (1.70+)
 - `clang` (required by `skia-safe` for building Skia bindings)
+- **Linux only**: `libfontconfig1-dev` and `libfreetype-dev` (e.g., `sudo apt-get install -y libfontconfig1-dev libfreetype-dev`)
 
 ### Build
 
