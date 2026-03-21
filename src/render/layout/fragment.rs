@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use super::ImageCache;
 use crate::model::*;
 use crate::units::*;
 
@@ -58,7 +59,7 @@ pub enum Fragment {
     Image {
         width: f32,
         height: f32,
-        data: ImageData,
+        rel_id: String,
     },
     Tab {
         line_height: f32,
@@ -116,6 +117,7 @@ pub fn collect_fragments(
     content_height: f32,
     defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
+    image_cache: &ImageCache,
 ) -> Vec<Fragment> {
     collect_fragments_with_fields(
         runs,
@@ -124,6 +126,7 @@ pub fn collect_fragments(
         defaults,
         measurer,
         None,
+        image_cache,
     )
 }
 
@@ -134,6 +137,7 @@ pub fn collect_fragments_with_fields(
     defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     field_ctx: Option<&FieldContext>,
+    image_cache: &ImageCache,
 ) -> Vec<Fragment> {
     let mut fragments = Vec::new();
     for run in runs {
@@ -205,7 +209,7 @@ pub fn collect_fragments_with_fields(
                     });
                 }
             }
-            Inline::Image(img) if !img.data.is_empty() => {
+            Inline::Image(img) if image_cache.contains(&img.rel_id) => {
                 let scale = f32::min(
                     1.0,
                     f32::min(
@@ -216,7 +220,7 @@ pub fn collect_fragments_with_fields(
                 fragments.push(Fragment::Image {
                     width: img.width_pt * scale,
                     height: img.height_pt * scale,
-                    data: img.data.clone(),
+                    rel_id: img.rel_id.to_string(),
                 });
             }
             Inline::Tab => {
@@ -404,6 +408,7 @@ pub fn measure_lines(
     line_spacing: Option<LineSpacing>,
     tab_stops: &[TabStop],
     default_tab_stop_pt: f32,
+    image_cache: &super::ImageCache,
 ) -> MeasuredLines {
     let mut lines = Vec::new();
     let mut cursor_y = 0.0_f32;
@@ -517,14 +522,15 @@ pub fn measure_lines(
                 Fragment::Image {
                     width,
                     height,
-                    data,
+                    rel_id,
                 } => {
+                    let image = image_cache.get(rel_id);
                     commands.push(DrawCommand::Image {
                         x,
                         y: cursor_y - height,
                         width: *width,
                         height: *height,
-                        data: data.clone(),
+                        image,
                     });
                     x += width;
                 }

@@ -1,4 +1,4 @@
-use skia_safe::{pdf, Color4f, Data, FontMgr, Image, Paint, Rect};
+use skia_safe::{pdf, Color4f, Data, FontMgr, Paint, Rect};
 
 use super::fonts;
 use super::layout::{DrawCommand, LayoutedPage};
@@ -6,7 +6,14 @@ use crate::error::Error;
 
 /// Render laid-out pages to a PDF byte buffer.
 pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
-    let font_mgr = FontMgr::new();
+    render_to_pdf_with_font_mgr(pages, &FontMgr::new())
+}
+
+/// Render laid-out pages to a PDF byte buffer, reusing an existing FontMgr.
+pub fn render_to_pdf_with_font_mgr(
+    pages: &[LayoutedPage],
+    font_mgr: &FontMgr,
+) -> Result<Vec<u8>, Error> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
 
@@ -14,7 +21,7 @@ pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
         let mut on_page = doc.begin_page((page.page_width, page.page_height), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, &font_mgr)?;
+            render_page(canvas, page, font_mgr)?;
         }
         doc = on_page.end_page();
     }
@@ -78,9 +85,10 @@ fn render_page(
                 y,
                 width,
                 height,
-                data,
+                image,
             } => {
-                draw_image(canvas, *x, *y, *width, *height, data);
+                let rect = Rect::from_xywh(*x, *y, *width, *height);
+                canvas.draw_image_rect(image, None, rect, &Paint::default());
             }
             DrawCommand::Rect {
                 x,
@@ -99,7 +107,6 @@ fn render_page(
                 url,
             } => {
                 let rect = Rect::from_xywh(*x, *y, *width, *height);
-                // Skia expects a null-terminated URL in the Data
                 let mut url_bytes = url.as_bytes().to_vec();
                 url_bytes.push(0);
                 let url_data = Data::new_copy(&url_bytes);
@@ -126,7 +133,6 @@ fn draw_text(
 ) {
     let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
     if char_spacing_pt.abs() > f32::EPSILON {
-        // Apply character spacing: each character's advance is expanded by char_spacing_pt
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
         paint.set_color4f(color_to_4f(color), None);
@@ -162,14 +168,6 @@ fn draw_line(
     paint.set_color4f(color_to_4f(color), None);
 
     canvas.draw_line((x1, y1), (x2, y2), &paint);
-}
-
-fn draw_image(canvas: &skia_safe::Canvas, x: f32, y: f32, width: f32, height: f32, data: &[u8]) {
-    let skia_data = Data::new_copy(data);
-    if let Some(image) = Image::from_encoded(skia_data) {
-        let rect = Rect::from_xywh(x, y, width, height);
-        canvas.draw_image_rect(image, None, rect, &Paint::default());
-    }
 }
 
 fn draw_rect(

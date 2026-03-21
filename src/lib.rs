@@ -20,9 +20,11 @@ pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Convert a parsed `Document` into PDF bytes.
 pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
+    let font_mgr = skia_safe::FontMgr::new();
+    render::fonts::preload_fonts(&font_mgr, &document.font_families());
     let config = render::layout::LayoutConfig::default();
-    let pages = render::layout::layout(document, &config);
-    render::painter::render_to_pdf(&pages)
+    let pages = render::layout::layout(document, &config, &font_mgr);
+    render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)
 }
 
 // --- Python bindings (enabled with `python` feature) ---

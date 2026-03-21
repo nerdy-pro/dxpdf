@@ -41,6 +41,7 @@ Conversion benchmarks for `dxpdf` using the test document:
 | 2026-03-21 | latest | 113.3 ms ± 1.4 ms | 111.9 ms | 118.0 ms | 19.3 MB | +hyperlinks (PDF link annotations), superscript/subscript, pctPosVOffset, unsupported feature warnings, 98 unit tests |
 | 2026-03-21 | v0.1.3 | 114.2 ms ± 0.6 ms | 113.3 ms | 115.3 ms | 19.3 MB | +char styles, paragraph borders, font-first resolution, field codes, 104 unit tests |
 | 2026-03-21 | cache | 85.2 ms ± 0.9 ms | 83.8 ms | 86.7 ms | 19.0 MB | +typeface cache (thread-local HashMap), 25% faster on macOS, much larger gains on Linux |
+| 2026-03-21 | images | 53.1 ms ± 1.0 ms | 51.5 ms | 55.0 ms | 19.0 MB | Shared FontMgr, upfront image decode into Rc\<Image\>, ImageStore in Document, immutable ImageCache |
 
 ### Methodology
 

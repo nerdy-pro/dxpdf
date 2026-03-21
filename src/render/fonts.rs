@@ -104,6 +104,22 @@ pub fn resolve_typeface(font_mgr: &FontMgr, font_family: &str, style: FontStyle)
     })
 }
 
+/// Pre-resolve all font families for all style variants (normal, bold, italic, bold-italic).
+/// Call this before layout/paint to move all fontconfig lookups into a dedicated pipeline step.
+pub fn preload_fonts(font_mgr: &FontMgr, families: &[std::rc::Rc<str>]) {
+    let styles = [
+        FontStyle::normal(),
+        FontStyle::bold(),
+        FontStyle::italic(),
+        FontStyle::bold_italic(),
+    ];
+    for family in families {
+        for &style in &styles {
+            resolve_typeface(font_mgr, family, style);
+        }
+    }
+}
+
 /// Create a Skia Font for the given properties with substitution support.
 pub fn make_font(
     font_mgr: &FontMgr,
