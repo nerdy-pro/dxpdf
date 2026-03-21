@@ -162,7 +162,10 @@ fn parse_zip_without_document_xml_returns_error() {
     let result = dxpdf::parse::parse(&bytes);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("document.xml"), "Error should mention document.xml: {err}");
+    assert!(
+        err.contains("document.xml"),
+        "Error should mention document.xml: {err}"
+    );
 }
 
 #[test]

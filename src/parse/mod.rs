@@ -9,7 +9,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::error::Error;
-use crate::model::{Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties, Spacing, StyleMap};
+use crate::model::{
+    Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties,
+    Spacing, StyleMap,
+};
 
 fn resolve_image_data(
     rel_id: &RelId,
@@ -35,10 +38,8 @@ fn resolve_image_data(
 /// Parse a DOCX file (as raw bytes) into a `Document`.
 pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     let contents = archive::extract_docx_contents(docx_bytes)?;
-    let mut document = xml::parse_document_xml_with_rels(
-        &contents.document_xml,
-        &contents.relationships,
-    )?;
+    let mut document =
+        xml::parse_document_xml_with_rels(&contents.document_xml, &contents.relationships)?;
     if let Some(dts) = contents.default_tab_stop {
         document.default_tab_stop = dts;
     }
@@ -306,11 +307,23 @@ fn resolve_images_in_block(
         Block::Paragraph(p) => {
             for inline in &mut p.runs {
                 if let Inline::Image(img) = inline {
-                    resolve_image_data(&img.rel_id, &mut img.data, &mut img.format_hint, rels, media);
+                    resolve_image_data(
+                        &img.rel_id,
+                        &mut img.data,
+                        &mut img.format_hint,
+                        rels,
+                        media,
+                    );
                 }
             }
             for float in &mut p.floats {
-                resolve_image_data(&float.rel_id, &mut float.data, &mut float.format_hint, rels, media);
+                resolve_image_data(
+                    &float.rel_id,
+                    &mut float.data,
+                    &mut float.format_hint,
+                    rels,
+                    media,
+                );
             }
         }
         Block::Table(t) => {

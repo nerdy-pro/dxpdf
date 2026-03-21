@@ -9,14 +9,17 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
     let mut styles = crate::model::StyleMap::new();
 
     // Built-in character styles that Word defines implicitly
-    styles.insert("Hyperlink".to_string(), crate::model::ResolvedParagraphStyle {
-        run_props: crate::model::ResolvedRunStyle {
-            color: crate::model::Color::from_hex("0563C1"),
-            underline: Some(true),
+    styles.insert(
+        "Hyperlink".to_string(),
+        crate::model::ResolvedParagraphStyle {
+            run_props: crate::model::ResolvedRunStyle {
+                color: crate::model::Color::from_hex("0563C1"),
+                underline: Some(true),
+                ..Default::default()
+            },
             ..Default::default()
         },
-        ..Default::default()
-    });
+    );
     let mut reader = Reader::from_str(xml);
     let mut in_style = false;
     let mut style_id = String::new();
@@ -150,9 +153,15 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                         }
                         b"spacing" => {
                             let mut sp = crate::model::Spacing::default();
-                            if let Some(v) = attr_val(e, b"before") { sp.before = v.parse().ok(); }
-                            if let Some(v) = attr_val(e, b"after") { sp.after = v.parse().ok(); }
-                            if let Some(v) = attr_val(e, b"line") { sp.line = v.parse().ok(); }
+                            if let Some(v) = attr_val(e, b"before") {
+                                sp.before = v.parse().ok();
+                            }
+                            if let Some(v) = attr_val(e, b"after") {
+                                sp.after = v.parse().ok();
+                            }
+                            if let Some(v) = attr_val(e, b"line") {
+                                sp.line = v.parse().ok();
+                            }
                             if let Some(v) = attr_val(e, b"lineRule") {
                                 sp.line_rule = match v.as_str() {
                                     "auto" => crate::model::LineRule::Auto,
@@ -165,18 +174,26 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                         }
                         b"ind" => {
                             let mut ind = crate::model::Indentation::default();
-                            if let Some(v) = attr_val(e, b"left") { ind.left = v.parse().ok(); }
-                            if let Some(v) = attr_val(e, b"right") { ind.right = v.parse().ok(); }
-                            if let Some(v) = attr_val(e, b"firstLine") { ind.first_line = v.parse().ok(); }
+                            if let Some(v) = attr_val(e, b"left") {
+                                ind.left = v.parse().ok();
+                            }
+                            if let Some(v) = attr_val(e, b"right") {
+                                ind.right = v.parse().ok();
+                            }
+                            if let Some(v) = attr_val(e, b"firstLine") {
+                                ind.first_line = v.parse().ok();
+                            }
                             if let Some(v) = attr_val(e, b"hanging") {
-                                if let Ok(h) = v.parse::<i32>() { ind.first_line = Some(-h); }
+                                if let Ok(h) = v.parse::<i32>() {
+                                    ind.first_line = Some(-h);
+                                }
                             }
                             indentation = Some(ind);
                         }
                         _ => {}
                     }
                 }
-                if in_rpr || (!in_ppr && !in_rpr && in_style) {
+                if in_rpr || (!in_ppr && in_style) {
                     match local {
                         b"b" => bold = Some(true),
                         b"i" => italic = Some(true),
@@ -216,4 +233,3 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
 
     styles
 }
-

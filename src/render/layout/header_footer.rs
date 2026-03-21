@@ -27,7 +27,10 @@ pub(super) fn render_headers_footers(
         let margin_top = config.margin_top;
         let margin_bottom = config.margin_bottom;
 
-        let field_ctx = FieldContext { page_number, num_pages };
+        let field_ctx = FieldContext {
+            page_number,
+            num_pages,
+        };
 
         // Render header
         if let Some(ref header) = doc_defaults.default_header {
@@ -96,10 +99,7 @@ pub(super) fn layout_header_footer_blocks(
             break;
         }
         if let Block::Paragraph(para) = block {
-            let spacing = match para.properties.spacing {
-                Some(s) => s,
-                None => Spacing::default(),
-            };
+            let spacing = para.properties.spacing.unwrap_or_default();
             cursor_y += spacing.before_pt();
 
             // Render floating images with alignment support
@@ -107,10 +107,7 @@ pub(super) fn layout_header_footer_blocks(
                 if float.data.is_empty() {
                     continue;
                 }
-                let scale = f32::min(
-                    1.0,
-                    content_width / float.width_pt.max(1.0),
-                );
+                let scale = f32::min(1.0, content_width / float.width_pt.max(1.0));
                 let img_w = float.width_pt * scale;
                 let img_h = float.height_pt * scale;
                 let img_x = if let Some(pct) = float.pct_pos_h {
@@ -190,9 +187,19 @@ pub(super) fn layout_header_footer_blocks(
 
 pub(super) fn to_roman(mut n: u32) -> String {
     let table = [
-        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
     ];
     let mut result = String::new();
     for &(value, numeral) in &table {

@@ -29,29 +29,33 @@ pub fn get_attr(
         let attr = attr?;
         let attr_local = local_name(attr.key.as_ref());
         if attr_local == name {
-            return Ok(Some(
-                String::from_utf8_lossy(&attr.value).into_owned(),
-            ));
+            return Ok(Some(String::from_utf8_lossy(&attr.value).into_owned()));
         }
     }
     Ok(None)
 }
 
 pub fn matches_body_or_cell(state: &ParseState) -> bool {
-    matches!(
-        state,
-        ParseState::InBody | ParseState::InTableCell { .. }
-    )
+    matches!(state, ParseState::InBody | ParseState::InTableCell { .. })
 }
 
 pub fn take_paragraph(
     state: &mut ParseState,
-) -> (ParagraphProperties, Vec<Inline>, Vec<FloatingImage>, Option<SectionProperties>) {
+) -> (
+    ParagraphProperties,
+    Vec<Inline>,
+    Vec<FloatingImage>,
+    Option<SectionProperties>,
+) {
     let old = std::mem::replace(state, ParseState::Idle);
     match old {
-        ParseState::InParagraph { props, runs, floats, section_props, .. } => {
-            (props, runs, floats, section_props)
-        }
+        ParseState::InParagraph {
+            props,
+            runs,
+            floats,
+            section_props,
+            ..
+        } => (props, runs, floats, section_props),
         _ => (ParagraphProperties::default(), Vec::new(), Vec::new(), None),
     }
 }

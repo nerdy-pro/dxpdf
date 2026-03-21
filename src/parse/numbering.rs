@@ -159,7 +159,10 @@ fn regex_like_find_nums(xml: &str) -> Vec<(u32, u32)> {
         // Find <w:num w:numId="X">
         if let Some(pos) = xml[i..].find("<w:num ") {
             let abs_pos = i + pos;
-            let end = xml[abs_pos..].find('>').map(|p| abs_pos + p).unwrap_or(xml.len());
+            let end = xml[abs_pos..]
+                .find('>')
+                .map(|p| abs_pos + p)
+                .unwrap_or(xml.len());
             let tag = &xml[abs_pos..end + 1];
             // Extract numId
             if let Some(nid_start) = tag.find("w:numId=\"") {
@@ -167,7 +170,8 @@ fn regex_like_find_nums(xml: &str) -> Vec<(u32, u32)> {
                 if let Some(nid_end) = tag[nid_start..].find('"') {
                     if let Ok(num_id) = tag[nid_start..nid_start + nid_end].parse::<u32>() {
                         // Find abstractNumId inside this num element
-                        let num_end = xml[abs_pos..].find("</w:num>")
+                        let num_end = xml[abs_pos..]
+                            .find("</w:num>")
                             .map(|p| abs_pos + p)
                             .unwrap_or(xml.len());
                         let num_body = &xml[abs_pos..num_end];
@@ -175,7 +179,9 @@ fn regex_like_find_nums(xml: &str) -> Vec<(u32, u32)> {
                             if let Some(val_start) = num_body[aid_pos..].find("w:val=\"") {
                                 let vs = aid_pos + val_start + 7;
                                 if let Some(val_end) = num_body[vs..].find('"') {
-                                    if let Ok(abstract_id) = num_body[vs..vs + val_end].parse::<u32>() {
+                                    if let Ok(abstract_id) =
+                                        num_body[vs..vs + val_end].parse::<u32>()
+                                    {
                                         result.push((num_id, abstract_id));
                                     }
                                 }
@@ -191,4 +197,3 @@ fn regex_like_find_nums(xml: &str) -> Vec<(u32, u32)> {
     }
     result
 }
-

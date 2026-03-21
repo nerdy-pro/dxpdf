@@ -9,12 +9,21 @@ const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     ("Calibri", &["Carlito", "Liberation Sans", "Noto Sans"]),
     ("Cambria", &["Caladea", "Liberation Serif", "Noto Serif"]),
     ("Arial", &["Liberation Sans", "Noto Sans", "Helvetica"]),
-    ("Times New Roman", &["Liberation Serif", "Noto Serif", "Times"]),
-    ("Courier New", &["Liberation Mono", "Noto Sans Mono", "Courier"]),
+    (
+        "Times New Roman",
+        &["Liberation Serif", "Noto Serif", "Times"],
+    ),
+    (
+        "Courier New",
+        &["Liberation Mono", "Noto Sans Mono", "Courier"],
+    ),
     ("Verdana", &["DejaVu Sans", "Noto Sans"]),
     ("Georgia", &["DejaVu Serif", "Noto Serif"]),
     ("Trebuchet MS", &["Ubuntu", "Noto Sans"]),
-    ("Consolas", &["Inconsolata", "Liberation Mono", "Noto Sans Mono"]),
+    (
+        "Consolas",
+        &["Inconsolata", "Liberation Mono", "Noto Sans Mono"],
+    ),
     ("Segoe UI", &["Noto Sans", "Liberation Sans"]),
 ];
 

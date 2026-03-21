@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
-use crate::units::{self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS,
-    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS};
+use crate::units::{
+    self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS,
+};
 
 /// Shared image data — avoids cloning large byte buffers during layout.
 pub type ImageData = Rc<Vec<u8>>;
@@ -35,12 +37,12 @@ pub type StyleMap = HashMap<String, ResolvedParagraphStyle>;
 /// Number format type for list items.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NumberFormat {
-    Bullet(String),     // The bullet character
-    Decimal,            // 1, 2, 3
-    LowerLetter,        // a, b, c
-    UpperLetter,        // A, B, C
-    LowerRoman,         // i, ii, iii
-    UpperRoman,         // I, II, III
+    Bullet(String), // The bullet character
+    Decimal,        // 1, 2, 3
+    LowerLetter,    // a, b, c
+    UpperLetter,    // A, B, C
+    LowerRoman,     // i, ii, iii
+    UpperRoman,     // I, II, III
 }
 
 /// A single numbering level definition.
@@ -112,7 +114,10 @@ impl Default for Document {
             default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
             default_spacing: Spacing::default(),
             default_cell_margins: CellMargins::default(),
-            table_cell_spacing: Spacing { after: Some(0), ..Default::default() },
+            table_cell_spacing: Spacing {
+                after: Some(0),
+                ..Default::default()
+            },
             default_table_borders: TableBorders::default(),
             styles: StyleMap::new(),
             numbering: NumberingMap::new(),
@@ -266,20 +271,15 @@ pub enum Alignment {
 }
 
 /// Line spacing rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineRule {
     /// `line` value is a multiplier: 240 = single (100%), 480 = double (200%).
+    #[default]
     Auto,
     /// `line` value is an exact height in twips.
     Exact,
     /// `line` value is a minimum height in twips.
     AtLeast,
-}
-
-impl Default for LineRule {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Resolved line spacing value.
@@ -522,7 +522,11 @@ impl BorderDef {
         Self {
             style: BorderStyle::Single,
             size,
-            color: Color { r: color.0, g: color.1, b: color.2 },
+            color: Color {
+                r: color.0,
+                g: color.1,
+                b: color.2,
+            },
         }
     }
 
@@ -553,7 +557,7 @@ impl Default for BorderDef {
 }
 
 /// Table-level border definitions.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TableBorders {
     pub top: BorderDef,
     pub bottom: BorderDef,
@@ -563,19 +567,6 @@ pub struct TableBorders {
     pub inside_h: BorderDef,
     /// Vertical borders between columns.
     pub inside_v: BorderDef,
-}
-
-impl Default for TableBorders {
-    fn default() -> Self {
-        Self {
-            top: BorderDef::default(),
-            bottom: BorderDef::default(),
-            left: BorderDef::default(),
-            right: BorderDef::default(),
-            inside_h: BorderDef::default(),
-            inside_v: BorderDef::default(),
-        }
-    }
 }
 
 /// Per-cell border overrides.
@@ -646,9 +637,9 @@ impl Color {
 
 impl RunProperties {
     pub fn font_size_pt(&self) -> f32 {
-        self.font_size.map(|s| s as f32 / units::HALF_POINTS_PER_POINT).unwrap_or(
-            DEFAULT_FONT_SIZE_HALF_PTS as f32 / units::HALF_POINTS_PER_POINT,
-        )
+        self.font_size
+            .map(|s| s as f32 / units::HALF_POINTS_PER_POINT)
+            .unwrap_or(DEFAULT_FONT_SIZE_HALF_PTS as f32 / units::HALF_POINTS_PER_POINT)
     }
 
     pub fn font_size_pt_with_default(&self, default_half_pts: u32) -> f32 {
@@ -712,7 +703,14 @@ mod tests {
     #[test]
     fn color_from_hex_valid() {
         let c = Color::from_hex("FF8000").unwrap();
-        assert_eq!(c, Color { r: 255, g: 128, b: 0 });
+        assert_eq!(
+            c,
+            Color {
+                r: 255,
+                g: 128,
+                b: 0
+            }
+        );
     }
 
     #[test]
@@ -723,7 +721,10 @@ mod tests {
 
     #[test]
     fn font_size_conversion() {
-        let rp = RunProperties { font_size: Some(24), ..Default::default() };
+        let rp = RunProperties {
+            font_size: Some(24),
+            ..Default::default()
+        };
         assert_eq!(rp.font_size_pt(), 12.0);
     }
 
@@ -742,7 +743,12 @@ mod tests {
 
     #[test]
     fn spacing_conversion() {
-        let s = Spacing { before: Some(240), after: Some(120), line: Some(360), ..Default::default() };
+        let s = Spacing {
+            before: Some(240),
+            after: Some(120),
+            line: Some(360),
+            ..Default::default()
+        };
         assert_eq!(s.before_pt(), 12.0);
         assert_eq!(s.after_pt(), 6.0);
         assert_eq!(s.line_pt(), 18.0);

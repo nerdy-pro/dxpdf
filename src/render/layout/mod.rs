@@ -159,12 +159,18 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         }
     }
 
-    let mut layouter =
-        Layouter::new(&effective_config, next_configs, default_tab_stop_pt, doc_defaults);
+    let mut layouter = Layouter::new(
+        &effective_config,
+        next_configs,
+        default_tab_stop_pt,
+        doc_defaults,
+    );
 
     let blocks = &doc.blocks;
     for (i, block) in blocks.iter().enumerate() {
-        let next_is_table = blocks.get(i + 1).is_some_and(|b| matches!(b, Block::Table(_)));
+        let next_is_table = blocks
+            .get(i + 1)
+            .is_some_and(|b| matches!(b, Block::Table(_)));
         layouter.layout_block(block, next_is_table);
     }
 
@@ -172,11 +178,15 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
 
     // Render headers and footers on each page
     let hf_defaults = DocDefaultsLayout::from_document(doc);
-    header_footer::render_headers_footers(&mut pages, &hf_defaults, default_tab_stop_pt, &initial_config);
+    header_footer::render_headers_footers(
+        &mut pages,
+        &hf_defaults,
+        default_tab_stop_pt,
+        &initial_config,
+    );
 
     pages
 }
-
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
     if let Some(ps) = &sect.page_size {
@@ -198,27 +208,80 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
 pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
     match cmd {
         DrawCommand::Text {
-            x, y, text, font_family, char_spacing_pt, font_size,
-            bold, italic, color,
+            x,
+            y,
+            text,
+            font_family,
+            char_spacing_pt,
+            font_size,
+            bold,
+            italic,
+            color,
         } => DrawCommand::Text {
-            x: *x, y: y_offset + y,
-            text: text.clone(), font_family: font_family.clone(),
+            x: *x,
+            y: y_offset + y,
+            text: text.clone(),
+            font_family: font_family.clone(),
             char_spacing_pt: *char_spacing_pt,
-            font_size: *font_size, bold: *bold, italic: *italic, color: *color,
+            font_size: *font_size,
+            bold: *bold,
+            italic: *italic,
+            color: *color,
         },
-        DrawCommand::Underline { x1, y1, x2, y2, color, width } => DrawCommand::Underline {
-            x1: *x1, y1: y_offset + y1, x2: *x2, y2: y_offset + y2,
-            color: *color, width: *width,
+        DrawCommand::Underline {
+            x1,
+            y1,
+            x2,
+            y2,
+            color,
+            width,
+        } => DrawCommand::Underline {
+            x1: *x1,
+            y1: y_offset + y1,
+            x2: *x2,
+            y2: y_offset + y2,
+            color: *color,
+            width: *width,
         },
-        DrawCommand::Image { x, y, width, height, data } => DrawCommand::Image {
-            x: *x, y: y_offset + y, width: *width, height: *height, data: data.clone(),
+        DrawCommand::Image {
+            x,
+            y,
+            width,
+            height,
+            data,
+        } => DrawCommand::Image {
+            x: *x,
+            y: y_offset + y,
+            width: *width,
+            height: *height,
+            data: data.clone(),
         },
-        DrawCommand::Rect { x, y, width, height, color } => DrawCommand::Rect {
-            x: *x, y: y_offset + y, width: *width, height: *height, color: *color,
+        DrawCommand::Rect {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => DrawCommand::Rect {
+            x: *x,
+            y: y_offset + y,
+            width: *width,
+            height: *height,
+            color: *color,
         },
         DrawCommand::Line { .. } => cmd.clone(),
-        DrawCommand::LinkAnnotation { x, y, width, height, url } => DrawCommand::LinkAnnotation {
-            x: *x, y: y_offset + y, width: *width, height: *height, url: url.clone(),
+        DrawCommand::LinkAnnotation {
+            x,
+            y,
+            width,
+            height,
+            url,
+        } => DrawCommand::LinkAnnotation {
+            x: *x,
+            y: y_offset + y,
+            width: *width,
+            height: *height,
+            url: url.clone(),
         },
     }
 }
@@ -323,7 +386,11 @@ impl Layouter {
                 before: s.before.or(defaults.before),
                 after: s.after.or(defaults.after),
                 line: s.line.or(defaults.line),
-                line_rule: if s.line.is_some() { s.line_rule } else { defaults.line_rule },
+                line_rule: if s.line.is_some() {
+                    s.line_rule
+                } else {
+                    defaults.line_rule
+                },
             },
             None => *defaults,
         }
@@ -336,14 +403,17 @@ impl Layouter {
         para_spacing: Option<Spacing>,
         table_spacing: Option<Spacing>,
     ) -> Spacing {
-        let table_defaults = table_spacing
-            .unwrap_or(self.doc_defaults.table_cell_spacing);
+        let table_defaults = table_spacing.unwrap_or(self.doc_defaults.table_cell_spacing);
         match para_spacing {
             Some(s) => Spacing {
                 before: s.before.or(table_defaults.before),
                 after: s.after.or(table_defaults.after),
                 line: s.line.or(table_defaults.line),
-                line_rule: if s.line.is_some() { s.line_rule } else { table_defaults.line_rule },
+                line_rule: if s.line.is_some() {
+                    s.line_rule
+                } else {
+                    table_defaults.line_rule
+                },
             },
             None => table_defaults,
         }
@@ -368,14 +438,16 @@ impl Layouter {
         let label = match &level.format {
             NumberFormat::Bullet(ch) => ch.clone(),
             NumberFormat::Decimal => {
-                let counter = self.list_counters
+                let counter = self
+                    .list_counters
                     .entry((list_ref.num_id, list_ref.level))
                     .or_insert(level.start.saturating_sub(1));
                 *counter += 1;
                 level.level_text.replace("%1", &counter.to_string())
             }
             NumberFormat::LowerLetter => {
-                let counter = self.list_counters
+                let counter = self
+                    .list_counters
                     .entry((list_ref.num_id, list_ref.level))
                     .or_insert(level.start.saturating_sub(1));
                 *counter += 1;
@@ -383,7 +455,8 @@ impl Layouter {
                 level.level_text.replace("%1", &ch.to_string())
             }
             NumberFormat::UpperLetter => {
-                let counter = self.list_counters
+                let counter = self
+                    .list_counters
                     .entry((list_ref.num_id, list_ref.level))
                     .or_insert(level.start.saturating_sub(1));
                 *counter += 1;
@@ -391,7 +464,8 @@ impl Layouter {
                 level.level_text.replace("%1", &ch.to_string())
             }
             NumberFormat::LowerRoman | NumberFormat::UpperRoman => {
-                let counter = self.list_counters
+                let counter = self
+                    .list_counters
                     .entry((list_ref.num_id, list_ref.level))
                     .or_insert(level.start.saturating_sub(1));
                 *counter += 1;
@@ -413,8 +487,7 @@ impl Layouter {
     }
 
     fn prune_floats(&mut self) {
-        self.active_floats
-            .retain(|f| self.cursor_y < f.page_y_end);
+        self.active_floats.retain(|f| self.cursor_y < f.page_y_end);
     }
 
     fn layout_block(&mut self, block: &Block, next_is_table: bool) {
@@ -447,7 +520,6 @@ impl Layouter {
         self.pages
     }
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -1,3 +1,9 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
+
 pub mod error;
 pub mod model;
 pub mod parse;

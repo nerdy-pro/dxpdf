@@ -4,13 +4,11 @@ use crate::error::Error;
 use crate::model::*;
 use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
 
-use super::ParseState;
 use super::helpers::{get_attr, is_val_false};
+use super::ParseState;
 
 /// Parse a border element like `<w:top w:val="single" w:sz="4" w:color="auto"/>`.
-pub fn parse_border_def(
-    e: &quick_xml::events::BytesStart<'_>,
-) -> Result<BorderDef, Error> {
+pub fn parse_border_def(e: &quick_xml::events::BytesStart<'_>) -> Result<BorderDef, Error> {
     let val = get_attr(e, b"val")?.unwrap_or_default();
     let style = match val.as_str() {
         "none" | "nil" => BorderStyle::None,
@@ -182,11 +180,17 @@ pub fn handle_empty_element(
                 _ => {}
             }
         }
-        ParseState::InParagraphProperties { ref mut props, ref in_pbdr, .. } => {
+        ParseState::InParagraphProperties {
+            ref mut props,
+            ref in_pbdr,
+            ..
+        } => {
             if *in_pbdr {
                 // Inside w:pBdr — parse border edge elements
                 let border = parse_border_def(e)?;
-                let borders = props.paragraph_borders.get_or_insert(ParagraphBorders::default());
+                let borders = props
+                    .paragraph_borders
+                    .get_or_insert(ParagraphBorders::default());
                 match local {
                     b"top" => borders.top = Some(border),
                     b"bottom" => borders.bottom = Some(border),
@@ -248,9 +252,7 @@ pub fn handle_empty_element(
                     props.indentation = Some(indent);
                 }
                 b"tab" => {
-                    if let (Some(val), Some(pos)) =
-                        (get_attr(e, b"val")?, get_attr(e, b"pos")?)
-                    {
+                    if let (Some(val), Some(pos)) = (get_attr(e, b"val")?, get_attr(e, b"pos")?) {
                         let stop_type = match val.as_str() {
                             "left" => Some(TabStopType::Left),
                             "center" => Some(TabStopType::Center),

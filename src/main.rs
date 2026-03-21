@@ -14,9 +14,7 @@ struct Cli {
 }
 
 fn main() -> Result<(), dxpdf::Error> {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn"),
-    ).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let cli = Cli::parse();
 
@@ -28,11 +26,7 @@ fn main() -> Result<(), dxpdf::Error> {
     let pdf_bytes = dxpdf::convert(&docx_bytes)?;
     std::fs::write(&output, &pdf_bytes)?;
 
-    eprintln!(
-        "Converted {} -> {}",
-        cli.input.display(),
-        output.display()
-    );
+    eprintln!("Converted {} -> {}", cli.input.display(), output.display());
 
     Ok(())
 }
