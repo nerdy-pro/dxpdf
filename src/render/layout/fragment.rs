@@ -91,12 +91,29 @@ impl Fragment {
     }
 }
 
+/// Context for evaluating field codes during fragment collection.
+pub struct FieldContext {
+    pub page_number: u32,
+    pub num_pages: u32,
+}
+
 pub fn collect_fragments(
     runs: &[Inline],
     content_width: f32,
     content_height: f32,
     defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
+) -> Vec<Fragment> {
+    collect_fragments_with_fields(runs, content_width, content_height, defaults, measurer, None)
+}
+
+pub fn collect_fragments_with_fields(
+    runs: &[Inline],
+    content_width: f32,
+    content_height: f32,
+    defaults: &DocDefaultsLayout,
+    measurer: &TextMeasurer,
+    field_ctx: Option<&FieldContext>,
 ) -> Vec<Fragment> {
     let mut fragments = Vec::new();
     for run in runs {
@@ -143,7 +160,7 @@ pub fn collect_fragments(
                         bold,
                         italic,
                     );
-                    // Character spacing adds extra width per character
+                    // Character spacing expands each character's advance width
                     let char_count = part.chars().count() as f32;
                     let measured_width = base_width + char_spacing_pt * char_count;
                     let is_space = part.chars().all(|c| c == ' ');
@@ -199,6 +216,41 @@ pub fn collect_fragments(
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
             Inline::Image(_) => {}
+            Inline::Field(fc) => {
+                let text = match (&fc.field_type, field_ctx) {
+                    (FieldType::Page, Some(ctx)) => ctx.page_number.to_string(),
+                    (FieldType::NumPages, Some(ctx)) => ctx.num_pages.to_string(),
+                    _ => "?".to_string(),
+                };
+                let rp = &fc.properties;
+                let font_family = rp.font_family.clone()
+                    .unwrap_or_else(|| defaults.font_family.clone());
+                let font_size = rp.font_size_pt_with_default(defaults.font_size_half_pts);
+                let bold = rp.bold;
+                let italic = rp.italic;
+                let char_spacing_pt = rp.char_spacing
+                    .map(|cs| twips_to_pt_signed(cs))
+                    .unwrap_or(0.0);
+                let w = measurer.measure_width(&text, &font_family, font_size, bold, italic);
+                let char_count = text.chars().count() as f32;
+                let measured_width = w + char_spacing_pt * char_count;
+                let lh = measurer.line_height(&font_family, font_size, bold, italic);
+                fragments.push(Fragment::Text {
+                    text,
+                    font_family,
+                    font_size,
+                    bold,
+                    italic,
+                    underline: rp.underline,
+                    color: rp.color,
+                    shading: rp.shading,
+                    char_spacing_pt,
+                    measured_width,
+                    measured_height: lh,
+                    hyperlink_url: None,
+                    baseline_offset: 0.0,
+                });
+            }
         }
     }
     fragments

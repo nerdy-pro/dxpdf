@@ -152,6 +152,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
             &doc_defaults,
             &pre_measurer,
             default_tab_stop_pt,
+            None,
         );
         if header_bottom > effective_config.margin_top {
             effective_config.margin_top = header_bottom;

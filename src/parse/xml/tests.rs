@@ -361,6 +361,60 @@ use super::*;
     }
 
     #[test]
+    fn parse_page_field_code() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:r><w:t>Page </w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+                <w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>
+                <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+                <w:r><w:t>3</w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="end"/></w:r>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        // Should have "Page " text and a PAGE field
+        assert!(p.runs.iter().any(|r| matches!(r, Inline::Field(fc) if fc.field_type == FieldType::Page)),
+            "Should contain a PAGE field, got: {:?}", p.runs);
+    }
+
+    #[test]
+    fn parse_numpages_field_code() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+                <w:r><w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r>
+                <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+                <w:r><w:t>5</w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="end"/></w:r>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        assert!(p.runs.iter().any(|r| matches!(r, Inline::Field(fc) if fc.field_type == FieldType::NumPages)),
+            "Should contain a NUMPAGES field, got: {:?}", p.runs);
+    }
+
+    #[test]
+    fn parse_unknown_field_uses_cached_value() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+                <w:r><w:instrText> MERGEFIELD Name </w:instrText></w:r>
+                <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+                <w:r><w:t>John</w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="end"/></w:r>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        // Unknown fields should render the cached value as plain text
+        assert!(p.runs.iter().any(|r| matches!(r, Inline::TextRun(tr) if tr.text == "John")),
+            "Unknown field should use cached value 'John', got: {:?}", p.runs);
+    }
+
+    #[test]
     fn parse_hyperlink_without_rel_id_keeps_text() {
         let xml = wrap_body(
             r#"<w:p>

@@ -1721,6 +1721,60 @@ use super::*;
     }
 
     // ==============================================================
+    // Field codes: PAGE / NUMPAGES
+    // ==============================================================
+
+    #[test]
+    fn page_field_renders_page_number_in_footer() {
+        let mut blocks = Vec::new();
+        for i in 0..60 {
+            blocks.push(simple_paragraph(&format!("Line {i}")));
+        }
+        let doc = Document {
+            blocks,
+            default_footer: Some(HeaderFooter {
+                blocks: vec![Block::Paragraph(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![
+                        Inline::TextRun(TextRun {
+                            text: "Page ".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        }),
+                        Inline::Field(FieldCode { field_type: FieldType::Page, properties: RunProperties::default() }),
+                        Inline::TextRun(TextRun {
+                            text: " of ".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        }),
+                        Inline::Field(FieldCode { field_type: FieldType::NumPages, properties: RunProperties::default() }),
+                    ],
+                    floats: Vec::new(),
+                    section_properties: None,
+                })],
+            }),
+            ..Document::default()
+        };
+        let pages = layout(&doc, &LayoutConfig::default());
+        assert!(pages.len() >= 2, "Need multiple pages");
+
+        // Page 1 footer should have "1" and total page count
+        let page1_texts = extract_texts(&[pages[0].clone()]);
+        assert!(page1_texts.iter().any(|(_, _, t)| t == "1"),
+            "Page 1 footer should contain '1', got: {:?}", page1_texts);
+
+        // Page 2 footer should have "2"
+        let page2_texts = extract_texts(&[pages[1].clone()]);
+        assert!(page2_texts.iter().any(|(_, _, t)| t == "2"),
+            "Page 2 footer should contain '2', got: {:?}", page2_texts);
+
+        // NUMPAGES should be the total page count on all pages
+        let total = pages.len().to_string();
+        assert!(page1_texts.iter().any(|(_, _, t)| t == &total),
+            "Footer should contain total page count '{total}'");
+    }
+
+    // ==============================================================
     // Superscript / subscript
     // ==============================================================
 

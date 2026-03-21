@@ -70,7 +70,7 @@ fn draw_text(
 ) {
     let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
     if char_spacing_pt.abs() > f32::EPSILON {
-        // Apply character spacing by drawing characters individually
+        // Apply character spacing: each character's advance is expanded by char_spacing_pt
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
         paint.set_color4f(color_to_4f(color), None);

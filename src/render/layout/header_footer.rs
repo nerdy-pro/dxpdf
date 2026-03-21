@@ -12,8 +12,10 @@ pub(super) fn render_headers_footers(
     config: &LayoutConfig,
 ) {
     let measurer = measurer::TextMeasurer::new();
+    let num_pages = pages.len() as u32;
 
-    for page in pages.iter_mut() {
+    for (page_idx, page) in pages.iter_mut().enumerate() {
+        let page_number = (page_idx + 1) as u32;
         let page_width = page.page_width;
         let page_height = page.page_height;
         let margin_left = config.margin_left;
@@ -24,6 +26,8 @@ pub(super) fn render_headers_footers(
 
         let margin_top = config.margin_top;
         let margin_bottom = config.margin_bottom;
+
+        let field_ctx = FieldContext { page_number, num_pages };
 
         // Render header
         if let Some(ref header) = doc_defaults.default_header {
@@ -39,6 +43,7 @@ pub(super) fn render_headers_footers(
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
+                Some(&field_ctx),
             );
             let body_commands = std::mem::take(&mut page.commands);
             page.commands = commands;
@@ -59,6 +64,7 @@ pub(super) fn render_headers_footers(
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
+                Some(&field_ctx),
             );
             page.commands.extend(commands);
         }
@@ -79,6 +85,7 @@ pub(super) fn layout_header_footer_blocks(
     defaults: &DocDefaultsLayout,
     measurer: &measurer::TextMeasurer,
     default_tab_stop_pt: f32,
+    field_ctx: Option<&FieldContext>,
 ) -> (Vec<DrawCommand>, f32) {
     let mut commands = Vec::new();
     let mut cursor_y = y_start;
@@ -137,12 +144,13 @@ pub(super) fn layout_header_footer_blocks(
             }
 
             // MEASURE: collect fragments and produce measured lines
-            let fragments = collect_fragments(
+            let fragments = collect_fragments_with_fields(
                 &para.runs,
                 content_width,
                 margin_extent,
                 defaults,
                 measurer,
+                field_ctx,
             );
 
             if fragments.is_empty() {

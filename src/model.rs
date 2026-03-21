@@ -345,6 +345,22 @@ impl<T: Into<String>> From<T> for FormatHint {
     }
 }
 
+/// A field code that can be evaluated at render time.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldType {
+    /// Current page number.
+    Page,
+    /// Total number of pages.
+    NumPages,
+}
+
+/// A field with its type and the run properties from the surrounding XML.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldCode {
+    pub field_type: FieldType,
+    pub properties: RunProperties,
+}
+
 /// An inline-level element within a paragraph.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Inline {
@@ -352,6 +368,8 @@ pub enum Inline {
     LineBreak,
     Tab,
     Image(InlineImage),
+    /// A field code evaluated at render time (e.g., PAGE, NUMPAGES).
+    Field(FieldCode),
 }
 
 #[derive(Debug, Clone, PartialEq)]

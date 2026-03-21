@@ -41,6 +41,10 @@ pub fn parse_document_xml_with_rels(
     let mut state = ParseState::Idle;
     let mut final_section: Option<SectionProperties> = None;
     let mut warned: HashSet<&'static str> = HashSet::new();
+    // Field code state machine: tracks begin→instrText→separate→cached→end sequence
+    let mut field_instr: Option<String> = None; // instruction text being collected
+    let mut field_suppressing = false; // true between "separate" and "end" — suppress cached text
+    let mut field_props = RunProperties::default(); // run properties from the field's begin run
 
     loop {
         match reader.read_event()? {
@@ -218,8 +222,54 @@ pub fn parse_document_xml_with_rels(
                     b"pict" | b"object" => {
                         warn_once(&mut warned, "pict", "Unsupported: VML image/object (w:pict/w:object) — use DrawingML (w:drawing) instead");
                     }
-                    b"fldChar" | b"instrText" => {
-                        warn_once(&mut warned, "fldChar", "Unsupported: field code (w:fldChar/w:instrText) — fields like PAGE, TOC, MERGEFIELD are not evaluated");
+                    b"fldChar" => {
+                        if let Some(val) = get_attr(e, b"fldCharType")? {
+                            match val.as_str() {
+                                "begin" => {
+                                    field_instr = Some(String::new());
+                                    field_suppressing = false;
+                                    // Capture run properties from current run
+                                    if let ParseState::InRun { ref props, .. } = state {
+                                        field_props = props.clone();
+                                    }
+                                }
+                                "separate" => {
+                                    field_suppressing = true;
+                                }
+                                "end" => {
+                                    if let Some(instr) = field_instr.take() {
+                                        let trimmed = instr.trim().to_uppercase();
+                                        let field_type = if trimmed.starts_with("PAGE") {
+                                            Some(FieldType::Page)
+                                        } else if trimmed.starts_with("NUMPAGES") {
+                                            Some(FieldType::NumPages)
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(ft) = field_type {
+                                            let fc = FieldCode {
+                                                field_type: ft,
+                                                properties: field_props.clone(),
+                                            };
+                                            if let ParseState::InParagraph { ref mut runs, .. } = state {
+                                                runs.push(Inline::Field(fc));
+                                            } else if let Some(ps) = stack.iter_mut().rev().find(
+                                                |s| matches!(s, ParseState::InParagraph { .. })
+                                            ) {
+                                                if let ParseState::InParagraph { ref mut runs, .. } = ps {
+                                                    runs.push(Inline::Field(fc));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    field_suppressing = false;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"instrText" => {
+                        // instrText content will be captured in the Text event handler
                     }
                     b"footnoteReference" => {
                         warn_once(&mut warned, "footnote", "Unsupported: footnote reference (w:footnoteReference)");
@@ -282,6 +332,50 @@ pub fn parse_document_xml_with_rels(
                             }
                         }
                     }
+                } else if local == b"fldChar" {
+                    if let Some(val) = get_attr(e, b"fldCharType")? {
+                        match val.as_str() {
+                            "begin" => {
+                                field_instr = Some(String::new());
+                                field_suppressing = false;
+                                if let ParseState::InRun { ref props, .. } = state {
+                                    field_props = props.clone();
+                                }
+                            }
+                            "separate" => {
+                                field_suppressing = true;
+                            }
+                            "end" => {
+                                if let Some(instr) = field_instr.take() {
+                                    let trimmed = instr.trim().to_uppercase();
+                                    let field_type = if trimmed.starts_with("PAGE") {
+                                        Some(FieldType::Page)
+                                    } else if trimmed.starts_with("NUMPAGES") {
+                                        Some(FieldType::NumPages)
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(ft) = field_type {
+                                        let fc = FieldCode {
+                                            field_type: ft,
+                                            properties: field_props.clone(),
+                                        };
+                                        if let ParseState::InParagraph { ref mut runs, .. } = state {
+                                            runs.push(Inline::Field(fc));
+                                        } else if let Some(ps) = stack.iter_mut().rev().find(
+                                            |s| matches!(s, ParseState::InParagraph { .. })
+                                        ) {
+                                            if let ParseState::InParagraph { ref mut runs, .. } = ps {
+                                                runs.push(Inline::Field(fc));
+                                            }
+                                        }
+                                    }
+                                }
+                                field_suppressing = false;
+                            }
+                            _ => {}
+                        }
+                    }
                 } else if matches!(state, ParseState::InDrawing { .. }) {
                     handle_drawing_element(local, e, &mut state)?;
                 } else if matches!(state, ParseState::InSectionProperties { .. }) {
@@ -291,6 +385,27 @@ pub fn parse_document_xml_with_rels(
                 }
             }
             Event::Text(ref e) => {
+                // Field code handling: capture instruction text or suppress cached value
+                if field_instr.is_some() && !field_suppressing {
+                    // Collecting instruction text (between begin and separate)
+                    if let Some(ref mut instr) = field_instr {
+                        instr.push_str(&e.unescape().unwrap_or_default());
+                    }
+                    continue;
+                }
+                if field_suppressing {
+                    // Suppress cached text for recognized fields; unknown fields will
+                    // have already been emitted as text before "separate" was reached.
+                    // Check if this is a known field — if so, skip the cached value.
+                    if let Some(ref instr) = field_instr {
+                        let trimmed = instr.trim().to_uppercase();
+                        if trimmed.starts_with("PAGE") || trimmed.starts_with("NUMPAGES") {
+                            continue;
+                        }
+                    }
+                    // Unknown field: let cached text through as normal
+                }
+
                 if let ParseState::InText { ref mut text, .. } = state {
                     text.push_str(&e.unescape()?);
                 } else if let ParseState::InDrawing {
