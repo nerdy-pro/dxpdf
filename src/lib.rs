@@ -29,8 +29,8 @@ pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
 
 #[cfg(feature = "python")]
 mod python {
-    use pyo3::prelude::*;
     use pyo3::exceptions::PyRuntimeError;
+    use pyo3::prelude::*;
 
     /// Convert DOCX bytes to PDF bytes.
     #[pyfunction]
