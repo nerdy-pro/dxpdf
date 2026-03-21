@@ -3,6 +3,14 @@ name = "dxpdf"
 version = "0.1.0"
 edition = "2021"
 description = "A fast DOCX-to-PDF converter powered by Skia"
+license = "MIT"
+repository = "https://github.com/nerdy-pro/dxpdf"
+homepage = "https://nerdy.pro"
+documentation = "https://docs.rs/dxpdf"
+readme = "README.md"
+keywords = ["docx", "pdf", "converter", "word", "ooxml"]
+categories = ["command-line-utilities", "document-processing"]
+exclude = ["test-cases/", "scripts/", "VISUAL_COMPARISON.md", "BENCHMARKS.md"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
