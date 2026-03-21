@@ -39,6 +39,7 @@ Conversion benchmarks for `dxpdf` using the test document:
 | 2026-03-20 | latest | 114.0 ms ± 1.3 ms | 111.0 ms | 117.8 ms | 18.8 MB | Rc\<Vec\<u8\>\> for images, Rc\<str\> for font families — no atomic overhead |
 | 2026-03-21 | pipeline | 118.4 ms ± 1.0 ms | 116.1 ms | 120.0 ms | 19.1 MB | Measure→layout→paint pipeline for all elements, shared measure_lines, after-table spacing fix, 86 unit tests |
 | 2026-03-21 | latest | 113.3 ms ± 1.4 ms | 111.9 ms | 118.0 ms | 19.3 MB | +hyperlinks (PDF link annotations), superscript/subscript, pctPosVOffset, unsupported feature warnings, 98 unit tests |
+| 2026-03-21 | v0.1.3 | 114.2 ms ± 0.6 ms | 113.3 ms | 115.3 ms | 19.3 MB | +char styles, paragraph borders, font-first resolution, field codes, 104 unit tests |
 
 ### Methodology
 

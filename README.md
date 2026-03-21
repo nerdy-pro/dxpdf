@@ -256,11 +256,11 @@ Validated against ISO 29500 (Office Open XML). **34 features fully implemented, 
 
 Benchmarked on Apple M3 Max with `hyperfine` (20 runs, 3 warmup):
 
-| Metric | Value |
-|---|---|
-| Mean conversion time | **113 ms** |
-| Peak memory (RSS) | **19 MB** |
-| Test document | 3-page form with 11 tables, 2 images, 2 sections |
+| Document | Pages | Mean time | Peak RSS |
+|---|---|---|---|
+| 3-page form (11 tables, 2 images) | 3 | **114 ms** | 19 MB |
+| 7-page inspection report | 7 | **213 ms** | 24 MB |
+| 24-page product sheet | 24 | **648 ms** | 76 MB |
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full history.
 
