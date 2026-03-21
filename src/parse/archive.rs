@@ -114,7 +114,10 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
         Ok(mut file) => {
             let mut styles_xml = String::new();
             file.read_to_string(&mut styles_xml)?;
-            (parse_doc_defaults(&styles_xml), super::styles::parse_styles(&styles_xml))
+            (
+                parse_doc_defaults(&styles_xml),
+                super::styles::parse_styles(&styles_xml),
+            )
         }
         Err(_) => (None, crate::model::StyleMap::new()),
     };
@@ -254,8 +257,7 @@ fn extract_theme_fonts(
                 if local == b"latin" {
                     for attr in e.attributes().flatten() {
                         if local_name(attr.key.as_ref()) == b"typeface" {
-                            let val =
-                                String::from_utf8_lossy(&attr.value).into_owned();
+                            let val = String::from_utf8_lossy(&attr.value).into_owned();
                             if in_minor && minor.is_none() {
                                 minor = Some(val);
                             } else if in_major && major.is_none() {
@@ -292,14 +294,10 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, String>, Error> {
                         let key = local_name(attr.key.as_ref());
                         match key {
                             b"Id" => {
-                                id = Some(
-                                    String::from_utf8_lossy(&attr.value).into_owned(),
-                                );
+                                id = Some(String::from_utf8_lossy(&attr.value).into_owned());
                             }
                             b"Target" => {
-                                target = Some(
-                                    String::from_utf8_lossy(&attr.value).into_owned(),
-                                );
+                                target = Some(String::from_utf8_lossy(&attr.value).into_owned());
                             }
                             _ => {}
                         }
@@ -408,8 +406,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             for attr in e.attributes().flatten() {
                                 let key = local_name(attr.key.as_ref());
                                 if key == b"ascii" || key == b"hAnsi" {
-                                    let val =
-                                        String::from_utf8_lossy(&attr.value).into_owned();
+                                    let val = String::from_utf8_lossy(&attr.value).into_owned();
                                     if font_family.is_none() && !val.is_empty() {
                                         font_family = Some(val);
                                     }
@@ -427,33 +424,36 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             b"after" => spacing_after = val.parse().ok(),
                             b"before" => spacing_before = val.parse().ok(),
                             b"line" => spacing_line = val.parse().ok(),
-                            b"lineRule" => spacing_line_rule = match val.as_ref() {
-                                "auto" => Some(crate::model::LineRule::Auto),
-                                "exact" => Some(crate::model::LineRule::Exact),
-                                "atLeast" => Some(crate::model::LineRule::AtLeast),
-                                _ => None,
-                            },
+                            b"lineRule" => {
+                                spacing_line_rule = match val.as_ref() {
+                                    "auto" => Some(crate::model::LineRule::Auto),
+                                    "exact" => Some(crate::model::LineRule::Exact),
+                                    "atLeast" => Some(crate::model::LineRule::AtLeast),
+                                    _ => None,
+                                }
+                            }
                             _ => {}
                         }
                     }
                 }
                 if in_tbl_cell_mar && cell_margins.is_none() {
                     // Parse margin children (top/bottom/left/right)
-                    let w_type_attr = e.attributes().flatten().find(|a| {
-                        local_name(a.key.as_ref()) == b"type"
-                    });
+                    let w_type_attr = e
+                        .attributes()
+                        .flatten()
+                        .find(|a| local_name(a.key.as_ref()) == b"type");
                     let is_dxa = w_type_attr
                         .map(|a| a.value.as_ref() == b"dxa")
                         .unwrap_or(false);
                     if is_dxa {
-                        let w_val: Option<u32> = e.attributes().flatten()
+                        let w_val: Option<u32> = e
+                            .attributes()
+                            .flatten()
                             .find(|a| local_name(a.key.as_ref()) == b"w")
-                            .and_then(|a| {
-                                String::from_utf8_lossy(&a.value).parse().ok()
-                            });
+                            .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok());
                         if let Some(val) = w_val {
-                            let m = cell_margins
-                                .get_or_insert(crate::model::CellMargins::default());
+                            let m =
+                                cell_margins.get_or_insert(crate::model::CellMargins::default());
                             match local {
                                 b"top" => m.top = val,
                                 b"bottom" => m.bottom = val,
@@ -466,7 +466,9 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 }
                 if in_table_style_borders && table_borders.is_none() {
                     // Parse border children (top/bottom/left/right/insideH/insideV)
-                    let val = e.attributes().flatten()
+                    let val = e
+                        .attributes()
+                        .flatten()
                         .find(|a| local_name(a.key.as_ref()) == b"val")
                         .map(|a| String::from_utf8_lossy(&a.value).into_owned())
                         .unwrap_or_default();
@@ -478,20 +480,25 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         "dotted" => crate::model::BorderStyle::Dotted,
                         _ => crate::model::BorderStyle::Single,
                     };
-                    let size: u32 = e.attributes().flatten()
+                    let size: u32 = e
+                        .attributes()
+                        .flatten()
                         .find(|a| local_name(a.key.as_ref()) == b"sz")
                         .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok())
                         .unwrap_or(4);
-                    let color_str: String = e.attributes().flatten()
+                    let color_str: String = e
+                        .attributes()
+                        .flatten()
                         .find(|a| local_name(a.key.as_ref()) == b"color")
                         .map(|a| String::from_utf8_lossy(&a.value).into_owned())
                         .unwrap_or_default();
-                    let color = if color_str == "auto" || color_str.is_empty() {
-                        crate::model::Color { r: 0, g: 0, b: 0 }
-                    } else {
-                        crate::model::Color::from_hex(&color_str)
-                            .unwrap_or(crate::model::Color { r: 0, g: 0, b: 0 })
-                    };
+                    let color =
+                        if color_str == "auto" || color_str.is_empty() {
+                            crate::model::Color { r: 0, g: 0, b: 0 }
+                        } else {
+                            crate::model::Color::from_hex(&color_str)
+                                .unwrap_or(crate::model::Color { r: 0, g: 0, b: 0 })
+                        };
                     let def = crate::model::BorderDef { style, size, color };
                     let b = table_borders.get_or_insert(crate::model::TableBorders::default());
                     match local {
@@ -504,9 +511,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         _ => {}
                     }
                 }
-                if in_table_style_ppr && local == b"spacing"
-                    && table_cell_spacing.is_none()
-                {
+                if in_table_style_ppr && local == b"spacing" && table_cell_spacing.is_none() {
                     let mut sp = crate::model::Spacing::default();
                     for attr in e.attributes().flatten() {
                         let key = local_name(attr.key.as_ref());

@@ -12,7 +12,10 @@ impl Layouter {
         let mut indent = para.properties.indentation.unwrap_or_default();
 
         // Resolve list label and override indentation
-        let list_label = para.properties.list_ref.as_ref()
+        let list_label = para
+            .properties
+            .list_ref
+            .as_ref()
             .and_then(|lr| self.resolve_list_label(lr));
 
         self.cursor_y += spacing.before_pt();
@@ -57,10 +60,12 @@ impl Layouter {
 
         if para.runs.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
-            let default_size = self.doc_defaults.font_size_half_pts as f32
-                / HALF_POINTS_PER_POINT;
+            let default_size = self.doc_defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
             let natural_height = self.measurer.line_height(
-                &self.doc_defaults.font_family, default_size, false, false,
+                &self.doc_defaults.font_family,
+                default_size,
+                false,
+                false,
             );
             self.cursor_y += resolve_line_height(natural_height, spacing.line_spacing());
             self.paint_paragraph_borders(&para.properties.paragraph_borders, top, self.cursor_y);
@@ -88,9 +93,7 @@ impl Layouter {
             (None, None)
         };
 
-        let base_content_width = self.config.content_width()
-            - indent.left_pt()
-            - indent.right_pt();
+        let base_content_width = self.config.content_width() - indent.left_pt() - indent.right_pt();
         let content_height = self.config.content_height();
         let fragments = collect_fragments(
             &para.runs,
@@ -147,8 +150,7 @@ impl Layouter {
             if !first_line_painted {
                 if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
                     let font = &self.doc_defaults.font_family;
-                    let fs = self.doc_defaults.font_size_half_pts as f32
-                        / HALF_POINTS_PER_POINT;
+                    let fs = self.doc_defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
                     self.current_page.commands.push(DrawCommand::Text {
                         x: lx,
                         y: self.cursor_y,
@@ -183,7 +185,9 @@ impl Layouter {
             // [rel_y_before .. rel_y_before + line.height], we offset by (cursor_y - rel_y_before).
 
             for cmd in &line.commands {
-                self.current_page.commands.push(offset_command(cmd, y_offset));
+                self.current_page
+                    .commands
+                    .push(offset_command(cmd, y_offset));
             }
 
             self.cursor_y += line.height;
@@ -228,32 +232,48 @@ impl Layouter {
                 // Skip top border if previous paragraph already drew a border
                 if b.is_visible() && !self.prev_para_had_bottom_border {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: left, y1: top, x2: right, y2: top,
-                        color: b.color_rgb(), width: b.width_pt(),
+                        x1: left,
+                        y1: top,
+                        x2: right,
+                        y2: top,
+                        color: b.color_rgb(),
+                        width: b.width_pt(),
                     });
                 }
             }
             if let Some(ref b) = borders.bottom {
                 if b.is_visible() {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: left, y1: bottom, x2: right, y2: bottom,
-                        color: b.color_rgb(), width: b.width_pt(),
+                        x1: left,
+                        y1: bottom,
+                        x2: right,
+                        y2: bottom,
+                        color: b.color_rgb(),
+                        width: b.width_pt(),
                     });
                 }
             }
             if let Some(ref b) = borders.left {
                 if b.is_visible() {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: left, y1: top, x2: left, y2: bottom,
-                        color: b.color_rgb(), width: b.width_pt(),
+                        x1: left,
+                        y1: top,
+                        x2: left,
+                        y2: bottom,
+                        color: b.color_rgb(),
+                        width: b.width_pt(),
                     });
                 }
             }
             if let Some(ref b) = borders.right {
                 if b.is_visible() {
                     self.current_page.commands.push(DrawCommand::Line {
-                        x1: right, y1: top, x2: right, y2: bottom,
-                        color: b.color_rgb(), width: b.width_pt(),
+                        x1: right,
+                        y1: top,
+                        x2: right,
+                        y2: bottom,
+                        color: b.color_rgb(),
+                        width: b.width_pt(),
                     });
                 }
             }
@@ -335,8 +355,7 @@ impl Layouter {
             let (float_x_shift, float_width_reduction) =
                 self.float_adjustment(abs_line_top, abs_line_top + tentative_line_height);
 
-            let available_width =
-                (base_content_width - fl_offset - float_width_reduction).max(0.0);
+            let available_width = (base_content_width - fl_offset - float_width_reduction).max(0.0);
 
             let (line_end, _) = fit_fragments(&fragments[line_start..], available_width);
             let actual_end = line_start + line_end.max(1);
@@ -365,9 +384,19 @@ impl Layouter {
             for frag in &fragments[line_start..actual_end] {
                 match frag {
                     Fragment::Text {
-                        text, font_family, font_size, bold, italic,
-                        underline, color, shading, char_spacing_pt,
-                        measured_width, hyperlink_url, baseline_offset, ..
+                        text,
+                        font_family,
+                        font_size,
+                        bold,
+                        italic,
+                        underline,
+                        color,
+                        shading,
+                        char_spacing_pt,
+                        measured_width,
+                        hyperlink_url,
+                        baseline_offset,
+                        ..
                     } => {
                         let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                         if let Some(bg) = shading {
@@ -412,7 +441,11 @@ impl Layouter {
                         }
                         x += measured_width;
                     }
-                    Fragment::Image { width, height, data } => {
+                    Fragment::Image {
+                        width,
+                        height,
+                        data,
+                    } => {
                         commands.push(DrawCommand::Image {
                             x,
                             y: rel_y - height,
@@ -424,20 +457,25 @@ impl Layouter {
                     }
                     Fragment::Tab { .. } => {
                         let rel_x = x - base_x;
-                        let next_stop = find_next_tab_stop(
-                            rel_x, tab_stops, self.default_tab_stop_pt,
-                        );
+                        let next_stop =
+                            find_next_tab_stop(rel_x, tab_stops, self.default_tab_stop_pt);
                         x = base_x + next_stop;
                     }
                     Fragment::LineBreak { .. } => {}
                 }
             }
 
-            lines.push(MeasuredLine { commands, height: line_height });
+            lines.push(MeasuredLine {
+                commands,
+                height: line_height,
+            });
             line_start = actual_end;
             first_line = false;
         }
 
-        MeasuredLines { total_height: rel_y, lines }
+        MeasuredLines {
+            total_height: rel_y,
+            lines,
+        }
     }
 }

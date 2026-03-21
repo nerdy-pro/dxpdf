@@ -7,6 +7,12 @@ pub struct TextMeasurer {
     font_mgr: FontMgr,
 }
 
+impl Default for TextMeasurer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextMeasurer {
     pub fn new() -> Self {
         Self {
@@ -29,13 +35,7 @@ impl TextMeasurer {
     }
 
     /// Get the line height (ascent + descent + leading) for a font.
-    pub fn line_height(
-        &self,
-        font_family: &str,
-        font_size: f32,
-        bold: bool,
-        italic: bool,
-    ) -> f32 {
+    pub fn line_height(&self, font_family: &str, font_size: f32, bold: bool, italic: bool) -> f32 {
         let font = fonts::make_font(&self.font_mgr, font_family, font_size, bold, italic);
         let (_, metrics) = font.metrics();
         -metrics.ascent + metrics.descent + metrics.leading

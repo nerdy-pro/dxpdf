@@ -67,8 +67,7 @@ pub fn parse_document_xml_with_rels(
                         };
                     }
                     b"pPr" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs, floats, section_props) =
-                            take_paragraph(&mut state);
+                        let (props, runs, floats, section_props) = take_paragraph(&mut state);
                         stack.push(ParseState::InParagraph {
                             props: ParagraphProperties::default(),
                             runs,
@@ -84,9 +83,12 @@ pub fn parse_document_xml_with_rels(
                     }
                     b"hyperlink" if matches!(state, ParseState::InParagraph { .. }) => {
                         // Resolve hyperlink URL from r:id relationship
-                        if let ParseState::InParagraph { ref mut hyperlink_url, .. } = state {
-                            let url = get_attr(e, b"id")?
-                                .and_then(|rid| rels.get(&rid).cloned());
+                        if let ParseState::InParagraph {
+                            ref mut hyperlink_url,
+                            ..
+                        } = state
+                        {
+                            let url = get_attr(e, b"id")?.and_then(|rid| rels.get(&rid).cloned());
                             *hyperlink_url = url;
                         }
                     }
@@ -181,15 +183,17 @@ pub fn parse_document_xml_with_rels(
                         handle_drawing_element(local, e, &mut state)?;
                     }
                     b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
-                        if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = state {
+                        if let ParseState::InParagraphProperties {
+                            ref mut in_pbdr, ..
+                        } = state
+                        {
                             *in_pbdr = true;
                         }
                     }
                     b"sectPr"
                         if matches!(
                             state,
-                            ParseState::InParagraphProperties { .. }
-                                | ParseState::InBody
+                            ParseState::InParagraphProperties { .. } | ParseState::InBody
                         ) =>
                     {
                         stack.push(state);
@@ -205,22 +209,36 @@ pub fn parse_document_xml_with_rels(
                         };
                     }
                     b"tblCellMar" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { ref mut in_cell_mar, .. } = state {
+                        if let ParseState::InTable {
+                            ref mut in_cell_mar,
+                            ..
+                        } = state
+                        {
                             *in_cell_mar = true;
                         }
                     }
                     b"tblBorders" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { ref mut in_borders, .. } = state {
+                        if let ParseState::InTable {
+                            ref mut in_borders, ..
+                        } = state
+                        {
                             *in_borders = true;
                         }
                     }
                     b"tcMar" if matches!(state, ParseState::InTableCell { .. }) => {
-                        if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
+                        if let ParseState::InTableCell {
+                            ref mut in_cell_mar,
+                            ..
+                        } = state
+                        {
                             *in_cell_mar = true;
                         }
                     }
                     b"tcBorders" if matches!(state, ParseState::InTableCell { .. }) => {
-                        if let ParseState::InTableCell { ref mut in_borders, .. } = state {
+                        if let ParseState::InTableCell {
+                            ref mut in_borders, ..
+                        } = state
+                        {
                             *in_borders = true;
                         }
                     }
@@ -257,12 +275,21 @@ pub fn parse_document_xml_with_rels(
                                                 field_type: ft,
                                                 properties: field_props.clone(),
                                             };
-                                            if let ParseState::InParagraph { ref mut runs, .. } = state {
+                                            if let ParseState::InParagraph {
+                                                ref mut runs, ..
+                                            } = state
+                                            {
                                                 runs.push(Inline::Field(fc));
-                                            } else if let Some(ps) = stack.iter_mut().rev().find(
-                                                |s| matches!(s, ParseState::InParagraph { .. })
-                                            ) {
-                                                if let ParseState::InParagraph { ref mut runs, .. } = ps {
+                                            } else if let Some(ps) =
+                                                stack.iter_mut().rev().find(|s| {
+                                                    matches!(s, ParseState::InParagraph { .. })
+                                                })
+                                            {
+                                                if let ParseState::InParagraph {
+                                                    ref mut runs,
+                                                    ..
+                                                } = ps
+                                                {
                                                     runs.push(Inline::Field(fc));
                                                 }
                                             }
@@ -278,10 +305,18 @@ pub fn parse_document_xml_with_rels(
                         // instrText content will be captured in the Text event handler
                     }
                     b"footnoteReference" => {
-                        warn_once(&mut warned, "footnote", "Unsupported: footnote reference (w:footnoteReference)");
+                        warn_once(
+                            &mut warned,
+                            "footnote",
+                            "Unsupported: footnote reference (w:footnoteReference)",
+                        );
                     }
                     b"endnoteReference" => {
-                        warn_once(&mut warned, "endnote", "Unsupported: endnote reference (w:endnoteReference)");
+                        warn_once(
+                            &mut warned,
+                            "endnote",
+                            "Unsupported: endnote reference (w:endnoteReference)",
+                        );
                     }
                     b"ins" | b"moveTo" => {
                         // Tracked insertions — content inside is valid, just not marked as tracked
@@ -320,13 +355,12 @@ pub fn parse_document_xml_with_rels(
                         } else {
                             Inline::Tab
                         };
-                        if let Some(para_state) = stack.iter_mut().rev().find(
-                            |s| matches!(s, ParseState::InParagraph { .. }),
-                        ) {
-                            if let ParseState::InParagraph {
-                                ref mut runs, ..
-                            } = para_state
-                            {
+                        if let Some(para_state) = stack
+                            .iter_mut()
+                            .rev()
+                            .find(|s| matches!(s, ParseState::InParagraph { .. }))
+                        {
+                            if let ParseState::InParagraph { ref mut runs, .. } = para_state {
                                 if !flushed_text.is_empty() {
                                     runs.push(Inline::TextRun(TextRun {
                                         text: flushed_text,
@@ -366,12 +400,18 @@ pub fn parse_document_xml_with_rels(
                                             field_type: ft,
                                             properties: field_props.clone(),
                                         };
-                                        if let ParseState::InParagraph { ref mut runs, .. } = state {
+                                        if let ParseState::InParagraph { ref mut runs, .. } = state
+                                        {
                                             runs.push(Inline::Field(fc));
-                                        } else if let Some(ps) = stack.iter_mut().rev().find(
-                                            |s| matches!(s, ParseState::InParagraph { .. })
-                                        ) {
-                                            if let ParseState::InParagraph { ref mut runs, .. } = ps {
+                                        } else if let Some(ps) = stack
+                                            .iter_mut()
+                                            .rev()
+                                            .find(|s| matches!(s, ParseState::InParagraph { .. }))
+                                        {
+                                            if let ParseState::InParagraph {
+                                                ref mut runs, ..
+                                            } = ps
+                                            {
                                                 runs.push(Inline::Field(fc));
                                             }
                                         }
@@ -464,13 +504,16 @@ pub fn parse_document_xml_with_rels(
                         state = ParseState::Idle;
                     }
                     b"hyperlink" if matches!(state, ParseState::InParagraph { .. }) => {
-                        if let ParseState::InParagraph { ref mut hyperlink_url, .. } = state {
+                        if let ParseState::InParagraph {
+                            ref mut hyperlink_url,
+                            ..
+                        } = state
+                        {
                             *hyperlink_url = None;
                         }
                     }
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
-                        let (props, runs, floats, section_props) =
-                            take_paragraph(&mut state);
+                        let (props, runs, floats, section_props) = take_paragraph(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
                         let paragraph = Block::Paragraph(Paragraph {
                             properties: props,
@@ -481,7 +524,10 @@ pub fn parse_document_xml_with_rels(
                         push_block(&mut state, &mut blocks, paragraph);
                     }
                     b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
-                        if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = state {
+                        if let ParseState::InParagraphProperties {
+                            ref mut in_pbdr, ..
+                        } = state
+                        {
                             *in_pbdr = false;
                         }
                     }
@@ -508,7 +554,12 @@ pub fn parse_document_xml_with_rels(
                         let (props, text) = take_run(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
                         if !text.is_empty() {
-                            if let ParseState::InParagraph { ref mut runs, ref hyperlink_url, .. } = state {
+                            if let ParseState::InParagraph {
+                                ref mut runs,
+                                ref hyperlink_url,
+                                ..
+                            } = state
+                            {
                                 runs.push(Inline::TextRun(TextRun {
                                     text,
                                     properties: props,
@@ -535,18 +586,29 @@ pub fn parse_document_xml_with_rels(
                                 text: ref mut t, ..
                             } = state
                             {
-                                let cleaned: String = text
-                                    .chars()
-                                    .filter(|c| *c != '\n' && *c != '\r')
-                                    .collect();
+                                let cleaned: String =
+                                    text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
                                 t.push_str(&cleaned);
                             }
                         }
                     }
                     b"tbl" if matches!(state, ParseState::InTable { .. }) => {
-                        if let ParseState::InTable { rows, grid_cols, default_cell_margins, borders, .. } = state {
+                        if let ParseState::InTable {
+                            rows,
+                            grid_cols,
+                            default_cell_margins,
+                            borders,
+                            ..
+                        } = state
+                        {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table { rows, grid_cols, default_cell_margins, cell_spacing: None, borders });
+                            let table = Block::Table(Table {
+                                rows,
+                                grid_cols,
+                                default_cell_margins,
+                                cell_spacing: None,
+                                borders,
+                            });
                             push_block(&mut state, &mut blocks, table);
                         }
                     }
@@ -621,8 +683,7 @@ pub fn parse_document_xml_with_rels(
                                         ),
                                         align_h,
                                         align_v,
-                                        wrap_side: wrap_side
-                                            .unwrap_or(WrapSide::BothSides),
+                                        wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
                                         pct_pos_h,
                                         pct_pos_v,
                                     };
@@ -636,17 +697,13 @@ pub fn parse_document_xml_with_rels(
                                         format_hint: FormatHint::default(),
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
-                                        if let Some(para_state) =
-                                            stack.iter_mut().rev().find(|s| {
-                                                matches!(
-                                                    s,
-                                                    ParseState::InParagraph { .. }
-                                                )
-                                            })
+                                        if let Some(para_state) = stack
+                                            .iter_mut()
+                                            .rev()
+                                            .find(|s| matches!(s, ParseState::InParagraph { .. }))
                                         {
                                             if let ParseState::InParagraph {
-                                                ref mut runs,
-                                                ..
+                                                ref mut runs, ..
                                             } = para_state
                                             {
                                                 runs.push(image);
@@ -659,12 +716,7 @@ pub fn parse_document_xml_with_rels(
                             }
                         }
                     }
-                    b"sectPr"
-                        if matches!(
-                            state,
-                            ParseState::InSectionProperties { .. }
-                        ) =>
-                    {
+                    b"sectPr" if matches!(state, ParseState::InSectionProperties { .. }) => {
                         if let ParseState::InSectionProperties { section } = state {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             match state {
@@ -687,23 +739,69 @@ pub fn parse_document_xml_with_rels(
                             *depth -= 1;
                         }
                     }
-                    b"tblCellMar" if matches!(state, ParseState::InTable { in_cell_mar: true, .. }) => {
-                        if let ParseState::InTable { ref mut in_cell_mar, .. } = state {
+                    b"tblCellMar"
+                        if matches!(
+                            state,
+                            ParseState::InTable {
+                                in_cell_mar: true,
+                                ..
+                            }
+                        ) =>
+                    {
+                        if let ParseState::InTable {
+                            ref mut in_cell_mar,
+                            ..
+                        } = state
+                        {
                             *in_cell_mar = false;
                         }
                     }
-                    b"tblBorders" if matches!(state, ParseState::InTable { in_borders: true, .. }) => {
-                        if let ParseState::InTable { ref mut in_borders, .. } = state {
+                    b"tblBorders"
+                        if matches!(
+                            state,
+                            ParseState::InTable {
+                                in_borders: true,
+                                ..
+                            }
+                        ) =>
+                    {
+                        if let ParseState::InTable {
+                            ref mut in_borders, ..
+                        } = state
+                        {
                             *in_borders = false;
                         }
                     }
-                    b"tcMar" if matches!(state, ParseState::InTableCell { in_cell_mar: true, .. }) => {
-                        if let ParseState::InTableCell { ref mut in_cell_mar, .. } = state {
+                    b"tcMar"
+                        if matches!(
+                            state,
+                            ParseState::InTableCell {
+                                in_cell_mar: true,
+                                ..
+                            }
+                        ) =>
+                    {
+                        if let ParseState::InTableCell {
+                            ref mut in_cell_mar,
+                            ..
+                        } = state
+                        {
                             *in_cell_mar = false;
                         }
                     }
-                    b"tcBorders" if matches!(state, ParseState::InTableCell { in_borders: true, .. }) => {
-                        if let ParseState::InTableCell { ref mut in_borders, .. } = state {
+                    b"tcBorders"
+                        if matches!(
+                            state,
+                            ParseState::InTableCell {
+                                in_borders: true,
+                                ..
+                            }
+                        ) =>
+                    {
+                        if let ParseState::InTableCell {
+                            ref mut in_borders, ..
+                        } = state
+                        {
                             *in_borders = false;
                         }
                     }
@@ -813,7 +911,6 @@ enum ParseState {
         reading_pct_pos: Option<char>,
     },
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -2,8 +2,8 @@ use crate::error::Error;
 use crate::model::*;
 use crate::units::DEFAULT_PAGE_MARGIN_TWIPS;
 
-use super::ParseState;
 use super::helpers::get_attr;
+use super::ParseState;
 
 /// Default header/footer distance from page edge in twips (0.5 inch).
 const DEFAULT_HF_MARGIN_TWIPS: u32 = 720;

@@ -38,26 +38,27 @@ fn resolve_cell_margins(
     table_default: &Option<CellMargins>,
     doc_default: &CellMargins,
 ) -> CellMargins {
-    cell.cell_margins
-        .or(*table_default)
-        .unwrap_or(*doc_default)
+    cell.cell_margins.or(*table_default).unwrap_or(*doc_default)
 }
 
-fn resolve_border(
-    cell_border: Option<BorderDef>,
-    table_border: BorderDef,
-) -> BorderDef {
+fn resolve_border(cell_border: Option<BorderDef>, table_border: BorderDef) -> BorderDef {
     cell_border.unwrap_or(table_border)
 }
 
 fn emit_border(
     commands: &mut Vec<DrawCommand>,
     border: &BorderDef,
-    x1: f32, y1: f32, x2: f32, y2: f32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
 ) {
     if border.is_visible() {
         commands.push(DrawCommand::Line {
-            x1, y1, x2, y2,
+            x1,
+            y1,
+            x2,
+            y2,
             color: border.color_rgb(),
             width: border.width_pt(),
         });
@@ -83,8 +84,16 @@ impl Layouter {
 
         let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
             let grid_total: f32 = table.grid_cols.iter().map(|w| twips_to_pt(*w)).sum();
-            let scale = if grid_total > 0.0 { content_width / grid_total } else { 1.0 };
-            table.grid_cols.iter().map(|w| twips_to_pt(*w) * scale).collect()
+            let scale = if grid_total > 0.0 {
+                content_width / grid_total
+            } else {
+                1.0
+            };
+            table
+                .grid_cols
+                .iter()
+                .map(|w| twips_to_pt(*w) * scale)
+                .collect()
         } else {
             vec![content_width / num_cols as f32; num_cols]
         };
@@ -92,133 +101,149 @@ impl Layouter {
         // ============================
         // PASS 1: MEASURE all cells
         // ============================
-        let measured_rows: Vec<MeasuredRow> = table.rows.iter().map(|row| {
-            let min_height = row.height.map(twips_to_pt).unwrap_or(0.0);
-            let row_height_limit = self.config.content_height();
+        let measured_rows: Vec<MeasuredRow> = table
+            .rows
+            .iter()
+            .map(|row| {
+                let min_height = row.height.map(twips_to_pt).unwrap_or(0.0);
+                let row_height_limit = self.config.content_height();
 
-            let mut col_x_positions = Vec::with_capacity(row.cells.len());
-            let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
-            let mut grid_col_idx = 0;
-            for cell in &row.cells {
-                let x = self.config.margin_left
-                    + col_widths[..grid_col_idx].iter().sum::<f32>();
-                let w = self.cell_width(grid_col_idx, cell, &col_widths);
-                col_x_positions.push(x);
-                cell_widths_computed.push(w);
-                grid_col_idx += cell.grid_span.max(1) as usize;
-            }
+                let mut col_x_positions = Vec::with_capacity(row.cells.len());
+                let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
+                let mut grid_col_idx = 0;
+                for cell in &row.cells {
+                    let x =
+                        self.config.margin_left + col_widths[..grid_col_idx].iter().sum::<f32>();
+                    let w = self.cell_width(grid_col_idx, cell, &col_widths);
+                    col_x_positions.push(x);
+                    cell_widths_computed.push(w);
+                    grid_col_idx += cell.grid_span.max(1) as usize;
+                }
 
-            let mut measured_cells = Vec::with_capacity(row.cells.len());
+                let mut measured_cells = Vec::with_capacity(row.cells.len());
 
-            for (col_idx, cell) in row.cells.iter().enumerate() {
-                let col_width = cell_widths_computed[col_idx];
-                let cell_x = col_x_positions[col_idx];
-                let margins = resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
-                let pad_left = margins.left_pt();
-                let pad_right = margins.right_pt();
-                let pad_top = margins.top_pt();
-                let pad_bottom = margins.bottom_pt();
-                let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
+                for (col_idx, cell) in row.cells.iter().enumerate() {
+                    let col_width = cell_widths_computed[col_idx];
+                    let cell_x = col_x_positions[col_idx];
+                    let margins =
+                        resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
+                    let pad_left = margins.left_pt();
+                    let pad_right = margins.right_pt();
+                    let pad_top = margins.top_pt();
+                    let pad_bottom = margins.bottom_pt();
+                    let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
 
-                if cell.is_vmerge_continue() {
+                    if cell.is_vmerge_continue() {
+                        measured_cells.push(MeasuredCell {
+                            commands: Vec::new(),
+                            content_height: 0.0,
+                            col_width,
+                        });
+                        continue;
+                    }
+
+                    let mut commands = Vec::new();
+                    let mut cell_y = pad_top;
+
+                    for block in &cell.blocks {
+                        if let Block::Paragraph(p) = block {
+                            let spacing =
+                                self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
+                            cell_y += spacing.before_pt();
+
+                            // Floating images in cell
+                            for float in &p.floats {
+                                if float.data.is_empty() {
+                                    continue;
+                                }
+                                let scale = f32::min(
+                                    1.0,
+                                    f32::min(
+                                        cell_content_width / float.width_pt.max(1.0),
+                                        row_height_limit.max(1.0) / float.height_pt.max(1.0),
+                                    ),
+                                );
+                                let img_w = float.width_pt * scale;
+                                let img_h = float.height_pt * scale;
+                                let img_x = cell_x + (col_width - img_w) / 2.0;
+                                commands.push(DrawCommand::Image {
+                                    x: img_x,
+                                    y: cell_y,
+                                    width: img_w,
+                                    height: img_h,
+                                    data: float.data.clone(),
+                                });
+                                cell_y += img_h;
+                            }
+
+                            let fragments = collect_fragments(
+                                &p.runs,
+                                cell_content_width,
+                                self.config.content_height(),
+                                &self.doc_defaults,
+                                &self.measurer,
+                            );
+
+                            if fragments.is_empty() && p.floats.is_empty() {
+                                let default_size = self.doc_defaults.font_size_half_pts as f32
+                                    / HALF_POINTS_PER_POINT;
+                                let natural = self.measurer.line_height(
+                                    &self.doc_defaults.font_family,
+                                    default_size,
+                                    false,
+                                    false,
+                                );
+                                cell_y += resolve_line_height(natural, spacing.line_spacing());
+                                cell_y += spacing.after_pt();
+                                continue;
+                            }
+                            if fragments.is_empty() {
+                                cell_y += spacing.after_pt();
+                                continue;
+                            }
+
+                            // Use shared measure_lines for fragment → command conversion
+                            let measured = measure_lines(
+                                &fragments,
+                                cell_x + pad_left,
+                                cell_content_width,
+                                0.0, // no first-line indent in cells
+                                p.properties.alignment,
+                                spacing.line_spacing(),
+                                &p.properties.tab_stops,
+                                self.default_tab_stop_pt,
+                            );
+
+                            // Offset measured commands by cell_y and accumulate
+                            for line in &measured.lines {
+                                for cmd in &line.commands {
+                                    commands.push(offset_command(cmd, cell_y));
+                                }
+                            }
+                            cell_y += measured.total_height;
+                            cell_y += spacing.after_pt();
+                        }
+                    }
+
+                    // Ensure minimum bottom padding to account for font descender space
+                    // not captured by line height metrics.
+                    let effective_pad_bottom = pad_bottom.max(1.0);
+                    let content_height = cell_y + effective_pad_bottom;
+
                     measured_cells.push(MeasuredCell {
-                        commands: Vec::new(),
-                        content_height: 0.0,
+                        commands,
+                        content_height,
                         col_width,
                     });
-                    continue;
                 }
 
-                let mut commands = Vec::new();
-                let mut cell_y = pad_top;
-
-                for block in &cell.blocks {
-                    if let Block::Paragraph(p) = block {
-                        let spacing = self.resolve_cell_spacing(
-                            p.properties.spacing, table.cell_spacing,
-                        );
-                        cell_y += spacing.before_pt();
-
-                        // Floating images in cell
-                        for float in &p.floats {
-                            if float.data.is_empty() { continue; }
-                            let scale = f32::min(1.0, f32::min(
-                                cell_content_width / float.width_pt.max(1.0),
-                                row_height_limit.max(1.0) / float.height_pt.max(1.0),
-                            ));
-                            let img_w = float.width_pt * scale;
-                            let img_h = float.height_pt * scale;
-                            let img_x = cell_x + (col_width - img_w) / 2.0;
-                            commands.push(DrawCommand::Image {
-                                x: img_x, y: cell_y,
-                                width: img_w, height: img_h,
-                                data: float.data.clone(),
-                            });
-                            cell_y += img_h;
-                        }
-
-                        let fragments = collect_fragments(
-                            &p.runs, cell_content_width,
-                            self.config.content_height(),
-                            &self.doc_defaults, &self.measurer,
-                        );
-
-                        if fragments.is_empty() && p.floats.is_empty() {
-                            let default_size = self.doc_defaults.font_size_half_pts as f32
-                                / HALF_POINTS_PER_POINT;
-                            let natural = self.measurer.line_height(
-                                &self.doc_defaults.font_family, default_size, false, false,
-                            );
-                            cell_y += resolve_line_height(natural, spacing.line_spacing());
-                            cell_y += spacing.after_pt();
-                            continue;
-                        }
-                        if fragments.is_empty() {
-                            cell_y += spacing.after_pt();
-                            continue;
-                        }
-
-                        // Use shared measure_lines for fragment → command conversion
-                        let measured = measure_lines(
-                            &fragments,
-                            cell_x + pad_left,
-                            cell_content_width,
-                            0.0, // no first-line indent in cells
-                            p.properties.alignment,
-                            spacing.line_spacing(),
-                            &p.properties.tab_stops,
-                            self.default_tab_stop_pt,
-                        );
-
-                        // Offset measured commands by cell_y and accumulate
-                        for line in &measured.lines {
-                            for cmd in &line.commands {
-                                commands.push(offset_command(cmd, cell_y));
-                            }
-                        }
-                        cell_y += measured.total_height;
-                        cell_y += spacing.after_pt();
-                    }
+                MeasuredRow {
+                    cells: measured_cells,
+                    col_x_positions,
+                    min_height,
                 }
-
-                // Ensure minimum bottom padding to account for font descender space
-                // not captured by line height metrics.
-                let effective_pad_bottom = pad_bottom.max(1.0);
-                let content_height = cell_y + effective_pad_bottom;
-
-                measured_cells.push(MeasuredCell {
-                    commands,
-                    content_height,
-                    col_width,
-                });
-            }
-
-            MeasuredRow {
-                cells: measured_cells,
-                col_x_positions,
-                min_height,
-            }
-        }).collect();
+            })
+            .collect();
 
         // ============================
         // PASS 2: LAYOUT — compute row heights with vMerge distribution
@@ -245,21 +270,26 @@ impl Layouter {
         }
 
         // Compute base row heights from non-merged cells only.
-        let mut row_heights: Vec<f32> = measured_rows.iter().enumerate().map(|(row_idx, mr)| {
-            let mut h = mr.min_height;
-            for (col_idx, mc) in mr.cells.iter().enumerate() {
-                let cell = &table.rows[row_idx].cells[col_idx];
-                if cell.vertical_merge.is_none() && mc.content_height > h {
-                    h = mc.content_height;
+        let mut row_heights: Vec<f32> = measured_rows
+            .iter()
+            .enumerate()
+            .map(|(row_idx, mr)| {
+                let mut h = mr.min_height;
+                for (col_idx, mc) in mr.cells.iter().enumerate() {
+                    let cell = &table.rows[row_idx].cells[col_idx];
+                    if cell.vertical_merge.is_none() && mc.content_height > h {
+                        h = mc.content_height;
+                    }
                 }
-            }
-            h
-        }).collect();
+                h
+            })
+            .collect();
 
         // Distribute vMerge span heights across rows
         for span in &vmerge_spans {
             let current_total: f32 = row_heights[span.start_row..span.start_row + span.row_count]
-                .iter().sum();
+                .iter()
+                .sum();
             if span.total_height > current_total {
                 let deficit = span.total_height - current_total;
                 let per_row = deficit / span.row_count as f32;
@@ -273,7 +303,8 @@ impl Layouter {
         // PASS 3: PAINT — emit draw commands at computed positions
         // ============================
 
-        let tbl_borders = table.borders
+        let tbl_borders = table
+            .borders
             .unwrap_or(self.doc_defaults.default_table_borders);
         let num_rows = table.rows.len();
 
@@ -295,14 +326,19 @@ impl Layouter {
                 // 1. Cell shading
                 if let Some(color) = &cell.shading {
                     self.current_page.commands.push(DrawCommand::Rect {
-                        x: cell_x, y: row_top, width: cw, height: row_height,
+                        x: cell_x,
+                        y: row_top,
+                        width: cw,
+                        height: row_height,
                         color: (color.r, color.g, color.b),
                     });
                 }
 
                 // 2. Cell content (offset by row_top)
                 for cmd in &mc.commands {
-                    self.current_page.commands.push(offset_command(cmd, row_top));
+                    self.current_page
+                        .commands
+                        .push(offset_command(cmd, row_top));
                 }
 
                 // 3. Cell borders
@@ -313,26 +349,62 @@ impl Layouter {
                 let is_last_col = col_idx == num_cells - 1;
 
                 if !cell.is_vmerge_continue() {
-                    let tbl_top = if is_first_row { tbl_borders.top } else { tbl_borders.inside_h };
-                    emit_border(&mut self.current_page.commands,
+                    let tbl_top = if is_first_row {
+                        tbl_borders.top
+                    } else {
+                        tbl_borders.inside_h
+                    };
+                    emit_border(
+                        &mut self.current_page.commands,
                         &resolve_border(cell_b.top, tbl_top),
-                        cell_x, row_top, cell_x + cw, row_top);
+                        cell_x,
+                        row_top,
+                        cell_x + cw,
+                        row_top,
+                    );
                 }
 
-                let tbl_left = if is_first_col { tbl_borders.left } else { tbl_borders.inside_v };
-                emit_border(&mut self.current_page.commands,
+                let tbl_left = if is_first_col {
+                    tbl_borders.left
+                } else {
+                    tbl_borders.inside_v
+                };
+                emit_border(
+                    &mut self.current_page.commands,
                     &resolve_border(cell_b.left, tbl_left),
-                    cell_x, row_top, cell_x, row_bottom);
+                    cell_x,
+                    row_top,
+                    cell_x,
+                    row_bottom,
+                );
 
-                let tbl_right = if is_last_col { tbl_borders.right } else { tbl_borders.inside_v };
-                emit_border(&mut self.current_page.commands,
+                let tbl_right = if is_last_col {
+                    tbl_borders.right
+                } else {
+                    tbl_borders.inside_v
+                };
+                emit_border(
+                    &mut self.current_page.commands,
                     &resolve_border(cell_b.right, tbl_right),
-                    cell_x + cw, row_top, cell_x + cw, row_bottom);
+                    cell_x + cw,
+                    row_top,
+                    cell_x + cw,
+                    row_bottom,
+                );
 
-                let tbl_bottom = if is_last_row { tbl_borders.bottom } else { tbl_borders.inside_h };
-                emit_border(&mut self.current_page.commands,
+                let tbl_bottom = if is_last_row {
+                    tbl_borders.bottom
+                } else {
+                    tbl_borders.inside_h
+                };
+                emit_border(
+                    &mut self.current_page.commands,
                     &resolve_border(cell_b.bottom, tbl_bottom),
-                    cell_x, row_bottom, cell_x + cw, row_bottom);
+                    cell_x,
+                    row_bottom,
+                    cell_x + cw,
+                    row_bottom,
+                );
             }
 
             self.cursor_y += row_height;

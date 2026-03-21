@@ -1,8 +1,8 @@
 use crate::error::Error;
 use crate::model::*;
 
-use super::ParseState;
 use super::helpers::get_attr;
+use super::ParseState;
 
 /// Handle elements inside a `w:drawing` subtree to extract image info.
 pub fn handle_drawing_element(

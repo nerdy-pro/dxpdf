@@ -11,8 +11,7 @@ pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
 
     for page in pages {
-        let mut on_page =
-            doc.begin_page((page.page_width, page.page_height), None);
+        let mut on_page = doc.begin_page((page.page_width, page.page_height), None);
         {
             let canvas = on_page.canvas();
             render_page(canvas, page, &font_mgr)?;
@@ -31,20 +30,74 @@ fn render_page(
 ) -> Result<(), Error> {
     for cmd in &page.commands {
         match cmd {
-            DrawCommand::Text { x, y, text, font_family, char_spacing_pt, font_size, bold, italic, color } => {
-                draw_text(canvas, font_mgr, *x, *y, text, font_family, *font_size, *bold, *italic, *color, *char_spacing_pt);
+            DrawCommand::Text {
+                x,
+                y,
+                text,
+                font_family,
+                char_spacing_pt,
+                font_size,
+                bold,
+                italic,
+                color,
+            } => {
+                draw_text(
+                    canvas,
+                    font_mgr,
+                    *x,
+                    *y,
+                    text,
+                    font_family,
+                    *font_size,
+                    *bold,
+                    *italic,
+                    *color,
+                    *char_spacing_pt,
+                );
             }
-            DrawCommand::Underline { x1, y1, x2, y2, color, width }
-            | DrawCommand::Line { x1, y1, x2, y2, color, width } => {
+            DrawCommand::Underline {
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                width,
+            }
+            | DrawCommand::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                width,
+            } => {
                 draw_line(canvas, *x1, *y1, *x2, *y2, *color, *width);
             }
-            DrawCommand::Image { x, y, width, height, data } => {
+            DrawCommand::Image {
+                x,
+                y,
+                width,
+                height,
+                data,
+            } => {
                 draw_image(canvas, *x, *y, *width, *height, data);
             }
-            DrawCommand::Rect { x, y, width, height, color } => {
+            DrawCommand::Rect {
+                x,
+                y,
+                width,
+                height,
+                color,
+            } => {
                 draw_rect(canvas, *x, *y, *width, *height, *color);
             }
-            DrawCommand::LinkAnnotation { x, y, width, height, url } => {
+            DrawCommand::LinkAnnotation {
+                x,
+                y,
+                width,
+                height,
+                url,
+            } => {
                 let rect = Rect::from_xywh(*x, *y, *width, *height);
                 // Skia expects a null-terminated URL in the Data
                 let mut url_bytes = url.as_bytes().to_vec();
@@ -111,14 +164,7 @@ fn draw_line(
     canvas.draw_line((x1, y1), (x2, y2), &paint);
 }
 
-fn draw_image(
-    canvas: &skia_safe::Canvas,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    data: &[u8],
-) {
+fn draw_image(canvas: &skia_safe::Canvas, x: f32, y: f32, width: f32, height: f32, data: &[u8]) {
     let skia_data = Data::new_copy(data);
     if let Some(image) = Image::from_encoded(skia_data) {
         let rect = Rect::from_xywh(x, y, width, height);
