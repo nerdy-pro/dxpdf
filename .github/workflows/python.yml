@@ -22,17 +22,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libgl1-mesa-dev
-
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --features python
-          manylinux: auto
+          manylinux: 2014
+          before-script-linux: yum install -y fontconfig-devel
 
       - uses: actions/upload-artifact@v4
         with:
