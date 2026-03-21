@@ -8,7 +8,7 @@ Built by [nerdy.pro](https://nerdy.pro).
 
 ## Why dxpdf?
 
-- **Fast** — converts a 24-page document in ~115ms on Apple Silicon
+- **Fast** — converts a 7-page report in ~94ms on Apple Silicon (with typeface caching)
 - **Accurate** — Flutter-inspired measure→layout→paint pipeline with pixel-level fidelity
 - **Standalone** — no external dependencies beyond Skia; no Office installation needed
 - **Cross-platform** — runs on macOS, Linux, and Windows
@@ -258,9 +258,9 @@ Benchmarked on Apple M3 Max with `hyperfine` (20 runs, 3 warmup):
 
 | Document | Pages | Mean time | Peak RSS |
 |---|---|---|---|
-| 3-page form (11 tables, 2 images) | 3 | **114 ms** | 19 MB |
-| 7-page inspection report | 7 | **213 ms** | 24 MB |
-| 24-page product sheet | 24 | **648 ms** | 76 MB |
+| 3-page form (11 tables, 2 images) | 3 | **85 ms** | 19 MB |
+| 7-page inspection report | 7 | **94 ms** | 24 MB |
+| 24-page product sheet | 24 | **504 ms** | 76 MB |
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full history.
 
