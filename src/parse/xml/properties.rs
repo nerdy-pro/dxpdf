@@ -182,7 +182,20 @@ pub fn handle_empty_element(
                 _ => {}
             }
         }
-        ParseState::InParagraphProperties { ref mut props, .. } => {
+        ParseState::InParagraphProperties { ref mut props, ref in_pbdr, .. } => {
+            if *in_pbdr {
+                // Inside w:pBdr — parse border edge elements
+                let border = parse_border_def(e)?;
+                let borders = props.paragraph_borders.get_or_insert(ParagraphBorders::default());
+                match local {
+                    b"top" => borders.top = Some(border),
+                    b"bottom" => borders.bottom = Some(border),
+                    b"left" => borders.left = Some(border),
+                    b"right" => borders.right = Some(border),
+                    _ => {}
+                }
+                return Ok(());
+            }
             match local {
                 b"jc" => {
                     if let Some(val) = get_attr(e, b"val")? {

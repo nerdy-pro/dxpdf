@@ -243,6 +243,8 @@ struct Layouter {
     measurer: TextMeasurer,
     /// Counters for numbered lists: (numId, level) -> current count.
     list_counters: std::collections::HashMap<(u32, u32), u32>,
+    /// Whether the previous paragraph had a bottom border (to suppress duplicate top borders).
+    prev_para_had_bottom_border: bool,
 }
 
 impl Layouter {
@@ -268,6 +270,7 @@ impl Layouter {
             doc_defaults,
             measurer,
             list_counters: std::collections::HashMap::new(),
+            prev_para_had_bottom_border: false,
         }
     }
 
@@ -423,7 +426,10 @@ impl Layouter {
                     self.section_break();
                 }
             }
-            Block::Table(t) => self.layout_table(t, next_is_table),
+            Block::Table(t) => {
+                self.prev_para_had_bottom_border = false;
+                self.layout_table(t, next_is_table);
+            }
         }
     }
 

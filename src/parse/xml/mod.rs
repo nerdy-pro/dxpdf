@@ -79,6 +79,7 @@ pub fn parse_document_xml_with_rels(
                         state = ParseState::InParagraphProperties {
                             props,
                             section_props: None,
+                            in_pbdr: false,
                         };
                     }
                     b"hyperlink" if matches!(state, ParseState::InParagraph { .. }) => {
@@ -178,6 +179,11 @@ pub fn parse_document_xml_with_rels(
                             *depth += 1;
                         }
                         handle_drawing_element(local, e, &mut state)?;
+                    }
+                    b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
+                        if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = state {
+                            *in_pbdr = true;
+                        }
                     }
                     b"sectPr"
                         if matches!(
@@ -474,10 +480,16 @@ pub fn parse_document_xml_with_rels(
                         });
                         push_block(&mut state, &mut blocks, paragraph);
                     }
+                    b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
+                        if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = state {
+                            *in_pbdr = false;
+                        }
+                    }
                     b"pPr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
                         if let ParseState::InParagraphProperties {
                             props,
                             section_props,
+                            ..
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
@@ -739,6 +751,7 @@ enum ParseState {
     InParagraphProperties {
         props: ParagraphProperties,
         section_props: Option<SectionProperties>,
+        in_pbdr: bool,
     },
     InSectionProperties {
         section: SectionProperties,

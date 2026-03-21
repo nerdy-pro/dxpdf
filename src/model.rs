@@ -221,6 +221,17 @@ pub struct ParagraphProperties {
     pub style_id: Option<String>,
     /// List reference (numId + level) from `w:numPr`.
     pub list_ref: Option<ListRef>,
+    /// Paragraph borders from `w:pBdr`.
+    pub paragraph_borders: Option<ParagraphBorders>,
+}
+
+/// Paragraph border edges from `w:pBdr`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParagraphBorders {
+    pub top: Option<BorderDef>,
+    pub bottom: Option<BorderDef>,
+    pub left: Option<BorderDef>,
+    pub right: Option<BorderDef>,
 }
 
 /// A tab stop alignment type.
@@ -506,6 +517,15 @@ pub struct BorderDef {
 }
 
 impl BorderDef {
+    /// Create a single-style border with given size (eighths of a point) and RGB color.
+    pub fn single(size: u32, color: (u8, u8, u8)) -> Self {
+        Self {
+            style: BorderStyle::Single,
+            size,
+            color: Color { r: color.0, g: color.1, b: color.2 },
+        }
+    }
+
     /// Width in points.
     pub fn width_pt(&self) -> f32 {
         self.size as f32 / units::BORDER_SIZE_UNITS_PER_POINT

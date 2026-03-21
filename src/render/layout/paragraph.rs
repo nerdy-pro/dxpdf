@@ -56,17 +56,20 @@ impl Layouter {
         }
 
         if para.runs.is_empty() && para.floats.is_empty() {
+            let top = self.cursor_y;
             let default_size = self.doc_defaults.font_size_half_pts as f32
                 / HALF_POINTS_PER_POINT;
             let natural_height = self.measurer.line_height(
                 &self.doc_defaults.font_family, default_size, false, false,
             );
             self.cursor_y += resolve_line_height(natural_height, spacing.line_spacing());
+            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, self.cursor_y);
             self.cursor_y += spacing.after_pt();
             return;
         }
 
         if para.runs.is_empty() {
+            self.prev_para_had_bottom_border = false;
             self.cursor_y += spacing.after_pt();
             return;
         }
@@ -195,7 +198,68 @@ impl Layouter {
             shading_insert_idx,
         );
 
+        // Paint paragraph borders
+        if let Some(top) = text_area_top {
+            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, text_area_bottom);
+        }
+
         self.cursor_y += spacing.after_pt();
+    }
+
+    /// Paint paragraph border lines (w:pBdr).
+    /// Word merges adjacent paragraph borders: when the previous paragraph had any
+    /// border (top or bottom), the current paragraph's top border is suppressed to
+    /// avoid duplicate lines.
+    fn paint_paragraph_borders(
+        &mut self,
+        borders: &Option<ParagraphBorders>,
+        top: f32,
+        bottom: f32,
+    ) {
+        let has_any_border = borders.as_ref().is_some_and(|b| {
+            b.top.as_ref().is_some_and(|d| d.is_visible())
+                || b.bottom.as_ref().is_some_and(|d| d.is_visible())
+        });
+
+        if let Some(ref borders) = borders {
+            let left = self.config.margin_left;
+            let right = left + self.config.content_width();
+            if let Some(ref b) = borders.top {
+                // Skip top border if previous paragraph already drew a border
+                if b.is_visible() && !self.prev_para_had_bottom_border {
+                    self.current_page.commands.push(DrawCommand::Line {
+                        x1: left, y1: top, x2: right, y2: top,
+                        color: b.color_rgb(), width: b.width_pt(),
+                    });
+                }
+            }
+            if let Some(ref b) = borders.bottom {
+                if b.is_visible() {
+                    self.current_page.commands.push(DrawCommand::Line {
+                        x1: left, y1: bottom, x2: right, y2: bottom,
+                        color: b.color_rgb(), width: b.width_pt(),
+                    });
+                }
+            }
+            if let Some(ref b) = borders.left {
+                if b.is_visible() {
+                    self.current_page.commands.push(DrawCommand::Line {
+                        x1: left, y1: top, x2: left, y2: bottom,
+                        color: b.color_rgb(), width: b.width_pt(),
+                    });
+                }
+            }
+            if let Some(ref b) = borders.right {
+                if b.is_visible() {
+                    self.current_page.commands.push(DrawCommand::Line {
+                        x1: right, y1: top, x2: right, y2: bottom,
+                        color: b.color_rgb(), width: b.width_pt(),
+                    });
+                }
+            }
+        }
+
+        self.prev_para_had_bottom_border = has_any_border;
     }
 
     /// Paint paragraph background shading covering the text area.

@@ -240,7 +240,7 @@ Validated against ISO 29500 (OOXML). **67 features fully implemented, 18 partial
 | Tab stops (left type) | ✅ |
 | Tab stops (center, right, decimal) | ⚠️ parsed, all render as left |
 | Paragraph shading | ✅ excludes before/after spacing |
-| Paragraph borders (`w:pBdr`) | ❌ |
+| Paragraph borders (`w:pBdr`) | ✅ top, bottom, left, right |
 | Keep with next, keep lines together | ❌ |
 | Widow/orphan control | ❌ |
 

@@ -350,6 +350,19 @@ use super::*;
     }
 
     #[test]
+    fn parse_paragraph_bottom_border() {
+        let xml = wrap_body(
+            r#"<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="auto"/></w:pBdr></w:pPr>
+                <w:r><w:t>Bordered</w:t></w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        let borders = p.properties.paragraph_borders.as_ref().expect("should have paragraph borders");
+        assert!(borders.bottom.is_some(), "should have bottom border");
+        assert!(borders.top.is_none(), "should not have top border");
+    }
+
+    #[test]
     fn parse_vert_align_subscript() {
         let xml = wrap_body(
             r#"<w:p><w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>2</w:t></w:r></w:p>"#,

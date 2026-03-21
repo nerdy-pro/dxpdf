@@ -1721,6 +1721,39 @@ use super::*;
     }
 
     // ==============================================================
+    // Paragraph borders (w:pBdr)
+    // ==============================================================
+
+    #[test]
+    fn paragraph_bottom_border_renders_line() {
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties {
+                paragraph_borders: Some(ParagraphBorders {
+                    top: None,
+                    bottom: Some(BorderDef::single(4, (0, 0, 0))),
+                    left: None,
+                    right: None,
+                }),
+                ..Default::default()
+            },
+            runs: vec![Inline::TextRun(TextRun {
+                text: "Bordered".into(),
+                properties: RunProperties::default(),
+                hyperlink_url: None,
+            })],
+            floats: Vec::new(),
+            section_properties: None,
+        })]);
+        let pages = layout(&doc, &LayoutConfig::default());
+        let lines = extract_lines(&pages);
+        // Should have a horizontal line (bottom border)
+        let h_lines: Vec<_> = lines.iter()
+            .filter(|(x1, y1, x2, y2)| (y1 - y2).abs() < 0.1 && (x2 - x1).abs() > 10.0)
+            .collect();
+        assert!(!h_lines.is_empty(), "Should have a horizontal border line, got: {:?}", lines);
+    }
+
+    // ==============================================================
     // Field codes: PAGE / NUMPAGES
     // ==============================================================
 
