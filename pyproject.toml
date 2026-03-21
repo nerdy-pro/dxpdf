@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "dxpdf"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A fast DOCX-to-PDF converter powered by Skia, written in Rust"
 readme = "README.md"
 license = { text = "MIT" }
