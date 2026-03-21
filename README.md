@@ -208,36 +208,138 @@ The test suite includes 98 unit tests and 9 integration tests covering:
 
 Visual regression tests compare rendered PDFs against Word-generated references using pixel matching (see [VISUAL_COMPARISON.md](VISUAL_COMPARISON.md)).
 
-## Known Limitations
+## OOXML Feature Coverage
 
-### Parsing
+Validated against ISO 29500 (OOXML). **67 features fully implemented, 18 partial, 34 not implemented.**
 
-- **Footnotes/Endnotes**: Not supported.
-- **Comments and tracked changes**: Ignored entirely.
-- **Hyperlinks**: `w:hyperlink` with `r:id` is parsed and rendered as clickable PDF link annotations. Internal anchor links (`w:anchor`) are not yet supported.
-- **Fields and form controls**: Merge fields (`w:fldChar`), checkboxes, dropdowns, and other form elements are not rendered. Page number fields (`PAGE`, `NUMPAGES`) in headers/footers are not evaluated.
-- **Legacy images**: VML images (`w:pict`, `v:imagedata`) are not supported; only DrawingML (`w:drawing`) is handled.
-- **Text boxes and shapes**: Drawing shapes (`wsp:`, `v:shape`) and text boxes are not parsed.
-- **SmartArt and charts**: `dgm:` and `c:chart` elements are not supported.
-- **Strikethrough and other text effects**: `w:strike`, `w:dstrike`, `w:shadow`, `w:outline`, `w:emboss`, `w:imprint` are not parsed. Superscript/subscript (`w:vertAlign`) is supported.
-- **Run highlighting**: `w:highlight` is not rendered (run shading `w:shd` is supported).
-- **Paragraph borders**: `w:pBdr` is not parsed.
-- **Multi-column layouts**: `w:cols` section properties are parsed but not used for layout.
-- **Per-section headers/footers**: Only the document-default header/footer is rendered; section-specific overrides (first page, even/odd) are not supported.
+### A. Text Formatting (w:rPr)
 
-### Rendering
+| Feature | Status |
+|---|---|
+| Bold, italic | ✅ with toggle support (`val="false"`) |
+| Underline | ✅ font-proportional stroke width (thicker for bold) |
+| Font size, family, color | ✅ |
+| Superscript/subscript (`w:vertAlign`) | ✅ 58% font size, baseline shifted |
+| Character spacing (`w:spacing`) | ✅ per-character advance expansion |
+| Run shading (`w:shd`) | ✅ |
+| Strikethrough (`w:strike`, `w:dstrike`) | ❌ |
+| Highlighting (`w:highlight`) | ❌ |
+| Caps, smallCaps | ❌ |
+| Shadow, outline, emboss, imprint | ❌ |
+| Hidden text (`w:vanish`) | ❌ |
 
-- **Justify alignment**: Parsed from `w:jc val="both"` but not applied — text renders left-aligned. Implementing justify requires distributing extra space across word gaps.
-- **Tab stop types**: Left, Center, Right, and Decimal tab stop types are parsed into the model but all tab stops are treated as left-aligned in layout. Center/Right/Decimal alignment at the stop position is not implemented.
-- **Table border styles**: Only `single` borders are rendered as solid lines. `double`, `dashed`, `dotted` styles are parsed but all render as solid lines.
-- **Cell shading patterns**: Only solid fill colors are rendered. Shading patterns (e.g., `val="pct25"`) are not supported — only `val="clear"` with a `fill` color.
-- **Cell vertical alignment**: Vertical alignment within cells (`w:vAlign`) is not applied; content is always top-aligned.
-- **Floating image distance**: Float-to-text gap uses a fixed 4pt default; `wp:distL`/`wp:distR`/`wp:distT`/`wp:distB` attributes are not parsed yet.
-- **Floating image positioning**: `wp14:pctPosVOffset`/`wp14:pctPosHOffset` percentage-based positioning is supported (relative to page dimensions). `relativeFrom` variants other than `page` are not yet distinguished.
-- **Fonts**: System fonts are used via Skia's font manager with automatic substitution for common proprietary fonts. If neither the requested font nor any substitute is installed, Helvetica is used. Font embedding and subsetting depend on Skia's PDF backend.
-- **Right-to-left text**: Not supported.
-- **Hyphenation**: No automatic hyphenation. Words break at spaces and existing hyphens, but no new hyphenation points are inserted.
-- **Kerning and ligatures**: `w:kern` and `w14:ligatures` are parsed by Skia's font engine but not explicitly controlled.
+### B. Paragraph Properties (w:pPr)
+
+| Feature | Status |
+|---|---|
+| Alignment (left, center, right) | ✅ |
+| Alignment (justify) | ⚠️ parsed, renders left-aligned |
+| Spacing before/after | ✅ |
+| Line spacing (auto/exact/atLeast) | ✅ |
+| Indentation (left, right, first-line, hanging) | ✅ |
+| Tab stops (left type) | ✅ |
+| Tab stops (center, right, decimal) | ⚠️ parsed, all render as left |
+| Paragraph shading | ✅ excludes before/after spacing |
+| Paragraph borders (`w:pBdr`) | ❌ |
+| Keep with next, keep lines together | ❌ |
+| Widow/orphan control | ❌ |
+
+### C. Styles
+
+| Feature | Status |
+|---|---|
+| Paragraph styles (`w:pStyle`) | ✅ |
+| Character styles (`w:rStyle`) | ✅ including built-in Hyperlink |
+| `basedOn` inheritance | ✅ field-by-field merging |
+| Document defaults (`docDefaults`) | ✅ |
+| Theme fonts | ✅ minor/major from `theme1.xml` |
+
+### D. Tables
+
+| Feature | Status |
+|---|---|
+| Grid columns, cell widths (dxa) | ✅ |
+| Cell widths (pct, auto) | ⚠️ fall back to grid |
+| Cell margins (per-cell/table/doc default) | ✅ three-level cascade |
+| Merged cells (gridSpan, vMerge) | ✅ with height distribution |
+| Row heights (minimum) | ✅ |
+| Row heights (exact) | ⚠️ treated as minimum |
+| Table borders (per-cell, per-table) | ✅ |
+| Border styles (single) | ✅ |
+| Border styles (double, dashed, dotted) | ⚠️ parsed, all render as single |
+| Cell shading (solid) | ✅ |
+| Cell shading (patterns) | ❌ |
+| Cell vertical alignment (`w:vAlign`) | ❌ |
+| Table alignment | ❌ |
+| Nested tables | ✅ recursive |
+| Table width (`w:tblW`) | ❌ |
+
+### E. Images
+
+| Feature | Status |
+|---|---|
+| Inline images (`wp:inline`) | ✅ PNG, JPEG, BMP, WebP via Skia |
+| Floating images (`wp:anchor`) | ✅ |
+| Position (offset, align, `wp14:pctPos`) | ✅ |
+| Wrap (none, square, tight, through) | ✅ basic flow adjustment |
+| Wrap (topAndBottom) | ❌ |
+| Distance from text (`distL/R/T/B`) | ⚠️ fixed 4pt default |
+| VML images (`w:pict`) | ❌ |
+
+### F. Page Layout
+
+| Feature | Status |
+|---|---|
+| Page size and orientation | ✅ |
+| Page margins (top, right, bottom, left, header, footer) | ✅ |
+| Section breaks (nextPage) | ✅ |
+| Section breaks (continuous, even, odd) | ⚠️ treated as nextPage |
+| Multi-column layout | ❌ |
+| Page borders | ❌ |
+| Document grid (`linePitch`) | ❌ |
+
+### G. Headers/Footers
+
+| Feature | Status |
+|---|---|
+| Default header/footer | ✅ with images, text, field codes |
+| First page header/footer | ❌ |
+| Even/odd page header/footer | ❌ |
+| Per-section headers/footers | ❌ |
+
+### H. Lists/Numbering
+
+| Feature | Status |
+|---|---|
+| Bullet lists | ✅ custom characters |
+| Numbered (decimal, letter, roman) | ✅ |
+| List indentation (left, hanging) | ✅ |
+| Multi-level lists | ⚠️ levels parsed, nesting limited |
+| List restart numbering | ⚠️ start value parsed, restart not implemented |
+
+### I. Fields
+
+| Feature | Status |
+|---|---|
+| PAGE, NUMPAGES | ✅ with run properties from surrounding context |
+| Hyperlinks (`w:hyperlink`) | ✅ clickable PDF link annotations |
+| Unknown fields | ✅ cached value used as fallback |
+| TOC, INDEX, MERGEFIELD, DATE | ❌ |
+
+### J. Other
+
+| Feature | Status |
+|---|---|
+| Footnotes/endnotes | ❌ warned |
+| Comments | ❌ ignored |
+| Tracked insertions | ⚠️ content passes through |
+| Tracked deletions | ⚠️ warned, deleted text may appear |
+| Text boxes, shapes | ❌ |
+| SmartArt, charts, equations | ❌ |
+| Embedded objects | ❌ |
+| Right-to-left text | ❌ |
+| Automatic hyphenation | ❌ words break at spaces and hyphens only |
+| Fonts | ⚠️ system fonts with substitution table; Helvetica fallback |
 
 ## Dependencies
 
