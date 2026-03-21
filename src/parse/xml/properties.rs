@@ -1,3 +1,5 @@
+use log::warn;
+
 use crate::error::Error;
 use crate::model::*;
 use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
@@ -103,6 +105,7 @@ pub fn handle_empty_element(
     local: &[u8],
     e: &quick_xml::events::BytesStart<'_>,
     state: &mut ParseState,
+    warned: &mut std::collections::HashSet<&'static str>,
 ) -> Result<(), Error> {
     match state {
         ParseState::InRunProperties { ref mut props } => {
@@ -145,6 +148,26 @@ pub fn handle_empty_element(
                     // w:spacing in rPr = character spacing (in twips)
                     if let Some(val) = get_attr(e, b"val")? {
                         props.char_spacing = val.parse::<i32>().ok();
+                    }
+                }
+                b"strike" | b"dstrike" => {
+                    if warned.insert("strike") {
+                        warn!("Unsupported: strikethrough (w:strike/w:dstrike)");
+                    }
+                }
+                b"vertAlign" => {
+                    if warned.insert("vertAlign") {
+                        warn!("Unsupported: superscript/subscript (w:vertAlign)");
+                    }
+                }
+                b"caps" | b"smallCaps" => {
+                    if warned.insert("caps") {
+                        warn!("Unsupported: capitalization effect (w:caps/w:smallCaps)");
+                    }
+                }
+                b"highlight" => {
+                    if warned.insert("highlight") {
+                        warn!("Unsupported: text highlighting (w:highlight)");
                     }
                 }
                 _ => {}

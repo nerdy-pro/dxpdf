@@ -3,6 +3,9 @@ mod helpers;
 mod properties;
 mod section;
 
+use std::collections::HashSet;
+
+use log::warn;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -14,6 +17,12 @@ use drawing::{handle_drawing_element, handle_drawing_end};
 use helpers::*;
 use properties::handle_empty_element;
 use section::handle_section_element;
+
+fn warn_once(warned: &mut HashSet<&'static str>, key: &'static str, msg: &str) {
+    if warned.insert(key) {
+        warn!("{msg}");
+    }
+}
 
 /// Parse the `word/document.xml` content into a `Document`.
 pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
@@ -31,6 +40,7 @@ pub fn parse_document_xml_with_rels(
     let mut stack: Vec<ParseState> = Vec::new();
     let mut state = ParseState::Idle;
     let mut final_section: Option<SectionProperties> = None;
+    let mut warned: HashSet<&'static str> = HashSet::new();
 
     loop {
         match reader.read_event()? {
@@ -204,6 +214,27 @@ pub fn parse_document_xml_with_rels(
                             *in_borders = true;
                         }
                     }
+                    // Warn on known unsupported elements that affect output
+                    b"pict" | b"object" => {
+                        warn_once(&mut warned, "pict", "Unsupported: VML image/object (w:pict/w:object) — use DrawingML (w:drawing) instead");
+                    }
+                    b"fldChar" | b"instrText" => {
+                        warn_once(&mut warned, "fldChar", "Unsupported: field code (w:fldChar/w:instrText) — fields like PAGE, TOC, MERGEFIELD are not evaluated");
+                    }
+                    b"footnoteReference" => {
+                        warn_once(&mut warned, "footnote", "Unsupported: footnote reference (w:footnoteReference)");
+                    }
+                    b"endnoteReference" => {
+                        warn_once(&mut warned, "endnote", "Unsupported: endnote reference (w:endnoteReference)");
+                    }
+                    b"ins" | b"moveTo" => {
+                        // Tracked insertions — content inside is valid, just not marked as tracked
+                    }
+                    b"del" | b"moveFrom" => {
+                        warn_once(&mut warned, "del", "Unsupported: tracked deletion (w:del/w:moveFrom) — deleted content may appear");
+                    }
+                    b"commentRangeStart" | b"commentRangeEnd" | b"commentReference" => {}
+                    b"bookmarkStart" | b"bookmarkEnd" | b"proofErr" | b"lastRenderedPageBreak" => {}
                     _ => {}
                 }
             }
@@ -256,7 +287,7 @@ pub fn parse_document_xml_with_rels(
                 } else if matches!(state, ParseState::InSectionProperties { .. }) {
                     handle_section_element(local, e, &mut state)?;
                 } else {
-                    handle_empty_element(local, e, &mut state)?;
+                    handle_empty_element(local, e, &mut state, &mut warned)?;
                 }
             }
             Event::Text(ref e) => {
