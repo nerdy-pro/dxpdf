@@ -1,6 +1,6 @@
 # Benchmark Results
 
-Conversion benchmarks for `docx-pdf` using the test document:
+Conversion benchmarks for `dxpdf` using the test document:
 **Protokoll test DIN VDE 0100-600 Erstinbetriebnahme.docx**
 
 ## Test Document

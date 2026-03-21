@@ -54,13 +54,13 @@ fn simple_docx(body_content: &str) -> Vec<u8> {
 #[test]
 fn parse_simple_docx() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
-    let doc = docx_pdf::parse::parse(&docx).unwrap();
+    let doc = dxpdf::parse::parse(&docx).unwrap();
     assert_eq!(doc.blocks.len(), 1);
     match &doc.blocks[0] {
-        docx_pdf::model::Block::Paragraph(p) => {
+        dxpdf::model::Block::Paragraph(p) => {
             assert_eq!(p.runs.len(), 1);
             match &p.runs[0] {
-                docx_pdf::model::Inline::TextRun(tr) => {
+                dxpdf::model::Inline::TextRun(tr) => {
                     assert_eq!(tr.text, "Hello World");
                 }
                 _ => panic!("Expected TextRun"),
@@ -73,7 +73,7 @@ fn parse_simple_docx() {
 #[test]
 fn convert_simple_docx_to_pdf() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
 
     // PDF should start with the magic bytes
     assert!(pdf.len() > 4);
@@ -100,7 +100,7 @@ fn convert_formatted_docx_to_pdf() {
             <w:r><w:t>Normal paragraph text.</w:t></w:r>
         </w:p>"#,
     );
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
     assert_eq!(&pdf[..5], b"%PDF-");
 }
 
@@ -118,21 +118,21 @@ fn convert_table_docx_to_pdf() {
             </w:tr>
         </w:tbl>"#,
     );
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
     assert_eq!(&pdf[..5], b"%PDF-");
 }
 
 #[test]
 fn convert_empty_document() {
     let docx = simple_docx("");
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
     assert_eq!(&pdf[..5], b"%PDF-");
 }
 
 #[test]
 fn convert_writes_to_file() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>File test</w:t></w:r></w:p>"#);
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let out_path = dir.path().join("test.pdf");
@@ -144,7 +144,7 @@ fn convert_writes_to_file() {
 
 #[test]
 fn parse_invalid_zip_returns_error() {
-    let result = docx_pdf::parse::parse(b"not a zip file");
+    let result = dxpdf::parse::parse(b"not a zip file");
     assert!(result.is_err());
 }
 
@@ -159,7 +159,7 @@ fn parse_zip_without_document_xml_returns_error() {
     let cursor = zip.finish().unwrap();
     let bytes = cursor.into_inner();
 
-    let result = docx_pdf::parse::parse(&bytes);
+    let result = dxpdf::parse::parse(&bytes);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("document.xml"), "Error should mention document.xml: {err}");
@@ -177,7 +177,7 @@ fn convert_multi_paragraph_docx() {
         ));
     }
     let docx = simple_docx(&body);
-    let pdf = docx_pdf::convert(&docx).unwrap();
+    let pdf = dxpdf::convert(&docx).unwrap();
     assert_eq!(&pdf[..5], b"%PDF-");
     // Should produce a non-trivial PDF
     assert!(pdf.len() > 100);

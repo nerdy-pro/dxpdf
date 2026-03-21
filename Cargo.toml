@@ -1,8 +1,8 @@
 [package]
-name = "docx-pdf"
+name = "dxpdf"
 version = "0.1.0"
 edition = "2021"
-description = "Convert DOCX files to PDF using Skia"
+description = "A fast DOCX-to-PDF converter powered by Skia"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

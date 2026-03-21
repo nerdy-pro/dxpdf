@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "docx-pdf", about = "Convert DOCX files to PDF")]
+#[command(name = "dxpdf", about = "Convert DOCX files to PDF")]
 struct Cli {
     /// Input .docx file
     input: PathBuf,
@@ -13,7 +13,7 @@ struct Cli {
     output: Option<PathBuf>,
 }
 
-fn main() -> Result<(), docx_pdf::Error> {
+fn main() -> Result<(), dxpdf::Error> {
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("warn"),
     ).init();
@@ -25,7 +25,7 @@ fn main() -> Result<(), docx_pdf::Error> {
         .unwrap_or_else(|| cli.input.with_extension("pdf"));
 
     let docx_bytes = std::fs::read(&cli.input)?;
-    let pdf_bytes = docx_pdf::convert(&docx_bytes)?;
+    let pdf_bytes = dxpdf::convert(&docx_bytes)?;
     std::fs::write(&output, &pdf_bytes)?;
 
     eprintln!(

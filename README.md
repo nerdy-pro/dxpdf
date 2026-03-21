@@ -1,6 +1,6 @@
-# docx-pdf
+# dxpdf
 
-A lightweight Rust binary that parses DOCX files and renders them to PDF using Skia.
+A fast DOCX-to-PDF converter powered by Skia, written in Rust.
 
 ## Features
 
@@ -41,32 +41,32 @@ A lightweight Rust binary that parses DOCX files and renders them to PDF using S
 cargo build --release
 ```
 
-The release binary will be at `target/release/docx-pdf`.
+The release binary will be at `target/release/dxpdf`.
 
 ## Usage
 
 ```bash
 # Basic conversion (outputs to same name with .pdf extension)
-docx-pdf input.docx
+dxpdf input.docx
 
 # Specify output path
-docx-pdf input.docx -o output.pdf
+dxpdf input.docx -o output.pdf
 ```
 
 ### As a library
 
 ```rust
-use docx_pdf;
+use dxpdf;
 
 let docx_bytes = std::fs::read("document.docx")?;
-let pdf_bytes = docx_pdf::convert(&docx_bytes)?;
+let pdf_bytes = dxpdf::convert(&docx_bytes)?;
 std::fs::write("output.pdf", &pdf_bytes)?;
 ```
 
 You can also work with the parsed document model directly:
 
 ```rust
-use docx_pdf::{parse, model, render};
+use dxpdf::{parse, model, render};
 
 let docx_bytes = std::fs::read("document.docx")?;
 let document = parse::parse(&docx_bytes)?;
@@ -79,7 +79,7 @@ for block in &document.blocks {
     }
 }
 
-let pdf_bytes = docx_pdf::convert_document(&document)?;
+let pdf_bytes = dxpdf::convert_document(&document)?;
 ```
 
 ## Architecture

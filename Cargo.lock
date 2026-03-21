@@ -258,7 +258,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "docx-pdf"
+name = "dxpdf"
 version = "0.1.0"
 dependencies = [
  "clap",
