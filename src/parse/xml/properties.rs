@@ -156,8 +156,12 @@ pub fn handle_empty_element(
                     }
                 }
                 b"vertAlign" => {
-                    if warned.insert("vertAlign") {
-                        warn!("Unsupported: superscript/subscript (w:vertAlign)");
+                    if let Some(val) = get_attr(e, b"val")? {
+                        props.vert_align = match val.as_str() {
+                            "superscript" => Some(VertAlign::Superscript),
+                            "subscript" => Some(VertAlign::Subscript),
+                            _ => None,
+                        };
                     }
                 }
                 b"caps" | b"smallCaps" => {

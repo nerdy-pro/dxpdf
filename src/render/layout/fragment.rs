@@ -52,6 +52,8 @@ pub enum Fragment {
         measured_height: f32,
         /// Hyperlink URL, if this text is part of a link.
         hyperlink_url: Option<String>,
+        /// Baseline offset in points (negative = up for superscript, positive = down for subscript).
+        baseline_offset: f32,
     },
     Image {
         width: f32,
@@ -105,7 +107,7 @@ pub fn collect_fragments(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = tr
+                let base_font_size = tr
                     .properties
                     .font_size_pt_with_default(defaults.font_size_half_pts);
                 let bold = tr.properties.bold;
@@ -113,8 +115,26 @@ pub fn collect_fragments(
                 let char_spacing_pt = tr.properties.char_spacing
                     .map(|cs| twips_to_pt_signed(cs))
                     .unwrap_or(0.0);
+
+                // Super/subscript: reduce font size and compute baseline offset
+                let (font_size, baseline_offset) = match tr.properties.vert_align {
+                    Some(VertAlign::Superscript) => {
+                        let reduced = base_font_size * 0.58;
+                        // Shift up by ~33% of the original line height
+                        let offset = -(base_font_size * 0.33);
+                        (reduced, offset)
+                    }
+                    Some(VertAlign::Subscript) => {
+                        let reduced = base_font_size * 0.58;
+                        // Shift down by ~8% of the original line height
+                        let offset = base_font_size * 0.08;
+                        (reduced, offset)
+                    }
+                    None => (base_font_size, 0.0),
+                };
+
                 let line_height =
-                    measurer.line_height(&font_family, font_size, bold, italic);
+                    measurer.line_height(&font_family, base_font_size, bold, italic);
                 for part in split_words_and_spaces(&tr.text) {
                     let base_width = measurer.measure_width(
                         part,
@@ -140,6 +160,7 @@ pub fn collect_fragments(
                         measured_width,
                         measured_height: line_height,
                         hyperlink_url: if is_space { None } else { tr.hyperlink_url.clone() },
+                        baseline_offset,
                     });
                 }
             }
@@ -378,7 +399,7 @@ pub fn measure_lines(
                 Fragment::Text {
                     text, font_family, font_size, bold, italic,
                     underline, color, shading, char_spacing_pt,
-                    measured_width, hyperlink_url, ..
+                    measured_width, hyperlink_url, baseline_offset, ..
                 } => {
                     let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                     if let Some(bg) = shading {
@@ -392,7 +413,7 @@ pub fn measure_lines(
                     }
                     commands.push(DrawCommand::Text {
                         x,
-                        y: cursor_y,
+                        y: cursor_y + baseline_offset,
                         text: text.clone(),
                         font_family: font_family.clone(),
                         char_spacing_pt: *char_spacing_pt,

@@ -303,7 +303,7 @@ impl Layouter {
                     Fragment::Text {
                         text, font_family, font_size, bold, italic,
                         underline, color, shading, char_spacing_pt,
-                        measured_width, hyperlink_url, ..
+                        measured_width, hyperlink_url, baseline_offset, ..
                     } => {
                         let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                         if let Some(bg) = shading {
@@ -317,7 +317,7 @@ impl Layouter {
                         }
                         commands.push(DrawCommand::Text {
                             x,
-                            y: rel_y,
+                            y: rel_y + baseline_offset,
                             text: text.clone(),
                             font_family: font_family.clone(),
                             char_spacing_pt: *char_spacing_pt,

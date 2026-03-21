@@ -400,6 +400,13 @@ pub struct TextRun {
     pub hyperlink_url: Option<String>,
 }
 
+/// Vertical alignment of text (superscript/subscript).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VertAlign {
+    Superscript,
+    Subscript,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RunProperties {
     pub bold: bool,
@@ -413,6 +420,8 @@ pub struct RunProperties {
     pub char_spacing: Option<i32>,
     /// Background shading color from `w:shd`.
     pub shading: Option<Color>,
+    /// Superscript or subscript positioning.
+    pub vert_align: Option<VertAlign>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

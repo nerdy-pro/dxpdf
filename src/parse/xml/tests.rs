@@ -339,6 +339,28 @@ use super::*;
     }
 
     #[test]
+    fn parse_vert_align_superscript() {
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>2</w:t></w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        let Inline::TextRun(tr) = &p.runs[0] else { panic!() };
+        assert_eq!(tr.properties.vert_align, Some(VertAlign::Superscript));
+    }
+
+    #[test]
+    fn parse_vert_align_subscript() {
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>2</w:t></w:r></w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        let Inline::TextRun(tr) = &p.runs[0] else { panic!() };
+        assert_eq!(tr.properties.vert_align, Some(VertAlign::Subscript));
+    }
+
+    #[test]
     fn parse_hyperlink_without_rel_id_keeps_text() {
         let xml = wrap_body(
             r#"<w:p>

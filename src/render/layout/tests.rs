@@ -781,6 +781,7 @@ use super::*;
             measured_width: width,
             measured_height: 14.0,
             hyperlink_url: None,
+            baseline_offset: 0.0,
         }
     }
 
@@ -927,6 +928,7 @@ use super::*;
             measured_width: 60.0,
             measured_height: 14.0,
             hyperlink_url: None,
+            baseline_offset: 0.0,
         }];
         let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
         assert!(measured.lines[0].commands.iter()
@@ -949,6 +951,7 @@ use super::*;
             measured_width: 40.0,
             measured_height: 14.0,
             hyperlink_url: None,
+            baseline_offset: 0.0,
         }];
         let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
         assert!(measured.lines[0].commands.iter()
@@ -1715,4 +1718,70 @@ use super::*;
         let pages = layout(&doc, &LayoutConfig::default());
         let links = extract_link_annotations(&pages);
         assert!(links.is_empty(), "No hyperlinks, no annotations");
+    }
+
+    // ==============================================================
+    // Superscript / subscript
+    // ==============================================================
+
+    #[test]
+    fn superscript_reduces_font_size_and_shifts_up() {
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties::default(),
+            runs: vec![
+                Inline::TextRun(TextRun {
+                    text: "m".into(),
+                    properties: RunProperties::default(),
+                    hyperlink_url: None,
+                }),
+                Inline::TextRun(TextRun {
+                    text: "2".into(),
+                    properties: RunProperties {
+                        vert_align: Some(VertAlign::Superscript),
+                        ..Default::default()
+                    },
+                    hyperlink_url: None,
+                }),
+            ],
+            floats: Vec::new(),
+            section_properties: None,
+        })]);
+        let pages = layout(&doc, &LayoutConfig::default());
+        let texts = extract_texts(&pages);
+        let normal = texts.iter().find(|(_, _, t)| t == "m").unwrap();
+        let sup = texts.iter().find(|(_, _, t)| t == "2").unwrap();
+        // Superscript should be higher (smaller y value since y is baseline)
+        assert!(sup.1 < normal.1,
+            "Superscript y={} should be above normal y={}", sup.1, normal.1);
+    }
+
+    #[test]
+    fn subscript_shifts_down() {
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties::default(),
+            runs: vec![
+                Inline::TextRun(TextRun {
+                    text: "H".into(),
+                    properties: RunProperties::default(),
+                    hyperlink_url: None,
+                }),
+                Inline::TextRun(TextRun {
+                    text: "2".into(),
+                    properties: RunProperties {
+                        vert_align: Some(VertAlign::Subscript),
+                        ..Default::default()
+                    },
+                    hyperlink_url: None,
+                }),
+            ],
+            floats: Vec::new(),
+            section_properties: None,
+        })]);
+        let pages = layout(&doc, &LayoutConfig::default());
+        let texts = extract_texts(&pages);
+        let normal = texts.iter().find(|(_, _, t)| t == "H").unwrap();
+        let sub = texts.iter().find(|(_, _, t)| t == "2").unwrap();
+        // Subscript should be lower (larger y value)
+        assert!(sub.1 > normal.1,
+            "Subscript y={} should be below normal y={}", sub.1, normal.1);
     }
