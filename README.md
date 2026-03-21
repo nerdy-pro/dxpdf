@@ -124,7 +124,7 @@ Each layout element (paragraphs, table cells, headers/footers) goes through thre
 | `parse` | DOCX ZIP extraction, event-driven XML parser, style/numbering resolution |
 | `render/layout` | Measure→layout→paint pipeline: `fragment` (shared line fitting), `paragraph`, `table` (three-pass), `header_footer` |
 | `render/painter` | Skia canvas operations for PDF output |
-| `render/fonts` | Font substitution table (Calibri→Carlito, Arial→Liberation Sans, etc.) |
+| `render/fonts` | Font resolution: tries requested font first, falls back to metric-compatible substitutes |
 | `units` | OOXML unit conversions (twips, EMUs, half-points) — spec-defined constants only |
 
 ## Running Tests
@@ -139,7 +139,7 @@ Visual regression tests compare rendered PDFs against Word-generated references 
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **67 features fully implemented, 18 partial, 34 not implemented.**
+Validated against ISO 29500 (Office Open XML). **34 features fully implemented, 6 partial, 15 not implemented.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
