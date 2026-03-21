@@ -19,7 +19,7 @@ crate-type = ["rlib", "cdylib"]
 clap = { version = "4", features = ["derive"] }
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-skia-safe = { version = "0.93", features = ["embed-freetype"] }
+skia-safe = "0.93"
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
