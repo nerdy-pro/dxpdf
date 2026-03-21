@@ -97,6 +97,3 @@ pub const TAB_FALLBACK_PT: f32 = 36.0;
 
 /// Underline offset below the text baseline (in points).
 pub const UNDERLINE_Y_OFFSET: f32 = 2.0;
-
-/// Underline stroke width (in points).
-pub const UNDERLINE_STROKE_WIDTH: f32 = 0.5;

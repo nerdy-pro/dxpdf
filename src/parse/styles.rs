@@ -7,6 +7,16 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
     use std::rc::Rc;
 
     let mut styles = crate::model::StyleMap::new();
+
+    // Built-in character styles that Word defines implicitly
+    styles.insert("Hyperlink".to_string(), crate::model::ResolvedParagraphStyle {
+        run_props: crate::model::ResolvedRunStyle {
+            color: crate::model::Color::from_hex("0563C1"),
+            underline: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
     let mut reader = Reader::from_str(xml);
     let mut in_style = false;
     let mut style_id = String::new();

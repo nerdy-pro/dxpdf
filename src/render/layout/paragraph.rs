@@ -327,13 +327,14 @@ impl Layouter {
                             color: c,
                         });
                         if *underline {
+                            let uw = underline_width(*font_size, *bold);
                             commands.push(DrawCommand::Underline {
                                 x1: x,
                                 y1: rel_y + UNDERLINE_Y_OFFSET,
                                 x2: x + measured_width,
                                 y2: rel_y + UNDERLINE_Y_OFFSET,
                                 color: c,
-                                width: UNDERLINE_STROKE_WIDTH,
+                                width: uw,
                             });
                         }
                         if let Some(url) = hyperlink_url {

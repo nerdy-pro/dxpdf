@@ -91,6 +91,13 @@ impl Fragment {
     }
 }
 
+/// Compute underline stroke width based on font size and weight.
+/// Bold text gets a thicker underline proportional to the font size.
+pub fn underline_width(font_size: f32, bold: bool) -> f32 {
+    let base = font_size * 0.05; // ~5% of font size
+    if bold { base * 1.5 } else { base }
+}
+
 /// Context for evaluating field codes during fragment collection.
 pub struct FieldContext {
     pub page_number: u32,
@@ -475,13 +482,14 @@ pub fn measure_lines(
                         color: c,
                     });
                     if *underline {
+                        let uw = underline_width(*font_size, *bold);
                         commands.push(DrawCommand::Underline {
                             x1: x,
                             y1: cursor_y + UNDERLINE_Y_OFFSET,
                             x2: x + measured_width,
                             y2: cursor_y + UNDERLINE_Y_OFFSET,
                             color: c,
-                            width: UNDERLINE_STROKE_WIDTH,
+                            width: uw,
                         });
                     }
                     if let Some(url) = hyperlink_url {
