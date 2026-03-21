@@ -5,14 +5,15 @@ A lightweight Rust binary that parses DOCX files and renders them to PDF using S
 ## Features
 
 - Parses DOCX (Office Open XML) files from ZIP archives
-- Text with formatting: bold, italic, underline, font size, font family, color, character spacing
+- Text with formatting: bold, italic, underline, font size, font family, color, character spacing, superscript/subscript
 - Paragraph properties: alignment, spacing (auto/exact/atLeast), indentation, tab stops, shading
 - Named style resolution from `word/styles.xml` with `basedOn` inheritance chains
 - Line breaks (`<w:br/>`) and tab characters (`<w:tab/>`) inside runs
 - Tables with per-column widths, cell margins, merged cells (`gridSpan`/`vMerge`), dynamic row heights, cell shading, borders
 - Three-pass table layout: measure→layout→paint with vMerge height distribution
 - Inline images (PNG, JPEG, and other formats supported by Skia)
-- Floating/anchored images with text wrapping and alignment (left/center/right)
+- Floating/anchored images with text wrapping, alignment, and percentage-based positioning (`wp14:pctPosVOffset`)
+- Hyperlinks rendered as clickable PDF link annotations
 - Headers and footers with images and text
 - Numbered and bulleted lists (decimal, lower/upper letter, lower/upper roman, bullet)
 - Multiple sections with different page sizes and margins (e.g., portrait + landscape)
@@ -23,6 +24,7 @@ A lightweight Rust binary that parses DOCX files and renders them to PDF using S
 - Flutter-inspired measure→layout→paint pipeline for all elements
 - Automatic pagination with page breaks
 - Centralized unit conversion system (`units.rs`) — spec-defined constants only
+- Warnings for unsupported DOCX features (via `log` crate, controlled by `RUST_LOG`)
 - Simple CLI interface
 - Cross-platform (macOS, Linux, Windows)
 
@@ -119,7 +121,7 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 
 ### Parsing
 
-- **Text runs** with direct formatting: bold (`w:b`), italic (`w:i`), underline (`w:u`), font size (`w:sz` in half-points), font family (`w:rFonts` — tries `ascii` then `hAnsi`), color (`w:color` as 6-digit hex), character spacing (`w:spacing w:val` in twips), run shading (`w:shd w:fill`)
+- **Text runs** with direct formatting: bold (`w:b`), italic (`w:i`), underline (`w:u`), font size (`w:sz` in half-points), font family (`w:rFonts` — tries `ascii` then `hAnsi`), color (`w:color` as 6-digit hex), character spacing (`w:spacing w:val` in twips), run shading (`w:shd w:fill`), superscript/subscript (`w:vertAlign val="superscript|subscript"`)
 - **Toggle properties**: `w:b`, `w:i` support `val="false"` / `val="0"` to disable
 - **Line breaks**: `<w:br/>` inside runs parsed as `Inline::LineBreak`, forcing a line break in layout
 - **Tab characters**: `<w:tab/>` inside runs parsed as `Inline::Tab`, advancing to the next tab stop
@@ -149,6 +151,8 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Headers and footers**: `w:headerReference`/`w:footerReference` in section properties resolved to `word/headerN.xml`/`word/footerN.xml`, with separate relationship files for images
 - **Lists/numbering**: `w:numPr` references resolved via `word/numbering.xml` with `abstractNum`→`num` mapping. Supported formats: bullet, decimal, lowerLetter, upperLetter, lowerRoman, upperRoman. Level text, indentation, and hanging indent parsed
 - **Paragraph shading**: `w:shd` with `w:fill` on paragraphs renders as a background rect covering the text area (excluding before/after spacing)
+- **Hyperlinks**: `w:hyperlink` with `r:id` resolved to URLs via relationships; text inside retains its formatting
+- **Percentage-based image positioning**: `wp14:pctPosHOffset`/`wp14:pctPosVOffset` for Word 2010+ documents
 
 ### Rendering
 
@@ -178,6 +182,9 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 - **Multi-section documents**: each section can have its own page size and margins; section breaks trigger new pages with updated dimensions. Section configs are pre-collected and applied in order
 - **Document defaults**: paragraphs without explicit spacing/font settings fall back to the document-level defaults from `word/styles.xml`
 - **Whitespace handling**: `xml:space="preserve"` spaces are measured at their actual width; long space runs naturally overflow the line and wrap, matching Word's behavior. Leading spaces at line boundaries are skipped to prevent blank lines
+- **Superscript/subscript**: `w:vertAlign` renders text at 58% font size with baseline shifted up (superscript) or down (subscript), while maintaining the original line height
+- **Hyperlinks**: clickable PDF link annotations via Skia's `annotate_rect_with_url()`, covering the text bounding box
+- **Unsupported feature warnings**: logs a warning (once per feature per document) for VML images, field codes, footnotes/endnotes, tracked deletions, strikethrough, and other unsupported elements
 - **Render order**: cell shading → cell content (text, images) → cell borders, ensuring borders are always visible on top of content
 
 ## Running Tests
@@ -186,15 +193,17 @@ Tables are recursive — `TableCell` contains `Vec<Block>`, mirroring the OOXML 
 cargo test
 ```
 
-The test suite includes 86 unit tests and 9 integration tests covering:
+The test suite includes 98 unit tests and 9 integration tests covering:
 
 - **Layout engine**: measure_lines, fit_fragments, resolve_line_height, paragraph spacing, indentation, alignment (center/right), page breaks, paragraph shading across pages
 - **Tables**: borders (2x2, gridSpan, alignment, tcW vs grid), vMerge (skip content, 3-row distribution, multi-column), cell margins, cell shading, empty/single-cell tables, table split across pages, after-table spacing
 - **Lists**: bullet label rendering, decimal counter increment
-- **Floats**: float adjustment shifts text
+- **Floats**: float adjustment shifts text, percentage-based positioning
 - **Headers/footers**: header on every page, footer at bottom
+- **Hyperlinks**: link annotations produced / not produced
+- **Superscript/subscript**: font reduction and baseline shift (up/down)
 - **Unit conversions**: twips, EMU, signed variants
-- **XML parser**: paragraphs, runs, formatting, images, tables, sections, spacing, tabs
+- **XML parser**: paragraphs, runs, formatting, images, tables, sections, spacing, tabs, vertAlign, pctPosOffset, hyperlinks
 - **Integration**: end-to-end DOCX→PDF conversion, error handling
 
 Visual regression tests compare rendered PDFs against Word-generated references using pixel matching (see [VISUAL_COMPARISON.md](VISUAL_COMPARISON.md)).
@@ -210,7 +219,7 @@ Visual regression tests compare rendered PDFs against Word-generated references 
 - **Legacy images**: VML images (`w:pict`, `v:imagedata`) are not supported; only DrawingML (`w:drawing`) is handled.
 - **Text boxes and shapes**: Drawing shapes (`wsp:`, `v:shape`) and text boxes are not parsed.
 - **SmartArt and charts**: `dgm:` and `c:chart` elements are not supported.
-- **Strikethrough and other text effects**: `w:strike`, `w:dstrike`, `w:shadow`, `w:outline`, `w:emboss`, `w:imprint`, superscript/subscript (`w:vertAlign`) are not parsed.
+- **Strikethrough and other text effects**: `w:strike`, `w:dstrike`, `w:shadow`, `w:outline`, `w:emboss`, `w:imprint` are not parsed. Superscript/subscript (`w:vertAlign`) is supported.
 - **Run highlighting**: `w:highlight` is not rendered (run shading `w:shd` is supported).
 - **Paragraph borders**: `w:pBdr` is not parsed.
 - **Multi-column layouts**: `w:cols` section properties are parsed but not used for layout.
@@ -236,9 +245,11 @@ Visual regression tests compare rendered PDFs against Word-generated references 
 |---|---|
 | `quick-xml` | Fast, event-driven XML parsing |
 | `zip` | Reading DOCX ZIP archives |
-| `skia-safe` | PDF rendering and text measurement via Skia |
+| `skia-safe` | PDF rendering, text measurement, and link annotations via Skia |
 | `clap` | CLI argument parsing |
 | `thiserror` | Ergonomic error types |
+| `log` | Logging facade for unsupported feature warnings |
+| `env_logger` | Log output controlled via `RUST_LOG` environment variable |
 
 ## Benchmarks
 
