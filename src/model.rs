@@ -127,6 +127,56 @@ impl Default for Document {
     }
 }
 
+impl Document {
+    /// Collect all unique font families referenced in this document.
+    pub fn font_families(&self) -> Vec<Rc<str>> {
+        use std::collections::HashSet;
+        let mut families = HashSet::new();
+        families.insert(self.default_font_family.clone());
+
+        // From styles
+        for style in self.styles.values() {
+            if let Some(ref f) = style.run_props.font_family {
+                families.insert(f.clone());
+            }
+        }
+
+        fn collect_from_blocks(blocks: &[Block], families: &mut HashSet<Rc<str>>) {
+            for block in blocks {
+                match block {
+                    Block::Paragraph(p) => {
+                        for inline in &p.runs {
+                            if let Inline::TextRun(tr) = inline {
+                                if let Some(ref f) = tr.properties.font_family {
+                                    families.insert(f.clone());
+                                }
+                            }
+                        }
+                    }
+                    Block::Table(t) => {
+                        for row in &t.rows {
+                            for cell in &row.cells {
+                                collect_from_blocks(&cell.blocks, families);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        collect_from_blocks(&self.blocks, &mut families);
+
+        if let Some(ref hf) = self.default_header {
+            collect_from_blocks(&hf.blocks, &mut families);
+        }
+        if let Some(ref hf) = self.default_footer {
+            collect_from_blocks(&hf.blocks, &mut families);
+        }
+
+        families.into_iter().collect()
+    }
+}
+
 /// A block-level element.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {

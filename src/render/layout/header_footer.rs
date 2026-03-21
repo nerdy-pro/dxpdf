@@ -10,8 +10,9 @@ pub(super) fn render_headers_footers(
     doc_defaults: &DocDefaultsLayout,
     default_tab_stop_pt: f32,
     config: &LayoutConfig,
+    font_mgr: &skia_safe::FontMgr,
 ) {
-    let measurer = measurer::TextMeasurer::new();
+    let measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
     let num_pages = pages.len() as u32;
 
     for (page_idx, page) in pages.iter_mut().enumerate() {

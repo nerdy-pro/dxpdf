@@ -111,7 +111,7 @@ pub struct LayoutedPage {
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
-pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
+pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage> {
     let mut section_configs: Vec<LayoutConfig> = Vec::new();
     for block in &doc.blocks {
         if let Block::Paragraph(p) = block {
@@ -134,12 +134,9 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
 
     let default_tab_stop_pt = twips_to_pt(doc.default_tab_stop);
     let doc_defaults = DocDefaultsLayout::from_document(doc);
-
-    // Pre-compute header extent to adjust margin_top if header content
-    // (including float images) extends past the declared top margin.
     let mut effective_config = initial_config;
     if let Some(ref header) = doc.default_header {
-        let pre_measurer = measurer::TextMeasurer::new();
+        let pre_measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
         let (_, header_bottom) = header_footer::layout_header_footer_blocks(
             &header.blocks,
             initial_config.margin_left,
@@ -164,6 +161,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         next_configs,
         default_tab_stop_pt,
         doc_defaults,
+        font_mgr.clone(),
     );
 
     let blocks = &doc.blocks;
@@ -183,6 +181,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig) -> Vec<LayoutedPage> {
         &hf_defaults,
         default_tab_stop_pt,
         &initial_config,
+        font_mgr,
     );
 
     pages
@@ -316,8 +315,9 @@ impl Layouter {
         next_section_configs: Vec<LayoutConfig>,
         default_tab_stop_pt: f32,
         doc_defaults: DocDefaultsLayout,
+        font_mgr: skia_safe::FontMgr,
     ) -> Self {
-        let measurer = TextMeasurer::new();
+        let measurer = TextMeasurer::with_font_mgr(font_mgr);
         Self {
             config: *config,
             pages: Vec::new(),

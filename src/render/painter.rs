@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use skia_safe::{pdf, Color4f, Data, FontMgr, Image, Paint, Rect};
 
 use super::fonts;
@@ -6,15 +9,23 @@ use crate::error::Error;
 
 /// Render laid-out pages to a PDF byte buffer.
 pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
-    let font_mgr = FontMgr::new();
+    render_to_pdf_with_font_mgr(pages, &FontMgr::new())
+}
+
+/// Render laid-out pages to a PDF byte buffer, reusing an existing FontMgr.
+pub fn render_to_pdf_with_font_mgr(
+    pages: &[LayoutedPage],
+    font_mgr: &FontMgr,
+) -> Result<Vec<u8>, Error> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
+    let mut image_cache: HashMap<*const Vec<u8>, Image> = HashMap::new();
 
     for page in pages {
         let mut on_page = doc.begin_page((page.page_width, page.page_height), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, &font_mgr)?;
+            render_page(canvas, page, font_mgr, &mut image_cache)?;
         }
         doc = on_page.end_page();
     }
@@ -27,6 +38,7 @@ fn render_page(
     canvas: &skia_safe::Canvas,
     page: &LayoutedPage,
     font_mgr: &FontMgr,
+    image_cache: &mut HashMap<*const Vec<u8>, Image>,
 ) -> Result<(), Error> {
     for cmd in &page.commands {
         match cmd {
@@ -80,7 +92,7 @@ fn render_page(
                 height,
                 data,
             } => {
-                draw_image(canvas, *x, *y, *width, *height, data);
+                draw_image_cached(canvas, *x, *y, *width, *height, data, image_cache);
             }
             DrawCommand::Rect {
                 x,
@@ -164,12 +176,22 @@ fn draw_line(
     canvas.draw_line((x1, y1), (x2, y2), &paint);
 }
 
-fn draw_image(canvas: &skia_safe::Canvas, x: f32, y: f32, width: f32, height: f32, data: &[u8]) {
-    let skia_data = Data::new_copy(data);
-    if let Some(image) = Image::from_encoded(skia_data) {
-        let rect = Rect::from_xywh(x, y, width, height);
-        canvas.draw_image_rect(image, None, rect, &Paint::default());
-    }
+fn draw_image_cached(
+    canvas: &skia_safe::Canvas,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    data: &Rc<Vec<u8>>,
+    cache: &mut HashMap<*const Vec<u8>, Image>,
+) {
+    let key = Rc::as_ptr(data);
+    let image = cache.entry(key).or_insert_with(|| {
+        let skia_data = Data::new_copy(data);
+        Image::from_encoded(skia_data).expect("failed to decode image")
+    });
+    let rect = Rect::from_xywh(x, y, width, height);
+    canvas.draw_image_rect(image.clone(), None, rect, &Paint::default());
 }
 
 fn draw_rect(
