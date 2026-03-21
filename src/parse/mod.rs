@@ -186,6 +186,28 @@ fn resolve_hf(
     Some(hf)
 }
 
+/// Apply a character style's run properties as defaults (direct formatting wins).
+fn apply_run_style(rp: &mut crate::model::RunProperties, style: &crate::model::ResolvedRunStyle) {
+    if !rp.bold && style.bold == Some(true) {
+        rp.bold = true;
+    }
+    if !rp.italic && style.italic == Some(true) {
+        rp.italic = true;
+    }
+    if !rp.underline && style.underline == Some(true) {
+        rp.underline = true;
+    }
+    if rp.font_size.is_none() {
+        rp.font_size = style.font_size;
+    }
+    if rp.font_family.is_none() {
+        rp.font_family = style.font_family.clone();
+    }
+    if rp.color.is_none() {
+        rp.color = style.color;
+    }
+}
+
 /// Apply named styles to paragraphs — style properties are defaults
 /// that direct formatting overrides.
 fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
@@ -238,6 +260,16 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                                 if rp.color.is_none() {
                                     rp.color = style.run_props.color;
                                 }
+                            }
+                        }
+                    }
+                }
+                // Apply character styles (w:rStyle) to individual runs
+                for run in &mut p.runs {
+                    if let Inline::TextRun(tr) = run {
+                        if let Some(ref sid) = tr.properties.style_id {
+                            if let Some(style) = styles.get(sid) {
+                                apply_run_style(&mut tr.properties, &style.run_props);
                             }
                         }
                     }

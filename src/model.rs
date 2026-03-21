@@ -440,6 +440,8 @@ pub struct RunProperties {
     pub shading: Option<Color>,
     /// Superscript or subscript positioning.
     pub vert_align: Option<VertAlign>,
+    /// Character style ID (e.g., "Hyperlink").
+    pub style_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

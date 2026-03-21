@@ -46,7 +46,10 @@ fn render_page(
             }
             DrawCommand::LinkAnnotation { x, y, width, height, url } => {
                 let rect = Rect::from_xywh(*x, *y, *width, *height);
-                let url_data = Data::new_copy(url.as_bytes());
+                // Skia expects a null-terminated URL in the Data
+                let mut url_bytes = url.as_bytes().to_vec();
+                url_bytes.push(0);
+                let url_data = Data::new_copy(&url_bytes);
                 canvas.annotate_rect_with_url(rect, &url_data);
             }
         }

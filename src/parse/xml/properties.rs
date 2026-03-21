@@ -110,6 +110,11 @@ pub fn handle_empty_element(
     match state {
         ParseState::InRunProperties { ref mut props } => {
             match local {
+                b"rStyle" => {
+                    if let Some(val) = get_attr(e, b"val")? {
+                        props.style_id = Some(val);
+                    }
+                }
                 b"b" => {
                     props.bold = !is_val_false(e)?;
                 }
