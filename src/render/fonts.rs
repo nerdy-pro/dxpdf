@@ -27,25 +27,39 @@ const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     ("Segoe UI", &["Noto Sans", "Liberation Sans"]),
 ];
 
+/// Try to match a font by family name, returning it only if the system
+/// actually has that exact font (not a Skia-substituted fallback).
+fn match_exact(font_mgr: &FontMgr, family: &str, style: FontStyle) -> Option<skia_safe::Typeface> {
+    let tf = font_mgr.match_family_style(family, style)?;
+    // Skia may silently return a fallback font instead of None.
+    // Verify the returned typeface actually matches the requested family.
+    let actual = tf.family_name();
+    if actual.eq_ignore_ascii_case(family) {
+        Some(tf)
+    } else {
+        None
+    }
+}
+
 /// Resolve a font family name, trying the requested font first, then
-/// substitutes from the table, then Helvetica as a final fallback.
+/// metric-compatible substitutes from the table, then Helvetica as a final fallback.
 pub fn resolve_typeface(
     font_mgr: &FontMgr,
     font_family: &str,
     style: FontStyle,
 ) -> skia_safe::Typeface {
-    // Try the requested font first
-    if let Some(tf) = font_mgr.match_family_style(font_family, style) {
+    // Try the requested font first (exact match only)
+    if let Some(tf) = match_exact(font_mgr, font_family, style) {
         return tf;
     }
 
-    // Try substitutes
+    // Try metric-compatible substitutes
     if let Some((_, subs)) = FONT_SUBSTITUTIONS
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(font_family))
     {
         for sub in *subs {
-            if let Some(tf) = font_mgr.match_family_style(sub, style) {
+            if let Some(tf) = match_exact(font_mgr, sub, style) {
                 return tf;
             }
         }
