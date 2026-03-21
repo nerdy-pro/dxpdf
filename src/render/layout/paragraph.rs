@@ -22,7 +22,7 @@ impl Layouter {
 
         // Register floating images attached to this paragraph
         for float in &para.floats {
-            if float.data.is_empty() {
+            if !self.image_cache.contains(&float.rel_id) {
                 continue;
             }
             let content_w = self.config.content_width();
@@ -42,12 +42,13 @@ impl Layouter {
                 self.cursor_y + float.offset_y_pt
             };
 
+            let image = self.image_cache.get(&float.rel_id);
             self.current_page.commands.push(DrawCommand::Image {
                 x: img_x,
                 y: img_y,
                 width: float.width_pt,
                 height: float.height_pt,
-                data: float.data.clone(),
+                image,
             });
 
             self.active_floats.push(ActiveFloat {
@@ -101,6 +102,7 @@ impl Layouter {
             content_height,
             &self.doc_defaults,
             &self.measurer,
+            &self.image_cache,
         );
         let base_x = self.config.margin_left + indent.left_pt();
 
@@ -312,7 +314,7 @@ impl Layouter {
     /// MEASURE: Produce lines with relative y-coordinates from fragments.
     /// Handles float adjustment using current absolute cursor_y.
     fn measure_paragraph_lines(
-        &self,
+        &mut self,
         fragments: &[Fragment],
         base_x: f32,
         base_content_width: f32,
@@ -444,14 +446,15 @@ impl Layouter {
                     Fragment::Image {
                         width,
                         height,
-                        data,
+                        rel_id,
                     } => {
+                        let image = self.image_cache.get(rel_id);
                         commands.push(DrawCommand::Image {
                             x,
                             y: rel_y - height,
                             width: *width,
                             height: *height,
-                            data: data.clone(),
+                            image,
                         });
                         x += width;
                     }

@@ -153,7 +153,7 @@ impl Layouter {
 
                             // Floating images in cell
                             for float in &p.floats {
-                                if float.data.is_empty() {
+                                if !self.image_cache.contains(&float.rel_id) {
                                     continue;
                                 }
                                 let scale = f32::min(
@@ -166,12 +166,13 @@ impl Layouter {
                                 let img_w = float.width_pt * scale;
                                 let img_h = float.height_pt * scale;
                                 let img_x = cell_x + (col_width - img_w) / 2.0;
+                                let image = self.image_cache.get(&float.rel_id);
                                 commands.push(DrawCommand::Image {
                                     x: img_x,
                                     y: cell_y,
                                     width: img_w,
                                     height: img_h,
-                                    data: float.data.clone(),
+                                    image,
                                 });
                                 cell_y += img_h;
                             }
@@ -182,6 +183,7 @@ impl Layouter {
                                 self.config.content_height(),
                                 &self.doc_defaults,
                                 &self.measurer,
+                                &self.image_cache,
                             );
 
                             if fragments.is_empty() && p.floats.is_empty() {
@@ -212,6 +214,7 @@ impl Layouter {
                                 spacing.line_spacing(),
                                 &p.properties.tab_stops,
                                 self.default_tab_stop_pt,
+                                &self.image_cache,
                             );
 
                             // Offset measured commands by cell_y and accumulate

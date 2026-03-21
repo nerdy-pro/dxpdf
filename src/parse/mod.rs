@@ -4,35 +4,43 @@ mod styles;
 pub mod xml;
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use std::rc::Rc;
 
 use crate::error::Error;
 use crate::model::{
-    Block, Document, FormatHint, HeaderFooter, ImageData, Inline, RelId, SectionProperties,
-    Spacing, StyleMap,
+    Block, Document, HeaderFooter, ImageStore, Inline, SectionProperties, Spacing, StyleMap,
 };
 
-fn resolve_image_data(
-    rel_id: &RelId,
-    data: &mut ImageData,
-    format_hint: &mut FormatHint,
+/// Build an image store mapping relationship IDs to raw image bytes.
+/// Body images use the document relationships; header/footer images use their own rels
+/// (prefixed with the header/footer filename to avoid collisions).
+fn build_image_store(
     rels: &HashMap<String, String>,
     media: &HashMap<String, Vec<u8>>,
-) {
-    if let Some(target) = rels.get(rel_id.as_str()) {
+    hf_rels: &HashMap<String, HashMap<String, String>>,
+) -> ImageStore {
+    let mut store = ImageStore::new();
+
+    // Body images: rel_id -> bytes
+    for (rel_id, target) in rels {
         if let Some(bytes) = media.get(target) {
-            *data = Rc::new(bytes.clone());
-            *format_hint = FormatHint::from(
-                Path::new(target)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase(),
-            );
+            store.insert(rel_id.clone(), bytes.clone());
         }
     }
+
+    // Header/footer images: prefix with hf filename to avoid collisions
+    // e.g., "header1.xml::rId1"
+    for (hf_name, hf_rel_map) in hf_rels {
+        for (rel_id, target) in hf_rel_map {
+            if let Some(bytes) = media.get(target) {
+                let prefixed_key = format!("{hf_name}::{rel_id}");
+                store.insert(prefixed_key, bytes.clone());
+            }
+        }
+    }
+
+    store
 }
 
 /// Parse a DOCX file (as raw bytes) into a `Document`.
@@ -82,10 +90,12 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     if !contents.numbering.is_empty() {
         document.numbering = contents.numbering.clone();
     }
-    resolve_images(
-        &mut document,
+
+    // Build the image store from relationships + media files
+    document.images = build_image_store(
         &contents.relationships,
         &contents.media_files,
+        &contents.header_footer_rels,
     );
 
     // Apply named styles to paragraphs and runs
@@ -98,7 +108,6 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         &contents.relationships,
         &contents.header_footer_xml,
         &contents.header_footer_rels,
-        &contents.media_files,
     );
 
     Ok(document)
@@ -110,7 +119,6 @@ fn resolve_headers_footers(
     rels: &HashMap<String, String>,
     hf_xml: &HashMap<String, String>,
     hf_rels: &HashMap<String, HashMap<String, String>>,
-    media: &HashMap<String, Vec<u8>>,
 ) {
     // Resolve headers/footers on section properties (both mid-document and final)
     let mut all_sections: Vec<&mut SectionProperties> = Vec::new();
@@ -127,13 +135,13 @@ fn resolve_headers_footers(
 
     for sect in &mut all_sections {
         if let Some(rid) = sect.header_rel_id.take() {
-            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels, media) {
+            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels) {
                 sect.header = Some(hf);
             }
             sect.header_rel_id = Some(rid);
         }
         if let Some(rid) = sect.footer_rel_id.take() {
-            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels, media) {
+            if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels) {
                 sect.footer = Some(hf);
             }
             sect.footer_rel_id = Some(rid);
@@ -169,22 +177,49 @@ fn resolve_hf(
     rels: &HashMap<String, String>,
     hf_xml: &HashMap<String, String>,
     hf_rels: &HashMap<String, HashMap<String, String>>,
-    media: &HashMap<String, Vec<u8>>,
 ) -> Option<HeaderFooter> {
     // Map rId -> filename (e.g., "header2.xml")
     let target = rels.get(rid)?;
     let xml_content = hf_xml.get(target)?;
 
-    let mut hf = xml::parse_header_footer_xml(xml_content).ok()?;
-
-    // Resolve images in the header/footer using its own rels
+    // Parse with the header/footer's own rels so hyperlinks resolve correctly.
+    // Image data is resolved separately via the ImageStore.
     let empty_rels = HashMap::new();
     let own_rels = hf_rels.get(target).unwrap_or(&empty_rels);
-    for block in &mut hf.blocks {
-        resolve_images_in_block(block, own_rels, media);
-    }
+
+    // Prefix rel_ids for header/footer images so they match the ImageStore keys
+    let mut hf = xml::parse_header_footer_xml_with_rels(xml_content, own_rels).ok()?;
+    prefix_image_rel_ids(&mut hf.blocks, target);
 
     Some(hf)
+}
+
+/// Prefix image rel_ids in header/footer blocks so they match the ImageStore keys.
+/// E.g., "rId1" in "header1.xml" becomes "header1.xml::rId1".
+fn prefix_image_rel_ids(blocks: &mut [Block], hf_name: &str) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => {
+                for inline in &mut p.runs {
+                    if let Inline::Image(img) = inline {
+                        let prefixed = format!("{hf_name}::{}", img.rel_id.as_str());
+                        img.rel_id = prefixed.into();
+                    }
+                }
+                for float in &mut p.floats {
+                    let prefixed = format!("{hf_name}::{}", float.rel_id.as_str());
+                    float.rel_id = prefixed.into();
+                }
+            }
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        prefix_image_rel_ids(&mut cell.blocks, hf_name);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Apply a character style's run properties as defaults (direct formatting wins).
@@ -280,57 +315,6 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                 for row in &mut t.rows {
                     for cell in &mut row.cells {
                         apply_styles(&mut cell.blocks, styles);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Walk the document tree and populate image data from the archive.
-fn resolve_images(
-    doc: &mut Document,
-    rels: &HashMap<String, String>,
-    media: &HashMap<String, Vec<u8>>,
-) {
-    for block in &mut doc.blocks {
-        resolve_images_in_block(block, rels, media);
-    }
-}
-
-fn resolve_images_in_block(
-    block: &mut Block,
-    rels: &HashMap<String, String>,
-    media: &HashMap<String, Vec<u8>>,
-) {
-    match block {
-        Block::Paragraph(p) => {
-            for inline in &mut p.runs {
-                if let Inline::Image(img) = inline {
-                    resolve_image_data(
-                        &img.rel_id,
-                        &mut img.data,
-                        &mut img.format_hint,
-                        rels,
-                        media,
-                    );
-                }
-            }
-            for float in &mut p.floats {
-                resolve_image_data(
-                    &float.rel_id,
-                    &mut float.data,
-                    &mut float.format_hint,
-                    rels,
-                    media,
-                );
-            }
-        }
-        Block::Table(t) => {
-            for row in &mut t.rows {
-                for cell in &mut row.cells {
-                    for block in &mut cell.blocks {
-                        resolve_images_in_block(block, rels, media);
                     }
                 }
             }

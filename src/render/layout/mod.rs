@@ -6,9 +6,42 @@ mod table;
 
 pub use measurer::TextMeasurer;
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::model::*;
 use crate::units::*;
 use fragment::DocDefaultsLayout;
+
+/// Pre-decoded Skia images keyed by relationship ID.
+/// All images are decoded upfront in `new()` — lookups are free.
+pub(crate) struct ImageCache {
+    images: HashMap<String, Rc<skia_safe::Image>>,
+}
+
+impl ImageCache {
+    /// Decode all images from the store upfront.
+    pub fn new(store: &ImageStore) -> Self {
+        let mut images = HashMap::with_capacity(store.len());
+        for (rel_id, data) in store {
+            let skia_data = skia_safe::Data::new_copy(data);
+            if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                images.insert(rel_id.clone(), Rc::new(image));
+            }
+        }
+        Self { images }
+    }
+
+    /// Check whether a given rel_id has a decoded image.
+    pub fn contains(&self, rel_id: &str) -> bool {
+        self.images.contains_key(rel_id)
+    }
+
+    /// Get a decoded image by rel_id. Panics if not found.
+    pub fn get(&self, rel_id: &str) -> Rc<skia_safe::Image> {
+        Rc::clone(self.images.get(rel_id).expect("image not in cache"))
+    }
+}
 
 /// Page layout configuration in points (1 point = 1/72 inch).
 #[derive(Debug, Clone, Copy)]
@@ -85,7 +118,7 @@ pub enum DrawCommand {
         y: f32,
         width: f32,
         height: f32,
-        data: ImageData,
+        image: Rc<skia_safe::Image>,
     },
     Rect {
         x: f32,
@@ -111,7 +144,11 @@ pub struct LayoutedPage {
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
-pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage> {
+pub fn layout(
+    doc: &Document,
+    config: &LayoutConfig,
+    font_mgr: &skia_safe::FontMgr,
+) -> Vec<LayoutedPage> {
     let mut section_configs: Vec<LayoutConfig> = Vec::new();
     for block in &doc.blocks {
         if let Block::Paragraph(p) = block {
@@ -134,6 +171,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontM
 
     let default_tab_stop_pt = twips_to_pt(doc.default_tab_stop);
     let doc_defaults = DocDefaultsLayout::from_document(doc);
+    let image_cache = ImageCache::new(&doc.images);
     let mut effective_config = initial_config;
     if let Some(ref header) = doc.default_header {
         let pre_measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
@@ -150,6 +188,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontM
             &pre_measurer,
             default_tab_stop_pt,
             None,
+            &image_cache,
         );
         if header_bottom > effective_config.margin_top {
             effective_config.margin_top = header_bottom;
@@ -162,6 +201,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontM
         default_tab_stop_pt,
         doc_defaults,
         font_mgr.clone(),
+        image_cache,
     );
 
     let blocks = &doc.blocks;
@@ -172,7 +212,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontM
         layouter.layout_block(block, next_is_table);
     }
 
-    let mut pages = layouter.finish();
+    let (mut pages, image_cache) = layouter.finish();
 
     // Render headers and footers on each page
     let hf_defaults = DocDefaultsLayout::from_document(doc);
@@ -182,6 +222,7 @@ pub fn layout(doc: &Document, config: &LayoutConfig, font_mgr: &skia_safe::FontM
         default_tab_stop_pt,
         &initial_config,
         font_mgr,
+        &image_cache,
     );
 
     pages
@@ -247,13 +288,13 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             y,
             width,
             height,
-            data,
+            image,
         } => DrawCommand::Image {
             x: *x,
             y: y_offset + y,
             width: *width,
             height: *height,
-            data: data.clone(),
+            image: image.clone(),
         },
         DrawCommand::Rect {
             x,
@@ -307,6 +348,7 @@ struct Layouter {
     list_counters: std::collections::HashMap<(u32, u32), u32>,
     /// Whether the previous paragraph had a bottom border (to suppress duplicate top borders).
     prev_para_had_bottom_border: bool,
+    image_cache: ImageCache,
 }
 
 impl Layouter {
@@ -316,6 +358,7 @@ impl Layouter {
         default_tab_stop_pt: f32,
         doc_defaults: DocDefaultsLayout,
         font_mgr: skia_safe::FontMgr,
+        image_cache: ImageCache,
     ) -> Self {
         let measurer = TextMeasurer::with_font_mgr(font_mgr);
         Self {
@@ -334,6 +377,7 @@ impl Layouter {
             measurer,
             list_counters: std::collections::HashMap::new(),
             prev_para_had_bottom_border: false,
+            image_cache,
         }
     }
 
@@ -506,7 +550,7 @@ impl Layouter {
         }
     }
 
-    fn finish(mut self) -> Vec<LayoutedPage> {
+    fn finish(mut self) -> (Vec<LayoutedPage>, ImageCache) {
         if !self.current_page.commands.is_empty() {
             self.pages.push(self.current_page);
         }
@@ -517,7 +561,7 @@ impl Layouter {
                 page_height: self.config.page_height,
             });
         }
-        self.pages
+        (self.pages, self.image_cache)
     }
 }
 

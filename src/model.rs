@@ -5,10 +5,11 @@ use crate::units::{
     DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS,
 };
 
-/// Shared image data — avoids cloning large byte buffers during layout.
-pub type ImageData = Rc<Vec<u8>>;
-
 use std::collections::HashMap;
+
+/// Image store mapping relationship IDs to raw image bytes.
+/// Produced during parsing, consumed during layout/rendering.
+pub type ImageStore = HashMap<String, Vec<u8>>;
 
 /// Resolved paragraph style properties.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -102,6 +103,8 @@ pub struct Document {
     pub default_header: Option<HeaderFooter>,
     /// Default footer content (from first/final section).
     pub default_footer: Option<HeaderFooter>,
+    /// Raw image bytes keyed by relationship ID.
+    pub images: ImageStore,
 }
 
 impl Default for Document {
@@ -123,6 +126,7 @@ impl Default for Document {
             numbering: NumberingMap::new(),
             default_header: None,
             default_footer: None,
+            images: ImageStore::new(),
         }
     }
 }
@@ -383,29 +387,6 @@ impl<T: Into<String>> From<T> for RelId {
     }
 }
 
-/// A type-safe wrapper for image format hints (e.g., "png", "jpeg").
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FormatHint(String);
-
-impl FormatHint {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::ops::Deref for FormatHint {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<T: Into<String>> From<T> for FormatHint {
-    fn from(s: T) -> Self {
-        Self(s.into())
-    }
-}
-
 /// A field code that can be evaluated at render time.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldType {
@@ -438,8 +419,6 @@ pub struct InlineImage {
     pub rel_id: RelId,
     pub width_pt: f32,
     pub height_pt: f32,
-    pub data: ImageData,
-    pub format_hint: FormatHint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -454,8 +433,6 @@ pub struct FloatingImage {
     pub rel_id: RelId,
     pub width_pt: f32,
     pub height_pt: f32,
-    pub data: ImageData,
-    pub format_hint: FormatHint,
     pub offset_x_pt: f32,
     pub offset_y_pt: f32,
     /// Horizontal alignment (e.g., "left", "right", "center") — alternative to offset.
@@ -810,11 +787,5 @@ mod tests {
         assert_eq!(rid.as_str(), "rId5");
         let rid2: RelId = String::from("rId6").into();
         assert_eq!(rid2.as_str(), "rId6");
-    }
-
-    #[test]
-    fn format_hint_from_str() {
-        let fh: FormatHint = "png".into();
-        assert_eq!(fh.as_str(), "png");
     }
 }

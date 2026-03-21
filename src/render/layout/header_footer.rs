@@ -11,6 +11,7 @@ pub(super) fn render_headers_footers(
     default_tab_stop_pt: f32,
     config: &LayoutConfig,
     font_mgr: &skia_safe::FontMgr,
+    image_cache: &super::ImageCache,
 ) {
     let measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
     let num_pages = pages.len() as u32;
@@ -48,6 +49,7 @@ pub(super) fn render_headers_footers(
                 &measurer,
                 default_tab_stop_pt,
                 Some(&field_ctx),
+                image_cache,
             );
             let body_commands = std::mem::take(&mut page.commands);
             page.commands = commands;
@@ -69,6 +71,7 @@ pub(super) fn render_headers_footers(
                 &measurer,
                 default_tab_stop_pt,
                 Some(&field_ctx),
+                image_cache,
             );
             page.commands.extend(commands);
         }
@@ -90,6 +93,7 @@ pub(super) fn layout_header_footer_blocks(
     measurer: &measurer::TextMeasurer,
     default_tab_stop_pt: f32,
     field_ctx: Option<&FieldContext>,
+    image_cache: &super::ImageCache,
 ) -> (Vec<DrawCommand>, f32) {
     let mut commands = Vec::new();
     let mut cursor_y = y_start;
@@ -105,7 +109,7 @@ pub(super) fn layout_header_footer_blocks(
 
             // Render floating images with alignment support
             for float in &para.floats {
-                if float.data.is_empty() {
+                if !image_cache.contains(&float.rel_id) {
                     continue;
                 }
                 let scale = f32::min(1.0, content_width / float.width_pt.max(1.0));
@@ -132,12 +136,13 @@ pub(super) fn layout_header_footer_blocks(
                     }
                 };
                 max_y = max_y.max(img_y + img_h);
+                let image = image_cache.get(&float.rel_id);
                 commands.push(DrawCommand::Image {
                     x: img_x,
                     y: img_y,
                     width: img_w,
                     height: img_h,
-                    data: float.data.clone(),
+                    image,
                 });
             }
 
@@ -149,6 +154,7 @@ pub(super) fn layout_header_footer_blocks(
                 defaults,
                 measurer,
                 field_ctx,
+                image_cache,
             );
 
             if fragments.is_empty() {
@@ -169,6 +175,7 @@ pub(super) fn layout_header_footer_blocks(
                 spacing.line_spacing(),
                 &para.properties.tab_stops,
                 default_tab_stop_pt,
+                image_cache,
             );
 
             // PAINT: offset measured commands by cursor_y

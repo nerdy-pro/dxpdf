@@ -60,7 +60,15 @@ fn main() -> Result<(), dxpdf::Error> {
         eprintln!("Layout: {:?}", t2 - t_fonts);
         eprintln!("Paint:  {:?}", t3 - t2);
         eprintln!("Total:  {:?}", t3 - t0);
-        eprintln!("Pages: {} | Text: {} | Lines: {} | Rects: {} | Images: {} | Links: {}", pages.len(), texts, lines, rects, imgs, links);
+        eprintln!(
+            "Pages: {} | Text: {} | Lines: {} | Rects: {} | Images: {} | Links: {}",
+            pages.len(),
+            texts,
+            lines,
+            rects,
+            imgs,
+            links
+        );
     } else {
         let pdf_bytes = dxpdf::convert(&docx_bytes)?;
         std::fs::write(&output, &pdf_bytes)?;

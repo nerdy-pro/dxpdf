@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use skia_safe::FontMgr;
@@ -6,11 +7,21 @@ use super::fragment::{
     find_next_tab_stop, fit_fragments, measure_lines, resolve_line_height, Fragment,
 };
 use super::header_footer::to_roman;
+use super::ImageCache;
 use super::*;
 
 fn test_font_mgr() -> FontMgr {
     FontMgr::new()
 }
+
+#[rustfmt::skip]
+const TINY_PNG: &[u8] = &[
+    137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,
+    0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,
+    137,0,0,0,11,73,68,65,84,8,215,99,96,0,2,0,
+    0,1,0,5,24,217,164,226,0,0,0,0,73,69,78,68,
+    174,66,96,130,
+];
 
 fn make_doc(blocks: Vec<Block>) -> Document {
     Document {
@@ -74,7 +85,11 @@ fn extract_lines(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
 #[test]
 fn layout_empty_document() {
     let doc = make_doc(vec![]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert_eq!(pages.len(), 1);
     assert!(pages[0].commands.is_empty());
 }
@@ -116,7 +131,11 @@ fn layout_page_break() {
         }));
     }
     let doc = make_doc(blocks);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert!(
         pages.len() > 1,
         "Expected multiple pages, got {}",
@@ -462,7 +481,11 @@ fn spacing_before_after_affects_position() {
         ],
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     assert!(texts.len() >= 2);
 
@@ -504,7 +527,11 @@ fn left_indentation_shifts_text_right() {
         ],
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
 
     let no_indent_x = texts.iter().find(|(_, _, t)| t == "NoIndent").unwrap().0;
@@ -566,7 +593,11 @@ fn section_break_changes_page_dimensions() {
         }),
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert!(pages.len() >= 2);
     assert!((pages[0].page_width - 612.0).abs() < 1.0);
     assert!((pages[0].page_height - 792.0).abs() < 1.0);
@@ -592,7 +623,11 @@ fn adjacent_tables_no_gap() {
         blocks: vec![Block::Table(mk_table("T1")), Block::Table(mk_table("T2"))],
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let lines = extract_lines(&pages);
     let mut h_ys: Vec<f32> = lines
         .iter()
@@ -644,7 +679,11 @@ fn vmerge_skips_content_and_border() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
 
     assert!(texts.iter().any(|(_, _, t)| t == "Merged"));
@@ -676,7 +715,11 @@ fn line_break_forces_new_line() {
         floats: Vec::new(),
         section_properties: None,
     })]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let before = texts.iter().find(|(_, _, t)| t == "Before").unwrap();
     let after = texts.iter().find(|(_, _, t)| t == "After").unwrap();
@@ -766,7 +809,11 @@ fn row_height_minimum_respected() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let lines = extract_lines(&pages);
     let h_ys: Vec<f32> = lines
         .iter()
@@ -947,7 +994,17 @@ fn fit_fragments_single_oversized() {
 
 #[test]
 fn measure_lines_empty_fragments() {
-    let measured = measure_lines(&[], 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let measured = measure_lines(
+        &[],
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     assert_eq!(measured.lines.len(), 0);
     assert!((measured.total_height).abs() < 0.01);
 }
@@ -955,7 +1012,17 @@ fn measure_lines_empty_fragments() {
 #[test]
 fn measure_lines_single_line() {
     let frags = [make_text_frag("Hello", 40.0)];
-    let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let measured = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     assert_eq!(measured.lines.len(), 1);
     assert!((measured.total_height - 14.0).abs() < 0.01);
     // Should have at least one Text command
@@ -972,7 +1039,17 @@ fn measure_lines_wraps_to_two_lines() {
         make_text_frag(" ", 5.0),
         make_text_frag("World", 250.0),
     ];
-    let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let measured = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     assert_eq!(measured.lines.len(), 2, "Should wrap to 2 lines");
     assert!(
         (measured.total_height - 28.0).abs() < 0.01,
@@ -993,6 +1070,7 @@ fn measure_lines_center_alignment() {
         None,
         &[],
         36.0,
+        &ImageCache::new(&HashMap::new()),
     );
     // Text x should be offset to center
     if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
@@ -1020,6 +1098,7 @@ fn measure_lines_right_alignment() {
         None,
         &[],
         36.0,
+        &ImageCache::new(&HashMap::new()),
     );
     if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
         .commands
@@ -1051,7 +1130,17 @@ fn measure_lines_with_underline() {
         hyperlink_url: None,
         baseline_offset: 0.0,
     }];
-    let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let measured = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     assert!(
         measured.lines[0]
             .commands
@@ -1082,7 +1171,17 @@ fn measure_lines_with_shading() {
         hyperlink_url: None,
         baseline_offset: 0.0,
     }];
-    let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let measured = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     assert!(
         measured.lines[0].commands.iter().any(|c| matches!(
             c,
@@ -1098,8 +1197,28 @@ fn measure_lines_with_shading() {
 #[test]
 fn measure_lines_first_line_offset() {
     let frags = [make_text_frag("Hello", 40.0)];
-    let no_offset = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
-    let with_offset = measure_lines(&frags, 72.0, 468.0, 20.0, None, None, &[], 36.0);
+    let no_offset = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
+    let with_offset = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        20.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     let x_no = no_offset.lines[0]
         .commands
         .iter()
@@ -1131,7 +1250,17 @@ fn measure_lines_first_line_offset() {
 #[test]
 fn measure_lines_with_line_spacing() {
     let frags = [make_text_frag("Hello", 40.0)];
-    let single = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
+    let single = measure_lines(
+        &frags,
+        72.0,
+        468.0,
+        0.0,
+        None,
+        None,
+        &[],
+        36.0,
+        &ImageCache::new(&HashMap::new()),
+    );
     let double = measure_lines(
         &frags,
         72.0,
@@ -1141,6 +1270,7 @@ fn measure_lines_with_line_spacing() {
         Some(LineSpacing::Multiplier(2.0)),
         &[],
         36.0,
+        &ImageCache::new(&HashMap::new()),
     );
     assert!((single.total_height - 14.0).abs() < 0.01);
     assert!((double.total_height - 28.0).abs() < 0.01);
@@ -1181,7 +1311,11 @@ fn vmerge_three_rows_distributes_height() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let lines = extract_lines(&pages);
 
     // Should have horizontal borders at 4 y-positions (top of each row + bottom)
@@ -1227,7 +1361,11 @@ fn vmerge_multiple_columns() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
 
     // Restart cells should render
@@ -1269,7 +1407,11 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
         },
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let text_y = texts.iter().find(|(_, _, t)| t == "Test").unwrap().1;
     // Text should be below margin_top + before_spacing(5pt) + line_height
@@ -1308,7 +1450,11 @@ fn direct_spacing_overrides_defaults() {
         },
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let text_y = texts.iter().find(|(_, _, t)| t == "Test").unwrap().1;
     assert!(
@@ -1346,7 +1492,11 @@ fn paragraph_shading_split_across_pages() {
         section_properties: None,
     }));
     let doc = make_doc(blocks);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     // Should not panic — verify at least one page has rect commands
     let total_rects: usize = pages
         .iter()
@@ -1381,7 +1531,11 @@ fn table_splits_across_pages() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert!(
         pages.len() > 1,
         "Table should span multiple pages, got {} pages",
@@ -1423,7 +1577,11 @@ fn cell_margins_from_table_default() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let text = texts.iter().find(|(_, _, t)| t == "Content").unwrap();
     // Text should be offset from cell left edge by left margin (10pt)
@@ -1459,7 +1617,11 @@ fn cell_shading_produces_rect() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let rects = extract_rects(&pages);
     assert!(
         rects.iter().any(|(_, _, _, _, c)| *c == (200, 100, 50)),
@@ -1481,7 +1643,11 @@ fn empty_table_no_crash() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert_eq!(pages.len(), 1);
 }
 
@@ -1498,7 +1664,11 @@ fn single_cell_table() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Only"));
 }
@@ -1527,7 +1697,11 @@ fn table_with_empty_cell() {
         borders: None,
     };
     let doc = make_doc(vec![Block::Table(table)]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Filled"));
 }
@@ -1642,7 +1816,11 @@ fn bullet_list_renders_label() {
         },
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     assert!(
         texts.iter().any(|(_, _, t)| t == "•"),
@@ -1692,7 +1870,11 @@ fn decimal_list_increments_counter() {
         },
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     assert!(
         texts.iter().any(|(_, _, t)| t == "1."),
@@ -1721,15 +1903,13 @@ fn float_adjustment_shifts_text() {
         height_pt: 100.0,
         offset_x_pt: 0.0,
         offset_y_pt: 0.0,
-        data: Rc::new(vec![0u8; 10]), // dummy data
-        format_hint: FormatHint::from("png"),
         align_h: Some("left".to_string()),
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "FloatTest".into(),
@@ -1739,6 +1919,7 @@ fn float_adjustment_shifts_text() {
         floats: vec![float_img],
         section_properties: None,
     })]);
+    doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let config = LayoutConfig::default();
     let pages = layout(&doc, &config, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -1778,7 +1959,11 @@ fn header_renders_on_each_page() {
         }),
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert!(pages.len() >= 2, "Need multiple pages");
     // Each page should have "HEADER" text
     for (i, page) in pages.iter().enumerate() {
@@ -1873,7 +2058,11 @@ fn after_table_spacing_uses_doc_default() {
         },
         ..Document::default()
     };
-    let pages_with = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages_with = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
 
     let table2 = Table {
         rows: vec![TableRow {
@@ -1889,7 +2078,11 @@ fn after_table_spacing_uses_doc_default() {
         blocks: vec![Block::Table(table2), simple_paragraph("After")],
         ..Document::default()
     };
-    let pages_without = layout(&doc_no_sp, &LayoutConfig::default(), &test_font_mgr());
+    let pages_without = layout(
+        &doc_no_sp,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
 
     let y_with = extract_texts(&pages_with)
         .iter()
@@ -1940,15 +2133,13 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
         height_pt: 50.0,
         offset_x_pt: 0.0,
         offset_y_pt: 0.0,
-        data: Rc::new(vec![0u8; 10]),
-        format_hint: FormatHint::from("png"),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: Some(50000),
         pct_pos_v: Some(10000),
     };
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -1958,6 +2149,7 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
         floats: vec![float_img],
         section_properties: None,
     })]);
+    doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let config = LayoutConfig::default();
     let pages = layout(&doc, &config, &test_font_mgr());
     let imgs = extract_images(&pages);
@@ -1977,15 +2169,13 @@ fn pct_pos_none_uses_regular_offset() {
         height_pt: 50.0,
         offset_x_pt: 20.0,
         offset_y_pt: 10.0,
-        data: Rc::new(vec![0u8; 10]),
-        format_hint: FormatHint::from("png"),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -1995,6 +2185,7 @@ fn pct_pos_none_uses_regular_offset() {
         floats: vec![float_img],
         section_properties: None,
     })]);
+    doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let config = LayoutConfig::default();
     let pages = layout(&doc, &config, &test_font_mgr());
     let imgs = extract_images(&pages);
@@ -2038,7 +2229,11 @@ fn hyperlink_produces_link_annotation() {
         floats: Vec::new(),
         section_properties: None,
     })]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let links = extract_link_annotations(&pages);
     assert_eq!(links.len(), 1, "Should have one link annotation");
     assert_eq!(links[0].4, "https://example.com");
@@ -2049,7 +2244,11 @@ fn hyperlink_produces_link_annotation() {
 #[test]
 fn no_hyperlink_no_annotation() {
     let doc = make_doc(vec![simple_paragraph("Plain text")]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let links = extract_link_annotations(&pages);
     assert!(links.is_empty(), "No hyperlinks, no annotations");
 }
@@ -2078,7 +2277,11 @@ fn paragraph_bottom_border_renders_line() {
         floats: Vec::new(),
         section_properties: None,
     })]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let lines = extract_lines(&pages);
     // Should have a horizontal line (bottom border)
     let h_lines: Vec<_> = lines
@@ -2133,7 +2336,11 @@ fn page_field_renders_page_number_in_footer() {
         }),
         ..Document::default()
     };
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     assert!(pages.len() >= 2, "Need multiple pages");
 
     // Page 1 footer should have "1" and total page count
@@ -2186,7 +2393,11 @@ fn superscript_reduces_font_size_and_shifts_up() {
         floats: Vec::new(),
         section_properties: None,
     })]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "m").unwrap();
     let sup = texts.iter().find(|(_, _, t)| t == "2").unwrap();
@@ -2221,7 +2432,11 @@ fn subscript_shifts_down() {
         floats: Vec::new(),
         section_properties: None,
     })]);
-    let pages = layout(&doc, &LayoutConfig::default(), &test_font_mgr());
+    let pages = layout(
+        &doc,
+        &LayoutConfig::default(),
+        &test_font_mgr(),
+    );
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "H").unwrap();
     let sub = texts.iter().find(|(_, _, t)| t == "2").unwrap();

@@ -673,8 +673,6 @@ pub fn parse_document_xml_with_rels(
                                         rel_id: rid,
                                         width_pt: w,
                                         height_pt: h,
-                                        data: std::rc::Rc::new(Vec::new()),
-                                        format_hint: FormatHint::default(),
                                         offset_x_pt: units::emu_to_pt_signed(
                                             pos_h_emu.unwrap_or(0),
                                         ),
@@ -693,8 +691,6 @@ pub fn parse_document_xml_with_rels(
                                         rel_id: rid,
                                         width_pt: w,
                                         height_pt: h,
-                                        data: std::rc::Rc::new(Vec::new()),
-                                        format_hint: FormatHint::default(),
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
                                         if let Some(para_state) = stack
