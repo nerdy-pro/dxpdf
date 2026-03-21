@@ -9,7 +9,7 @@ homepage = "https://nerdy.pro"
 documentation = "https://docs.rs/dxpdf"
 readme = "README.md"
 keywords = ["docx", "pdf", "converter", "word", "ooxml"]
-categories = ["command-line-utilities", "document-processing"]
+categories = ["command-line-utilities", "text-processing"]
 exclude = ["test-cases/", "scripts/", "VISUAL_COMPARISON.md", "BENCHMARKS.md"]
 
 [dependencies]
