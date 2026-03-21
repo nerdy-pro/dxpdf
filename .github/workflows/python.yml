@@ -27,7 +27,7 @@ jobs:
         with:
           args: --release --out dist --features python
           manylinux: 2_28
-          before-script-linux: dnf install -y fontconfig-devel clang ninja-build
+          before-script-linux: dnf install -y fontconfig-devel freetype-devel
 
       - uses: actions/upload-artifact@v4
         with:
