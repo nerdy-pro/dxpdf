@@ -17,6 +17,15 @@ use section::handle_section_element;
 
 /// Parse the `word/document.xml` content into a `Document`.
 pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
+    let empty = std::collections::HashMap::new();
+    parse_document_xml_with_rels(xml, &empty)
+}
+
+/// Parse document XML with relationship data for hyperlink resolution.
+pub fn parse_document_xml_with_rels(
+    xml: &str,
+    rels: &std::collections::HashMap<String, String>,
+) -> Result<Document, Error> {
     let mut reader = Reader::from_str(xml);
     let mut blocks: Vec<Block> = Vec::new();
     let mut stack: Vec<ParseState> = Vec::new();
@@ -40,6 +49,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             runs: Vec::new(),
                             floats: Vec::new(),
                             section_props: None,
+                            hyperlink_url: None,
                         };
                     }
                     b"pPr" if matches!(state, ParseState::InParagraph { .. }) => {
@@ -50,11 +60,20 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                             runs,
                             floats,
                             section_props,
+                            hyperlink_url: None,
                         });
                         state = ParseState::InParagraphProperties {
                             props,
                             section_props: None,
                         };
+                    }
+                    b"hyperlink" if matches!(state, ParseState::InParagraph { .. }) => {
+                        // Resolve hyperlink URL from r:id relationship
+                        if let ParseState::InParagraph { ref mut hyperlink_url, .. } = state {
+                            let url = get_attr(e, b"id")?
+                                .and_then(|rid| rels.get(&rid).cloned());
+                            *hyperlink_url = url;
+                        }
                     }
                     b"r" if matches!(state, ParseState::InParagraph { .. }) => {
                         stack.push(state);
@@ -225,6 +244,7 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                                     runs.push(Inline::TextRun(TextRun {
                                         text: flushed_text,
                                         properties: props.clone(),
+                                        hyperlink_url: None,
                                     }));
                                 }
                                 runs.push(inline_to_push);
@@ -291,6 +311,11 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                     b"body" | b"hdr" | b"ftr" => {
                         state = ParseState::Idle;
                     }
+                    b"hyperlink" if matches!(state, ParseState::InParagraph { .. }) => {
+                        if let ParseState::InParagraph { ref mut hyperlink_url, .. } = state {
+                            *hyperlink_url = None;
+                        }
+                    }
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
                         let (props, runs, floats, section_props) =
                             take_paragraph(&mut state);
@@ -325,10 +350,11 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
                         let (props, text) = take_run(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
                         if !text.is_empty() {
-                            if let ParseState::InParagraph { ref mut runs, .. } = state {
+                            if let ParseState::InParagraph { ref mut runs, ref hyperlink_url, .. } = state {
                                 runs.push(Inline::TextRun(TextRun {
                                     text,
                                     properties: props,
+                                    hyperlink_url: hyperlink_url.clone(),
                                 }));
                             }
                         }
@@ -541,7 +567,15 @@ pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
 /// Header/footer XML has the same structure as document body
 /// but with `w:hdr` or `w:ftr` as the root element.
 pub fn parse_header_footer_xml(xml: &str) -> Result<HeaderFooter, Error> {
-    let doc = parse_document_xml(xml)?;
+    let empty = std::collections::HashMap::new();
+    parse_header_footer_xml_with_rels(xml, &empty)
+}
+
+pub fn parse_header_footer_xml_with_rels(
+    xml: &str,
+    rels: &std::collections::HashMap<String, String>,
+) -> Result<HeaderFooter, Error> {
+    let doc = parse_document_xml_with_rels(xml, rels)?;
     Ok(HeaderFooter { blocks: doc.blocks })
 }
 
@@ -553,6 +587,8 @@ enum ParseState {
         runs: Vec<Inline>,
         floats: Vec<FloatingImage>,
         section_props: Option<SectionProperties>,
+        /// URL of the containing w:hyperlink element, if any.
+        hyperlink_url: Option<String>,
     },
     InParagraphProperties {
         props: ParagraphProperties,

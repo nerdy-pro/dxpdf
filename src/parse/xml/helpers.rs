@@ -49,7 +49,7 @@ pub fn take_paragraph(
 ) -> (ParagraphProperties, Vec<Inline>, Vec<FloatingImage>, Option<SectionProperties>) {
     let old = std::mem::replace(state, ParseState::Idle);
     match old {
-        ParseState::InParagraph { props, runs, floats, section_props } => {
+        ParseState::InParagraph { props, runs, floats, section_props, .. } => {
             (props, runs, floats, section_props)
         }
         _ => (ParagraphProperties::default(), Vec::new(), Vec::new(), None),

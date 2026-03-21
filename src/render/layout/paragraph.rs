@@ -303,7 +303,7 @@ impl Layouter {
                     Fragment::Text {
                         text, font_family, font_size, bold, italic,
                         underline, color, shading, char_spacing_pt,
-                        measured_width, ..
+                        measured_width, hyperlink_url, ..
                     } => {
                         let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                         if let Some(bg) = shading {
@@ -334,6 +334,15 @@ impl Layouter {
                                 y2: rel_y + UNDERLINE_Y_OFFSET,
                                 color: c,
                                 width: UNDERLINE_STROKE_WIDTH,
+                            });
+                        }
+                        if let Some(url) = hyperlink_url {
+                            commands.push(DrawCommand::LinkAnnotation {
+                                x,
+                                y: rel_y - line_height,
+                                width: *measured_width,
+                                height: line_height,
+                                url: url.clone(),
                             });
                         }
                         x += measured_width;

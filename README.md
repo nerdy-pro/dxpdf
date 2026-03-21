@@ -205,7 +205,7 @@ Visual regression tests compare rendered PDFs against Word-generated references 
 
 - **Footnotes/Endnotes**: Not supported.
 - **Comments and tracked changes**: Ignored entirely.
-- **Hyperlinks**: `w:hyperlink` elements are not parsed; linked text renders as unstyled plain text.
+- **Hyperlinks**: `w:hyperlink` with `r:id` is parsed and rendered as clickable PDF link annotations. Internal anchor links (`w:anchor`) are not yet supported.
 - **Fields and form controls**: Merge fields (`w:fldChar`), checkboxes, dropdowns, and other form elements are not rendered. Page number fields (`PAGE`, `NUMPAGES`) in headers/footers are not evaluated.
 - **Legacy images**: VML images (`w:pict`, `v:imagedata`) are not supported; only DrawingML (`w:drawing`) is handled.
 - **Text boxes and shapes**: Drawing shapes (`wsp:`, `v:shape`) and text boxes are not parsed.

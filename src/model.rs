@@ -396,6 +396,8 @@ pub struct FloatingImage {
 pub struct TextRun {
     pub text: String,
     pub properties: RunProperties,
+    /// URL for hyperlinked text (resolved from w:hyperlink r:id).
+    pub hyperlink_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

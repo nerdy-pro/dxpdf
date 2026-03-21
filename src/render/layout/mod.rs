@@ -94,6 +94,13 @@ pub enum DrawCommand {
         height: f32,
         color: (u8, u8, u8),
     },
+    LinkAnnotation {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +216,9 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             x: *x, y: y_offset + y, width: *width, height: *height, color: *color,
         },
         DrawCommand::Line { .. } => cmd.clone(),
+        DrawCommand::LinkAnnotation { x, y, width, height, url } => DrawCommand::LinkAnnotation {
+            x: *x, y: y_offset + y, width: *width, height: *height, url: url.clone(),
+        },
     }
 }
 

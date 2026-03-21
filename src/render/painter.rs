@@ -44,6 +44,11 @@ fn render_page(
             DrawCommand::Rect { x, y, width, height, color } => {
                 draw_rect(canvas, *x, *y, *width, *height, *color);
             }
+            DrawCommand::LinkAnnotation { x, y, width, height, url } => {
+                let rect = Rect::from_xywh(*x, *y, *width, *height);
+                let url_data = Data::new_copy(url.as_bytes());
+                canvas.annotate_rect_with_url(rect, &url_data);
+            }
         }
     }
 

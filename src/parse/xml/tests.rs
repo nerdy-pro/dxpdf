@@ -315,3 +315,42 @@ use super::*;
         // Should still have absolute offset
         assert!((float.offset_x_pt - 25.25).abs() < 0.5, "offset_x_pt={}", float.offset_x_pt);
     }
+
+    #[test]
+    fn parse_hyperlink_resolves_url() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:hyperlink r:id="rId6" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                    <w:r><w:rPr><w:color w:val="0563C1"/><w:u/></w:rPr>
+                        <w:t>Click here</w:t>
+                    </w:r>
+                </w:hyperlink>
+            </w:p>"#,
+        );
+        let mut rels = std::collections::HashMap::new();
+        rels.insert("rId6".to_string(), "https://example.com".to_string());
+        let doc = parse_document_xml_with_rels(&xml, &rels).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        assert_eq!(p.runs.len(), 1);
+        let Inline::TextRun(tr) = &p.runs[0] else { panic!() };
+        assert_eq!(tr.text, "Click here");
+        assert_eq!(tr.hyperlink_url.as_deref(), Some("https://example.com"));
+        assert!(tr.properties.underline);
+    }
+
+    #[test]
+    fn parse_hyperlink_without_rel_id_keeps_text() {
+        let xml = wrap_body(
+            r#"<w:p>
+                <w:hyperlink>
+                    <w:r><w:t>No link</w:t></w:r>
+                </w:hyperlink>
+            </w:p>"#,
+        );
+        let doc = parse_document_xml(&xml).unwrap();
+        let Block::Paragraph(p) = &doc.blocks[0] else { panic!() };
+        assert_eq!(p.runs.len(), 1);
+        let Inline::TextRun(tr) = &p.runs[0] else { panic!() };
+        assert_eq!(tr.text, "No link");
+        assert_eq!(tr.hyperlink_url, None);
+    }

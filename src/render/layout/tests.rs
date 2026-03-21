@@ -17,6 +17,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: text.to_string(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: Vec::new(),
             section_properties: None,
@@ -30,6 +31,7 @@ use super::*;
                 runs: vec![Inline::TextRun(TextRun {
                     text: text.to_string(),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 })],
                 floats: Vec::new(),
                 section_properties: None,
@@ -99,6 +101,7 @@ use super::*;
                 runs: vec![Inline::TextRun(TextRun {
                     text: format!("Paragraph {i}"),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 })],
                 floats: Vec::new(),
                 section_properties: None,
@@ -123,6 +126,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Center".to_string(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: Vec::new(),
             section_properties: None,
@@ -422,6 +426,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "First".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -439,6 +444,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "Second".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -477,6 +483,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "Indented".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -507,6 +514,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "Portrait".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: Some(SectionProperties {
@@ -521,6 +529,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "Landscape".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -608,9 +617,9 @@ use super::*;
         let doc = make_doc(vec![Block::Paragraph(Paragraph {
             properties: ParagraphProperties::default(),
             runs: vec![
-                Inline::TextRun(TextRun { text: "Before".into(), properties: RunProperties::default() }),
+                Inline::TextRun(TextRun { text: "Before".into(), properties: RunProperties::default(), hyperlink_url: None }),
                 Inline::LineBreak,
-                Inline::TextRun(TextRun { text: "After".into(), properties: RunProperties::default() }),
+                Inline::TextRun(TextRun { text: "After".into(), properties: RunProperties::default(), hyperlink_url: None }),
             ],
             floats: Vec::new(),
             section_properties: None,
@@ -635,6 +644,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Shaded".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: Vec::new(),
             section_properties: None,
@@ -707,6 +717,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Right".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: Vec::new(),
             section_properties: None,
@@ -769,6 +780,7 @@ use super::*;
             char_spacing_pt: 0.0,
             measured_width: width,
             measured_height: 14.0,
+            hyperlink_url: None,
         }
     }
 
@@ -914,6 +926,7 @@ use super::*;
             char_spacing_pt: 0.0,
             measured_width: 60.0,
             measured_height: 14.0,
+            hyperlink_url: None,
         }];
         let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
         assert!(measured.lines[0].commands.iter()
@@ -935,6 +948,7 @@ use super::*;
             char_spacing_pt: 0.0,
             measured_width: 40.0,
             measured_height: 14.0,
+            hyperlink_url: None,
         }];
         let measured = measure_lines(&frags, 72.0, 468.0, 0.0, None, None, &[], 36.0);
         assert!(measured.lines[0].commands.iter()
@@ -1076,6 +1090,7 @@ use super::*;
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Test".into(),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 })],
                 floats: Vec::new(),
                 section_properties: None,
@@ -1113,6 +1128,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Shaded text that may cross pages".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: Vec::new(),
             section_properties: None,
@@ -1303,11 +1319,13 @@ use super::*;
                 Inline::TextRun(TextRun {
                     text: "First".into(),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 }),
                 Inline::LineBreak,
                 Inline::TextRun(TextRun {
                     text: "Second".into(),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 }),
             ],
             floats: Vec::new(),
@@ -1337,6 +1355,7 @@ use super::*;
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Item".into(),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 })],
                 floats: Vec::new(),
                 section_properties: None,
@@ -1374,6 +1393,7 @@ use super::*;
                 runs: vec![Inline::TextRun(TextRun {
                     text: format!("Item {i}"),
                     properties: RunProperties::default(),
+                    hyperlink_url: None,
                 })],
                 floats: Vec::new(),
                 section_properties: None,
@@ -1429,6 +1449,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "FloatTest".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: vec![float_img],
             section_properties: None,
@@ -1460,6 +1481,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "HEADER".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -1486,6 +1508,7 @@ use super::*;
                     runs: vec![Inline::TextRun(TextRun {
                         text: "FOOTER".into(),
                         properties: RunProperties::default(),
+                        hyperlink_url: None,
                     })],
                     floats: Vec::new(),
                     section_properties: None,
@@ -1600,6 +1623,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Body".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: vec![float_img],
             section_properties: None,
@@ -1636,6 +1660,7 @@ use super::*;
             runs: vec![Inline::TextRun(TextRun {
                 text: "Body".into(),
                 properties: RunProperties::default(),
+                hyperlink_url: None,
             })],
             floats: vec![float_img],
             section_properties: None,
@@ -1646,4 +1671,48 @@ use super::*;
         let (ix, iy, _, _) = imgs[0];
         // Should use margin_left + offset_x_pt = 72 + 20 = 92
         assert!((ix - 92.0).abs() < 1.0, "Image x={ix}, expected ~92");
+    }
+
+    // ==============================================================
+    // Hyperlinks produce LinkAnnotation commands
+    // ==============================================================
+
+    fn extract_link_annotations(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, String)> {
+        let mut links = Vec::new();
+        for page in pages {
+            for cmd in &page.commands {
+                if let DrawCommand::LinkAnnotation { x, y, width, height, url } = cmd {
+                    links.push((*x, *y, *width, *height, url.clone()));
+                }
+            }
+        }
+        links
+    }
+
+    #[test]
+    fn hyperlink_produces_link_annotation() {
+        let doc = make_doc(vec![Block::Paragraph(Paragraph {
+            properties: ParagraphProperties::default(),
+            runs: vec![Inline::TextRun(TextRun {
+                text: "Click".into(),
+                properties: RunProperties::default(),
+                hyperlink_url: Some("https://example.com".to_string()),
+            })],
+            floats: Vec::new(),
+            section_properties: None,
+        })]);
+        let pages = layout(&doc, &LayoutConfig::default());
+        let links = extract_link_annotations(&pages);
+        assert_eq!(links.len(), 1, "Should have one link annotation");
+        assert_eq!(links[0].4, "https://example.com");
+        assert!(links[0].2 > 0.0, "Link width should be > 0");
+        assert!(links[0].3 > 0.0, "Link height should be > 0");
+    }
+
+    #[test]
+    fn no_hyperlink_no_annotation() {
+        let doc = make_doc(vec![simple_paragraph("Plain text")]);
+        let pages = layout(&doc, &LayoutConfig::default());
+        let links = extract_link_annotations(&pages);
+        assert!(links.is_empty(), "No hyperlinks, no annotations");
     }

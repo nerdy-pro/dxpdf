@@ -50,6 +50,8 @@ pub enum Fragment {
         char_spacing_pt: f32,
         measured_width: f32,
         measured_height: f32,
+        /// Hyperlink URL, if this text is part of a link.
+        hyperlink_url: Option<String>,
     },
     Image {
         width: f32,
@@ -137,6 +139,7 @@ pub fn collect_fragments(
                         char_spacing_pt,
                         measured_width,
                         measured_height: line_height,
+                        hyperlink_url: if is_space { None } else { tr.hyperlink_url.clone() },
                     });
                 }
             }
@@ -375,7 +378,7 @@ pub fn measure_lines(
                 Fragment::Text {
                     text, font_family, font_size, bold, italic,
                     underline, color, shading, char_spacing_pt,
-                    measured_width, ..
+                    measured_width, hyperlink_url, ..
                 } => {
                     let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                     if let Some(bg) = shading {
@@ -406,6 +409,15 @@ pub fn measure_lines(
                             y2: cursor_y + UNDERLINE_Y_OFFSET,
                             color: c,
                             width: UNDERLINE_STROKE_WIDTH,
+                        });
+                    }
+                    if let Some(url) = hyperlink_url {
+                        commands.push(DrawCommand::LinkAnnotation {
+                            x,
+                            y: cursor_y - line_height,
+                            width: *measured_width,
+                            height: line_height,
+                            url: url.clone(),
                         });
                     }
                     x += measured_width;
