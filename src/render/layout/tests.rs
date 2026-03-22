@@ -419,8 +419,7 @@ fn extract_texts(pages: &[LayoutedPage]) -> Vec<(f32, f32, String)> {
     texts
 }
 
-#[allow(clippy::type_complexity)]
-fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, (u8, u8, u8))> {
+fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, Color)> {
     let mut rects = Vec::new();
     for page in pages {
         for cmd in &page.commands {
@@ -1167,7 +1166,11 @@ fn measure_lines_with_shading() {
         measured.lines[0].commands.iter().any(|c| matches!(
             c,
             DrawCommand::Rect {
-                color: (255, 255, 0),
+                color: Color {
+                    r: 255,
+                    g: 255,
+                    b: 0
+                },
                 ..
             }
         )),
@@ -1559,7 +1562,9 @@ fn cell_shading_produces_rect() {
     let pages = layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
     assert!(
-        rects.iter().any(|(_, _, _, _, c)| *c == (200, 100, 50)),
+        rects
+            .iter()
+            .any(|(_, _, _, _, c)| *c == Color::new(200, 100, 50)),
         "Should have a rect with color (200,100,50)"
     );
 }
@@ -2130,7 +2135,7 @@ fn paragraph_bottom_border_renders_line() {
         properties: ParagraphProperties {
             paragraph_borders: Some(ParagraphBorders {
                 top: None,
-                bottom: Some(BorderDef::single(4, (0, 0, 0))),
+                bottom: Some(BorderDef::single(4, Color::BLACK)),
                 left: None,
                 right: None,
             }),

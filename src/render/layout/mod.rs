@@ -114,16 +114,16 @@ pub enum DrawCommand {
         font_size: Pt,
         bold: bool,
         italic: bool,
-        color: (u8, u8, u8),
+        color: Color,
     },
     Underline {
         line: PtLineSegment,
-        color: (u8, u8, u8),
+        color: Color,
         width: Pt,
     },
     Line {
         line: PtLineSegment,
-        color: (u8, u8, u8),
+        color: Color,
         width: Pt,
     },
     Image {
@@ -132,7 +132,7 @@ pub enum DrawCommand {
     },
     Rect {
         rect: PtRect,
-        color: (u8, u8, u8),
+        color: Color,
     },
     LinkAnnotation {
         rect: PtRect,

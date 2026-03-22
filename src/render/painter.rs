@@ -1,10 +1,11 @@
-use skia_safe::{pdf, Color4f, Data, FontMgr, Paint, Rect};
+use skia_safe::{pdf, Data, FontMgr, Paint, Rect};
 
 use super::fonts;
 use super::layout::{DrawCommand, LayoutedPage};
 use crate::dimension::Pt;
 use crate::error::Error;
 use crate::geometry::{PtLineSegment, PtOffset, PtRect};
+use crate::model::Color;
 
 /// Render laid-out pages to a PDF byte buffer.
 pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
@@ -95,13 +96,13 @@ fn draw_text(
     font_size: Pt,
     bold: bool,
     italic: bool,
-    color: (u8, u8, u8),
+    color: Color,
     char_spacing: Pt,
 ) {
     let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
-    paint.set_color4f(color_to_4f(color), None);
+    paint.set_color4f(skia_safe::Color4f::from(color), None);
 
     if char_spacing.abs() > Pt::ZERO {
         let mut cursor = position;
@@ -119,32 +120,22 @@ fn draw_text(
     canvas.draw_str(text, pt, &font, &paint);
 }
 
-fn draw_line(canvas: &skia_safe::Canvas, line: PtLineSegment, color: (u8, u8, u8), width: Pt) {
+fn draw_line(canvas: &skia_safe::Canvas, line: PtLineSegment, color: Color, width: Pt) {
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     paint.set_stroke(true);
     paint.set_stroke_width(f32::from(width));
-    paint.set_color4f(color_to_4f(color), None);
+    paint.set_color4f(skia_safe::Color4f::from(color), None);
 
     let start: skia_safe::Point = line.start.into();
     let end: skia_safe::Point = line.end.into();
     canvas.draw_line(start, end, &paint);
 }
 
-fn draw_rect(canvas: &skia_safe::Canvas, rect: PtRect, color: (u8, u8, u8)) {
+fn draw_rect(canvas: &skia_safe::Canvas, rect: PtRect, color: Color) {
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
-    paint.set_color4f(color_to_4f(color), None);
+    paint.set_color4f(skia_safe::Color4f::from(color), None);
     let skia_rect: Rect = rect.into();
     canvas.draw_rect(skia_rect, &paint);
-}
-
-fn color_to_4f(color: (u8, u8, u8)) -> Color4f {
-    const MAX_U8: f32 = u8::MAX as f32;
-    Color4f::new(
-        color.0 as f32 / MAX_U8,
-        color.1 as f32 / MAX_U8,
-        color.2 as f32 / MAX_U8,
-        1.0,
-    )
 }

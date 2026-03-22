@@ -57,7 +57,7 @@ fn emit_border(
     if border.is_visible() {
         commands.push(DrawCommand::Line {
             line: PtLineSegment::new(PtOffset::new(x1, y1), PtOffset::new(x2, y2)),
-            color: border.color_rgb(),
+            color: border.color,
             width: Pt::from(border.size),
         });
     }
@@ -327,7 +327,7 @@ impl Layouter {
                 if let Some(color) = &cell.shading {
                     self.current_page.commands.push(DrawCommand::Rect {
                         rect: PtRect::from_xywh(cell_x, row_top, cw, row_height),
-                        color: (color.r, color.g, color.b),
+                        color: *color,
                     });
                 }
 

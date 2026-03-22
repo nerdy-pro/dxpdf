@@ -477,7 +477,7 @@ pub fn measure_lines(
                     baseline_offset,
                     ..
                 } => {
-                    let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+                    let c = color.unwrap_or(Color::BLACK);
                     if let Some(bg) = shading {
                         commands.push(DrawCommand::Rect {
                             rect: PtRect::from_xywh(
@@ -486,7 +486,7 @@ pub fn measure_lines(
                                 *measured_width,
                                 line_height,
                             ),
-                            color: (bg.r, bg.g, bg.b),
+                            color: *bg,
                         });
                     }
                     commands.push(DrawCommand::Text {

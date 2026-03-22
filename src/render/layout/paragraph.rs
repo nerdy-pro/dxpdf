@@ -166,7 +166,7 @@ impl Layouter {
                         font_size: fs,
                         bold: false,
                         italic: false,
-                        color: (0, 0, 0),
+                        color: Color::BLACK,
                     });
                 }
                 first_line_painted = true;
@@ -228,7 +228,7 @@ impl Layouter {
                             PtOffset::new(left, top),
                             PtOffset::new(right, top),
                         ),
-                        color: b.color_rgb(),
+                        color: b.color,
                         width: Pt::from(b.size),
                     });
                 }
@@ -240,7 +240,7 @@ impl Layouter {
                             PtOffset::new(left, bottom),
                             PtOffset::new(right, bottom),
                         ),
-                        color: b.color_rgb(),
+                        color: b.color,
                         width: Pt::from(b.size),
                     });
                 }
@@ -252,7 +252,7 @@ impl Layouter {
                             PtOffset::new(left, top),
                             PtOffset::new(left, bottom),
                         ),
-                        color: b.color_rgb(),
+                        color: b.color,
                         width: Pt::from(b.size),
                     });
                 }
@@ -264,7 +264,7 @@ impl Layouter {
                             PtOffset::new(right, top),
                             PtOffset::new(right, bottom),
                         ),
-                        color: b.color_rgb(),
+                        color: b.color,
                         width: Pt::from(b.size),
                     });
                 }
@@ -295,7 +295,7 @@ impl Layouter {
                                 self.config.content_width(),
                                 height,
                             ),
-                            color: (bg.r, bg.g, bg.b),
+                            color: *bg,
                         },
                     );
                 }
@@ -397,7 +397,7 @@ impl Layouter {
                         baseline_offset,
                         ..
                     } => {
-                        let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
+                        let c = color.unwrap_or(Color::BLACK);
                         if let Some(bg) = shading {
                             commands.push(DrawCommand::Rect {
                                 rect: PtRect::from_xywh(
@@ -406,7 +406,7 @@ impl Layouter {
                                     *measured_width,
                                     line_height,
                                 ),
-                                color: (bg.r, bg.g, bg.b),
+                                color: *bg,
                             });
                         }
                         commands.push(DrawCommand::Text {

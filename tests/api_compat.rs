@@ -407,18 +407,17 @@ fn border_style_variants() {
 #[test]
 fn border_def_fields_and_methods() {
     use dxpdf::model::*;
-    let bd = BorderDef::single(8, (0, 0, 0));
+    let bd = BorderDef::single(8, Color::BLACK);
     let _: &BorderStyle = &bd.style;
     let _: dxpdf::dimension::EighthPoints = bd.size;
     let _: &Color = &bd.color;
     let _: bool = bd.is_visible();
-    let _: (u8, u8, u8) = bd.color_rgb();
 }
 
 #[test]
 fn table_borders_fields() {
     use dxpdf::model::*;
-    let bd = BorderDef::single(4, (0, 0, 0));
+    let bd = BorderDef::single(4, Color::BLACK);
     let tb = TableBorders {
         top: bd,
         bottom: bd,
@@ -755,6 +754,7 @@ fn layouted_page_fields() {
 fn draw_command_variants() {
     use dxpdf::dimension::Pt;
     use dxpdf::geometry::{PtLineSegment, PtOffset, PtRect};
+    use dxpdf::model::Color;
     use dxpdf::render::layout::DrawCommand;
     let _ = DrawCommand::Text {
         position: PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
@@ -764,14 +764,14 @@ fn draw_command_variants() {
         font_size: Pt::new(12.0),
         bold: false,
         italic: false,
-        color: (0, 0, 0),
+        color: Color::BLACK,
     };
     let _ = DrawCommand::Underline {
         line: PtLineSegment::new(
             PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
             PtOffset::new(Pt::new(100.0), Pt::new(0.0)),
         ),
-        color: (0, 0, 0),
+        color: Color::BLACK,
         width: Pt::new(1.0),
     };
     let _ = DrawCommand::Line {
@@ -779,12 +779,12 @@ fn draw_command_variants() {
             PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
             PtOffset::new(Pt::new(100.0), Pt::new(100.0)),
         ),
-        color: (0, 0, 0),
+        color: Color::BLACK,
         width: Pt::new(1.0),
     };
     let _ = DrawCommand::Rect {
         rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(50.0)),
-        color: (200, 200, 200),
+        color: Color::new(200, 200, 200),
     };
     let _ = DrawCommand::LinkAnnotation {
         rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(12.0)),
