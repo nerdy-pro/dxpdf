@@ -11,7 +11,6 @@ use quick_xml::Reader;
 
 use crate::error::Error;
 use crate::model::*;
-use crate::units;
 
 use drawing::{handle_drawing_element, handle_drawing_end};
 use helpers::*;
@@ -487,9 +486,10 @@ pub fn parse_document_xml_with_rels(
                     } else if let Some(axis) = reading_pos_offset {
                         let val_str = e.unescape().unwrap_or_default();
                         if let Ok(val) = val_str.trim().parse::<i64>() {
+                            let emu = crate::dimension::Emu::new(val);
                             match axis {
-                                'H' => *pos_h_emu = Some(val),
-                                'V' => *pos_v_emu = Some(val),
+                                'H' => *pos_h_emu = Some(emu),
+                                'V' => *pos_v_emu = Some(emu),
                                 _ => {}
                             }
                         }
@@ -665,20 +665,18 @@ pub fn parse_document_xml_with_rels(
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             if let Some(rid) = rel_id {
-                                let w = emu_to_pt(width_emu.unwrap_or(0));
-                                let h = emu_to_pt(height_emu.unwrap_or(0));
+                                use crate::dimension::{Emu, Pt};
+                                let zero = Emu::new(0);
+                                let w = Pt::from(width_emu.unwrap_or(zero)).raw();
+                                let h = Pt::from(height_emu.unwrap_or(zero)).raw();
 
                                 if is_anchor {
                                     let float = FloatingImage {
                                         rel_id: rid,
                                         width_pt: w,
                                         height_pt: h,
-                                        offset_x_pt: units::emu_to_pt_signed(
-                                            pos_h_emu.unwrap_or(0),
-                                        ),
-                                        offset_y_pt: units::emu_to_pt_signed(
-                                            pos_v_emu.unwrap_or(0),
-                                        ),
+                                        offset_x_pt: Pt::from(pos_h_emu.unwrap_or(zero)).raw(),
+                                        offset_y_pt: Pt::from(pos_v_emu.unwrap_or(zero)).raw(),
                                         align_h,
                                         align_v,
                                         wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
@@ -886,11 +884,11 @@ enum ParseState {
     InDrawing {
         depth: u32,
         rel_id: Option<RelId>,
-        width_emu: Option<u64>,
-        height_emu: Option<u64>,
+        width_emu: Option<crate::dimension::Emu>,
+        height_emu: Option<crate::dimension::Emu>,
         is_anchor: bool,
-        pos_h_emu: Option<i64>,
-        pos_v_emu: Option<i64>,
+        pos_h_emu: Option<crate::dimension::Emu>,
+        pos_v_emu: Option<crate::dimension::Emu>,
         align_h: Option<String>,
         align_v: Option<String>,
         /// Tracks whether we're reading text for posOffset ('H'/'V') or align ('h'/'v').
