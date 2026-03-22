@@ -843,11 +843,12 @@ fn draw_command_variants() {
 fn layout_function_exists() {
     // Verify layout function is accessible (we don't call it since it needs a FontMgr).
     use dxpdf::render::layout::layout;
-    let _ = layout as fn(
-        &dxpdf::model::Document,
-        &dxpdf::render::layout::LayoutConfig,
-        &skia_safe::FontMgr,
-    ) -> Vec<dxpdf::render::layout::LayoutedPage>;
+    let _ = layout
+        as fn(
+            &dxpdf::model::Document,
+            &dxpdf::render::layout::LayoutConfig,
+            &skia_safe::FontMgr,
+        ) -> Vec<dxpdf::render::layout::LayoutedPage>;
 }
 
 // ---------------------------------------------------------------------------
