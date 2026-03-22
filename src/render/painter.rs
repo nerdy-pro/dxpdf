@@ -2,7 +2,9 @@ use skia_safe::{pdf, Color4f, Data, FontMgr, Paint, Rect};
 
 use super::fonts;
 use super::layout::{DrawCommand, LayoutedPage};
+use crate::dimension::Pt;
 use crate::error::Error;
+use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 
 /// Render laid-out pages to a PDF byte buffer.
 pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
@@ -18,10 +20,7 @@ pub fn render_to_pdf_with_font_mgr(
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
 
     for page in pages {
-        let mut on_page = doc.begin_page(
-            (f32::from(page.page_width), f32::from(page.page_height)),
-            None,
-        );
+        let mut on_page = doc.begin_page(page.page_size, None);
         {
             let canvas = on_page.canvas();
             render_page(canvas, page, font_mgr)?;
@@ -41,8 +40,7 @@ fn render_page(
     for cmd in &page.commands {
         match cmd {
             DrawCommand::Text {
-                x,
-                y,
+                position,
                 text,
                 font_family,
                 char_spacing_pt,
@@ -54,91 +52,33 @@ fn render_page(
                 draw_text(
                     canvas,
                     font_mgr,
-                    f32::from(*x),
-                    f32::from(*y),
+                    *position,
                     text,
                     font_family,
-                    f32::from(*font_size),
+                    *font_size,
                     *bold,
                     *italic,
                     *color,
-                    f32::from(*char_spacing_pt),
+                    *char_spacing_pt,
                 );
             }
-            DrawCommand::Underline {
-                x1,
-                y1,
-                x2,
-                y2,
-                color,
-                width,
+            DrawCommand::Underline { line, color, width }
+            | DrawCommand::Line { line, color, width } => {
+                draw_line(canvas, *line, *color, *width);
             }
-            | DrawCommand::Line {
-                x1,
-                y1,
-                x2,
-                y2,
-                color,
-                width,
-            } => {
-                draw_line(
-                    canvas,
-                    f32::from(*x1),
-                    f32::from(*y1),
-                    f32::from(*x2),
-                    f32::from(*y2),
-                    *color,
-                    f32::from(*width),
-                );
+            DrawCommand::Image { rect, image } => {
+                let skia_rect: Rect = (*rect).into();
+                canvas.draw_image_rect(image, None, skia_rect, &Paint::default());
             }
-            DrawCommand::Image {
-                x,
-                y,
-                width,
-                height,
-                image,
-            } => {
-                let rect = Rect::from_xywh(
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
-                );
-                canvas.draw_image_rect(image, None, rect, &Paint::default());
+            DrawCommand::Rect { rect, color } => {
+                draw_rect(canvas, *rect, *color);
             }
-            DrawCommand::Rect {
-                x,
-                y,
-                width,
-                height,
-                color,
-            } => {
-                draw_rect(
-                    canvas,
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
-                    *color,
-                );
-            }
-            DrawCommand::LinkAnnotation {
-                x,
-                y,
-                width,
-                height,
-                url,
-            } => {
-                let rect = Rect::from_xywh(
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
-                );
+            DrawCommand::LinkAnnotation { rect, url } => {
+                let skia_rect: Rect = (*rect).into();
                 let mut url_bytes = url.as_bytes().to_vec();
                 url_bytes.push(0);
                 let url_data = Data::new_copy(&url_bytes);
-                canvas.annotate_rect_with_url(rect, &url_data);
+                canvas.annotate_rect_with_url(skia_rect, &url_data);
             }
         }
     }
@@ -149,68 +89,54 @@ fn render_page(
 fn draw_text(
     canvas: &skia_safe::Canvas,
     font_mgr: &FontMgr,
-    x: f32,
-    y: f32,
+    position: PtOffset,
     text: &str,
     font_family: &str,
-    font_size: f32,
+    font_size: Pt,
     bold: bool,
     italic: bool,
     color: (u8, u8, u8),
-    char_spacing_pt: f32,
+    char_spacing: Pt,
 ) {
     let font = fonts::make_font(font_mgr, font_family, font_size, bold, italic);
-    if char_spacing_pt.abs() > f32::EPSILON {
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_color4f(color_to_4f(color), None);
-        let mut cx = x;
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color4f(color_to_4f(color), None);
+
+    if char_spacing.abs() > Pt::ZERO {
+        let mut cursor = position;
         for ch in text.chars() {
             let s = ch.to_string();
-            canvas.draw_str(&s, (cx, y), &font, &paint);
+            let pt: skia_safe::Point = cursor.into();
+            canvas.draw_str(&s, pt, &font, &paint);
             let (w, _) = font.measure_str(&s, None);
-            cx += w + char_spacing_pt;
+            cursor.x += Pt::new(w) + char_spacing;
         }
         return;
     }
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color4f(color_to_4f(color), None);
 
-    canvas.draw_str(text, (x, y), &font, &paint);
+    let pt: skia_safe::Point = position.into();
+    canvas.draw_str(text, pt, &font, &paint);
 }
 
-fn draw_line(
-    canvas: &skia_safe::Canvas,
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-    color: (u8, u8, u8),
-    width: f32,
-) {
+fn draw_line(canvas: &skia_safe::Canvas, line: PtLineSegment, color: (u8, u8, u8), width: Pt) {
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     paint.set_stroke(true);
-    paint.set_stroke_width(width);
+    paint.set_stroke_width(f32::from(width));
     paint.set_color4f(color_to_4f(color), None);
 
-    canvas.draw_line((x1, y1), (x2, y2), &paint);
+    let start: skia_safe::Point = line.start.into();
+    let end: skia_safe::Point = line.end.into();
+    canvas.draw_line(start, end, &paint);
 }
 
-fn draw_rect(
-    canvas: &skia_safe::Canvas,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    color: (u8, u8, u8),
-) {
-    let rect = Rect::from_xywh(x, y, width, height);
+fn draw_rect(canvas: &skia_safe::Canvas, rect: PtRect, color: (u8, u8, u8)) {
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
     paint.set_color4f(color_to_4f(color), None);
-    canvas.draw_rect(rect, &paint);
+    let skia_rect: Rect = rect.into();
+    canvas.draw_rect(skia_rect, &paint);
 }
 
 fn color_to_4f(color: (u8, u8, u8)) -> Color4f {

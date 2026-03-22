@@ -10,6 +10,7 @@ use super::header_footer::to_roman;
 use super::ImageCache;
 use super::*;
 use crate::dimension::{Pt, Twips};
+use crate::geometry::{PtOffset, PtSize};
 
 /// Shorthand for Twips::new in tests.
 fn tw(v: i64) -> Twips {
@@ -85,12 +86,12 @@ fn extract_lines(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
     let mut lines = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Line { x1, y1, x2, y2, .. } = cmd {
+            if let DrawCommand::Line { line, .. } = cmd {
                 lines.push((
-                    f32::from(*x1),
-                    f32::from(*y1),
-                    f32::from(*x2),
-                    f32::from(*y2),
+                    f32::from(line.start.x),
+                    f32::from(line.start.y),
+                    f32::from(line.end.x),
+                    f32::from(line.end.y),
                 ));
             }
         }
@@ -166,8 +167,8 @@ fn layout_centered_text() {
         section_properties: None,
     })]);
     let pages = layout(&doc, &test_font_mgr());
-    if let Some(DrawCommand::Text { x, .. }) = pages[0].commands.first() {
-        assert!(f32::from(*x) > 72.0);
+    if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
+        assert!(f32::from(position.x) > 72.0);
     }
 }
 
@@ -410,8 +411,8 @@ fn extract_texts(pages: &[LayoutedPage]) -> Vec<(f32, f32, String)> {
     let mut texts = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Text { x, y, text, .. } = cmd {
-                texts.push((f32::from(*x), f32::from(*y), text.clone()));
+            if let DrawCommand::Text { position, text, .. } = cmd {
+                texts.push((f32::from(position.x), f32::from(position.y), text.clone()));
             }
         }
     }
@@ -423,19 +424,12 @@ fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, (u8, u8, u8
     let mut rects = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Rect {
-                x,
-                y,
-                width,
-                height,
-                color,
-            } = cmd
-            {
+            if let DrawCommand::Rect { rect, color } = cmd {
                 rects.push((
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
                     *color,
                 ));
             }
@@ -558,10 +552,7 @@ fn section_break_changes_page_dimensions() {
                 })],
                 floats: Vec::new(),
                 section_properties: Some(SectionProperties {
-                    page_size: Some(PageSize {
-                        width: tw(12240),
-                        height: tw(15840),
-                    }),
+                    page_size: Some(PageSize::new(tw(12240), tw(15840))),
                     page_margins: None,
                     header: None,
                     footer: None,
@@ -581,10 +572,7 @@ fn section_break_changes_page_dimensions() {
             }),
         ],
         final_section: Some(SectionProperties {
-            page_size: Some(PageSize {
-                width: tw(15840),
-                height: tw(12240),
-            }),
+            page_size: Some(PageSize::new(tw(15840), tw(12240))),
             page_margins: None,
             header: None,
             footer: None,
@@ -595,10 +583,10 @@ fn section_break_changes_page_dimensions() {
     };
     let pages = layout(&doc, &test_font_mgr());
     assert!(pages.len() >= 2);
-    assert!((f32::from(pages[0].page_width) - 612.0).abs() < 1.0);
-    assert!((f32::from(pages[0].page_height) - 792.0).abs() < 1.0);
-    assert!((f32::from(pages[1].page_width) - 792.0).abs() < 1.0);
-    assert!((f32::from(pages[1].page_height) - 612.0).abs() < 1.0);
+    assert!((f32::from(pages[0].page_size.width) - 612.0).abs() < 1.0);
+    assert!((f32::from(pages[0].page_size.height) - 792.0).abs() < 1.0);
+    assert!((f32::from(pages[1].page_size.width) - 792.0).abs() < 1.0);
+    assert!((f32::from(pages[1].page_size.height) - 612.0).abs() < 1.0);
 }
 
 // ---- Adjacent tables ----
@@ -1061,12 +1049,12 @@ fn measure_lines_center_alignment() {
         &ImageCache::new(&HashMap::new()),
     );
     // Text x should be offset to center
-    if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
+    if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
         .commands
         .iter()
         .find(|c| matches!(c, DrawCommand::Text { .. }))
     {
-        let x = f32::from(*x);
+        let x = f32::from(position.x);
         let expected_x = 72.0 + (468.0 - 40.0) / 2.0;
         assert!(
             (x - expected_x).abs() < 1.0,
@@ -1089,12 +1077,12 @@ fn measure_lines_right_alignment() {
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
-    if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
+    if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
         .commands
         .iter()
         .find(|c| matches!(c, DrawCommand::Text { .. }))
     {
-        let x = f32::from(*x);
+        let x = f32::from(position.x);
         let expected_x = 72.0 + 468.0 - 40.0;
         assert!(
             (x - expected_x).abs() < 1.0,
@@ -1213,8 +1201,8 @@ fn measure_lines_first_line_offset() {
         .commands
         .iter()
         .find_map(|c| {
-            if let DrawCommand::Text { x, .. } = c {
-                Some(f32::from(*x))
+            if let DrawCommand::Text { position, .. } = c {
+                Some(f32::from(position.x))
             } else {
                 None
             }
@@ -1224,8 +1212,8 @@ fn measure_lines_first_line_offset() {
         .commands
         .iter()
         .find_map(|c| {
-            if let DrawCommand::Text { x, .. } = c {
-                Some(f32::from(*x))
+            if let DrawCommand::Text { position, .. } = c {
+                Some(f32::from(position.x))
             } else {
                 None
             }
@@ -1525,12 +1513,7 @@ fn cell_margins_from_table_default() {
             cells: vec![make_cell("Content")],
         }],
         grid_cols: vec![tw(5000)],
-        default_cell_margins: Some(CellMargins {
-            top: tw(100),
-            bottom: tw(100),
-            left: tw(200),
-            right: tw(200),
-        }),
+        default_cell_margins: Some(CellMargins::new(tw(100), tw(200), tw(100), tw(200))),
         cell_spacing: None,
         borders: None,
     };
@@ -1823,10 +1806,8 @@ fn decimal_list_increments_counter() {
 fn float_adjustment_shifts_text() {
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width: pt(100.0),
-        height: pt(100.0),
-        offset_x: pt(0.0),
-        offset_y: pt(0.0),
+        size: PtSize::new(pt(100.0), pt(100.0)),
+        offset: PtOffset::new(pt(0.0), pt(0.0)),
         align_h: Some("left".to_string()),
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2013,19 +1994,12 @@ fn extract_images(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
     let mut imgs = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Image {
-                x,
-                y,
-                width,
-                height,
-                ..
-            } = cmd
-            {
+            if let DrawCommand::Image { rect, .. } = cmd {
                 imgs.push((
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
                 ));
             }
         }
@@ -2037,10 +2011,8 @@ fn extract_images(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
 fn pct_pos_offset_positions_float_by_page_percentage() {
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width: pt(50.0),
-        height: pt(50.0),
-        offset_x: pt(0.0),
-        offset_y: pt(0.0),
+        size: PtSize::new(pt(50.0), pt(50.0)),
+        offset: PtOffset::new(pt(0.0), pt(0.0)),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2070,10 +2042,8 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
 fn pct_pos_none_uses_regular_offset() {
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width: pt(50.0),
-        height: pt(50.0),
-        offset_x: pt(20.0),
-        offset_y: pt(10.0),
+        size: PtSize::new(pt(50.0), pt(50.0)),
+        offset: PtOffset::new(pt(20.0), pt(10.0)),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2105,19 +2075,12 @@ fn extract_link_annotations(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, 
     let mut links = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::LinkAnnotation {
-                x,
-                y,
-                width,
-                height,
-                url,
-            } = cmd
-            {
+            if let DrawCommand::LinkAnnotation { rect, url } = cmd {
                 links.push((
-                    f32::from(*x),
-                    f32::from(*y),
-                    f32::from(*width),
-                    f32::from(*height),
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
                     url.clone(),
                 ));
             }

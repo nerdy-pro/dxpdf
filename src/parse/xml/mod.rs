@@ -673,10 +673,11 @@ pub fn parse_document_xml_with_rels(
                                 if is_anchor {
                                     let float = FloatingImage {
                                         rel_id: rid,
-                                        width: w,
-                                        height: h,
-                                        offset_x: Pt::from(pos_h_emu.unwrap_or(zero)),
-                                        offset_y: Pt::from(pos_v_emu.unwrap_or(zero)),
+                                        size: crate::geometry::PtSize::new(w, h),
+                                        offset: crate::geometry::PtOffset::new(
+                                            Pt::from(pos_h_emu.unwrap_or(zero)),
+                                            Pt::from(pos_v_emu.unwrap_or(zero)),
+                                        ),
                                         align_h,
                                         align_v,
                                         wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
@@ -687,8 +688,7 @@ pub fn parse_document_xml_with_rels(
                                 } else {
                                     let image = Inline::Image(InlineImage {
                                         rel_id: rid,
-                                        width: w,
-                                        height: h,
+                                        size: crate::geometry::PtSize::new(w, h),
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
                                         if let Some(para_state) = stack

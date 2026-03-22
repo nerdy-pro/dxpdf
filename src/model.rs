@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use crate::dimension::{EighthPoints, HalfPoints, Pt, Twips};
+use crate::geometry::{PtOffset, PtSize, TwipsEdgeInsets, TwipsSize};
 use crate::units::DEFAULT_FONT_FAMILY;
 
 use std::collections::HashMap;
@@ -193,12 +194,8 @@ pub enum Block {
     Table(Table),
 }
 
-/// Page size.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PageSize {
-    pub width: Twips,
-    pub height: Twips,
-}
+/// Page size — a type alias for `TwipsSize`.
+pub type PageSize = TwipsSize;
 
 /// Page margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -384,8 +381,7 @@ pub enum Inline {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImage {
     pub rel_id: RelId,
-    pub width: Pt,
-    pub height: Pt,
+    pub size: PtSize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,10 +394,8 @@ pub enum WrapSide {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FloatingImage {
     pub rel_id: RelId,
-    pub width: Pt,
-    pub height: Pt,
-    pub offset_x: Pt,
-    pub offset_y: Pt,
+    pub size: PtSize,
+    pub offset: PtOffset,
     /// Horizontal alignment (e.g., "left", "right", "center") — alternative to offset.
     pub align_h: Option<String>,
     /// Vertical alignment (e.g., "top", "center", "bottom") — alternative to offset.
@@ -456,28 +450,41 @@ pub struct Color {
     pub b: u8,
 }
 
-/// Cell margins (padding).
+/// Cell margins (padding) — a newtype over `TwipsEdgeInsets`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CellMargins {
-    pub top: Twips,
-    pub right: Twips,
-    pub bottom: Twips,
-    pub left: Twips,
-}
+pub struct CellMargins(pub TwipsEdgeInsets);
 
 impl CellMargins {
     /// Default left/right cell margin: 108 twips (~0.075 inch).
     pub const DEFAULT_LR: Twips = Twips::new(108);
+
+    /// Create new cell margins from individual values.
+    pub fn new(top: Twips, right: Twips, bottom: Twips, left: Twips) -> Self {
+        Self(TwipsEdgeInsets::new(top, right, bottom, left))
+    }
 }
 
 impl Default for CellMargins {
     fn default() -> Self {
-        Self {
-            top: Twips::new(0),
-            right: Self::DEFAULT_LR,
-            bottom: Twips::new(0),
-            left: Self::DEFAULT_LR,
-        }
+        Self::new(
+            Twips::new(0),
+            Self::DEFAULT_LR,
+            Twips::new(0),
+            Self::DEFAULT_LR,
+        )
+    }
+}
+
+impl std::ops::Deref for CellMargins {
+    type Target = TwipsEdgeInsets;
+    fn deref(&self) -> &TwipsEdgeInsets {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for CellMargins {
+    fn deref_mut(&mut self) -> &mut TwipsEdgeInsets {
+        &mut self.0
     }
 }
 

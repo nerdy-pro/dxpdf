@@ -40,26 +40,14 @@ impl TextMeasurer {
         bold: bool,
         italic: bool,
     ) -> Pt {
-        let font = fonts::make_font(
-            &self.font_mgr,
-            font_family,
-            f32::from(font_size),
-            bold,
-            italic,
-        );
+        let font = fonts::make_font(&self.font_mgr, font_family, font_size, bold, italic);
         let (width, _) = font.measure_str(text, None);
         Pt::new(width)
     }
 
     /// Get the line height (ascent + descent + leading) for a font.
     pub fn line_height(&self, font_family: &str, font_size: Pt, bold: bool, italic: bool) -> Pt {
-        let font = fonts::make_font(
-            &self.font_mgr,
-            font_family,
-            f32::from(font_size),
-            bold,
-            italic,
-        );
+        let font = fonts::make_font(&self.font_mgr, font_family, font_size, bold, italic);
         let (_, metrics) = font.metrics();
         Pt::new(-metrics.ascent + metrics.descent + metrics.leading)
     }

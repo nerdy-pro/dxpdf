@@ -124,7 +124,7 @@ pub fn preload_fonts(font_mgr: &FontMgr, families: &[std::rc::Rc<str>]) {
 pub fn make_font(
     font_mgr: &FontMgr,
     font_family: &str,
-    font_size: f32,
+    font_size: crate::dimension::Pt,
     bold: bool,
     italic: bool,
 ) -> Font {
@@ -135,5 +135,5 @@ pub fn make_font(
         (false, false) => FontStyle::normal(),
     };
     let typeface = resolve_typeface(font_mgr, font_family, style);
-    Font::from_typeface(typeface, font_size)
+    Font::from_typeface(typeface, f32::from(font_size))
 }

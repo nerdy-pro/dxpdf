@@ -1,4 +1,5 @@
 use crate::dimension::Pt;
+use crate::geometry::PtRect;
 use crate::model::*;
 
 use super::fragment::*;
@@ -19,16 +20,16 @@ pub(super) fn render_headers_footers(
 
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let page_number = (page_idx + 1) as u32;
-        let page_width = page.page_width;
-        let page_height = page.page_height;
-        let margin_left = config.margin_left;
-        let margin_right = config.margin_right;
+        let page_width = page.page_size.width;
+        let page_height = page.page_size.height;
+        let margin_left = config.margins.left;
+        let margin_right = config.margins.right;
         let content_width = page_width - margin_left - margin_right;
         let header_y = config.header_margin;
-        let footer_y = page_height - config.margin_bottom;
+        let footer_y = page_height - config.margins.bottom;
 
-        let margin_top = config.margin_top;
-        let margin_bottom = config.margin_bottom;
+        let margin_top = config.margins.top;
+        let margin_bottom = config.margins.bottom;
 
         let field_ctx = FieldContext {
             page_number,
@@ -113,8 +114,8 @@ pub(super) fn layout_header_footer_blocks(
                 if !image_cache.contains(&float.rel_id) {
                     continue;
                 }
-                let fw = float.width;
-                let fh = float.height;
+                let fw = float.size.width;
+                let fh = float.size.height;
                 let scale = f32::min(1.0, content_width / fw.max(Pt::new(1.0)));
                 let img_w = fw * scale;
                 let img_h = fh * scale;
@@ -125,7 +126,7 @@ pub(super) fn layout_header_footer_blocks(
                         Some("right") => x_start + content_width - img_w,
                         Some("center") => x_start + (content_width - img_w) / 2.0,
                         Some("left") => x_start,
-                        _ => x_start + float.offset_x,
+                        _ => x_start + float.offset.x,
                     }
                 };
                 let img_y = if let Some(pct) = float.pct_pos_v {
@@ -135,16 +136,13 @@ pub(super) fn layout_header_footer_blocks(
                         Some("center") => (margin_extent - img_h) / 2.0,
                         Some("bottom") => margin_extent - img_h,
                         Some("top") => Pt::ZERO,
-                        _ => cursor_y + float.offset_y,
+                        _ => cursor_y + float.offset.y,
                     }
                 };
                 max_y = max_y.max(img_y + img_h);
                 let image = image_cache.get(&float.rel_id);
                 commands.push(DrawCommand::Image {
-                    x: img_x,
-                    y: img_y,
-                    width: img_w,
-                    height: img_h,
+                    rect: PtRect::from_xywh(img_x, img_y, img_w, img_h),
                     image,
                 });
             }

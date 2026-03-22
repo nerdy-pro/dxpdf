@@ -197,8 +197,8 @@ fn parse_inline_image() {
         panic!()
     };
     assert_eq!(img.rel_id, RelId::from("rId5"));
-    assert!((f32::from(img.width) - 72.0).abs() < 0.1);
-    assert!((f32::from(img.height) - 36.0).abs() < 0.1);
+    assert!((f32::from(img.size.width) - 72.0).abs() < 0.1);
+    assert!((f32::from(img.size.height) - 36.0).abs() < 0.1);
 }
 
 #[test]
@@ -365,9 +365,9 @@ fn parse_floating_image_without_pct_pos_has_none() {
     assert_eq!(float.pct_pos_v, None);
     // Should still have absolute offset
     assert!(
-        (f32::from(float.offset_x) - 25.25).abs() < 0.5,
+        (f32::from(float.offset.x) - 25.25).abs() < 0.5,
         "offset_x={}",
-        float.offset_x
+        float.offset.x
     );
 }
 

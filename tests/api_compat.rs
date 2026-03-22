@@ -176,8 +176,10 @@ fn inline_variants() {
     });
     let _ = Inline::Image(InlineImage {
         rel_id: RelId::from("rId1"),
-        width: dxpdf::dimension::Pt::new(0.0),
-        height: dxpdf::dimension::Pt::new(0.0),
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(0.0),
+            dxpdf::dimension::Pt::new(0.0),
+        ),
     });
     let _ = Inline::Field(FieldCode {
         field_type: FieldType::Page,
@@ -313,10 +315,10 @@ fn tab_stop_type_variants() {
 #[test]
 fn page_size_fields_and_methods() {
     use dxpdf::model::*;
-    let ps = PageSize {
-        width: dxpdf::dimension::Twips::new(12240),
-        height: dxpdf::dimension::Twips::new(15840),
-    };
+    let ps = PageSize::new(
+        dxpdf::dimension::Twips::new(12240),
+        dxpdf::dimension::Twips::new(15840),
+    );
     let _: f32 = f32::from(ps.width);
     let _: f32 = f32::from(ps.height);
 }
@@ -521,12 +523,12 @@ fn table_cell_fields_and_methods() {
 #[test]
 fn cell_margins_fields_and_methods() {
     use dxpdf::model::*;
-    let cm = CellMargins {
-        top: dxpdf::dimension::Twips::new(0),
-        right: dxpdf::dimension::Twips::new(108),
-        bottom: dxpdf::dimension::Twips::new(0),
-        left: dxpdf::dimension::Twips::new(108),
-    };
+    let cm = CellMargins::new(
+        dxpdf::dimension::Twips::new(0),
+        dxpdf::dimension::Twips::new(108),
+        dxpdf::dimension::Twips::new(0),
+        dxpdf::dimension::Twips::new(108),
+    );
     let _: f32 = f32::from(cm.top);
     let _: f32 = f32::from(cm.right);
     let _: f32 = f32::from(cm.bottom);
@@ -549,12 +551,14 @@ fn inline_image_fields() {
     use dxpdf::model::*;
     let img = InlineImage {
         rel_id: RelId::from("rId1"),
-        width: dxpdf::dimension::Pt::new(100.0),
-        height: dxpdf::dimension::Pt::new(100.0),
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(100.0),
+            dxpdf::dimension::Pt::new(100.0),
+        ),
     };
     let _: &RelId = &img.rel_id;
-    let _: dxpdf::dimension::Pt = img.width;
-    let _: dxpdf::dimension::Pt = img.height;
+    let _: dxpdf::dimension::Pt = img.size.width;
+    let _: dxpdf::dimension::Pt = img.size.height;
 }
 
 #[test]
@@ -562,10 +566,14 @@ fn floating_image_fields() {
     use dxpdf::model::*;
     let img = FloatingImage {
         rel_id: RelId::from("rId2"),
-        width: dxpdf::dimension::Pt::new(200.0),
-        height: dxpdf::dimension::Pt::new(150.0),
-        offset_x: dxpdf::dimension::Pt::new(10.0),
-        offset_y: dxpdf::dimension::Pt::new(20.0),
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(200.0),
+            dxpdf::dimension::Pt::new(150.0),
+        ),
+        offset: dxpdf::geometry::PtOffset::new(
+            dxpdf::dimension::Pt::new(10.0),
+            dxpdf::dimension::Pt::new(20.0),
+        ),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -573,10 +581,10 @@ fn floating_image_fields() {
         pct_pos_v: None,
     };
     let _: &RelId = &img.rel_id;
-    let _: dxpdf::dimension::Pt = img.width;
-    let _: dxpdf::dimension::Pt = img.height;
-    let _: dxpdf::dimension::Pt = img.offset_x;
-    let _: dxpdf::dimension::Pt = img.offset_y;
+    let _: dxpdf::dimension::Pt = img.size.width;
+    let _: dxpdf::dimension::Pt = img.size.height;
+    let _: dxpdf::dimension::Pt = img.offset.x;
+    let _: dxpdf::dimension::Pt = img.offset.y;
     let _: &Option<String> = &img.align_h;
     let _: &Option<String> = &img.align_v;
     let _: &WrapSide = &img.wrap_side;
@@ -720,7 +728,8 @@ fn render_fonts_signatures() {
 
     let _: fn(&FontMgr, &str, FontStyle) -> Typeface = dxpdf::render::fonts::resolve_typeface;
     let _: fn(&FontMgr, &[Rc<str>]) = dxpdf::render::fonts::preload_fonts;
-    let _: fn(&FontMgr, &str, f32, bool, bool) -> Font = dxpdf::render::fonts::make_font;
+    let _: fn(&FontMgr, &str, dxpdf::dimension::Pt, bool, bool) -> Font =
+        dxpdf::render::fonts::make_font;
 }
 
 // ---------------------------------------------------------------------------
@@ -729,24 +738,26 @@ fn render_fonts_signatures() {
 
 #[test]
 fn layouted_page_fields() {
+    use dxpdf::geometry::PtSize;
     use dxpdf::render::layout::{DrawCommand, LayoutedPage};
     let page = LayoutedPage {
         commands: vec![],
-        page_width: dxpdf::dimension::Pt::new(612.0),
-        page_height: dxpdf::dimension::Pt::new(792.0),
+        page_size: PtSize::new(
+            dxpdf::dimension::Pt::new(612.0),
+            dxpdf::dimension::Pt::new(792.0),
+        ),
     };
     let _: &Vec<DrawCommand> = &page.commands;
-    let _: dxpdf::dimension::Pt = page.page_width;
-    let _: dxpdf::dimension::Pt = page.page_height;
+    let _: PtSize = page.page_size;
 }
 
 #[test]
 fn draw_command_variants() {
     use dxpdf::dimension::Pt;
+    use dxpdf::geometry::{PtLineSegment, PtOffset, PtRect};
     use dxpdf::render::layout::DrawCommand;
     let _ = DrawCommand::Text {
-        x: Pt::new(0.0),
-        y: Pt::new(0.0),
+        position: PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
         text: String::new(),
         font_family: Rc::from("Helvetica"),
         char_spacing_pt: Pt::new(0.0),
@@ -756,33 +767,27 @@ fn draw_command_variants() {
         color: (0, 0, 0),
     };
     let _ = DrawCommand::Underline {
-        x1: Pt::new(0.0),
-        y1: Pt::new(0.0),
-        x2: Pt::new(100.0),
-        y2: Pt::new(0.0),
+        line: PtLineSegment::new(
+            PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
+            PtOffset::new(Pt::new(100.0), Pt::new(0.0)),
+        ),
         color: (0, 0, 0),
         width: Pt::new(1.0),
     };
     let _ = DrawCommand::Line {
-        x1: Pt::new(0.0),
-        y1: Pt::new(0.0),
-        x2: Pt::new(100.0),
-        y2: Pt::new(100.0),
+        line: PtLineSegment::new(
+            PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
+            PtOffset::new(Pt::new(100.0), Pt::new(100.0)),
+        ),
         color: (0, 0, 0),
         width: Pt::new(1.0),
     };
     let _ = DrawCommand::Rect {
-        x: Pt::new(0.0),
-        y: Pt::new(0.0),
-        width: Pt::new(100.0),
-        height: Pt::new(50.0),
+        rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(50.0)),
         color: (200, 200, 200),
     };
     let _ = DrawCommand::LinkAnnotation {
-        x: Pt::new(0.0),
-        y: Pt::new(0.0),
-        width: Pt::new(100.0),
-        height: Pt::new(12.0),
+        rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(12.0)),
         url: "https://example.com".into(),
     };
     // DrawCommand::Image requires an Rc<skia_safe::Image> — skip construction

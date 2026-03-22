@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use super::ImageCache;
 use crate::dimension::{HalfPoints, Pt};
+use crate::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
 use crate::units::{MIN_TAB_WIDTH, TAB_FALLBACK, UNDERLINE_Y_OFFSET};
 
@@ -58,8 +59,7 @@ pub enum Fragment {
         baseline_offset: Pt,
     },
     Image {
-        width: Pt,
-        height: Pt,
+        size: PtSize,
         rel_id: String,
     },
     Tab {
@@ -74,7 +74,7 @@ impl Fragment {
     pub fn width(&self) -> Pt {
         match self {
             Fragment::Text { measured_width, .. } => *measured_width,
-            Fragment::Image { width, .. } => *width,
+            Fragment::Image { size, .. } => size.width,
             Fragment::Tab { .. } => MIN_TAB_WIDTH,
             Fragment::LineBreak { .. } => Pt::ZERO,
         }
@@ -85,7 +85,7 @@ impl Fragment {
             Fragment::Text {
                 measured_height, ..
             } => *measured_height,
-            Fragment::Image { height, .. } => *height,
+            Fragment::Image { size, .. } => size.height,
             Fragment::Tab { line_height } | Fragment::LineBreak { line_height } => *line_height,
         }
     }
@@ -206,8 +206,8 @@ pub fn collect_fragments_with_fields(
                 }
             }
             Inline::Image(img) if image_cache.contains(&img.rel_id) => {
-                let w = img.width;
-                let h = img.height;
+                let w = img.size.width;
+                let h = img.size.height;
                 let scale = f32::min(
                     1.0,
                     f32::min(
@@ -216,8 +216,7 @@ pub fn collect_fragments_with_fields(
                     ),
                 );
                 fragments.push(Fragment::Image {
-                    width: w * scale,
-                    height: h * scale,
+                    size: PtSize::new(w * scale, h * scale),
                     rel_id: img.rel_id.to_string(),
                 });
             }
@@ -481,16 +480,17 @@ pub fn measure_lines(
                     let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                     if let Some(bg) = shading {
                         commands.push(DrawCommand::Rect {
-                            x,
-                            y: cursor_y - line_height,
-                            width: *measured_width,
-                            height: line_height,
+                            rect: PtRect::from_xywh(
+                                x,
+                                cursor_y - line_height,
+                                *measured_width,
+                                line_height,
+                            ),
                             color: (bg.r, bg.g, bg.b),
                         });
                     }
                     commands.push(DrawCommand::Text {
-                        x,
-                        y: cursor_y + *baseline_offset,
+                        position: PtOffset::new(x, cursor_y + *baseline_offset),
                         text: text.clone(),
                         font_family: font_family.clone(),
                         char_spacing_pt: *char_spacing_pt,
@@ -502,39 +502,34 @@ pub fn measure_lines(
                     if *underline {
                         let uw = underline_width(*font_size, *bold);
                         commands.push(DrawCommand::Underline {
-                            x1: x,
-                            y1: cursor_y + UNDERLINE_Y_OFFSET,
-                            x2: x + *measured_width,
-                            y2: cursor_y + UNDERLINE_Y_OFFSET,
+                            line: PtLineSegment::new(
+                                PtOffset::new(x, cursor_y + UNDERLINE_Y_OFFSET),
+                                PtOffset::new(x + *measured_width, cursor_y + UNDERLINE_Y_OFFSET),
+                            ),
                             color: c,
                             width: uw,
                         });
                     }
                     if let Some(url) = hyperlink_url {
                         commands.push(DrawCommand::LinkAnnotation {
-                            x,
-                            y: cursor_y - line_height,
-                            width: *measured_width,
-                            height: line_height,
+                            rect: PtRect::from_xywh(
+                                x,
+                                cursor_y - line_height,
+                                *measured_width,
+                                line_height,
+                            ),
                             url: url.clone(),
                         });
                     }
                     x += *measured_width;
                 }
-                Fragment::Image {
-                    width,
-                    height,
-                    rel_id,
-                } => {
+                Fragment::Image { size, rel_id } => {
                     let image = image_cache.get(rel_id);
                     commands.push(DrawCommand::Image {
-                        x,
-                        y: cursor_y - *height,
-                        width: *width,
-                        height: *height,
+                        rect: PtRect::from_xywh(x, cursor_y - size.height, size.width, size.height),
                         image,
                     });
-                    x += *width;
+                    x += size.width;
                 }
                 Fragment::Tab { .. } => {
                     let rel_x = x - x_origin;

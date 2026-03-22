@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::dimension::Pt;
+use crate::geometry::{PtEdgeInsets, PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
 use crate::units::FLOAT_TEXT_GAP;
 use fragment::DocDefaultsLayout;
@@ -55,12 +56,8 @@ impl ImageCache {
 /// Built internally from document `SectionProperties`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayoutConfig {
-    pub page_width: Pt,
-    pub page_height: Pt,
-    pub margin_top: Pt,
-    pub margin_bottom: Pt,
-    pub margin_left: Pt,
-    pub margin_right: Pt,
+    pub page_size: PtSize,
+    pub margins: PtEdgeInsets,
     /// Distance from page top to header content.
     pub header_margin: Pt,
     /// Distance from page bottom to footer content.
@@ -75,12 +72,13 @@ impl Default for LayoutConfig {
     /// to application-defined defaults. These match Microsoft Word's defaults.
     fn default() -> Self {
         Self {
-            page_width: US_LETTER_WIDTH_PT,
-            page_height: US_LETTER_HEIGHT_PT,
-            margin_top: DEFAULT_PAGE_MARGIN_PT,
-            margin_bottom: DEFAULT_PAGE_MARGIN_PT,
-            margin_left: DEFAULT_PAGE_MARGIN_PT,
-            margin_right: DEFAULT_PAGE_MARGIN_PT,
+            page_size: PtSize::new(US_LETTER_WIDTH_PT, US_LETTER_HEIGHT_PT),
+            margins: PtEdgeInsets::new(
+                DEFAULT_PAGE_MARGIN_PT,
+                DEFAULT_PAGE_MARGIN_PT,
+                DEFAULT_PAGE_MARGIN_PT,
+                DEFAULT_PAGE_MARGIN_PT,
+            ),
             header_margin: DEFAULT_PAGE_MARGIN_PT / 2.0,
             footer_margin: DEFAULT_PAGE_MARGIN_PT / 2.0,
         }
@@ -97,11 +95,11 @@ impl LayoutConfig {
     }
 
     pub fn content_width(&self) -> Pt {
-        self.page_width - self.margin_left - self.margin_right
+        self.page_size.width - self.margins.left - self.margins.right
     }
 
     pub fn content_height(&self) -> Pt {
-        self.page_height - self.margin_top - self.margin_bottom
+        self.page_size.height - self.margins.top - self.margins.bottom
     }
 }
 
@@ -109,8 +107,7 @@ impl LayoutConfig {
 #[derive(Debug, Clone)]
 pub enum DrawCommand {
     Text {
-        x: Pt,
-        y: Pt,
+        position: PtOffset,
         text: String,
         font_family: std::rc::Rc<str>,
         char_spacing_pt: Pt,
@@ -120,40 +117,25 @@ pub enum DrawCommand {
         color: (u8, u8, u8),
     },
     Underline {
-        x1: Pt,
-        y1: Pt,
-        x2: Pt,
-        y2: Pt,
+        line: PtLineSegment,
         color: (u8, u8, u8),
         width: Pt,
     },
     Line {
-        x1: Pt,
-        y1: Pt,
-        x2: Pt,
-        y2: Pt,
+        line: PtLineSegment,
         color: (u8, u8, u8),
         width: Pt,
     },
     Image {
-        x: Pt,
-        y: Pt,
-        width: Pt,
-        height: Pt,
+        rect: PtRect,
         image: Rc<skia_safe::Image>,
     },
     Rect {
-        x: Pt,
-        y: Pt,
-        width: Pt,
-        height: Pt,
+        rect: PtRect,
         color: (u8, u8, u8),
     },
     LinkAnnotation {
-        x: Pt,
-        y: Pt,
-        width: Pt,
-        height: Pt,
+        rect: PtRect,
         url: String,
     },
 }
@@ -161,8 +143,7 @@ pub enum DrawCommand {
 #[derive(Debug, Clone)]
 pub struct LayoutedPage {
     pub commands: Vec<DrawCommand>,
-    pub page_width: Pt,
-    pub page_height: Pt,
+    pub page_size: PtSize,
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
@@ -195,21 +176,21 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
         let pre_measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
         let (_, header_bottom) = header_footer::layout_header_footer_blocks(
             &header.blocks,
-            initial_config.margin_left,
+            initial_config.margins.left,
             initial_config.header_margin,
             initial_config.content_width(),
-            initial_config.margin_top,
-            initial_config.page_height,
-            initial_config.page_width,
-            initial_config.page_height,
+            initial_config.margins.top,
+            initial_config.page_size.height,
+            initial_config.page_size.width,
+            initial_config.page_size.height,
             &doc_defaults,
             &pre_measurer,
             default_tab_stop_pt,
             None,
             &image_cache,
         );
-        if header_bottom > effective_config.margin_top {
-            effective_config.margin_top = header_bottom;
+        if header_bottom > effective_config.margins.top {
+            effective_config.margins.top = header_bottom;
         }
     }
 
@@ -248,14 +229,15 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
     if let Some(ps) = &sect.page_size {
-        config.page_width = Pt::from(ps.width);
-        config.page_height = Pt::from(ps.height);
+        config.page_size = PtSize::from(*ps);
     }
     if let Some(pm) = &sect.page_margins {
-        config.margin_top = Pt::from(pm.top);
-        config.margin_right = Pt::from(pm.right);
-        config.margin_bottom = Pt::from(pm.bottom);
-        config.margin_left = Pt::from(pm.left);
+        config.margins = PtEdgeInsets::new(
+            Pt::from(pm.top),
+            Pt::from(pm.right),
+            Pt::from(pm.bottom),
+            Pt::from(pm.left),
+        );
         config.header_margin = Pt::from(pm.header);
         config.footer_margin = Pt::from(pm.footer);
     }
@@ -266,8 +248,7 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
 pub(super) fn offset_command(cmd: &DrawCommand, y_offset: Pt) -> DrawCommand {
     match cmd {
         DrawCommand::Text {
-            x,
-            y,
+            position,
             text,
             font_family,
             char_spacing_pt,
@@ -276,8 +257,7 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: Pt) -> DrawCommand {
             italic,
             color,
         } => DrawCommand::Text {
-            x: *x,
-            y: y_offset + *y,
+            position: PtOffset::new(position.x, y_offset + position.y),
             text: text.clone(),
             font_family: font_family.clone(),
             char_spacing_pt: *char_spacing_pt,
@@ -286,59 +266,40 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: Pt) -> DrawCommand {
             italic: *italic,
             color: *color,
         },
-        DrawCommand::Underline {
-            x1,
-            y1,
-            x2,
-            y2,
-            color,
-            width,
-        } => DrawCommand::Underline {
-            x1: *x1,
-            y1: y_offset + *y1,
-            x2: *x2,
-            y2: y_offset + *y2,
+        DrawCommand::Underline { line, color, width } => DrawCommand::Underline {
+            line: PtLineSegment::new(
+                PtOffset::new(line.start.x, y_offset + line.start.y),
+                PtOffset::new(line.end.x, y_offset + line.end.y),
+            ),
             color: *color,
             width: *width,
         },
-        DrawCommand::Image {
-            x,
-            y,
-            width,
-            height,
-            image,
-        } => DrawCommand::Image {
-            x: *x,
-            y: y_offset + *y,
-            width: *width,
-            height: *height,
+        DrawCommand::Image { rect, image } => DrawCommand::Image {
+            rect: PtRect::from_xywh(
+                rect.origin.x,
+                y_offset + rect.origin.y,
+                rect.size.width,
+                rect.size.height,
+            ),
             image: image.clone(),
         },
-        DrawCommand::Rect {
-            x,
-            y,
-            width,
-            height,
-            color,
-        } => DrawCommand::Rect {
-            x: *x,
-            y: y_offset + *y,
-            width: *width,
-            height: *height,
+        DrawCommand::Rect { rect, color } => DrawCommand::Rect {
+            rect: PtRect::from_xywh(
+                rect.origin.x,
+                y_offset + rect.origin.y,
+                rect.size.width,
+                rect.size.height,
+            ),
             color: *color,
         },
         DrawCommand::Line { .. } => cmd.clone(),
-        DrawCommand::LinkAnnotation {
-            x,
-            y,
-            width,
-            height,
-            url,
-        } => DrawCommand::LinkAnnotation {
-            x: *x,
-            y: y_offset + *y,
-            width: *width,
-            height: *height,
+        DrawCommand::LinkAnnotation { rect, url } => DrawCommand::LinkAnnotation {
+            rect: PtRect::from_xywh(
+                rect.origin.x,
+                y_offset + rect.origin.y,
+                rect.size.width,
+                rect.size.height,
+            ),
             url: url.clone(),
         },
     }
@@ -384,10 +345,9 @@ impl Layouter {
             pages: Vec::new(),
             current_page: LayoutedPage {
                 commands: Vec::new(),
-                page_width: config.page_width,
-                page_height: config.page_height,
+                page_size: config.page_size,
             },
-            cursor_y: config.margin_top,
+            cursor_y: config.margins.top,
             active_floats: Vec::new(),
             next_section_configs,
             default_tab_stop_pt,
@@ -400,7 +360,7 @@ impl Layouter {
     }
 
     fn content_bottom(&self) -> Pt {
-        self.config.page_height - self.config.margin_bottom
+        self.config.page_size.height - self.config.margins.bottom
     }
 
     fn new_page(&mut self) {
@@ -408,12 +368,11 @@ impl Layouter {
             &mut self.current_page,
             LayoutedPage {
                 commands: Vec::new(),
-                page_width: self.config.page_width,
-                page_height: self.config.page_height,
+                page_size: self.config.page_size,
             },
         );
         self.pages.push(page);
-        self.cursor_y = self.config.margin_top;
+        self.cursor_y = self.config.margins.top;
         self.active_floats.clear();
     }
 
@@ -421,9 +380,8 @@ impl Layouter {
         self.new_page();
         if let Some(next_config) = self.next_section_configs.pop() {
             self.config = next_config;
-            self.current_page.page_width = self.config.page_width;
-            self.current_page.page_height = self.config.page_height;
-            self.cursor_y = self.config.margin_top;
+            self.current_page.page_size = self.config.page_size;
+            self.cursor_y = self.config.margins.top;
         }
     }
 
@@ -432,7 +390,7 @@ impl Layouter {
         let mut width_reduction = Pt::ZERO;
         for f in &self.active_floats {
             if line_top < f.page_y_end && line_bottom > f.page_y_start {
-                let shift = (f.page_x - self.config.margin_left) + f.width + FLOAT_TEXT_GAP;
+                let shift = (f.page_x - self.config.margins.left) + f.width + FLOAT_TEXT_GAP;
                 x_shift = x_shift.max(shift);
                 width_reduction = width_reduction.max(shift);
             }
@@ -575,8 +533,7 @@ impl Layouter {
         if self.pages.is_empty() {
             self.pages.push(LayoutedPage {
                 commands: Vec::new(),
-                page_width: self.config.page_width,
-                page_height: self.config.page_height,
+                page_size: self.config.page_size,
             });
         }
         (self.pages, self.image_cache)

@@ -1,4 +1,5 @@
 use crate::dimension::Pt;
+use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::*;
 
 use super::fragment::*;
@@ -55,10 +56,7 @@ fn emit_border(
 ) {
     if border.is_visible() {
         commands.push(DrawCommand::Line {
-            x1,
-            y1,
-            x2,
-            y2,
+            line: PtLineSegment::new(PtOffset::new(x1, y1), PtOffset::new(x2, y2)),
             color: border.color_rgb(),
             width: Pt::from(border.size),
         });
@@ -112,7 +110,7 @@ impl Layouter {
                 let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
                 let mut grid_col_idx = 0;
                 for cell in &row.cells {
-                    let x = self.config.margin_left
+                    let x = self.config.margins.left
                         + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
                     let w = self.cell_width(grid_col_idx, cell, &col_widths);
                     col_x_positions.push(x);
@@ -156,8 +154,8 @@ impl Layouter {
                                 if !self.image_cache.contains(&float.rel_id) {
                                     continue;
                                 }
-                                let fw = float.width;
-                                let fh = float.height;
+                                let fw = float.size.width;
+                                let fh = float.size.height;
                                 let scale = f32::min(
                                     1.0,
                                     f32::min(
@@ -170,10 +168,7 @@ impl Layouter {
                                 let img_x = cell_x + (col_width - img_w) / 2.0;
                                 let image = self.image_cache.get(&float.rel_id);
                                 commands.push(DrawCommand::Image {
-                                    x: img_x,
-                                    y: cell_y,
-                                    width: img_w,
-                                    height: img_h,
+                                    rect: PtRect::from_xywh(img_x, cell_y, img_w, img_h),
                                     image,
                                 });
                                 cell_y += img_h;
@@ -331,10 +326,7 @@ impl Layouter {
                 // 1. Cell shading
                 if let Some(color) = &cell.shading {
                     self.current_page.commands.push(DrawCommand::Rect {
-                        x: cell_x,
-                        y: row_top,
-                        width: cw,
-                        height: row_height,
+                        rect: PtRect::from_xywh(cell_x, row_top, cw, row_height),
                         color: (color.r, color.g, color.b),
                     });
                 }

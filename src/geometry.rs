@@ -277,6 +277,33 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Skia interop
+// ---------------------------------------------------------------------------
+
+impl From<Offset<PtUnit>> for skia_safe::Point {
+    fn from(o: Offset<PtUnit>) -> Self {
+        skia_safe::Point::new(f32::from(o.x), f32::from(o.y))
+    }
+}
+
+impl From<Size<PtUnit>> for skia_safe::Size {
+    fn from(s: Size<PtUnit>) -> Self {
+        skia_safe::Size::new(f32::from(s.width), f32::from(s.height))
+    }
+}
+
+impl From<Rect<PtUnit>> for skia_safe::Rect {
+    fn from(r: Rect<PtUnit>) -> Self {
+        skia_safe::Rect::from_xywh(
+            f32::from(r.origin.x),
+            f32::from(r.origin.y),
+            f32::from(r.size.width),
+            f32::from(r.size.height),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Type aliases
 // ---------------------------------------------------------------------------
 
@@ -489,5 +516,33 @@ mod tests {
         );
         let pr: PtRect = tr.into();
         assert!((f32::from(pr.size.width) - 612.0).abs() < 0.01);
+    }
+
+    // -- Skia interop --
+
+    #[test]
+    fn pt_offset_into_skia_point() {
+        let o = PtOffset::new(Pt::new(72.0), Pt::new(36.0));
+        let p: skia_safe::Point = o.into();
+        assert_eq!(p.x, 72.0);
+        assert_eq!(p.y, 36.0);
+    }
+
+    #[test]
+    fn pt_size_into_skia_size() {
+        let s = PtSize::new(Pt::new(612.0), Pt::new(792.0));
+        let ss: skia_safe::Size = s.into();
+        assert_eq!(ss.width, 612.0);
+        assert_eq!(ss.height, 792.0);
+    }
+
+    #[test]
+    fn pt_rect_into_skia_rect() {
+        let r = PtRect::from_xywh(Pt::new(10.0), Pt::new(20.0), Pt::new(100.0), Pt::new(50.0));
+        let sr: skia_safe::Rect = r.into();
+        assert_eq!(sr.left, 10.0);
+        assert_eq!(sr.top, 20.0);
+        assert_eq!(sr.width(), 100.0);
+        assert_eq!(sr.height(), 50.0);
     }
 }

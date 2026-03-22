@@ -27,10 +27,7 @@ pub fn handle_section_element(
                     .and_then(|v| v.parse::<i64>().ok())
                     .map(Twips::new);
                 if let (Some(w), Some(h)) = (w, h) {
-                    section.page_size = Some(PageSize {
-                        width: w,
-                        height: h,
-                    });
+                    section.page_size = Some(PageSize::new(w, h));
                 }
             }
             b"pgMar" => {
