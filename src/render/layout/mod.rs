@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::model::*;
-use crate::units::*;
+use crate::units::FLOAT_TEXT_GAP_PT;
 use fragment::DocDefaultsLayout;
 
 /// US Letter page width in points (8.5 inches).
@@ -495,7 +495,11 @@ impl Layouter {
     }
 
     /// Resolve list label text and indentation for a paragraph with a list reference.
-    fn resolve_list_label(&mut self, list_ref: &ListRef) -> Option<(String, f32, f32)> {
+    /// Returns (label_text, indent_left in twips, indent_hanging in twips).
+    fn resolve_list_label(
+        &mut self,
+        list_ref: &ListRef,
+    ) -> Option<(String, crate::dimension::Twips, crate::dimension::Twips)> {
         let def = self.doc_defaults.numbering.get(&list_ref.num_id)?;
         let level = def.levels.get(list_ref.level as usize)?;
 
@@ -544,10 +548,7 @@ impl Layouter {
             }
         };
 
-        let indent_left = crate::dimension::Pt::from(level.indent_left).raw();
-        let indent_hanging = crate::dimension::Pt::from(level.indent_hanging).raw();
-
-        Some((label, indent_left, indent_hanging))
+        Some((label, level.indent_left, level.indent_hanging))
     }
 
     fn prune_floats(&mut self) {

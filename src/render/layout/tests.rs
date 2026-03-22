@@ -1915,25 +1915,22 @@ fn footer_renders_at_bottom() {
 
 #[test]
 fn twips_to_pt_zero() {
-    assert!((crate::units::twips_to_pt(0) - 0.0).abs() < 0.001);
+    use crate::dimension::{Pt, Twips};
+    assert!((Pt::from(Twips::new(0)).raw() - 0.0).abs() < 0.001);
 }
 
 #[test]
 fn twips_to_pt_signed_negative() {
-    let pt = crate::units::twips_to_pt_signed(-20);
-    assert!(
-        (pt - (-1.0)).abs() < 0.001,
-        "twips_to_pt_signed(-20) = {pt}"
-    );
+    use crate::dimension::{Pt, Twips};
+    let pt = Pt::from(Twips::new(-20)).raw();
+    assert!((pt - (-1.0)).abs() < 0.001, "Twips(-20) -> Pt = {pt}");
 }
 
 #[test]
 fn emu_to_pt_signed_negative() {
-    let pt = crate::units::emu_to_pt_signed(-914400);
-    assert!(
-        (pt - (-72.0)).abs() < 0.1,
-        "emu_to_pt_signed(-914400) = {pt}"
-    );
+    use crate::dimension::{Emu, Pt};
+    let pt = Pt::from(Emu::new(-914400)).raw();
+    assert!((pt - (-72.0)).abs() < 0.1, "Emu(-914400) -> Pt = {pt}");
 }
 
 // ==============================================================

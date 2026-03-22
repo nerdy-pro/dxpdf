@@ -3,7 +3,7 @@ use std::rc::Rc;
 use super::ImageCache;
 use crate::dimension::{HalfPoints, Pt};
 use crate::model::*;
-use crate::units::*;
+use crate::units::{MIN_TAB_WIDTH_PT, TAB_FALLBACK_PT, UNDERLINE_Y_OFFSET};
 
 use super::measurer::TextMeasurer;
 use super::DrawCommand;

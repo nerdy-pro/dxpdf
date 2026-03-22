@@ -1,65 +1,20 @@
-//! Unit conversion constants and helpers for OOXML measurements.
+//! OOXML string constants and rendering defaults.
 //!
-//! All constants in this module are either:
-//! - Defined by the OOXML / ISO 29500 specification
-//! - Standard typographic / paper size values
-//! - Clearly documented rendering defaults with rationale
+//! Unit conversion is handled by the `dimension` module. This module retains
+//! string constants used during XML parsing and rendering defaults that are
+//! not yet derived from the document.
 
-// --- OOXML unit conversion factors (ISO 29500) ---
-
-/// Number of twips per point (1 point = 20 twips).
-pub const TWIPS_PER_POINT: f32 = 20.0;
-
-/// Number of EMUs per inch (ISO 29500: 1 inch = 914400 EMUs).
-pub const EMU_PER_INCH: f32 = 914400.0;
-
-/// Number of points per inch (standard typographic unit).
-pub const POINTS_PER_INCH: f32 = 72.0;
-
-/// Half-points per point (OOXML font sizes are in half-points).
-pub const HALF_POINTS_PER_POINT: f32 = 2.0;
-
-/// Border size units per point (OOXML w:sz is in eighths of a point).
-pub const BORDER_SIZE_UNITS_PER_POINT: f32 = 8.0;
-
-// --- Unit conversion functions ---
-
-/// Convert twips to points.
-pub fn twips_to_pt(twips: u32) -> f32 {
-    twips as f32 / TWIPS_PER_POINT
-}
-
-/// Convert signed twips to points.
-pub fn twips_to_pt_signed(twips: i32) -> f32 {
-    twips as f32 / TWIPS_PER_POINT
-}
+// --- Legacy conversion function (re-exported from model for backward compat) ---
 
 /// Convert English Metric Units to points.
 pub fn emu_to_pt(emu: u64) -> f32 {
-    emu as f32 / EMU_PER_INCH * POINTS_PER_INCH
+    emu as f32 / 914_400.0 * 72.0
 }
 
-/// Convert signed English Metric Units to points.
-pub fn emu_to_pt_signed(emu: i64) -> f32 {
-    emu as f32 / EMU_PER_INCH * POINTS_PER_INCH
-}
-
-// --- OOXML document defaults (ISO 29500) ---
+// --- OOXML document defaults ---
 
 /// Default font family when nothing is specified.
 pub const DEFAULT_FONT_FAMILY: &str = "Helvetica";
-
-/// Default font size in half-points (24 = 12pt, OOXML default).
-pub const DEFAULT_FONT_SIZE_HALF_PTS: u32 = 24;
-
-/// Default tab stop interval in twips (720 = 0.5 inch, OOXML default).
-pub const DEFAULT_TAB_STOP_TWIPS: u32 = 720;
-
-/// Default page margin in twips (1440 = 1 inch, OOXML default).
-pub const DEFAULT_PAGE_MARGIN_TWIPS: u32 = 1440;
-
-/// Default cell margin left/right in twips (108 twips, OOXML w:tblCellMar default).
-pub const DEFAULT_CELL_MARGIN_LR_TWIPS: u32 = 108;
 
 /// OOXML width type for twips.
 pub const WIDTH_TYPE_DXA: &str = "dxa";

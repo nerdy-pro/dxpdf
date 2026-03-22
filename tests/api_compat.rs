@@ -49,17 +49,7 @@ fn error_is_std_error() {
 
 #[test]
 fn unit_constants() {
-    let _: f32 = dxpdf::units::TWIPS_PER_POINT;
-    let _: f32 = dxpdf::units::EMU_PER_INCH;
-    let _: f32 = dxpdf::units::POINTS_PER_INCH;
-    let _: f32 = dxpdf::units::HALF_POINTS_PER_POINT;
-    let _: f32 = dxpdf::units::BORDER_SIZE_UNITS_PER_POINT;
-
     let _: &str = dxpdf::units::DEFAULT_FONT_FAMILY;
-    let _: u32 = dxpdf::units::DEFAULT_FONT_SIZE_HALF_PTS;
-    let _: u32 = dxpdf::units::DEFAULT_TAB_STOP_TWIPS;
-    let _: u32 = dxpdf::units::DEFAULT_PAGE_MARGIN_TWIPS;
-    let _: u32 = dxpdf::units::DEFAULT_CELL_MARGIN_LR_TWIPS;
     let _: &str = dxpdf::units::WIDTH_TYPE_DXA;
     let _: &str = dxpdf::units::UNDERLINE_NONE;
 
@@ -70,11 +60,8 @@ fn unit_constants() {
 }
 
 #[test]
-fn unit_conversion_signatures() {
-    let _: fn(u32) -> f32 = dxpdf::units::twips_to_pt;
-    let _: fn(i32) -> f32 = dxpdf::units::twips_to_pt_signed;
+fn unit_legacy_emu_to_pt() {
     let _: fn(u64) -> f32 = dxpdf::units::emu_to_pt;
-    let _: fn(i64) -> f32 = dxpdf::units::emu_to_pt_signed;
 }
 
 // ---------------------------------------------------------------------------

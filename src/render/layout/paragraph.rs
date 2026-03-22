@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::model::*;
-use crate::units::*;
+use crate::units::UNDERLINE_Y_OFFSET;
 
 use super::fragment::*;
 use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
@@ -85,16 +85,14 @@ impl Layouter {
         // Apply list indentation (overrides paragraph indentation)
         let (list_label_text, list_label_x) = if let Some((ref label, left, hanging)) = list_label {
             if indent.left.is_none() {
-                indent.left = Some(crate::dimension::Twips::new(
-                    (left * TWIPS_PER_POINT) as i64,
-                ));
+                indent.left = Some(left);
             }
             if indent.first_line.is_none() {
-                indent.first_line = Some(crate::dimension::Twips::new(
-                    -((hanging * TWIPS_PER_POINT) as i64),
-                ));
+                indent.first_line = Some(-hanging);
             }
-            let label_x = self.config.margin_left + left - hanging;
+            let left_pt = crate::dimension::Pt::from(left).raw();
+            let hanging_pt = crate::dimension::Pt::from(hanging).raw();
+            let label_x = self.config.margin_left + left_pt - hanging_pt;
             (Some(label.clone()), Some(label_x))
         } else {
             (None, None)
