@@ -189,8 +189,8 @@ fn inline_variants() {
     });
     let _ = Inline::Image(InlineImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 0.0,
-        height_pt: 0.0,
+        width: dxpdf::dimension::Pt::new(0.0),
+        height: dxpdf::dimension::Pt::new(0.0),
     });
     let _ = Inline::Field(FieldCode {
         field_type: FieldType::Page,
@@ -576,12 +576,12 @@ fn inline_image_fields() {
     use dxpdf::model::*;
     let img = InlineImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 100.0,
-        height_pt: 100.0,
+        width: dxpdf::dimension::Pt::new(100.0),
+        height: dxpdf::dimension::Pt::new(100.0),
     };
     let _: &RelId = &img.rel_id;
-    let _: f32 = img.width_pt;
-    let _: f32 = img.height_pt;
+    let _: dxpdf::dimension::Pt = img.width;
+    let _: dxpdf::dimension::Pt = img.height;
 }
 
 #[test]
@@ -589,10 +589,10 @@ fn floating_image_fields() {
     use dxpdf::model::*;
     let img = FloatingImage {
         rel_id: RelId::from("rId2"),
-        width_pt: 200.0,
-        height_pt: 150.0,
-        offset_x_pt: 10.0,
-        offset_y_pt: 20.0,
+        width: dxpdf::dimension::Pt::new(200.0),
+        height: dxpdf::dimension::Pt::new(150.0),
+        offset_x: dxpdf::dimension::Pt::new(10.0),
+        offset_y: dxpdf::dimension::Pt::new(20.0),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -600,10 +600,10 @@ fn floating_image_fields() {
         pct_pos_v: None,
     };
     let _: &RelId = &img.rel_id;
-    let _: f32 = img.width_pt;
-    let _: f32 = img.height_pt;
-    let _: f32 = img.offset_x_pt;
-    let _: f32 = img.offset_y_pt;
+    let _: dxpdf::dimension::Pt = img.width;
+    let _: dxpdf::dimension::Pt = img.height;
+    let _: dxpdf::dimension::Pt = img.offset_x;
+    let _: dxpdf::dimension::Pt = img.offset_y;
     let _: &Option<String> = &img.align_h;
     let _: &Option<String> = &img.align_v;
     let _: &WrapSide = &img.wrap_side;

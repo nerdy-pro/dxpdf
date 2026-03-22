@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::dimension::{EighthPoints, HalfPoints};
+use crate::dimension::{EighthPoints, HalfPoints, Pt};
 use crate::units::{
     twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
     DEFAULT_TAB_STOP_TWIPS,
@@ -422,8 +422,8 @@ pub enum Inline {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImage {
     pub rel_id: RelId,
-    pub width_pt: f32,
-    pub height_pt: f32,
+    pub width: Pt,
+    pub height: Pt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,10 +436,10 @@ pub enum WrapSide {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FloatingImage {
     pub rel_id: RelId,
-    pub width_pt: f32,
-    pub height_pt: f32,
-    pub offset_x_pt: f32,
-    pub offset_y_pt: f32,
+    pub width: Pt,
+    pub height: Pt,
+    pub offset_x: Pt,
+    pub offset_y: Pt,
     /// Horizontal alignment (e.g., "left", "right", "center") — alternative to offset.
     pub align_h: Option<String>,
     /// Vertical alignment (e.g., "top", "center", "bottom") — alternative to offset.

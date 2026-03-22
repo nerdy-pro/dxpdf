@@ -156,15 +156,17 @@ impl Layouter {
                                 if !self.image_cache.contains(&float.rel_id) {
                                     continue;
                                 }
+                                let fw = float.width.raw();
+                                let fh = float.height.raw();
                                 let scale = f32::min(
                                     1.0,
                                     f32::min(
-                                        cell_content_width / float.width_pt.max(1.0),
-                                        row_height_limit.max(1.0) / float.height_pt.max(1.0),
+                                        cell_content_width / fw.max(1.0),
+                                        row_height_limit.max(1.0) / fh.max(1.0),
                                     ),
                                 );
-                                let img_w = float.width_pt * scale;
-                                let img_h = float.height_pt * scale;
+                                let img_w = fw * scale;
+                                let img_h = fh * scale;
                                 let img_x = cell_x + (col_width - img_w) / 2.0;
                                 let image = self.image_cache.get(&float.rel_id);
                                 commands.push(DrawCommand::Image {

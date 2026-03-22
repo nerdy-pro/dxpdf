@@ -667,16 +667,16 @@ pub fn parse_document_xml_with_rels(
                             if let Some(rid) = rel_id {
                                 use crate::dimension::{Emu, Pt};
                                 let zero = Emu::new(0);
-                                let w = Pt::from(width_emu.unwrap_or(zero)).raw();
-                                let h = Pt::from(height_emu.unwrap_or(zero)).raw();
+                                let w = Pt::from(width_emu.unwrap_or(zero));
+                                let h = Pt::from(height_emu.unwrap_or(zero));
 
                                 if is_anchor {
                                     let float = FloatingImage {
                                         rel_id: rid,
-                                        width_pt: w,
-                                        height_pt: h,
-                                        offset_x_pt: Pt::from(pos_h_emu.unwrap_or(zero)).raw(),
-                                        offset_y_pt: Pt::from(pos_v_emu.unwrap_or(zero)).raw(),
+                                        width: w,
+                                        height: h,
+                                        offset_x: Pt::from(pos_h_emu.unwrap_or(zero)),
+                                        offset_y: Pt::from(pos_v_emu.unwrap_or(zero)),
                                         align_h,
                                         align_v,
                                         wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
@@ -687,8 +687,8 @@ pub fn parse_document_xml_with_rels(
                                 } else {
                                     let image = Inline::Image(InlineImage {
                                         rel_id: rid,
-                                        width_pt: w,
-                                        height_pt: h,
+                                        width: w,
+                                        height: h,
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
                                         if let Some(para_state) = stack

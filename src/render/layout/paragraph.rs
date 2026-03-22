@@ -26,36 +26,38 @@ impl Layouter {
                 continue;
             }
             let content_w = self.config.content_width();
+            let fw = float.width.raw();
+            let fh = float.height.raw();
             let img_x = if let Some(pct) = float.pct_pos_h {
                 pct as f32 / 100_000.0 * self.config.page_width
             } else {
                 match float.align_h.as_deref() {
-                    Some("right") => self.config.margin_left + content_w - float.width_pt,
-                    Some("center") => self.config.margin_left + (content_w - float.width_pt) / 2.0,
+                    Some("right") => self.config.margin_left + content_w - fw,
+                    Some("center") => self.config.margin_left + (content_w - fw) / 2.0,
                     Some("left") => self.config.margin_left,
-                    _ => self.config.margin_left + float.offset_x_pt,
+                    _ => self.config.margin_left + float.offset_x.raw(),
                 }
             };
             let img_y = if let Some(pct) = float.pct_pos_v {
                 pct as f32 / 100_000.0 * self.config.page_height
             } else {
-                self.cursor_y + float.offset_y_pt
+                self.cursor_y + float.offset_y.raw()
             };
 
             let image = self.image_cache.get(&float.rel_id);
             self.current_page.commands.push(DrawCommand::Image {
                 x: img_x,
                 y: img_y,
-                width: float.width_pt,
-                height: float.height_pt,
+                width: fw,
+                height: fh,
                 image,
             });
 
             self.active_floats.push(ActiveFloat {
                 page_x: img_x,
                 page_y_start: img_y,
-                page_y_end: img_y + float.height_pt,
-                width: float.width_pt,
+                page_y_end: img_y + fh,
+                width: fw,
             });
         }
 

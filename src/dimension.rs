@@ -6,7 +6,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::ops::{Add, Neg, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 // ---------------------------------------------------------------------------
 // Unit markers (zero-sized types)
@@ -192,6 +192,48 @@ impl Neg for Pt {
     type Output = Self;
     fn neg(self) -> Self {
         Self::new(-self.value)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pt-specific arithmetic: scalar multiply/divide, ordering
+// ---------------------------------------------------------------------------
+
+/// Scale a point value by a dimensionless factor.
+impl Mul<f32> for Pt {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self {
+        Self::new(self.value * rhs)
+    }
+}
+
+/// Scale a point value by a dimensionless factor (f32 * Pt).
+impl Mul<Pt> for f32 {
+    type Output = Pt;
+    fn mul(self, rhs: Pt) -> Pt {
+        Pt::new(self * rhs.value)
+    }
+}
+
+/// Divide a point value by a dimensionless factor.
+impl Div<f32> for Pt {
+    type Output = Self;
+    fn div(self, rhs: f32) -> Self {
+        Self::new(self.value / rhs)
+    }
+}
+
+/// Divide two point values to get a dimensionless ratio.
+impl Div<Pt> for Pt {
+    type Output = f32;
+    fn div(self, rhs: Pt) -> f32 {
+        self.value / rhs.value
+    }
+}
+
+impl PartialOrd for Pt {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.value.partial_cmp(&other.value)
     }
 }
 
@@ -572,5 +614,42 @@ mod tests {
         let p = Pt::new(12.0);
         let p2 = p;
         assert_eq!(p, p2);
+    }
+
+    // -- Pt scalar arithmetic --
+
+    #[test]
+    fn pt_mul_scalar() {
+        let p = Pt::new(12.0);
+        assert_eq!((p * 2.0).raw(), 24.0);
+    }
+
+    #[test]
+    fn pt_scalar_mul() {
+        let p = Pt::new(12.0);
+        assert_eq!((2.0 * p).raw(), 24.0);
+    }
+
+    #[test]
+    fn pt_div_scalar() {
+        let p = Pt::new(72.0);
+        assert_eq!((p / 2.0).raw(), 36.0);
+    }
+
+    #[test]
+    fn pt_div_pt_gives_ratio() {
+        let a = Pt::new(36.0);
+        let b = Pt::new(72.0);
+        assert_eq!(a / b, 0.5);
+    }
+
+    // -- Pt ordering --
+
+    #[test]
+    fn pt_ordering() {
+        assert!(Pt::new(12.0) < Pt::new(13.0));
+        assert!(Pt::new(13.0) > Pt::new(12.0));
+        assert!(Pt::new(12.0) <= Pt::new(12.0));
+        assert!(Pt::new(12.0) >= Pt::new(12.0));
     }
 }

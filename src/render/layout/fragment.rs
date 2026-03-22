@@ -210,16 +210,15 @@ pub fn collect_fragments_with_fields(
                 }
             }
             Inline::Image(img) if image_cache.contains(&img.rel_id) => {
+                let w = img.width.raw();
+                let h = img.height.raw();
                 let scale = f32::min(
                     1.0,
-                    f32::min(
-                        content_width / img.width_pt.max(1.0),
-                        content_height / img.height_pt.max(1.0),
-                    ),
+                    f32::min(content_width / w.max(1.0), content_height / h.max(1.0)),
                 );
                 fragments.push(Fragment::Image {
-                    width: img.width_pt * scale,
-                    height: img.height_pt * scale,
+                    width: w * scale,
+                    height: h * scale,
                     rel_id: img.rel_id.to_string(),
                 });
             }

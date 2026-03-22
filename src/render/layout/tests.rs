@@ -1801,10 +1801,10 @@ fn float_adjustment_shifts_text() {
     // Create a paragraph with a float image on the left
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 100.0,
-        height_pt: 100.0,
-        offset_x_pt: 0.0,
-        offset_y_pt: 0.0,
+        width: crate::dimension::Pt::new(100.0),
+        height: crate::dimension::Pt::new(100.0),
+        offset_x: crate::dimension::Pt::new(0.0),
+        offset_y: crate::dimension::Pt::new(0.0),
         align_h: Some("left".to_string()),
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2017,10 +2017,10 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
     // pct_pos_h = 50000 → 50% of page width (612pt) = 306pt
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 50.0,
-        height_pt: 50.0,
-        offset_x_pt: 0.0,
-        offset_y_pt: 0.0,
+        width: crate::dimension::Pt::new(50.0),
+        height: crate::dimension::Pt::new(50.0),
+        offset_x: crate::dimension::Pt::new(0.0),
+        offset_y: crate::dimension::Pt::new(0.0),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2052,10 +2052,10 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
 fn pct_pos_none_uses_regular_offset() {
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 50.0,
-        height_pt: 50.0,
-        offset_x_pt: 20.0,
-        offset_y_pt: 10.0,
+        width: crate::dimension::Pt::new(50.0),
+        height: crate::dimension::Pt::new(50.0),
+        offset_x: crate::dimension::Pt::new(20.0),
+        offset_y: crate::dimension::Pt::new(10.0),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -2076,7 +2076,7 @@ fn pct_pos_none_uses_regular_offset() {
     let pages = layout(&doc, &test_font_mgr());
     let imgs = extract_images(&pages);
     let (ix, _iy, _, _) = imgs[0];
-    // Should use margin_left + offset_x_pt = 72 + 20 = 92
+    // Should use margin_left + offset_x = 72 + 20 = 92
     assert!((ix - 92.0).abs() < 1.0, "Image x={ix}, expected ~92");
 }
 
