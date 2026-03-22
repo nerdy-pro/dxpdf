@@ -453,11 +453,11 @@ fn table_borders_fields() {
     use dxpdf::model::*;
     let bd = BorderDef::single(4, (0, 0, 0));
     let tb = TableBorders {
-        top: bd.clone(),
-        bottom: bd.clone(),
-        left: bd.clone(),
-        right: bd.clone(),
-        inside_h: bd.clone(),
+        top: bd,
+        bottom: bd,
+        left: bd,
+        right: bd,
+        inside_h: bd,
         inside_v: bd,
     };
     let _ = &tb.top;
@@ -708,7 +708,7 @@ fn rel_id_api() {
     let rid = RelId::from("rId5");
     let _: &str = rid.as_str();
     // Deref to str
-    let _: &str = &*rid;
+    let _: &str = &rid;
 }
 
 // ---------------------------------------------------------------------------
