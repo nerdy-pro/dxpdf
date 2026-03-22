@@ -812,27 +812,13 @@ fn layout_function_exists() {
 #[test]
 fn text_measurer_api() {
     use dxpdf::render::layout::TextMeasurer;
-    let m = TextMeasurer::default();
-    let _: &skia_safe::FontMgr = m.font_mgr();
-    let _: dxpdf::dimension::Pt = m.measure_width(
-        "hello",
-        "Helvetica",
-        dxpdf::dimension::Pt::new(12.0),
-        false,
-        false,
-    );
-    let _: dxpdf::dimension::Pt =
-        m.line_height("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
-
-    // Also constructible via new()
-    let _ = TextMeasurer::new();
-}
-
-#[test]
-fn text_measurer_with_font_mgr() {
-    use dxpdf::render::layout::TextMeasurer;
-    let fm = skia_safe::FontMgr::default();
-    let _ = TextMeasurer::with_font_mgr(fm);
+    let fm = skia_safe::FontMgr::new();
+    let m = TextMeasurer::new(fm);
+    let f = m.font("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
+    let _: dxpdf::dimension::Pt = f.measure_width("hello");
+    let fm = f.metrics();
+    let _: dxpdf::dimension::Pt = fm.line_height;
+    let _: dxpdf::dimension::Pt = fm.ascent;
 }
 
 // ---------------------------------------------------------------------------

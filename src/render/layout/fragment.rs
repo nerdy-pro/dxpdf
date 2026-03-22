@@ -174,11 +174,13 @@ pub fn collect_fragments_with_fields(
                     None => (base_font_size, Pt::ZERO),
                 };
 
-                let line_height = measurer.line_height(&font_family, base_font_size, bold, italic);
-                let ascent = measurer.ascent(&font_family, base_font_size, bold, italic);
+                let base_font = measurer.font(&font_family, base_font_size, bold, italic);
+                let fm = base_font.metrics();
+                let line_height = fm.line_height;
+                let ascent = fm.ascent;
+                let render_font = measurer.font(&font_family, font_size, bold, italic);
                 for part in split_words_and_spaces(&tr.text) {
-                    let base_width =
-                        measurer.measure_width(part, &font_family, font_size, bold, italic);
+                    let base_width = render_font.measure_width(part);
                     // Character spacing expands each character's advance width
                     let char_count = part.chars().count() as f32;
                     let measured_width = base_width + char_spacing_pt * char_count;
@@ -226,12 +228,18 @@ pub fn collect_fragments_with_fields(
             }
             Inline::Tab => {
                 let default_size = Pt::from(defaults.font_size);
-                let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
+                let lh = measurer
+                    .font(&defaults.font_family, default_size, false, false)
+                    .metrics()
+                    .line_height;
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
                 let default_size = Pt::from(defaults.font_size);
-                let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
+                let lh = measurer
+                    .font(&defaults.font_family, default_size, false, false)
+                    .metrics()
+                    .line_height;
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
             Inline::Image(_) => {}
@@ -250,11 +258,13 @@ pub fn collect_fragments_with_fields(
                 let bold = rp.bold;
                 let italic = rp.italic;
                 let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
-                let w = measurer.measure_width(&text, &font_family, font_size, bold, italic);
+                let f = measurer.font(&font_family, font_size, bold, italic);
+                let w = f.measure_width(&text);
                 let char_count = text.chars().count() as f32;
                 let measured_width = w + char_spacing_pt * char_count;
-                let lh = measurer.line_height(&font_family, font_size, bold, italic);
-                let ascent = measurer.ascent(&font_family, font_size, bold, italic);
+                let fm = f.metrics();
+                let lh = fm.line_height;
+                let ascent = fm.ascent;
                 fragments.push(Fragment::Text {
                     text,
                     font_family,
