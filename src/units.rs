@@ -67,17 +67,6 @@ pub const WIDTH_TYPE_DXA: &str = "dxa";
 /// OOXML underline value for "no underline".
 pub const UNDERLINE_NONE: &str = "none";
 
-// --- Standard page dimensions ---
-
-/// US Letter page width in points (8.5 inches).
-pub const US_LETTER_WIDTH_PT: f32 = 612.0;
-
-/// US Letter page height in points (11 inches).
-pub const US_LETTER_HEIGHT_PT: f32 = 792.0;
-
-/// Default page margin in points (1 inch).
-pub const DEFAULT_PAGE_MARGIN_PT: f32 = 72.0;
-
 // --- Rendering defaults ---
 // These are not from the OOXML spec but are reasonable rendering choices.
 // TODO: FLOAT_TEXT_GAP_PT should be replaced by parsing wp:distL/distR/distT/distB

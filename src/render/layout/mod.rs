@@ -13,6 +13,13 @@ use crate::model::*;
 use crate::units::*;
 use fragment::DocDefaultsLayout;
 
+/// US Letter page width in points (8.5 inches).
+const US_LETTER_WIDTH_PT: f32 = 612.0;
+/// US Letter page height in points (11 inches).
+const US_LETTER_HEIGHT_PT: f32 = 792.0;
+/// Default page margin in points (1 inch).
+const DEFAULT_PAGE_MARGIN_PT: f32 = 72.0;
+
 /// Pre-decoded Skia images keyed by relationship ID.
 /// All images are decoded upfront in `new()` — lookups are free.
 pub(crate) struct ImageCache {
@@ -44,8 +51,9 @@ impl ImageCache {
 }
 
 /// Page layout configuration in points (1 point = 1/72 inch).
+/// Built internally from document `SectionProperties`.
 #[derive(Debug, Clone, Copy)]
-pub struct LayoutConfig {
+pub(crate) struct LayoutConfig {
     pub page_width: f32,
     pub page_height: f32,
     pub margin_top: f32,
@@ -59,6 +67,11 @@ pub struct LayoutConfig {
 }
 
 impl Default for LayoutConfig {
+    /// US Letter (8.5 × 11 in) with 1-inch margins.
+    ///
+    /// OOXML (ISO/IEC 29500-1, §17.6.2) does not mandate `w:sectPr` on the
+    /// document body; when it is absent, consumers are expected to fall back
+    /// to application-defined defaults. These match Microsoft Word's defaults.
     fn default() -> Self {
         Self {
             page_width: US_LETTER_WIDTH_PT,
@@ -74,6 +87,14 @@ impl Default for LayoutConfig {
 }
 
 impl LayoutConfig {
+    /// Build a layout config from section properties, using US Letter defaults
+    /// for any values not specified.
+    fn from_section(sect: &SectionProperties) -> Self {
+        let mut cfg = Self::default();
+        apply_section_to_config(&mut cfg, sect);
+        cfg
+    }
+
     pub fn content_width(&self) -> f32 {
         self.page_width - self.margin_left - self.margin_right
     }
@@ -144,28 +165,24 @@ pub struct LayoutedPage {
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
-pub fn layout(
-    doc: &Document,
-    config: &LayoutConfig,
-    font_mgr: &skia_safe::FontMgr,
-) -> Vec<LayoutedPage> {
+///
+/// Page dimensions and margins are derived from the document's section properties,
+/// falling back to US Letter with 1-inch margins when not specified.
+pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage> {
+    // Build per-section configs from inline section breaks + final section.
     let mut section_configs: Vec<LayoutConfig> = Vec::new();
     for block in &doc.blocks {
         if let Block::Paragraph(p) = block {
             if let Some(ref sect) = p.section_properties {
-                let mut cfg = *config;
-                apply_section_to_config(&mut cfg, sect);
-                section_configs.push(cfg);
+                section_configs.push(LayoutConfig::from_section(sect));
             }
         }
     }
     if let Some(ref sect) = doc.final_section {
-        let mut cfg = *config;
-        apply_section_to_config(&mut cfg, sect);
-        section_configs.push(cfg);
+        section_configs.push(LayoutConfig::from_section(sect));
     }
 
-    let initial_config = section_configs.first().copied().unwrap_or(*config);
+    let initial_config = section_configs.first().copied().unwrap_or_default();
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse();
 
