@@ -239,7 +239,7 @@ impl Layouter {
                         x2: right,
                         y2: top,
                         color: b.color_rgb(),
-                        width: b.width_pt(),
+                        width: crate::dimension::Pt::from(b.size).raw(),
                     });
                 }
             }
@@ -251,7 +251,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: b.width_pt(),
+                        width: crate::dimension::Pt::from(b.size).raw(),
                     });
                 }
             }
@@ -263,7 +263,7 @@ impl Layouter {
                         x2: left,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: b.width_pt(),
+                        width: crate::dimension::Pt::from(b.size).raw(),
                     });
                 }
             }
@@ -275,7 +275,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: b.width_pt(),
+                        width: crate::dimension::Pt::from(b.size).raw(),
                     });
                 }
             }

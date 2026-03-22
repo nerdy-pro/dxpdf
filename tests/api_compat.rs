@@ -437,9 +437,8 @@ fn border_def_fields_and_methods() {
     use dxpdf::model::*;
     let bd = BorderDef::single(8, (0, 0, 0));
     let _: &BorderStyle = &bd.style;
-    let _: u32 = bd.size;
+    let _: dxpdf::dimension::EighthPoints = bd.size;
     let _: &Color = &bd.color;
-    let _: f32 = bd.width_pt();
     let _: bool = bd.is_visible();
     let _: (u8, u8, u8) = bd.color_rgb();
 }

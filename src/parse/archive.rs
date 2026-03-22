@@ -480,12 +480,13 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         "dotted" => crate::model::BorderStyle::Dotted,
                         _ => crate::model::BorderStyle::Single,
                     };
-                    let size: u32 = e
+                    let size = e
                         .attributes()
                         .flatten()
                         .find(|a| local_name(a.key.as_ref()) == b"sz")
-                        .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok())
-                        .unwrap_or(4);
+                        .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
+                        .map(crate::dimension::EighthPoints::new)
+                        .unwrap_or(crate::model::BorderDef::DEFAULT_SIZE);
                     let color_str: String = e
                         .attributes()
                         .flatten()

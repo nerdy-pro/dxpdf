@@ -1,5 +1,6 @@
 use log::warn;
 
+use crate::dimension::EighthPoints;
 use crate::error::Error;
 use crate::model::*;
 use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
@@ -20,8 +21,9 @@ pub fn parse_border_def(e: &quick_xml::events::BytesStart<'_>) -> Result<BorderD
     };
 
     let size = get_attr(e, b"sz")?
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(4);
+        .and_then(|v| v.parse::<i64>().ok())
+        .map(EighthPoints::new)
+        .unwrap_or(BorderDef::DEFAULT_SIZE);
 
     let color_str = get_attr(e, b"color")?.unwrap_or_default();
     let color = if color_str == "auto" || color_str.is_empty() {

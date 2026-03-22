@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::dimension::EighthPoints;
 use crate::units::{
     self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
     DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS,
@@ -538,17 +539,21 @@ pub enum BorderStyle {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BorderDef {
     pub style: BorderStyle,
-    /// Width in eighths of a point (OOXML native for w:sz).
-    pub size: u32,
+    /// Width in eighths of a point (OOXML native for `w:sz`).
+    pub size: EighthPoints,
     pub color: Color,
 }
 
 impl BorderDef {
+    /// Default border width when `w:sz` is absent: 4 eighth-points (0.5pt).
+    /// Not defined by OOXML spec; matches Microsoft Word's behavior.
+    pub const DEFAULT_SIZE: EighthPoints = EighthPoints::new(4);
+
     /// Create a single-style border with given size (eighths of a point) and RGB color.
-    pub fn single(size: u32, color: (u8, u8, u8)) -> Self {
+    pub fn single(size: i64, color: (u8, u8, u8)) -> Self {
         Self {
             style: BorderStyle::Single,
-            size,
+            size: EighthPoints::new(size),
             color: Color {
                 r: color.0,
                 g: color.1,
@@ -557,14 +562,9 @@ impl BorderDef {
         }
     }
 
-    /// Width in points.
-    pub fn width_pt(&self) -> f32 {
-        self.size as f32 / units::BORDER_SIZE_UNITS_PER_POINT
-    }
-
     /// Returns true if this border should be drawn.
     pub fn is_visible(&self) -> bool {
-        self.style != BorderStyle::None && self.size > 0
+        self.style != BorderStyle::None && self.size.is_positive()
     }
 
     /// Color as an RGB tuple.
@@ -577,7 +577,7 @@ impl Default for BorderDef {
     fn default() -> Self {
         Self {
             style: BorderStyle::Single,
-            size: 4, // 0.5pt
+            size: Self::DEFAULT_SIZE,
             color: Color { r: 0, g: 0, b: 0 },
         }
     }

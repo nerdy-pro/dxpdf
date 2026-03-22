@@ -60,7 +60,7 @@ fn emit_border(
             x2,
             y2,
             color: border.color_rgb(),
-            width: border.width_pt(),
+            width: crate::dimension::Pt::from(border.size).raw(),
         });
     }
 }

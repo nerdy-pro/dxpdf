@@ -120,15 +120,19 @@ pub type Pt = Dimension<PtUnit>;
 // ---------------------------------------------------------------------------
 
 impl<U: IntegerUnit> Dimension<U> {
-    pub fn new(value: i64) -> Self {
+    pub const fn new(value: i64) -> Self {
         Self {
             value,
             _unit: PhantomData,
         }
     }
 
-    pub fn raw(self) -> i64 {
+    pub const fn raw(self) -> i64 {
         self.value
+    }
+
+    pub const fn is_positive(self) -> bool {
+        self.value > 0
     }
 }
 
@@ -495,6 +499,26 @@ mod tests {
     fn pt_equality() {
         assert_eq!(Pt::new(12.0), Pt::new(12.0));
         assert_ne!(Pt::new(12.0), Pt::new(11.0));
+    }
+
+    // -- is_positive --
+
+    #[test]
+    fn positive_integer_dimension() {
+        assert!(Twips::new(1).is_positive());
+        assert!(EighthPoints::new(4).is_positive());
+    }
+
+    #[test]
+    fn zero_is_not_positive() {
+        assert!(!Twips::new(0).is_positive());
+        assert!(!Emu::new(0).is_positive());
+    }
+
+    #[test]
+    fn negative_is_not_positive() {
+        assert!(!Twips::new(-1).is_positive());
+        assert!(!HalfPoints::new(-10).is_positive());
     }
 
     // -- Debug & Display --
