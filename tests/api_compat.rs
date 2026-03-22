@@ -63,10 +63,6 @@ fn unit_constants() {
     let _: &str = dxpdf::units::WIDTH_TYPE_DXA;
     let _: &str = dxpdf::units::UNDERLINE_NONE;
 
-    let _: f32 = dxpdf::units::US_LETTER_WIDTH_PT;
-    let _: f32 = dxpdf::units::US_LETTER_HEIGHT_PT;
-    let _: f32 = dxpdf::units::DEFAULT_PAGE_MARGIN_PT;
-
     let _: f32 = dxpdf::units::FLOAT_TEXT_GAP_PT;
     let _: f32 = dxpdf::units::MIN_TAB_WIDTH_PT;
     let _: f32 = dxpdf::units::TAB_FALLBACK_PT;
@@ -763,22 +759,6 @@ fn render_fonts_signatures() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn layout_config_fields_and_methods() {
-    use dxpdf::render::layout::LayoutConfig;
-    let cfg = LayoutConfig::default();
-    let _: f32 = cfg.page_width;
-    let _: f32 = cfg.page_height;
-    let _: f32 = cfg.margin_top;
-    let _: f32 = cfg.margin_bottom;
-    let _: f32 = cfg.margin_left;
-    let _: f32 = cfg.margin_right;
-    let _: f32 = cfg.header_margin;
-    let _: f32 = cfg.footer_margin;
-    let _: f32 = cfg.content_width();
-    let _: f32 = cfg.content_height();
-}
-
-#[test]
 fn layouted_page_fields() {
     use dxpdf::render::layout::{DrawCommand, LayoutedPage};
     let page = LayoutedPage {
@@ -846,7 +826,6 @@ fn layout_function_exists() {
     let _ = layout
         as fn(
             &dxpdf::model::Document,
-            &dxpdf::render::layout::LayoutConfig,
             &skia_safe::FontMgr,
         ) -> Vec<dxpdf::render::layout::LayoutedPage>;
 }
