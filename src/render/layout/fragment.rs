@@ -156,7 +156,7 @@ pub fn collect_fragments_with_fields(
                 let char_spacing_pt = tr
                     .properties
                     .char_spacing
-                    .map(twips_to_pt_signed)
+                    .map(|v| Pt::from(v).raw())
                     .unwrap_or(0.0);
 
                 // Super/subscript: reduce font size and compute baseline offset
@@ -247,7 +247,7 @@ pub fn collect_fragments_with_fields(
                 let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size)).raw();
                 let bold = rp.bold;
                 let italic = rp.italic;
-                let char_spacing_pt = rp.char_spacing.map(twips_to_pt_signed).unwrap_or(0.0);
+                let char_spacing_pt = rp.char_spacing.map(|v| Pt::from(v).raw()).unwrap_or(0.0);
                 let w = measurer.measure_width(&text, &font_family, font_size, bold, italic);
                 let char_count = text.chars().count() as f32;
                 let measured_width = w + char_spacing_pt * char_count;
@@ -276,7 +276,7 @@ pub fn collect_fragments_with_fields(
 /// Find the next tab stop position (in points, relative to paragraph left edge).
 pub fn find_next_tab_stop(current_x: f32, custom_stops: &[TabStop], default_interval: f32) -> f32 {
     for stop in custom_stops {
-        let pos = stop.position_pt();
+        let pos = Pt::from(stop.position).raw();
         if pos > current_x + 1.0 {
             return pos;
         }

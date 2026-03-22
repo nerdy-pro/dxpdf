@@ -186,7 +186,7 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse();
 
-    let default_tab_stop_pt = twips_to_pt(doc.default_tab_stop);
+    let default_tab_stop_pt = crate::dimension::Pt::from(doc.default_tab_stop).raw();
     let doc_defaults = DocDefaultsLayout::from_document(doc);
     let image_cache = ImageCache::new(&doc.images);
     let mut effective_config = initial_config;
@@ -246,17 +246,18 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
 }
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
+    use crate::dimension::Pt;
     if let Some(ps) = &sect.page_size {
-        config.page_width = ps.width_pt();
-        config.page_height = ps.height_pt();
+        config.page_width = Pt::from(ps.width).raw();
+        config.page_height = Pt::from(ps.height).raw();
     }
     if let Some(pm) = &sect.page_margins {
-        config.margin_top = pm.top_pt();
-        config.margin_right = pm.right_pt();
-        config.margin_bottom = pm.bottom_pt();
-        config.margin_left = pm.left_pt();
-        config.header_margin = pm.header_pt();
-        config.footer_margin = pm.footer_pt();
+        config.margin_top = Pt::from(pm.top).raw();
+        config.margin_right = Pt::from(pm.right).raw();
+        config.margin_bottom = Pt::from(pm.bottom).raw();
+        config.margin_left = Pt::from(pm.left).raw();
+        config.header_margin = Pt::from(pm.header).raw();
+        config.footer_margin = Pt::from(pm.footer).raw();
     }
 }
 
@@ -488,7 +489,9 @@ impl Layouter {
                 .map(|i| col_widths.get(i).copied().unwrap_or(72.0))
                 .sum();
         }
-        cell.width_pt().unwrap_or(72.0)
+        cell.width
+            .map(|w| crate::dimension::Pt::from(w).raw())
+            .unwrap_or(72.0)
     }
 
     /// Resolve list label text and indentation for a paragraph with a list reference.
@@ -541,8 +544,8 @@ impl Layouter {
             }
         };
 
-        let indent_left = twips_to_pt(level.indent_left);
-        let indent_hanging = twips_to_pt(level.indent_hanging);
+        let indent_left = crate::dimension::Pt::from(level.indent_left).raw();
+        let indent_hanging = crate::dimension::Pt::from(level.indent_hanging).raw();
 
         Some((label, indent_left, indent_hanging))
     }

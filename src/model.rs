@@ -1,10 +1,7 @@
 use std::rc::Rc;
 
-use crate::dimension::{EighthPoints, HalfPoints, Pt};
-use crate::units::{
-    twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
-    DEFAULT_TAB_STOP_TWIPS,
-};
+use crate::dimension::{EighthPoints, HalfPoints, Pt, Twips};
+use crate::units::DEFAULT_FONT_FAMILY;
 
 use std::collections::HashMap;
 
@@ -54,10 +51,10 @@ pub struct NumberingLevel {
     /// Format pattern (e.g., "%1." for "1.")
     pub level_text: String,
     pub start: u32,
-    /// Indentation: left margin in twips.
-    pub indent_left: u32,
-    /// Indentation: hanging indent in twips.
-    pub indent_hanging: u32,
+    /// Indentation: left margin.
+    pub indent_left: Twips,
+    /// Indentation: hanging indent.
+    pub indent_hanging: Twips,
 }
 
 /// A numbering definition (abstractNum + num mapping).
@@ -82,8 +79,8 @@ pub struct Document {
     pub blocks: Vec<Block>,
     /// Final section properties (from `w:body/w:sectPr`).
     pub final_section: Option<SectionProperties>,
-    /// Default tab stop interval in twips.
-    pub default_tab_stop: u32,
+    /// Default tab stop interval.
+    pub default_tab_stop: Twips,
     /// Default font size in half-points.
     pub default_font_size: HalfPoints,
     /// Default font family.
@@ -113,13 +110,13 @@ impl Default for Document {
         Self {
             blocks: Vec::new(),
             final_section: None,
-            default_tab_stop: DEFAULT_TAB_STOP_TWIPS,
+            default_tab_stop: Self::DEFAULT_TAB_STOP,
             default_font_size: Self::DEFAULT_FONT_SIZE,
             default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
             default_spacing: Spacing::default(),
             default_cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing {
-                after: Some(0),
+                after: Some(Twips::new(0)),
                 ..Default::default()
             },
             default_table_borders: TableBorders::default(),
@@ -136,6 +133,9 @@ impl Document {
     /// Default font size: 24 half-points (12pt).
     /// Matches Microsoft Word's default; not mandated by the OOXML spec.
     pub const DEFAULT_FONT_SIZE: HalfPoints = HalfPoints::new(24);
+
+    /// Default tab stop interval: 720 twips (0.5 inch).
+    pub const DEFAULT_TAB_STOP: Twips = Twips::new(720);
 
     /// Collect all unique font families referenced in this document.
     pub fn font_families(&self) -> Vec<Rc<str>> {
@@ -193,55 +193,24 @@ pub enum Block {
     Table(Table),
 }
 
-/// Page size in twips.
+/// Page size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageSize {
-    pub width: u32,
-    pub height: u32,
+    pub width: Twips,
+    pub height: Twips,
 }
 
-impl PageSize {
-    pub fn width_pt(&self) -> f32 {
-        twips_to_pt(self.width)
-    }
-
-    pub fn height_pt(&self) -> f32 {
-        twips_to_pt(self.height)
-    }
-}
-
-/// Page margins in twips.
+/// Page margins.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageMargins {
-    pub top: u32,
-    pub right: u32,
-    pub bottom: u32,
-    pub left: u32,
+    pub top: Twips,
+    pub right: Twips,
+    pub bottom: Twips,
+    pub left: Twips,
     /// Distance from page top to header content.
-    pub header: u32,
+    pub header: Twips,
     /// Distance from page bottom to footer content.
-    pub footer: u32,
-}
-
-impl PageMargins {
-    pub fn top_pt(&self) -> f32 {
-        twips_to_pt(self.top)
-    }
-    pub fn right_pt(&self) -> f32 {
-        twips_to_pt(self.right)
-    }
-    pub fn bottom_pt(&self) -> f32 {
-        twips_to_pt(self.bottom)
-    }
-    pub fn left_pt(&self) -> f32 {
-        twips_to_pt(self.left)
-    }
-    pub fn header_pt(&self) -> f32 {
-        twips_to_pt(self.header)
-    }
-    pub fn footer_pt(&self) -> f32 {
-        twips_to_pt(self.footer)
-    }
+    pub footer: Twips,
 }
 
 /// Header or footer content — same structure as the document body.
@@ -310,15 +279,8 @@ pub enum TabStopType {
 /// A custom tab stop definition.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabStop {
-    /// Position in twips.
-    pub position: u32,
+    pub position: Twips,
     pub stop_type: TabStopType,
-}
-
-impl TabStop {
-    pub fn position_pt(&self) -> f32 {
-        twips_to_pt(self.position)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -352,21 +314,21 @@ pub enum LineSpacing {
     AtLeast(f32),
 }
 
-/// Spacing in twips.
+/// Paragraph spacing.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Spacing {
-    pub before: Option<u32>,
-    pub after: Option<u32>,
-    pub line: Option<u32>,
+    pub before: Option<Twips>,
+    pub after: Option<Twips>,
+    pub line: Option<Twips>,
     pub line_rule: LineRule,
 }
 
-/// Indentation in twips.
+/// Paragraph indentation.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Indentation {
-    pub left: Option<u32>,
-    pub right: Option<u32>,
-    pub first_line: Option<i32>,
+    pub left: Option<Twips>,
+    pub right: Option<Twips>,
+    pub first_line: Option<Twips>,
 }
 
 /// A type-safe wrapper for OOXML relationship IDs (e.g., "rId5").
@@ -477,8 +439,8 @@ pub struct RunProperties {
     pub font_size: Option<HalfPoints>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
-    /// Character spacing adjustment in twips (positive = expand, negative = condense).
-    pub char_spacing: Option<i32>,
+    /// Character spacing adjustment (positive = expand, negative = condense).
+    pub char_spacing: Option<Twips>,
     /// Background shading color from `w:shd`.
     pub shading: Option<Color>,
     /// Superscript or subscript positioning.
@@ -494,38 +456,28 @@ pub struct Color {
     pub b: u8,
 }
 
-/// Cell margins (padding) in twips.
+/// Cell margins (padding).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellMargins {
-    pub top: u32,
-    pub right: u32,
-    pub bottom: u32,
-    pub left: u32,
+    pub top: Twips,
+    pub right: Twips,
+    pub bottom: Twips,
+    pub left: Twips,
+}
+
+impl CellMargins {
+    /// Default left/right cell margin: 108 twips (~0.075 inch).
+    pub const DEFAULT_LR: Twips = Twips::new(108);
 }
 
 impl Default for CellMargins {
     fn default() -> Self {
         Self {
-            top: 0,
-            right: DEFAULT_CELL_MARGIN_LR_TWIPS,
-            bottom: 0,
-            left: DEFAULT_CELL_MARGIN_LR_TWIPS,
+            top: Twips::new(0),
+            right: Self::DEFAULT_LR,
+            bottom: Twips::new(0),
+            left: Self::DEFAULT_LR,
         }
-    }
-}
-
-impl CellMargins {
-    pub fn top_pt(&self) -> f32 {
-        twips_to_pt(self.top)
-    }
-    pub fn right_pt(&self) -> f32 {
-        twips_to_pt(self.right)
-    }
-    pub fn bottom_pt(&self) -> f32 {
-        twips_to_pt(self.bottom)
-    }
-    pub fn left_pt(&self) -> f32 {
-        twips_to_pt(self.left)
     }
 }
 
@@ -612,7 +564,7 @@ pub struct CellBorders {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     pub rows: Vec<TableRow>,
-    pub grid_cols: Vec<u32>,
+    pub grid_cols: Vec<Twips>,
     pub default_cell_margins: Option<CellMargins>,
     pub cell_spacing: Option<Spacing>,
     pub borders: Option<TableBorders>,
@@ -621,8 +573,8 @@ pub struct Table {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableRow {
     pub cells: Vec<TableCell>,
-    /// Minimum row height in twips from `w:trHeight`.
-    pub height: Option<u32>,
+    /// Minimum row height from `w:trHeight`.
+    pub height: Option<Twips>,
 }
 
 /// Vertical merge state for a table cell.
@@ -635,7 +587,7 @@ pub enum VerticalMerge {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
-    pub width: Option<u32>,
+    pub width: Option<Twips>,
     pub grid_span: u32,
     pub vertical_merge: Option<VerticalMerge>,
     pub cell_margins: Option<CellMargins>,
@@ -645,10 +597,6 @@ pub struct TableCell {
 }
 
 impl TableCell {
-    pub fn width_pt(&self) -> Option<f32> {
-        self.width.map(twips_to_pt)
-    }
-
     pub fn is_vmerge_continue(&self) -> bool {
         self.vertical_merge == Some(VerticalMerge::Continue)
     }
@@ -668,51 +616,52 @@ impl Color {
 
 impl Spacing {
     pub fn before_pt(&self) -> f32 {
-        self.before.map(twips_to_pt).unwrap_or(0.0)
+        self.before.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
     }
 
     pub fn after_pt(&self) -> f32 {
-        self.after.map(twips_to_pt).unwrap_or(0.0)
+        self.after.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
     }
 
-    /// Line spacing: returns (value, is_multiplier).
-    /// For `Auto`: value is multiplier (1.0 = single spacing).
-    /// For `Exact`/`AtLeast`: value is points.
+    /// Line spacing semantic value.
+    /// For `Auto`: multiplier (1.0 = single spacing).
+    /// For `Exact`/`AtLeast`: value in points.
     /// Returns `None` if not explicitly set.
     pub fn line_spacing(&self) -> Option<LineSpacing> {
         self.line.map(|v| match self.line_rule {
-            LineRule::Auto => LineSpacing::Multiplier(v as f32 / 240.0),
-            LineRule::Exact => LineSpacing::Fixed(twips_to_pt(v)),
-            LineRule::AtLeast => LineSpacing::AtLeast(twips_to_pt(v)),
+            LineRule::Auto => LineSpacing::Multiplier(v.raw() as f32 / 240.0),
+            LineRule::Exact => LineSpacing::Fixed(Pt::from(v).raw()),
+            LineRule::AtLeast => LineSpacing::AtLeast(Pt::from(v).raw()),
         })
     }
 
     /// Line spacing in points with a fixed fallback of 12pt.
     /// For `Auto` rule, returns the multiplier * 12pt as a rough estimate.
     pub fn line_pt(&self) -> f32 {
+        let single_line = Pt::from(Twips::new(240)).raw();
         match self.line_spacing() {
             Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => pt,
-            Some(LineSpacing::Multiplier(m)) => m * twips_to_pt(240),
-            None => twips_to_pt(240),
+            Some(LineSpacing::Multiplier(m)) => m * single_line,
+            None => single_line,
         }
     }
 }
 
 impl Indentation {
     pub fn left_pt(&self) -> f32 {
-        self.left.map(twips_to_pt).unwrap_or(0.0)
+        self.left.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
     }
 
     pub fn right_pt(&self) -> f32 {
-        self.right.map(twips_to_pt).unwrap_or(0.0)
+        self.right.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
     }
 
     pub fn first_line_pt(&self) -> f32 {
-        self.first_line.map(twips_to_pt_signed).unwrap_or(0.0)
+        self.first_line.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
     }
 }
 
-// Re-export emu_to_pt from units for backward compatibility
+// Re-export for backward compatibility
 pub use crate::units::emu_to_pt;
 
 #[cfg(test)]
@@ -761,9 +710,9 @@ mod tests {
     #[test]
     fn spacing_conversion() {
         let s = Spacing {
-            before: Some(240),
-            after: Some(120),
-            line: Some(360),
+            before: Some(Twips::new(240)),
+            after: Some(Twips::new(120)),
+            line: Some(Twips::new(360)),
             ..Default::default()
         };
         assert_eq!(s.before_pt(), 12.0);

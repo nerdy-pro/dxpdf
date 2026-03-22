@@ -154,13 +154,13 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                         b"spacing" => {
                             let mut sp = crate::model::Spacing::default();
                             if let Some(v) = attr_val(e, b"before") {
-                                sp.before = v.parse().ok();
+                                sp.before = v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"after") {
-                                sp.after = v.parse().ok();
+                                sp.after = v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"line") {
-                                sp.line = v.parse().ok();
+                                sp.line = v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"lineRule") {
                                 sp.line_rule = match v.as_str() {
@@ -175,17 +175,18 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                         b"ind" => {
                             let mut ind = crate::model::Indentation::default();
                             if let Some(v) = attr_val(e, b"left") {
-                                ind.left = v.parse().ok();
+                                ind.left = v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"right") {
-                                ind.right = v.parse().ok();
+                                ind.right = v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"firstLine") {
-                                ind.first_line = v.parse().ok();
+                                ind.first_line =
+                                    v.parse::<i64>().ok().map(crate::dimension::Twips::new);
                             }
                             if let Some(v) = attr_val(e, b"hanging") {
-                                if let Ok(h) = v.parse::<i32>() {
-                                    ind.first_line = Some(-h);
+                                if let Ok(h) = v.parse::<i64>() {
+                                    ind.first_line = Some(crate::dimension::Twips::new(-h));
                                 }
                             }
                             indentation = Some(ind);

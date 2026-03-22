@@ -9,6 +9,12 @@ use super::fragment::{
 use super::header_footer::to_roman;
 use super::ImageCache;
 use super::*;
+use crate::dimension::Twips;
+
+/// Shorthand for Twips::new in tests.
+fn tw(v: i64) -> Twips {
+    Twips::new(v)
+}
 
 fn test_font_mgr() -> FontMgr {
     FontMgr::new()
@@ -109,9 +115,9 @@ fn layout_page_break() {
         blocks.push(Block::Paragraph(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
-                    before: Some(100),
-                    after: Some(100),
-                    line: Some(240),
+                    before: Some(tw(100)),
+                    after: Some(tw(100)),
+                    line: Some(tw(240)),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -167,11 +173,11 @@ fn tab_stop_default_interval() {
 fn tab_stop_custom() {
     let stops = vec![
         TabStop {
-            position: 2880,
+            position: tw(2880),
             stop_type: TabStopType::Left,
         },
         TabStop {
-            position: 5760,
+            position: tw(5760),
             stop_type: TabStopType::Left,
         },
     ];
@@ -196,7 +202,7 @@ fn table_borders_simple_2x2() {
                 cells: vec![make_cell("A2"), make_cell("B2")],
             },
         ],
-        grid_cols: vec![2880, 2880],
+        grid_cols: vec![tw(2880), tw(2880)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -236,7 +242,7 @@ fn table_borders_with_gridspan() {
                 cells: vec![make_cell("A"), make_cell("B"), make_cell("C")],
             },
         ],
-        grid_cols: vec![2000, 2000, 2000],
+        grid_cols: vec![tw(2000), tw(2000), tw(2000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -294,7 +300,7 @@ fn table_borders_alignment_across_rows() {
                 ],
             },
         ],
-        grid_cols: vec![1000, 1000, 1000, 1000],
+        grid_cols: vec![tw(1000), tw(1000), tw(1000), tw(1000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -333,12 +339,12 @@ fn table_borders_tcw_vs_grid_alignment() {
                 cells: vec![
                     {
                         let mut c = make_spanned_cell("AB", 2);
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                     {
                         let mut c = make_cell("C");
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                 ],
@@ -348,23 +354,23 @@ fn table_borders_tcw_vs_grid_alignment() {
                 cells: vec![
                     {
                         let mut c = make_cell("A");
-                        c.width = Some(100);
+                        c.width = Some(tw(100));
                         c
                     },
                     {
                         let mut c = make_cell("B");
-                        c.width = Some(200);
+                        c.width = Some(tw(200));
                         c
                     },
                     {
                         let mut c = make_cell("C");
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                 ],
             },
         ],
-        grid_cols: vec![100, 200, 300],
+        grid_cols: vec![tw(100), tw(200), tw(300)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -431,8 +437,8 @@ fn spacing_before_after_affects_position() {
             Block::Paragraph(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
-                        before: Some(200),
-                        after: Some(200),
+                        before: Some(tw(200)),
+                        after: Some(tw(200)),
                         line: None,
                         ..Default::default()
                     }),
@@ -449,7 +455,7 @@ fn spacing_before_after_affects_position() {
             Block::Paragraph(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
-                        before: Some(100),
+                        before: Some(tw(100)),
                         after: None,
                         line: None,
                         ..Default::default()
@@ -492,7 +498,7 @@ fn left_indentation_shifts_text_right() {
             Block::Paragraph(Paragraph {
                 properties: ParagraphProperties {
                     indentation: Some(Indentation {
-                        left: Some(720), // 36pt
+                        left: Some(tw(720)), // 36pt
                         right: None,
                         first_line: None,
                     }),
@@ -537,8 +543,8 @@ fn section_break_changes_page_dimensions() {
                 floats: Vec::new(),
                 section_properties: Some(SectionProperties {
                     page_size: Some(PageSize {
-                        width: 12240,
-                        height: 15840,
+                        width: tw(12240),
+                        height: tw(15840),
                     }),
                     page_margins: None,
                     header: None,
@@ -560,8 +566,8 @@ fn section_break_changes_page_dimensions() {
         ],
         final_section: Some(SectionProperties {
             page_size: Some(PageSize {
-                width: 15840,
-                height: 12240,
+                width: tw(15840),
+                height: tw(12240),
             }),
             page_margins: None,
             header: None,
@@ -588,7 +594,7 @@ fn adjacent_tables_no_gap() {
             height: None,
             cells: vec![make_cell(text)],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -643,7 +649,7 @@ fn vmerge_skips_content_and_border() {
                 ],
             },
         ],
-        grid_cols: vec![3000, 3000],
+        grid_cols: vec![tw(3000), tw(3000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -700,8 +706,8 @@ fn paragraph_shading_excludes_spacing() {
     let doc = make_doc(vec![Block::Paragraph(Paragraph {
         properties: ParagraphProperties {
             spacing: Some(Spacing {
-                before: Some(200),
-                after: Some(200),
+                before: Some(tw(200)),
+                after: Some(tw(200)),
                 line: None,
                 ..Default::default()
             }),
@@ -761,10 +767,10 @@ fn roman_numerals() {
 fn row_height_minimum_respected() {
     let table = Table {
         rows: vec![TableRow {
-            height: Some(1000), // 50pt minimum
+            height: Some(tw(1000)), // 50pt minimum
             cells: vec![make_cell("Short")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1261,7 +1267,7 @@ fn vmerge_three_rows_distributes_height() {
                 cells: vec![continue_cell2, make_cell("R2C1")],
             },
         ],
-        grid_cols: vec![3000, 3000],
+        grid_cols: vec![tw(3000), tw(3000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1307,7 +1313,7 @@ fn vmerge_multiple_columns() {
                 cells: vec![continue_a, make_cell("B1"), continue_c],
             },
         ],
-        grid_cols: vec![2000, 2000, 2000],
+        grid_cols: vec![tw(2000), tw(2000), tw(2000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1348,8 +1354,8 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
     let doc = Document {
         blocks: vec![simple_paragraph("Test")],
         default_spacing: Spacing {
-            before: Some(100), // 5pt
-            after: Some(200),  // 10pt
+            before: Some(tw(100)), // 5pt
+            after: Some(tw(200)),  // 10pt
             line: None,
             ..Default::default()
         },
@@ -1371,7 +1377,7 @@ fn direct_spacing_overrides_defaults() {
         blocks: vec![Block::Paragraph(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
-                    before: Some(400), // 20pt
+                    before: Some(tw(400)), // 20pt
                     after: None,
                     line: None,
                     ..Default::default()
@@ -1387,8 +1393,8 @@ fn direct_spacing_overrides_defaults() {
             section_properties: None,
         })],
         default_spacing: Spacing {
-            before: Some(100), // 5pt — should be overridden
-            after: Some(200),
+            before: Some(tw(100)), // 5pt — should be overridden
+            after: Some(tw(200)),
             line: None,
             ..Default::default()
         },
@@ -1455,13 +1461,13 @@ fn table_splits_across_pages() {
     let mut rows = Vec::new();
     for i in 0..50 {
         rows.push(TableRow {
-            height: Some(400), // 20pt each → 1000pt total > page height
+            height: Some(tw(400)), // 20pt each → 1000pt total > page height
             cells: vec![make_cell(&format!("Row {i}"))],
         });
     }
     let table = Table {
         rows,
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1498,12 +1504,12 @@ fn cell_margins_from_table_default() {
             height: None,
             cells: vec![make_cell("Content")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: Some(CellMargins {
-            top: 100, // 5pt
-            bottom: 100,
-            left: 200, // 10pt
-            right: 200,
+            top: tw(100), // 5pt
+            bottom: tw(100),
+            left: tw(200), // 10pt
+            right: tw(200),
         }),
         cell_spacing: None,
         borders: None,
@@ -1539,7 +1545,7 @@ fn cell_shading_produces_rect() {
             height: None,
             cells: vec![cell],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1578,7 +1584,7 @@ fn single_cell_table() {
             height: None,
             cells: vec![make_cell("Only")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1607,7 +1613,7 @@ fn table_with_empty_cell() {
                 make_cell("Filled"),
             ],
         }],
-        grid_cols: vec![2500, 2500],
+        grid_cols: vec![tw(2500), tw(2500)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1655,7 +1661,7 @@ fn first_line_indent_shifts_first_line_only() {
             indentation: Some(Indentation {
                 left: None,
                 right: None,
-                first_line: Some(720), // 36pt
+                first_line: Some(tw(720)), // 36pt
             }),
             ..Default::default()
         },
@@ -1717,8 +1723,8 @@ fn bullet_list_renders_label() {
                         format: NumberFormat::Bullet("•".to_string()),
                         level_text: "%1".to_string(),
                         start: 1,
-                        indent_left: 720,
-                        indent_hanging: 360,
+                        indent_left: tw(720),
+                        indent_hanging: tw(360),
                     }],
                 },
             );
@@ -1767,8 +1773,8 @@ fn decimal_list_increments_counter() {
                         format: NumberFormat::Decimal,
                         level_text: "%1.".to_string(),
                         start: 1,
-                        indent_left: 720,
-                        indent_hanging: 360,
+                        indent_left: tw(720),
+                        indent_hanging: tw(360),
                     }],
                 },
             );
@@ -1941,7 +1947,7 @@ fn after_table_spacing_uses_doc_default() {
             height: None,
             cells: vec![make_cell("T")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
@@ -1949,7 +1955,7 @@ fn after_table_spacing_uses_doc_default() {
     let doc = Document {
         blocks: vec![Block::Table(table), simple_paragraph("After")],
         default_spacing: Spacing {
-            after: Some(200), // 10pt
+            after: Some(tw(200)), // 10pt
             ..Default::default()
         },
         ..Document::default()
@@ -1961,7 +1967,7 @@ fn after_table_spacing_uses_doc_default() {
             height: None,
             cells: vec![make_cell("T")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,

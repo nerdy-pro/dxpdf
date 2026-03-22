@@ -860,7 +860,7 @@ enum ParseState {
     },
     InTable {
         rows: Vec<TableRow>,
-        grid_cols: Vec<u32>,
+        grid_cols: Vec<crate::dimension::Twips>,
         default_cell_margins: Option<CellMargins>,
         in_cell_mar: bool,
         borders: Option<TableBorders>,
@@ -868,11 +868,11 @@ enum ParseState {
     },
     InTableRow {
         cells: Vec<TableCell>,
-        height: Option<u32>,
+        height: Option<crate::dimension::Twips>,
     },
     InTableCell {
         blocks: Vec<Block>,
-        width: Option<u32>,
+        width: Option<crate::dimension::Twips>,
         grid_span: u32,
         vertical_merge: Option<VerticalMerge>,
         cell_margins: Option<CellMargins>,

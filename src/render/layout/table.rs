@@ -1,5 +1,4 @@
 use crate::model::*;
-use crate::units::*;
 
 use super::fragment::*;
 use super::{offset_command, DrawCommand, Layouter};
@@ -83,7 +82,11 @@ impl Layouter {
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
         let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
-            let grid_total: f32 = table.grid_cols.iter().map(|w| twips_to_pt(*w)).sum();
+            let grid_total: f32 = table
+                .grid_cols
+                .iter()
+                .map(|w| crate::dimension::Pt::from(*w).raw())
+                .sum();
             let scale = if grid_total > 0.0 {
                 content_width / grid_total
             } else {
@@ -92,7 +95,7 @@ impl Layouter {
             table
                 .grid_cols
                 .iter()
-                .map(|w| twips_to_pt(*w) * scale)
+                .map(|w| crate::dimension::Pt::from(*w).raw() * scale)
                 .collect()
         } else {
             vec![content_width / num_cols as f32; num_cols]
@@ -105,7 +108,10 @@ impl Layouter {
             .rows
             .iter()
             .map(|row| {
-                let min_height = row.height.map(twips_to_pt).unwrap_or(0.0);
+                let min_height = row
+                    .height
+                    .map(|h| crate::dimension::Pt::from(h).raw())
+                    .unwrap_or(0.0);
                 let row_height_limit = self.config.content_height();
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
@@ -127,10 +133,10 @@ impl Layouter {
                     let cell_x = col_x_positions[col_idx];
                     let margins =
                         resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
-                    let pad_left = margins.left_pt();
-                    let pad_right = margins.right_pt();
-                    let pad_top = margins.top_pt();
-                    let pad_bottom = margins.bottom_pt();
+                    let pad_left = crate::dimension::Pt::from(margins.left).raw();
+                    let pad_right = crate::dimension::Pt::from(margins.right).raw();
+                    let pad_top = crate::dimension::Pt::from(margins.top).raw();
+                    let pad_bottom = crate::dimension::Pt::from(margins.bottom).raw();
                     let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
 
                     if cell.is_vmerge_continue() {

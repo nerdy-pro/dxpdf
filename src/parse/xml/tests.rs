@@ -1,4 +1,5 @@
 use super::*;
+use crate::dimension::Twips;
 
 fn wrap_body(content: &str) -> String {
     format!(
@@ -95,12 +96,12 @@ fn parse_spacing_and_indentation() {
         panic!()
     };
     let spacing = p.properties.spacing.unwrap();
-    assert_eq!(spacing.before, Some(240));
-    assert_eq!(spacing.after, Some(120));
-    assert_eq!(spacing.line, Some(360));
+    assert_eq!(spacing.before, Some(Twips::new(240)));
+    assert_eq!(spacing.after, Some(Twips::new(120)));
+    assert_eq!(spacing.line, Some(Twips::new(360)));
     let indent = p.properties.indentation.unwrap();
-    assert_eq!(indent.left, Some(720));
-    assert_eq!(indent.first_line, Some(360));
+    assert_eq!(indent.left, Some(Twips::new(720)));
+    assert_eq!(indent.first_line, Some(Twips::new(360)));
 }
 
 #[test]
@@ -256,9 +257,9 @@ fn parse_section_properties() {
         panic!()
     };
     let sect1 = p1.section_properties.as_ref().unwrap();
-    assert_eq!(sect1.page_size.unwrap().width, 11906);
-    assert_eq!(sect1.page_size.unwrap().height, 16838);
-    assert_eq!(sect1.page_margins.unwrap().top, 720);
+    assert_eq!(sect1.page_size.unwrap().width, Twips::new(11906));
+    assert_eq!(sect1.page_size.unwrap().height, Twips::new(16838));
+    assert_eq!(sect1.page_margins.unwrap().top, Twips::new(720));
 
     let Block::Paragraph(p2) = &doc.blocks[1] else {
         panic!()
@@ -266,8 +267,8 @@ fn parse_section_properties() {
     assert!(p2.section_properties.is_none());
 
     let final_sect = doc.final_section.as_ref().unwrap();
-    assert_eq!(final_sect.page_size.unwrap().width, 16838);
-    assert_eq!(final_sect.page_margins.unwrap().top, 1440);
+    assert_eq!(final_sect.page_size.unwrap().width, Twips::new(16838));
+    assert_eq!(final_sect.page_margins.unwrap().top, Twips::new(1440));
 }
 
 #[test]
@@ -286,11 +287,11 @@ fn parse_tab_stops() {
         panic!()
     };
     assert_eq!(p.properties.tab_stops.len(), 3);
-    assert_eq!(p.properties.tab_stops[0].position, 2880);
+    assert_eq!(p.properties.tab_stops[0].position, Twips::new(2880));
     assert_eq!(p.properties.tab_stops[0].stop_type, TabStopType::Left);
-    assert_eq!(p.properties.tab_stops[1].position, 4320);
+    assert_eq!(p.properties.tab_stops[1].position, Twips::new(4320));
     assert_eq!(p.properties.tab_stops[1].stop_type, TabStopType::Center);
-    assert_eq!(p.properties.tab_stops[2].position, 9360);
+    assert_eq!(p.properties.tab_stops[2].position, Twips::new(9360));
     assert_eq!(p.properties.tab_stops[2].stop_type, TabStopType::Right);
 }
 

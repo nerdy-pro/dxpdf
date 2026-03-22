@@ -19,8 +19,8 @@ pub(super) fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
     let mut lvl_fmt = String::new();
     let mut lvl_text = String::new();
     let mut lvl_start: u32 = 1;
-    let mut lvl_ind_left: u32 = 0;
-    let mut lvl_ind_hanging: u32 = 0;
+    let mut lvl_ind_left: crate::dimension::Twips = crate::dimension::Twips::new(0);
+    let mut lvl_ind_hanging: crate::dimension::Twips = crate::dimension::Twips::new(0);
     let mut current_levels: Vec<NumberingLevel> = Vec::new();
 
     loop {
@@ -42,8 +42,8 @@ pub(super) fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
                         lvl_fmt.clear();
                         lvl_text.clear();
                         lvl_start = 1;
-                        lvl_ind_left = 0;
-                        lvl_ind_hanging = 0;
+                        lvl_ind_left = crate::dimension::Twips::new(0);
+                        lvl_ind_hanging = crate::dimension::Twips::new(0);
                         if let Some(v) = attr_val(e, b"ilvl") {
                             lvl_ilvl = v.parse().unwrap_or(0);
                         }
@@ -76,8 +76,8 @@ pub(super) fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
                                     format: NumberFormat::Decimal,
                                     level_text: String::new(),
                                     start: 1,
-                                    indent_left: 0,
-                                    indent_hanging: 0,
+                                    indent_left: crate::dimension::Twips::new(0),
+                                    indent_hanging: crate::dimension::Twips::new(0),
                                 });
                             }
                             current_levels[lvl_ilvl as usize] = NumberingLevel {
@@ -115,10 +115,16 @@ pub(super) fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
                         }
                         b"ind" => {
                             if let Some(v) = attr_val(e, b"left") {
-                                lvl_ind_left = v.parse().unwrap_or(0);
+                                lvl_ind_left = v
+                                    .parse::<i64>()
+                                    .map(crate::dimension::Twips::new)
+                                    .unwrap_or(crate::dimension::Twips::new(0));
                             }
                             if let Some(v) = attr_val(e, b"hanging") {
-                                lvl_ind_hanging = v.parse().unwrap_or(0);
+                                lvl_ind_hanging = v
+                                    .parse::<i64>()
+                                    .map(crate::dimension::Twips::new)
+                                    .unwrap_or(crate::dimension::Twips::new(0));
                             }
                         }
                         _ => {}

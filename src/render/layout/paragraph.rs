@@ -85,10 +85,14 @@ impl Layouter {
         // Apply list indentation (overrides paragraph indentation)
         let (list_label_text, list_label_x) = if let Some((ref label, left, hanging)) = list_label {
             if indent.left.is_none() {
-                indent.left = Some((left * TWIPS_PER_POINT) as u32);
+                indent.left = Some(crate::dimension::Twips::new(
+                    (left * TWIPS_PER_POINT) as i64,
+                ));
             }
             if indent.first_line.is_none() {
-                indent.first_line = Some(-((hanging * TWIPS_PER_POINT) as i32));
+                indent.first_line = Some(crate::dimension::Twips::new(
+                    -((hanging * TWIPS_PER_POINT) as i64),
+                ));
             }
             let label_x = self.config.margin_left + left - hanging;
             (Some(label.clone()), Some(label_x))
