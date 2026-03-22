@@ -190,8 +190,8 @@ impl Document {
 /// A block-level element.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    Paragraph(Paragraph),
-    Table(Table),
+    Paragraph(Box<Paragraph>),
+    Table(Box<Table>),
 }
 
 /// Page size — a type alias for `TwipsSize`.

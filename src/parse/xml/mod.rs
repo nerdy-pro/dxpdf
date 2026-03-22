@@ -332,12 +332,12 @@ pub fn parse_document_xml_with_rels(
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 if local == b"p" && matches_body_or_cell(&state) {
-                    let paragraph = Block::Paragraph(Paragraph {
+                    let paragraph = Block::Paragraph(Box::new(Paragraph {
                         properties: ParagraphProperties::default(),
                         runs: Vec::new(),
                         floats: Vec::new(),
                         section_properties: None,
-                    });
+                    }));
                     push_block(&mut state, &mut blocks, paragraph);
                 } else if (local == b"br" || local == b"tab")
                     && matches!(state, ParseState::InRun { .. })
@@ -515,12 +515,12 @@ pub fn parse_document_xml_with_rels(
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
                         let (props, runs, floats, section_props) = take_paragraph(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
-                        let paragraph = Block::Paragraph(Paragraph {
+                        let paragraph = Block::Paragraph(Box::new(Paragraph {
                             properties: props,
                             runs,
                             floats,
                             section_properties: section_props,
-                        });
+                        }));
                         push_block(&mut state, &mut blocks, paragraph);
                     }
                     b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
@@ -602,13 +602,13 @@ pub fn parse_document_xml_with_rels(
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table {
+                            let table = Block::Table(Box::new(Table {
                                 rows,
                                 grid_cols,
                                 default_cell_margins,
                                 cell_spacing: None,
                                 borders,
-                            });
+                            }));
                             push_block(&mut state, &mut blocks, table);
                         }
                     }

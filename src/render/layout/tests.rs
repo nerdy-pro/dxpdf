@@ -43,7 +43,7 @@ fn make_doc(blocks: Vec<Block>) -> Document {
 }
 
 fn simple_paragraph(text: &str) -> Block {
-    Block::Paragraph(Paragraph {
+    Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: text.to_string(),
@@ -52,12 +52,12 @@ fn simple_paragraph(text: &str) -> Block {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })
+    }))
 }
 
 fn make_cell(text: &str) -> TableCell {
     TableCell {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties::default(),
             runs: vec![Inline::TextRun(TextRun {
                 text: text.to_string(),
@@ -66,7 +66,7 @@ fn make_cell(text: &str) -> TableCell {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         width: None,
         grid_span: 1,
         vertical_merge: None,
@@ -123,7 +123,7 @@ fn layout_single_paragraph() {
 fn layout_page_break() {
     let mut blocks = Vec::new();
     for i in 0..100 {
-        blocks.push(Block::Paragraph(Paragraph {
+        blocks.push(Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
                     before: Some(tw(100)),
@@ -140,7 +140,7 @@ fn layout_page_break() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        }));
+        })));
     }
     let doc = make_doc(blocks);
     let pages = layout(&doc, &test_font_mgr());
@@ -153,7 +153,7 @@ fn layout_page_break() {
 
 #[test]
 fn layout_centered_text() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             alignment: Some(Alignment::Center),
             ..Default::default()
@@ -165,7 +165,7 @@ fn layout_centered_text() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
         assert!(f32::from(position.x) > 72.0);
@@ -218,7 +218,7 @@ fn table_borders_simple_2x2() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -258,7 +258,7 @@ fn table_borders_with_gridspan() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -316,7 +316,7 @@ fn table_borders_alignment_across_rows() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -386,7 +386,7 @@ fn table_borders_tcw_vs_grid_alignment() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -444,7 +444,7 @@ fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, (u8, u8, u8
 fn spacing_before_after_affects_position() {
     let doc = Document {
         blocks: vec![
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
                         before: Some(tw(200)),
@@ -461,8 +461,8 @@ fn spacing_before_after_affects_position() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
-            Block::Paragraph(Paragraph {
+            })),
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
                         before: Some(tw(100)),
@@ -479,7 +479,7 @@ fn spacing_before_after_affects_position() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         ..Document::default()
     };
@@ -505,7 +505,7 @@ fn left_indentation_shifts_text_right() {
     let doc = Document {
         blocks: vec![
             simple_paragraph("NoIndent"),
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     indentation: Some(Indentation {
                         left: Some(tw(720)), // 36pt
@@ -521,7 +521,7 @@ fn left_indentation_shifts_text_right() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         ..Document::default()
     };
@@ -543,7 +543,7 @@ fn left_indentation_shifts_text_right() {
 fn section_break_changes_page_dimensions() {
     let doc = Document {
         blocks: vec![
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Portrait".into(),
@@ -559,8 +559,8 @@ fn section_break_changes_page_dimensions() {
                     header_rel_id: None,
                     footer_rel_id: None,
                 }),
-            }),
-            Block::Paragraph(Paragraph {
+            })),
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Landscape".into(),
@@ -569,7 +569,7 @@ fn section_break_changes_page_dimensions() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         final_section: Some(SectionProperties {
             page_size: Some(PageSize::new(tw(15840), tw(12240))),
@@ -604,7 +604,10 @@ fn adjacent_tables_no_gap() {
         borders: None,
     };
     let doc = Document {
-        blocks: vec![Block::Table(mk_table("T1")), Block::Table(mk_table("T2"))],
+        blocks: vec![
+            Block::Table(Box::new(mk_table("T1"))),
+            Block::Table(Box::new(mk_table("T2"))),
+        ],
         ..Document::default()
     };
     let pages = layout(&doc, &test_font_mgr());
@@ -658,7 +661,7 @@ fn vmerge_skips_content_and_border() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
 
@@ -673,7 +676,7 @@ fn vmerge_skips_content_and_border() {
 
 #[test]
 fn line_break_forces_new_line() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -690,7 +693,7 @@ fn line_break_forces_new_line() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let before = texts.iter().find(|(_, _, t)| t == "Before").unwrap();
@@ -707,7 +710,7 @@ fn line_break_forces_new_line() {
 
 #[test]
 fn paragraph_shading_excludes_spacing() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             spacing: Some(Spacing {
                 before: Some(tw(200)),
@@ -729,7 +732,7 @@ fn paragraph_shading_excludes_spacing() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
     let texts = extract_texts(&pages);
@@ -778,7 +781,7 @@ fn row_height_minimum_respected() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
     let h_ys: Vec<f32> = lines
@@ -799,7 +802,7 @@ fn row_height_minimum_respected() {
 
 #[test]
 fn right_alignment() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             alignment: Some(Alignment::Right),
             ..Default::default()
@@ -811,7 +814,7 @@ fn right_alignment() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text_x = texts.iter().find(|(_, _, t)| t == "Right").unwrap().0;
@@ -1288,7 +1291,7 @@ fn vmerge_three_rows_distributes_height() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -1334,7 +1337,7 @@ fn vmerge_multiple_columns() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
 
@@ -1386,7 +1389,7 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
 #[test]
 fn direct_spacing_overrides_defaults() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
                     before: Some(tw(400)), // 20pt
@@ -1403,7 +1406,7 @@ fn direct_spacing_overrides_defaults() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         default_spacing: Spacing {
             before: Some(tw(100)),
             after: Some(tw(200)),
@@ -1431,7 +1434,7 @@ fn paragraph_shading_split_across_pages() {
     for _ in 0..40 {
         blocks.push(simple_paragraph("Filler line"));
     }
-    blocks.push(Block::Paragraph(Paragraph {
+    blocks.push(Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             shading: Some(Color {
                 r: 200,
@@ -1447,7 +1450,7 @@ fn paragraph_shading_split_across_pages() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    }));
+    })));
     let doc = make_doc(blocks);
     let pages = layout(&doc, &test_font_mgr());
     let total_rects: usize = pages
@@ -1482,7 +1485,7 @@ fn table_splits_across_pages() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     assert!(
         pages.len() > 1,
@@ -1517,7 +1520,7 @@ fn cell_margins_from_table_default() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text = texts.iter().find(|(_, _, t)| t == "Content").unwrap();
@@ -1552,7 +1555,7 @@ fn cell_shading_produces_rect() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
     assert!(
@@ -1574,7 +1577,7 @@ fn empty_table_no_crash() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     assert_eq!(pages.len(), 1);
 }
@@ -1591,7 +1594,7 @@ fn single_cell_table() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Only"));
@@ -1620,7 +1623,7 @@ fn table_with_empty_cell() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Filled"));
@@ -1633,12 +1636,12 @@ fn table_with_empty_cell() {
 #[test]
 fn empty_paragraph_still_has_height() {
     let doc = make_doc(vec![
-        Block::Paragraph(Paragraph {
+        Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties::default(),
             runs: vec![],
             floats: Vec::new(),
             section_properties: None,
-        }),
+        })),
         simple_paragraph("After"),
     ]);
     let pages = layout(&doc, &test_font_mgr());
@@ -1656,7 +1659,7 @@ fn empty_paragraph_still_has_height() {
 
 #[test]
 fn first_line_indent_shifts_first_line_only() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             indentation: Some(Indentation {
                 left: None,
@@ -1680,7 +1683,7 @@ fn first_line_indent_shifts_first_line_only() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let first_x = texts.iter().find(|(_, _, t)| t == "First").unwrap().0;
@@ -1698,7 +1701,7 @@ fn first_line_indent_shifts_first_line_only() {
 #[test]
 fn bullet_list_renders_label() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 list_ref: Some(ListRef {
                     num_id: 1,
@@ -1713,7 +1716,7 @@ fn bullet_list_renders_label() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         numbering: {
             let mut map = std::collections::HashMap::new();
             map.insert(
@@ -1745,7 +1748,7 @@ fn bullet_list_renders_label() {
 fn decimal_list_increments_counter() {
     let mut blocks = Vec::new();
     for i in 1..=3 {
-        blocks.push(Block::Paragraph(Paragraph {
+        blocks.push(Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 list_ref: Some(ListRef {
                     num_id: 1,
@@ -1760,7 +1763,7 @@ fn decimal_list_increments_counter() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        }));
+        })));
     }
     let doc = Document {
         blocks,
@@ -1814,7 +1817,7 @@ fn float_adjustment_shifts_text() {
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "FloatTest".into(),
@@ -1823,7 +1826,7 @@ fn float_adjustment_shifts_text() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -1849,7 +1852,7 @@ fn header_renders_on_each_page() {
     let doc = Document {
         blocks,
         default_header: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "HEADER".into(),
@@ -1858,7 +1861,7 @@ fn header_renders_on_each_page() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
@@ -1879,7 +1882,7 @@ fn footer_renders_at_bottom() {
     let doc = Document {
         blocks: vec![simple_paragraph("Body")],
         default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "FOOTER".into(),
@@ -1888,7 +1891,7 @@ fn footer_renders_at_bottom() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
@@ -1945,7 +1948,7 @@ fn after_table_spacing_uses_doc_default() {
         borders: None,
     };
     let doc = Document {
-        blocks: vec![Block::Table(table), simple_paragraph("After")],
+        blocks: vec![Block::Table(Box::new(table)), simple_paragraph("After")],
         default_spacing: Spacing {
             after: Some(tw(200)),
             ..Default::default()
@@ -1965,7 +1968,7 @@ fn after_table_spacing_uses_doc_default() {
         borders: None,
     };
     let doc_no_sp = Document {
-        blocks: vec![Block::Table(table2), simple_paragraph("After")],
+        blocks: vec![Block::Table(Box::new(table2)), simple_paragraph("After")],
         ..Document::default()
     };
     let pages_without = layout(&doc_no_sp, &test_font_mgr());
@@ -2019,7 +2022,7 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
         pct_pos_h: Some(50000),
         pct_pos_v: Some(10000),
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -2028,7 +2031,7 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let imgs = extract_images(&pages);
@@ -2050,7 +2053,7 @@ fn pct_pos_none_uses_regular_offset() {
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -2059,7 +2062,7 @@ fn pct_pos_none_uses_regular_offset() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let imgs = extract_images(&pages);
@@ -2091,7 +2094,7 @@ fn extract_link_annotations(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, 
 
 #[test]
 fn hyperlink_produces_link_annotation() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Click".into(),
@@ -2100,7 +2103,7 @@ fn hyperlink_produces_link_annotation() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let links = extract_link_annotations(&pages);
     assert_eq!(links.len(), 1, "Should have one link annotation");
@@ -2123,7 +2126,7 @@ fn no_hyperlink_no_annotation() {
 
 #[test]
 fn paragraph_bottom_border_renders_line() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             paragraph_borders: Some(ParagraphBorders {
                 top: None,
@@ -2140,7 +2143,7 @@ fn paragraph_bottom_border_renders_line() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
     let h_lines: Vec<_> = lines
@@ -2167,7 +2170,7 @@ fn page_field_renders_page_number_in_footer() {
     let doc = Document {
         blocks,
         default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![
                     Inline::TextRun(TextRun {
@@ -2191,7 +2194,7 @@ fn page_field_renders_page_number_in_footer() {
                 ],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
@@ -2225,7 +2228,7 @@ fn page_field_renders_page_number_in_footer() {
 
 #[test]
 fn superscript_reduces_font_size_and_shifts_up() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -2244,7 +2247,7 @@ fn superscript_reduces_font_size_and_shifts_up() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "m").unwrap();
@@ -2259,7 +2262,7 @@ fn superscript_reduces_font_size_and_shifts_up() {
 
 #[test]
 fn subscript_shifts_down() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -2278,7 +2281,7 @@ fn subscript_shifts_down() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "H").unwrap();

@@ -119,7 +119,7 @@ fn block_variants() {
         floats: vec![],
         section_properties: None,
     };
-    let _ = Block::Paragraph(p);
+    let _ = Block::Paragraph(Box::new(p));
 
     let t = Table {
         rows: vec![],
@@ -128,7 +128,7 @@ fn block_variants() {
         cell_spacing: None,
         borders: None,
     };
-    let _ = Block::Table(t);
+    let _ = Block::Table(Box::new(t));
 }
 
 #[test]
