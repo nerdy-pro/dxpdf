@@ -284,7 +284,9 @@ impl Layouter {
             })
             .collect();
 
-        // Distribute vMerge span heights across rows
+        // Distribute vMerge span heights across rows.
+        // Non-merged rows keep their natural height; only the last row of the
+        // span absorbs any remaining deficit so that the merged cell's content fits.
         for span in &vmerge_spans {
             let current_total: Pt = row_heights[span.start_row..span.start_row + span.row_count]
                 .iter()
@@ -292,10 +294,7 @@ impl Layouter {
                 .sum();
             if span.total_height > current_total {
                 let deficit = span.total_height - current_total;
-                let per_row = deficit / span.row_count as f32;
-                for i in 0..span.row_count {
-                    row_heights[span.start_row + i] += per_row;
-                }
+                row_heights[span.start_row + span.row_count - 1] += deficit;
             }
         }
 
