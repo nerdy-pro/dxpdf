@@ -5,8 +5,9 @@
 //! Conversion to points (`Pt`) for rendering produces `f32` values.
 
 use std::fmt;
+use std::iter::Sum;
 use std::marker::PhantomData;
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 // ---------------------------------------------------------------------------
 // Unit markers (zero-sized types)
@@ -133,11 +134,28 @@ impl<U: IntegerUnit> Dimension<U> {
 }
 
 impl Pt {
-    pub fn new(value: f32) -> Self {
+    pub const ZERO: Pt = Pt {
+        value: 0.0,
+        _unit: PhantomData,
+    };
+
+    pub const fn new(value: f32) -> Self {
         Self {
             value,
             _unit: PhantomData,
         }
+    }
+
+    pub fn max(self, other: Self) -> Self {
+        Self::new(self.value.max(other.value))
+    }
+
+    pub fn min(self, other: Self) -> Self {
+        Self::new(self.value.min(other.value))
+    }
+
+    pub fn abs(self) -> Self {
+        Self::new(self.value.abs())
     }
 }
 
@@ -200,6 +218,30 @@ impl Neg for Pt {
     type Output = Self;
     fn neg(self) -> Self {
         Self::new(-self.value)
+    }
+}
+
+impl AddAssign for Pt {
+    fn add_assign(&mut self, rhs: Self) {
+        self.value += rhs.value;
+    }
+}
+
+impl SubAssign for Pt {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.value -= rhs.value;
+    }
+}
+
+impl Sum for Pt {
+    fn sum<I: Iterator<Item = Pt>>(iter: I) -> Pt {
+        iter.fold(Pt::ZERO, |a, b| a + b)
+    }
+}
+
+impl<'a> Sum<&'a Pt> for Pt {
+    fn sum<I: Iterator<Item = &'a Pt>>(iter: I) -> Pt {
+        iter.fold(Pt::ZERO, |a, b| a + *b)
     }
 }
 
@@ -687,5 +729,72 @@ mod tests {
         assert!(Pt::new(13.0) > Pt::new(12.0));
         assert!(Pt::new(12.0) <= Pt::new(12.0));
         assert!(Pt::new(12.0) >= Pt::new(12.0));
+    }
+
+    // -- Pt ZERO --
+
+    #[test]
+    fn pt_zero_constant() {
+        assert_eq!(f32::from(Pt::ZERO), 0.0);
+    }
+
+    // -- Pt AddAssign / SubAssign --
+
+    #[test]
+    fn pt_add_assign() {
+        let mut p = Pt::new(10.0);
+        p += Pt::new(5.0);
+        assert_eq!(f32::from(p), 15.0);
+    }
+
+    #[test]
+    fn pt_sub_assign() {
+        let mut p = Pt::new(10.0);
+        p -= Pt::new(3.0);
+        assert_eq!(f32::from(p), 7.0);
+    }
+
+    // -- Pt Sum --
+
+    #[test]
+    fn pt_sum_owned() {
+        let vals = vec![Pt::new(1.0), Pt::new(2.0), Pt::new(3.0)];
+        let total: Pt = vals.into_iter().sum();
+        assert_eq!(f32::from(total), 6.0);
+    }
+
+    #[test]
+    fn pt_sum_ref() {
+        let vals = [Pt::new(10.0), Pt::new(20.0)];
+        let total: Pt = vals.iter().sum();
+        assert_eq!(f32::from(total), 30.0);
+    }
+
+    #[test]
+    fn pt_sum_empty() {
+        let vals: Vec<Pt> = vec![];
+        let total: Pt = vals.into_iter().sum();
+        assert_eq!(f32::from(total), 0.0);
+    }
+
+    // -- Pt max / min / abs --
+
+    #[test]
+    fn pt_max() {
+        assert_eq!(Pt::new(3.0).max(Pt::new(5.0)), Pt::new(5.0));
+        assert_eq!(Pt::new(5.0).max(Pt::new(3.0)), Pt::new(5.0));
+    }
+
+    #[test]
+    fn pt_min() {
+        assert_eq!(Pt::new(3.0).min(Pt::new(5.0)), Pt::new(3.0));
+        assert_eq!(Pt::new(5.0).min(Pt::new(3.0)), Pt::new(3.0));
+    }
+
+    #[test]
+    fn pt_abs() {
+        assert_eq!(Pt::new(-12.0).abs(), Pt::new(12.0));
+        assert_eq!(Pt::new(12.0).abs(), Pt::new(12.0));
+        assert_eq!(Pt::ZERO.abs(), Pt::ZERO);
     }
 }

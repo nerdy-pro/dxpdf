@@ -615,14 +615,6 @@ impl Color {
 }
 
 impl Spacing {
-    pub fn before_pt(&self) -> f32 {
-        self.before.map(f32::from).unwrap_or(0.0)
-    }
-
-    pub fn after_pt(&self) -> f32 {
-        self.after.map(f32::from).unwrap_or(0.0)
-    }
-
     /// Line spacing semantic value.
     /// For `Auto`: multiplier (1.0 = single spacing).
     /// For `Exact`/`AtLeast`: value in points.
@@ -635,29 +627,14 @@ impl Spacing {
         })
     }
 
-    /// Line spacing in points with a fixed fallback of 12pt.
-    /// For `Auto` rule, returns the multiplier * 12pt as a rough estimate.
-    pub fn line_pt(&self) -> f32 {
+    /// Line spacing in points with a fixed fallback of single-line (240 twips = 12pt).
+    pub fn line_pt(&self) -> Pt {
         let single_line = Pt::from(Twips::new(240));
         match self.line_spacing() {
-            Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => f32::from(pt),
-            Some(LineSpacing::Multiplier(m)) => m * f32::from(single_line),
-            None => f32::from(single_line),
+            Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => pt,
+            Some(LineSpacing::Multiplier(m)) => single_line * m,
+            None => single_line,
         }
-    }
-}
-
-impl Indentation {
-    pub fn left_pt(&self) -> f32 {
-        self.left.map(f32::from).unwrap_or(0.0)
-    }
-
-    pub fn right_pt(&self) -> f32 {
-        self.right.map(f32::from).unwrap_or(0.0)
-    }
-
-    pub fn first_line_pt(&self) -> f32 {
-        self.first_line.map(f32::from).unwrap_or(0.0)
     }
 }
 
@@ -714,9 +691,9 @@ mod tests {
             line: Some(Twips::new(360)),
             ..Default::default()
         };
-        assert_eq!(s.before_pt(), 12.0);
-        assert_eq!(s.after_pt(), 6.0);
-        assert_eq!(s.line_pt(), 18.0);
+        assert_eq!(f32::from(s.before.map(Pt::from).unwrap_or(Pt::ZERO)), 12.0);
+        assert_eq!(f32::from(s.after.map(Pt::from).unwrap_or(Pt::ZERO)), 6.0);
+        assert_eq!(f32::from(s.line_pt()), 18.0);
     }
 
     #[test]

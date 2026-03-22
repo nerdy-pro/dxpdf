@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::dimension::Pt;
 use crate::model::*;
 use crate::units::UNDERLINE_Y_OFFSET;
 
@@ -18,7 +19,7 @@ impl Layouter {
             .as_ref()
             .and_then(|lr| self.resolve_list_label(lr));
 
-        self.cursor_y += spacing.before_pt();
+        self.cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
 
         // Register floating images attached to this paragraph
         for float in &para.floats {
@@ -26,22 +27,22 @@ impl Layouter {
                 continue;
             }
             let content_w = self.config.content_width();
-            let fw = f32::from(float.width);
-            let fh = f32::from(float.height);
+            let fw = float.width;
+            let fh = float.height;
             let img_x = if let Some(pct) = float.pct_pos_h {
-                pct as f32 / 100_000.0 * self.config.page_width
+                self.config.page_width * (pct as f32 / 100_000.0)
             } else {
                 match float.align_h.as_deref() {
                     Some("right") => self.config.margin_left + content_w - fw,
                     Some("center") => self.config.margin_left + (content_w - fw) / 2.0,
                     Some("left") => self.config.margin_left,
-                    _ => self.config.margin_left + f32::from(float.offset_x),
+                    _ => self.config.margin_left + float.offset_x,
                 }
             };
             let img_y = if let Some(pct) = float.pct_pos_v {
-                pct as f32 / 100_000.0 * self.config.page_height
+                self.config.page_height * (pct as f32 / 100_000.0)
             } else {
-                self.cursor_y + f32::from(float.offset_y)
+                self.cursor_y + float.offset_y
             };
 
             let image = self.image_cache.get(&float.rel_id);
@@ -63,7 +64,7 @@ impl Layouter {
 
         if para.runs.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
-            let default_size = f32::from(self.doc_defaults.font_size);
+            let default_size = Pt::from(self.doc_defaults.font_size);
             let natural_height = self.measurer.line_height(
                 &self.doc_defaults.font_family,
                 default_size,
@@ -72,13 +73,13 @@ impl Layouter {
             );
             self.cursor_y += resolve_line_height(natural_height, spacing.line_spacing());
             self.paint_paragraph_borders(&para.properties.paragraph_borders, top, self.cursor_y);
-            self.cursor_y += spacing.after_pt();
+            self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
             return;
         }
 
         if para.runs.is_empty() {
             self.prev_para_had_bottom_border = false;
-            self.cursor_y += spacing.after_pt();
+            self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
             return;
         }
 
@@ -90,15 +91,17 @@ impl Layouter {
             if indent.first_line.is_none() {
                 indent.first_line = Some(-hanging);
             }
-            let left_pt = f32::from(left);
-            let hanging_pt = f32::from(hanging);
+            let left_pt = Pt::from(left);
+            let hanging_pt = Pt::from(hanging);
             let label_x = self.config.margin_left + left_pt - hanging_pt;
             (Some(label.clone()), Some(label_x))
         } else {
             (None, None)
         };
 
-        let base_content_width = self.config.content_width() - indent.left_pt() - indent.right_pt();
+        let base_content_width = self.config.content_width()
+            - indent.left.map(Pt::from).unwrap_or(Pt::ZERO)
+            - indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
         let content_height = self.config.content_height();
         let fragments = collect_fragments(
             &para.runs,
@@ -108,7 +111,7 @@ impl Layouter {
             &self.measurer,
             &self.image_cache,
         );
-        let base_x = self.config.margin_left + indent.left_pt();
+        let base_x = self.config.margin_left + indent.left.map(Pt::from).unwrap_or(Pt::ZERO);
 
         // ============================
         // PASS 1: MEASURE — produce lines with relative y-coordinates
@@ -117,7 +120,7 @@ impl Layouter {
             &fragments,
             base_x,
             base_content_width,
-            indent.first_line_pt(),
+            indent.first_line.map(Pt::from).unwrap_or(Pt::ZERO),
             para.properties.alignment,
             spacing.line_spacing(),
             &para.properties.tab_stops,
@@ -129,7 +132,7 @@ impl Layouter {
         // These passes are combined because page breaks require emitting
         // shading on the correct page before switching.
 
-        let mut text_area_top: Option<f32> = None;
+        let mut text_area_top: Option<Pt> = None;
         let mut text_area_bottom = self.cursor_y;
         let mut shading_insert_idx = self.current_page.commands.len();
         let mut first_line_painted = false;
@@ -156,13 +159,13 @@ impl Layouter {
             if !first_line_painted {
                 if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
                     let font = &self.doc_defaults.font_family;
-                    let fs = f32::from(self.doc_defaults.font_size);
+                    let fs = Pt::from(self.doc_defaults.font_size);
                     self.current_page.commands.push(DrawCommand::Text {
                         x: lx,
                         y: self.cursor_y,
                         text: label.clone(),
                         font_family: Rc::clone(font),
-                        char_spacing_pt: 0.0,
+                        char_spacing_pt: Pt::ZERO,
                         font_size: fs,
                         bold: false,
                         italic: false,
@@ -178,17 +181,8 @@ impl Layouter {
             }
 
             // Paint line content at absolute position
-            // Line commands have y relative to measure start; we offset by cursor_y
-            // minus the accumulated relative y of lines before this one.
-            let rel_y_before: f32 = measured.lines[..i].iter().map(|l| l.height).sum();
+            let rel_y_before: Pt = measured.lines[..i].iter().map(|l| l.height).sum();
             let y_offset = self.cursor_y - rel_y_before;
-            // But we can simplify: the relative y in commands already accounts for
-            // all prior lines' heights. So the offset maps relative y=0 to the
-            // paragraph's absolute start on the current page.
-            // For the first line on each page, cursor_y is the page start position.
-            // We need: absolute_y = cursor_y + (relative_y_in_line - relative_y_at_line_start)
-            // Since line commands have y from 0..total_height, and this line's y range is
-            // [rel_y_before .. rel_y_before + line.height], we offset by (cursor_y - rel_y_before).
 
             for cmd in &line.commands {
                 self.current_page
@@ -213,19 +207,14 @@ impl Layouter {
             self.paint_paragraph_borders(&para.properties.paragraph_borders, top, text_area_bottom);
         }
 
-        self.cursor_y += spacing.after_pt();
+        self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
     }
 
     /// Paint paragraph border lines (w:pBdr).
     /// Word merges adjacent paragraph borders: when the previous paragraph had any
     /// border (top or bottom), the current paragraph's top border is suppressed to
     /// avoid duplicate lines.
-    fn paint_paragraph_borders(
-        &mut self,
-        borders: &Option<ParagraphBorders>,
-        top: f32,
-        bottom: f32,
-    ) {
+    fn paint_paragraph_borders(&mut self, borders: &Option<ParagraphBorders>, top: Pt, bottom: Pt) {
         let has_any_border = borders.as_ref().is_some_and(|b| {
             b.top.as_ref().is_some_and(|d| d.is_visible())
                 || b.bottom.as_ref().is_some_and(|d| d.is_visible())
@@ -243,7 +232,7 @@ impl Layouter {
                         x2: right,
                         y2: top,
                         color: b.color_rgb(),
-                        width: f32::from(b.size),
+                        width: Pt::from(b.size),
                     });
                 }
             }
@@ -255,7 +244,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: f32::from(b.size),
+                        width: Pt::from(b.size),
                     });
                 }
             }
@@ -267,7 +256,7 @@ impl Layouter {
                         x2: left,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: f32::from(b.size),
+                        width: Pt::from(b.size),
                     });
                 }
             }
@@ -279,7 +268,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: f32::from(b.size),
+                        width: Pt::from(b.size),
                     });
                 }
             }
@@ -292,14 +281,14 @@ impl Layouter {
     fn paint_paragraph_shading(
         &mut self,
         shading: &Option<Color>,
-        text_area_top: Option<f32>,
-        text_area_bottom: f32,
+        text_area_top: Option<Pt>,
+        text_area_bottom: Pt,
         insert_idx: usize,
     ) {
         if let Some(bg) = shading {
             if let Some(top) = text_area_top {
                 let height = text_area_bottom - top;
-                if height > 0.0 {
+                if height > Pt::ZERO {
                     self.current_page.commands.insert(
                         insert_idx,
                         DrawCommand::Rect {
@@ -320,15 +309,15 @@ impl Layouter {
     fn measure_paragraph_lines(
         &mut self,
         fragments: &[Fragment],
-        base_x: f32,
-        base_content_width: f32,
-        first_line_offset: f32,
+        base_x: Pt,
+        base_content_width: Pt,
+        first_line_offset: Pt,
         alignment: Option<Alignment>,
         line_spacing: Option<LineSpacing>,
         tab_stops: &[TabStop],
     ) -> MeasuredLines {
         let mut lines = Vec::new();
-        let mut rel_y = 0.0_f32;
+        let mut rel_y = Pt::ZERO;
         let mut line_start = 0;
         let mut first_line = true;
 
@@ -348,7 +337,11 @@ impl Layouter {
                 }
             }
 
-            let fl_offset = if first_line { first_line_offset } else { 0.0 };
+            let fl_offset = if first_line {
+                first_line_offset
+            } else {
+                Pt::ZERO
+            };
 
             // Float adjustment: use absolute position for overlap detection
             let abs_line_top = self.cursor_y + rel_y;
@@ -356,12 +349,13 @@ impl Layouter {
                 .iter()
                 .take(1)
                 .map(|f| f.height())
-                .fold(0.0_f32, f32::max);
+                .fold(Pt::ZERO, Pt::max);
             let tentative_line_height = resolve_line_height(tentative_height, line_spacing);
             let (float_x_shift, float_width_reduction) =
                 self.float_adjustment(abs_line_top, abs_line_top + tentative_line_height);
 
-            let available_width = (base_content_width - fl_offset - float_width_reduction).max(0.0);
+            let available_width =
+                (base_content_width - fl_offset - float_width_reduction).max(Pt::ZERO);
 
             let (line_end, _) = fit_fragments(&fragments[line_start..], available_width);
             let actual_end = line_start + line_end.max(1);
@@ -369,18 +363,18 @@ impl Layouter {
             let frag_height = fragments[line_start..actual_end]
                 .iter()
                 .map(|f| f.height())
-                .fold(0.0_f32, f32::max);
+                .fold(Pt::ZERO, Pt::max);
             let line_height = resolve_line_height(frag_height, line_spacing);
 
             let used_width = if actual_end > line_start {
                 measure_fragments(&fragments[line_start..actual_end])
             } else {
-                0.0
+                Pt::ZERO
             };
             let x_offset = match alignment {
                 Some(Alignment::Center) => (available_width - used_width) / 2.0,
                 Some(Alignment::Right) => available_width - used_width,
-                _ => 0.0,
+                _ => Pt::ZERO,
             };
 
             rel_y += line_height;
@@ -416,7 +410,7 @@ impl Layouter {
                         }
                         commands.push(DrawCommand::Text {
                             x,
-                            y: rel_y + baseline_offset,
+                            y: rel_y + *baseline_offset,
                             text: text.clone(),
                             font_family: font_family.clone(),
                             char_spacing_pt: *char_spacing_pt,
@@ -430,7 +424,7 @@ impl Layouter {
                             commands.push(DrawCommand::Underline {
                                 x1: x,
                                 y1: rel_y + UNDERLINE_Y_OFFSET,
-                                x2: x + measured_width,
+                                x2: x + *measured_width,
                                 y2: rel_y + UNDERLINE_Y_OFFSET,
                                 color: c,
                                 width: uw,
@@ -445,7 +439,7 @@ impl Layouter {
                                 url: url.clone(),
                             });
                         }
-                        x += measured_width;
+                        x += *measured_width;
                     }
                     Fragment::Image {
                         width,
@@ -455,12 +449,12 @@ impl Layouter {
                         let image = self.image_cache.get(rel_id);
                         commands.push(DrawCommand::Image {
                             x,
-                            y: rel_y - height,
+                            y: rel_y - *height,
                             width: *width,
                             height: *height,
                             image,
                         });
-                        x += width;
+                        x += *width;
                     }
                     Fragment::Tab { .. } => {
                         let rel_x = x - base_x;

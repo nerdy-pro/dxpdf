@@ -9,16 +9,17 @@ pub use measurer::TextMeasurer;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::dimension::Pt;
 use crate::model::*;
-use crate::units::FLOAT_TEXT_GAP_PT;
+use crate::units::FLOAT_TEXT_GAP;
 use fragment::DocDefaultsLayout;
 
 /// US Letter page width in points (8.5 inches).
-const US_LETTER_WIDTH_PT: f32 = 612.0;
+const US_LETTER_WIDTH_PT: Pt = Pt::new(612.0);
 /// US Letter page height in points (11 inches).
-const US_LETTER_HEIGHT_PT: f32 = 792.0;
+const US_LETTER_HEIGHT_PT: Pt = Pt::new(792.0);
 /// Default page margin in points (1 inch).
-const DEFAULT_PAGE_MARGIN_PT: f32 = 72.0;
+const DEFAULT_PAGE_MARGIN_PT: Pt = Pt::new(72.0);
 
 /// Pre-decoded Skia images keyed by relationship ID.
 /// All images are decoded upfront in `new()` — lookups are free.
@@ -54,16 +55,16 @@ impl ImageCache {
 /// Built internally from document `SectionProperties`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayoutConfig {
-    pub page_width: f32,
-    pub page_height: f32,
-    pub margin_top: f32,
-    pub margin_bottom: f32,
-    pub margin_left: f32,
-    pub margin_right: f32,
+    pub page_width: Pt,
+    pub page_height: Pt,
+    pub margin_top: Pt,
+    pub margin_bottom: Pt,
+    pub margin_left: Pt,
+    pub margin_right: Pt,
     /// Distance from page top to header content.
-    pub header_margin: f32,
+    pub header_margin: Pt,
     /// Distance from page bottom to footer content.
-    pub footer_margin: f32,
+    pub footer_margin: Pt,
 }
 
 impl Default for LayoutConfig {
@@ -95,11 +96,11 @@ impl LayoutConfig {
         cfg
     }
 
-    pub fn content_width(&self) -> f32 {
+    pub fn content_width(&self) -> Pt {
         self.page_width - self.margin_left - self.margin_right
     }
 
-    pub fn content_height(&self) -> f32 {
+    pub fn content_height(&self) -> Pt {
         self.page_height - self.margin_top - self.margin_bottom
     }
 }
@@ -108,51 +109,51 @@ impl LayoutConfig {
 #[derive(Debug, Clone)]
 pub enum DrawCommand {
     Text {
-        x: f32,
-        y: f32,
+        x: Pt,
+        y: Pt,
         text: String,
         font_family: std::rc::Rc<str>,
-        char_spacing_pt: f32,
-        font_size: f32,
+        char_spacing_pt: Pt,
+        font_size: Pt,
         bold: bool,
         italic: bool,
         color: (u8, u8, u8),
     },
     Underline {
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
+        x1: Pt,
+        y1: Pt,
+        x2: Pt,
+        y2: Pt,
         color: (u8, u8, u8),
-        width: f32,
+        width: Pt,
     },
     Line {
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
+        x1: Pt,
+        y1: Pt,
+        x2: Pt,
+        y2: Pt,
         color: (u8, u8, u8),
-        width: f32,
+        width: Pt,
     },
     Image {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
         image: Rc<skia_safe::Image>,
     },
     Rect {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
         color: (u8, u8, u8),
     },
     LinkAnnotation {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
         url: String,
     },
 }
@@ -160,8 +161,8 @@ pub enum DrawCommand {
 #[derive(Debug, Clone)]
 pub struct LayoutedPage {
     pub commands: Vec<DrawCommand>,
-    pub page_width: f32,
-    pub page_height: f32,
+    pub page_width: Pt,
+    pub page_height: Pt,
 }
 
 /// Perform layout on a document, producing positioned draw commands per page.
@@ -186,7 +187,7 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse();
 
-    let default_tab_stop_pt = f32::from(doc.default_tab_stop);
+    let default_tab_stop_pt = Pt::from(doc.default_tab_stop);
     let doc_defaults = DocDefaultsLayout::from_document(doc);
     let image_cache = ImageCache::new(&doc.images);
     let mut effective_config = initial_config;
@@ -247,22 +248,22 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
     if let Some(ps) = &sect.page_size {
-        config.page_width = f32::from(ps.width);
-        config.page_height = f32::from(ps.height);
+        config.page_width = Pt::from(ps.width);
+        config.page_height = Pt::from(ps.height);
     }
     if let Some(pm) = &sect.page_margins {
-        config.margin_top = f32::from(pm.top);
-        config.margin_right = f32::from(pm.right);
-        config.margin_bottom = f32::from(pm.bottom);
-        config.margin_left = f32::from(pm.left);
-        config.header_margin = f32::from(pm.header);
-        config.footer_margin = f32::from(pm.footer);
+        config.margin_top = Pt::from(pm.top);
+        config.margin_right = Pt::from(pm.right);
+        config.margin_bottom = Pt::from(pm.bottom);
+        config.margin_left = Pt::from(pm.left);
+        config.header_margin = Pt::from(pm.header);
+        config.footer_margin = Pt::from(pm.footer);
     }
 }
 
 /// Offset all y-coordinates in a draw command by a given amount.
 /// Used to translate relative-positioned commands to absolute page positions.
-pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
+pub(super) fn offset_command(cmd: &DrawCommand, y_offset: Pt) -> DrawCommand {
     match cmd {
         DrawCommand::Text {
             x,
@@ -276,7 +277,7 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             color,
         } => DrawCommand::Text {
             x: *x,
-            y: y_offset + y,
+            y: y_offset + *y,
             text: text.clone(),
             font_family: font_family.clone(),
             char_spacing_pt: *char_spacing_pt,
@@ -294,9 +295,9 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             width,
         } => DrawCommand::Underline {
             x1: *x1,
-            y1: y_offset + y1,
+            y1: y_offset + *y1,
             x2: *x2,
-            y2: y_offset + y2,
+            y2: y_offset + *y2,
             color: *color,
             width: *width,
         },
@@ -308,7 +309,7 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             image,
         } => DrawCommand::Image {
             x: *x,
-            y: y_offset + y,
+            y: y_offset + *y,
             width: *width,
             height: *height,
             image: image.clone(),
@@ -321,7 +322,7 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             color,
         } => DrawCommand::Rect {
             x: *x,
-            y: y_offset + y,
+            y: y_offset + *y,
             width: *width,
             height: *height,
             color: *color,
@@ -335,7 +336,7 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
             url,
         } => DrawCommand::LinkAnnotation {
             x: *x,
-            y: y_offset + y,
+            y: y_offset + *y,
             width: *width,
             height: *height,
             url: url.clone(),
@@ -345,20 +346,20 @@ pub(super) fn offset_command(cmd: &DrawCommand, y_offset: f32) -> DrawCommand {
 
 /// A floating image that affects text layout on the current page.
 struct ActiveFloat {
-    page_x: f32,
-    page_y_start: f32,
-    page_y_end: f32,
-    width: f32,
+    page_x: Pt,
+    page_y_start: Pt,
+    page_y_end: Pt,
+    width: Pt,
 }
 
 struct Layouter {
     config: LayoutConfig,
     pages: Vec<LayoutedPage>,
     current_page: LayoutedPage,
-    cursor_y: f32,
+    cursor_y: Pt,
     active_floats: Vec<ActiveFloat>,
     next_section_configs: Vec<LayoutConfig>,
-    default_tab_stop_pt: f32,
+    default_tab_stop_pt: Pt,
     doc_defaults: DocDefaultsLayout,
     measurer: TextMeasurer,
     /// Counters for numbered lists: (numId, level) -> current count.
@@ -372,7 +373,7 @@ impl Layouter {
     fn new(
         config: &LayoutConfig,
         next_section_configs: Vec<LayoutConfig>,
-        default_tab_stop_pt: f32,
+        default_tab_stop_pt: Pt,
         doc_defaults: DocDefaultsLayout,
         font_mgr: skia_safe::FontMgr,
         image_cache: ImageCache,
@@ -398,7 +399,7 @@ impl Layouter {
         }
     }
 
-    fn content_bottom(&self) -> f32 {
+    fn content_bottom(&self) -> Pt {
         self.config.page_height - self.config.margin_bottom
     }
 
@@ -426,13 +427,12 @@ impl Layouter {
         }
     }
 
-    fn float_adjustment(&self, line_top: f32, line_bottom: f32) -> (f32, f32) {
-        let gap = FLOAT_TEXT_GAP_PT;
-        let mut x_shift = 0.0_f32;
-        let mut width_reduction = 0.0_f32;
+    fn float_adjustment(&self, line_top: Pt, line_bottom: Pt) -> (Pt, Pt) {
+        let mut x_shift = Pt::ZERO;
+        let mut width_reduction = Pt::ZERO;
         for f in &self.active_floats {
             if line_top < f.page_y_end && line_bottom > f.page_y_start {
-                let shift = (f.page_x - self.config.margin_left) + f.width + gap;
+                let shift = (f.page_x - self.config.margin_left) + f.width + FLOAT_TEXT_GAP;
                 x_shift = x_shift.max(shift);
                 width_reduction = width_reduction.max(shift);
             }
@@ -481,14 +481,14 @@ impl Layouter {
     }
 
     /// Get the width of a table cell, accounting for grid_span.
-    fn cell_width(&self, grid_col_idx: usize, cell: &TableCell, col_widths: &[f32]) -> f32 {
+    fn cell_width(&self, grid_col_idx: usize, cell: &TableCell, col_widths: &[Pt]) -> Pt {
         if !col_widths.is_empty() {
             let span = cell.grid_span.max(1) as usize;
             return (grid_col_idx..grid_col_idx + span)
-                .map(|i| col_widths.get(i).copied().unwrap_or(72.0))
+                .map(|i| col_widths.get(i).copied().unwrap_or(Pt::new(72.0)))
                 .sum();
         }
-        cell.width.map(f32::from).unwrap_or(72.0)
+        cell.width.map(Pt::from).unwrap_or(Pt::new(72.0))
     }
 
     /// Resolve list label text and indentation for a paragraph with a list reference.

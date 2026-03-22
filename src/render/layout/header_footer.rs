@@ -1,3 +1,4 @@
+use crate::dimension::Pt;
 use crate::model::*;
 
 use super::fragment::*;
@@ -8,7 +9,7 @@ use super::{offset_command, DrawCommand, LayoutConfig, LayoutedPage};
 pub(super) fn render_headers_footers(
     pages: &mut [LayoutedPage],
     doc_defaults: &DocDefaultsLayout,
-    default_tab_stop_pt: f32,
+    default_tab_stop_pt: Pt,
     config: &LayoutConfig,
     font_mgr: &skia_safe::FontMgr,
     image_cache: &super::ImageCache,
@@ -82,19 +83,19 @@ pub(super) fn render_headers_footers(
 /// Returns (draw_commands, max_y_extent).
 pub(super) fn layout_header_footer_blocks(
     blocks: &[Block],
-    x_start: f32,
-    y_start: f32,
-    content_width: f32,
-    margin_extent: f32,
-    y_limit: f32,
-    page_width: f32,
-    page_height: f32,
+    x_start: Pt,
+    y_start: Pt,
+    content_width: Pt,
+    margin_extent: Pt,
+    y_limit: Pt,
+    page_width: Pt,
+    page_height: Pt,
     defaults: &DocDefaultsLayout,
     measurer: &measurer::TextMeasurer,
-    default_tab_stop_pt: f32,
+    default_tab_stop_pt: Pt,
     field_ctx: Option<&FieldContext>,
     image_cache: &super::ImageCache,
-) -> (Vec<DrawCommand>, f32) {
+) -> (Vec<DrawCommand>, Pt) {
     let mut commands = Vec::new();
     let mut cursor_y = y_start;
     let mut max_y = y_start;
@@ -105,36 +106,36 @@ pub(super) fn layout_header_footer_blocks(
         }
         if let Block::Paragraph(para) = block {
             let spacing = para.properties.spacing.unwrap_or_default();
-            cursor_y += spacing.before_pt();
+            cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
 
             // Render floating images with alignment support
             for float in &para.floats {
                 if !image_cache.contains(&float.rel_id) {
                     continue;
                 }
-                let fw = f32::from(float.width);
-                let fh = f32::from(float.height);
-                let scale = f32::min(1.0, content_width / fw.max(1.0));
+                let fw = float.width;
+                let fh = float.height;
+                let scale = f32::min(1.0, content_width / fw.max(Pt::new(1.0)));
                 let img_w = fw * scale;
                 let img_h = fh * scale;
                 let img_x = if let Some(pct) = float.pct_pos_h {
-                    pct as f32 / 100_000.0 * page_width
+                    page_width * (pct as f32 / 100_000.0)
                 } else {
                     match float.align_h.as_deref() {
                         Some("right") => x_start + content_width - img_w,
                         Some("center") => x_start + (content_width - img_w) / 2.0,
                         Some("left") => x_start,
-                        _ => x_start + f32::from(float.offset_x),
+                        _ => x_start + float.offset_x,
                     }
                 };
                 let img_y = if let Some(pct) = float.pct_pos_v {
-                    pct as f32 / 100_000.0 * page_height
+                    page_height * (pct as f32 / 100_000.0)
                 } else {
                     match float.align_v.as_deref() {
                         Some("center") => (margin_extent - img_h) / 2.0,
                         Some("bottom") => margin_extent - img_h,
-                        Some("top") => 0.0,
-                        _ => cursor_y + f32::from(float.offset_y),
+                        Some("top") => Pt::ZERO,
+                        _ => cursor_y + float.offset_y,
                     }
                 };
                 max_y = max_y.max(img_y + img_h);
@@ -161,18 +162,20 @@ pub(super) fn layout_header_footer_blocks(
 
             if fragments.is_empty() {
                 cursor_y += spacing.line_pt();
-                cursor_y += spacing.after_pt();
+                cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                 continue;
             }
 
             let indent = para.properties.indentation.unwrap_or_default();
-            let avail = content_width - indent.left_pt() - indent.right_pt();
+            let avail = content_width
+                - indent.left.map(Pt::from).unwrap_or(Pt::ZERO)
+                - indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
 
             let measured = measure_lines(
                 &fragments,
-                x_start + indent.left_pt(),
+                x_start + indent.left.map(Pt::from).unwrap_or(Pt::ZERO),
                 avail,
-                0.0,
+                Pt::ZERO,
                 para.properties.alignment,
                 spacing.line_spacing(),
                 &para.properties.tab_stops,
@@ -187,7 +190,7 @@ pub(super) fn layout_header_footer_blocks(
                 }
             }
             cursor_y += measured.total_height;
-            cursor_y += spacing.after_pt();
+            cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
         }
     }
 

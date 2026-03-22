@@ -18,7 +18,10 @@ pub fn render_to_pdf_with_font_mgr(
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
 
     for page in pages {
-        let mut on_page = doc.begin_page((page.page_width, page.page_height), None);
+        let mut on_page = doc.begin_page(
+            (f32::from(page.page_width), f32::from(page.page_height)),
+            None,
+        );
         {
             let canvas = on_page.canvas();
             render_page(canvas, page, font_mgr)?;
@@ -51,15 +54,15 @@ fn render_page(
                 draw_text(
                     canvas,
                     font_mgr,
-                    *x,
-                    *y,
+                    f32::from(*x),
+                    f32::from(*y),
                     text,
                     font_family,
-                    *font_size,
+                    f32::from(*font_size),
                     *bold,
                     *italic,
                     *color,
-                    *char_spacing_pt,
+                    f32::from(*char_spacing_pt),
                 );
             }
             DrawCommand::Underline {
@@ -78,7 +81,15 @@ fn render_page(
                 color,
                 width,
             } => {
-                draw_line(canvas, *x1, *y1, *x2, *y2, *color, *width);
+                draw_line(
+                    canvas,
+                    f32::from(*x1),
+                    f32::from(*y1),
+                    f32::from(*x2),
+                    f32::from(*y2),
+                    *color,
+                    f32::from(*width),
+                );
             }
             DrawCommand::Image {
                 x,
@@ -87,7 +98,12 @@ fn render_page(
                 height,
                 image,
             } => {
-                let rect = Rect::from_xywh(*x, *y, *width, *height);
+                let rect = Rect::from_xywh(
+                    f32::from(*x),
+                    f32::from(*y),
+                    f32::from(*width),
+                    f32::from(*height),
+                );
                 canvas.draw_image_rect(image, None, rect, &Paint::default());
             }
             DrawCommand::Rect {
@@ -97,7 +113,14 @@ fn render_page(
                 height,
                 color,
             } => {
-                draw_rect(canvas, *x, *y, *width, *height, *color);
+                draw_rect(
+                    canvas,
+                    f32::from(*x),
+                    f32::from(*y),
+                    f32::from(*width),
+                    f32::from(*height),
+                    *color,
+                );
             }
             DrawCommand::LinkAnnotation {
                 x,
@@ -106,7 +129,12 @@ fn render_page(
                 height,
                 url,
             } => {
-                let rect = Rect::from_xywh(*x, *y, *width, *height);
+                let rect = Rect::from_xywh(
+                    f32::from(*x),
+                    f32::from(*y),
+                    f32::from(*width),
+                    f32::from(*height),
+                );
                 let mut url_bytes = url.as_bytes().to_vec();
                 url_bytes.push(0);
                 let url_data = Data::new_copy(&url_bytes);

@@ -53,10 +53,10 @@ fn unit_constants() {
     let _: &str = dxpdf::units::WIDTH_TYPE_DXA;
     let _: &str = dxpdf::units::UNDERLINE_NONE;
 
-    let _: f32 = dxpdf::units::FLOAT_TEXT_GAP_PT;
-    let _: f32 = dxpdf::units::MIN_TAB_WIDTH_PT;
-    let _: f32 = dxpdf::units::TAB_FALLBACK_PT;
-    let _: f32 = dxpdf::units::UNDERLINE_Y_OFFSET;
+    let _: dxpdf::dimension::Pt = dxpdf::units::FLOAT_TEXT_GAP;
+    let _: dxpdf::dimension::Pt = dxpdf::units::MIN_TAB_WIDTH;
+    let _: dxpdf::dimension::Pt = dxpdf::units::TAB_FALLBACK;
+    let _: dxpdf::dimension::Pt = dxpdf::units::UNDERLINE_Y_OFFSET;
 }
 
 #[test]
@@ -253,23 +253,8 @@ fn spacing_fields_and_methods() {
         line: Some(dxpdf::dimension::Twips::new(0)),
         line_rule: LineRule::Auto,
     };
-    let _: f32 = s.before_pt();
-    let _: f32 = s.after_pt();
     let _: Option<LineSpacing> = s.line_spacing();
-    let _: f32 = s.line_pt();
-}
-
-#[test]
-fn indentation_fields_and_methods() {
-    use dxpdf::model::*;
-    let ind = Indentation {
-        left: Some(dxpdf::dimension::Twips::new(0)),
-        right: Some(dxpdf::dimension::Twips::new(0)),
-        first_line: Some(dxpdf::dimension::Twips::new(0)),
-    };
-    let _: f32 = ind.left_pt();
-    let _: f32 = ind.right_pt();
-    let _: f32 = ind.first_line_pt();
+    let _: dxpdf::dimension::Pt = s.line_pt();
 }
 
 #[test]
@@ -747,56 +732,57 @@ fn layouted_page_fields() {
     use dxpdf::render::layout::{DrawCommand, LayoutedPage};
     let page = LayoutedPage {
         commands: vec![],
-        page_width: 612.0,
-        page_height: 792.0,
+        page_width: dxpdf::dimension::Pt::new(612.0),
+        page_height: dxpdf::dimension::Pt::new(792.0),
     };
     let _: &Vec<DrawCommand> = &page.commands;
-    let _: f32 = page.page_width;
-    let _: f32 = page.page_height;
+    let _: dxpdf::dimension::Pt = page.page_width;
+    let _: dxpdf::dimension::Pt = page.page_height;
 }
 
 #[test]
 fn draw_command_variants() {
+    use dxpdf::dimension::Pt;
     use dxpdf::render::layout::DrawCommand;
     let _ = DrawCommand::Text {
-        x: 0.0,
-        y: 0.0,
+        x: Pt::new(0.0),
+        y: Pt::new(0.0),
         text: String::new(),
         font_family: Rc::from("Helvetica"),
-        char_spacing_pt: 0.0,
-        font_size: 12.0,
+        char_spacing_pt: Pt::new(0.0),
+        font_size: Pt::new(12.0),
         bold: false,
         italic: false,
         color: (0, 0, 0),
     };
     let _ = DrawCommand::Underline {
-        x1: 0.0,
-        y1: 0.0,
-        x2: 100.0,
-        y2: 0.0,
+        x1: Pt::new(0.0),
+        y1: Pt::new(0.0),
+        x2: Pt::new(100.0),
+        y2: Pt::new(0.0),
         color: (0, 0, 0),
-        width: 1.0,
+        width: Pt::new(1.0),
     };
     let _ = DrawCommand::Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: 100.0,
-        y2: 100.0,
+        x1: Pt::new(0.0),
+        y1: Pt::new(0.0),
+        x2: Pt::new(100.0),
+        y2: Pt::new(100.0),
         color: (0, 0, 0),
-        width: 1.0,
+        width: Pt::new(1.0),
     };
     let _ = DrawCommand::Rect {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 50.0,
+        x: Pt::new(0.0),
+        y: Pt::new(0.0),
+        width: Pt::new(100.0),
+        height: Pt::new(50.0),
         color: (200, 200, 200),
     };
     let _ = DrawCommand::LinkAnnotation {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 12.0,
+        x: Pt::new(0.0),
+        y: Pt::new(0.0),
+        width: Pt::new(100.0),
+        height: Pt::new(12.0),
         url: "https://example.com".into(),
     };
     // DrawCommand::Image requires an Rc<skia_safe::Image> — skip construction
@@ -823,8 +809,15 @@ fn text_measurer_api() {
     use dxpdf::render::layout::TextMeasurer;
     let m = TextMeasurer::default();
     let _: &skia_safe::FontMgr = m.font_mgr();
-    let _: f32 = m.measure_width("hello", "Helvetica", 12.0, false, false);
-    let _: f32 = m.line_height("Helvetica", 12.0, false, false);
+    let _: dxpdf::dimension::Pt = m.measure_width(
+        "hello",
+        "Helvetica",
+        dxpdf::dimension::Pt::new(12.0),
+        false,
+        false,
+    );
+    let _: dxpdf::dimension::Pt =
+        m.line_height("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
 
     // Also constructible via new()
     let _ = TextMeasurer::new();

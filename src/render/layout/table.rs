@@ -1,3 +1,4 @@
+use crate::dimension::Pt;
 use crate::model::*;
 
 use super::fragment::*;
@@ -10,20 +11,20 @@ use super::{offset_command, DrawCommand, Layouter};
 /// Result of measuring a single cell's content.
 struct MeasuredCell {
     commands: Vec<DrawCommand>,
-    content_height: f32,
-    col_width: f32,
+    content_height: Pt,
+    col_width: Pt,
 }
 
 /// Result of measuring all cells in a row.
 struct MeasuredRow {
     cells: Vec<MeasuredCell>,
-    col_x_positions: Vec<f32>,
-    min_height: f32,
+    col_x_positions: Vec<Pt>,
+    min_height: Pt,
 }
 
 /// A vMerge span tracking entry.
 struct VmergeSpan {
-    total_height: f32,
+    total_height: Pt,
     start_row: usize,
     row_count: usize,
 }
@@ -47,10 +48,10 @@ fn resolve_border(cell_border: Option<BorderDef>, table_border: BorderDef) -> Bo
 fn emit_border(
     commands: &mut Vec<DrawCommand>,
     border: &BorderDef,
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
+    x1: Pt,
+    y1: Pt,
+    x2: Pt,
+    y2: Pt,
 ) {
     if border.is_visible() {
         commands.push(DrawCommand::Line {
@@ -59,7 +60,7 @@ fn emit_border(
             x2,
             y2,
             color: border.color_rgb(),
-            width: f32::from(border.size),
+            width: Pt::from(border.size),
         });
     }
 }
@@ -81,9 +82,9 @@ impl Layouter {
         let content_width = self.config.content_width();
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
-        let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
-            let grid_total: f32 = table.grid_cols.iter().map(|w| f32::from(*w)).sum();
-            let scale = if grid_total > 0.0 {
+        let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
+            let grid_total: Pt = table.grid_cols.iter().map(|w| Pt::from(*w)).sum();
+            let scale = if grid_total > Pt::ZERO {
                 content_width / grid_total
             } else {
                 1.0
@@ -91,7 +92,7 @@ impl Layouter {
             table
                 .grid_cols
                 .iter()
-                .map(|w| f32::from(*w) * scale)
+                .map(|w| Pt::from(*w) * scale)
                 .collect()
         } else {
             vec![content_width / num_cols as f32; num_cols]
@@ -104,15 +105,15 @@ impl Layouter {
             .rows
             .iter()
             .map(|row| {
-                let min_height = row.height.map(f32::from).unwrap_or(0.0);
+                let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
                 let row_height_limit = self.config.content_height();
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
                 let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
                 let mut grid_col_idx = 0;
                 for cell in &row.cells {
-                    let x =
-                        self.config.margin_left + col_widths[..grid_col_idx].iter().sum::<f32>();
+                    let x = self.config.margin_left
+                        + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
                     let w = self.cell_width(grid_col_idx, cell, &col_widths);
                     col_x_positions.push(x);
                     cell_widths_computed.push(w);
@@ -126,16 +127,16 @@ impl Layouter {
                     let cell_x = col_x_positions[col_idx];
                     let margins =
                         resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
-                    let pad_left = f32::from(margins.left);
-                    let pad_right = f32::from(margins.right);
-                    let pad_top = f32::from(margins.top);
-                    let pad_bottom = f32::from(margins.bottom);
-                    let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
+                    let pad_left = Pt::from(margins.left);
+                    let pad_right = Pt::from(margins.right);
+                    let pad_top = Pt::from(margins.top);
+                    let pad_bottom = Pt::from(margins.bottom);
+                    let cell_content_width = (col_width - pad_left - pad_right).max(Pt::new(1.0));
 
                     if cell.is_vmerge_continue() {
                         measured_cells.push(MeasuredCell {
                             commands: Vec::new(),
-                            content_height: 0.0,
+                            content_height: Pt::ZERO,
                             col_width,
                         });
                         continue;
@@ -148,20 +149,20 @@ impl Layouter {
                         if let Block::Paragraph(p) = block {
                             let spacing =
                                 self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
-                            cell_y += spacing.before_pt();
+                            cell_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
 
                             // Floating images in cell
                             for float in &p.floats {
                                 if !self.image_cache.contains(&float.rel_id) {
                                     continue;
                                 }
-                                let fw = f32::from(float.width);
-                                let fh = f32::from(float.height);
+                                let fw = float.width;
+                                let fh = float.height;
                                 let scale = f32::min(
                                     1.0,
                                     f32::min(
-                                        cell_content_width / fw.max(1.0),
-                                        row_height_limit.max(1.0) / fh.max(1.0),
+                                        cell_content_width / fw.max(Pt::new(1.0)),
+                                        row_height_limit.max(Pt::new(1.0)) / fh.max(Pt::new(1.0)),
                                     ),
                                 );
                                 let img_w = fw * scale;
@@ -188,7 +189,7 @@ impl Layouter {
                             );
 
                             if fragments.is_empty() && p.floats.is_empty() {
-                                let default_size = f32::from(self.doc_defaults.font_size);
+                                let default_size = Pt::from(self.doc_defaults.font_size);
                                 let natural = self.measurer.line_height(
                                     &self.doc_defaults.font_family,
                                     default_size,
@@ -196,11 +197,11 @@ impl Layouter {
                                     false,
                                 );
                                 cell_y += resolve_line_height(natural, spacing.line_spacing());
-                                cell_y += spacing.after_pt();
+                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                                 continue;
                             }
                             if fragments.is_empty() {
-                                cell_y += spacing.after_pt();
+                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                                 continue;
                             }
 
@@ -209,7 +210,7 @@ impl Layouter {
                                 &fragments,
                                 cell_x + pad_left,
                                 cell_content_width,
-                                0.0, // no first-line indent in cells
+                                Pt::ZERO, // no first-line indent in cells
                                 p.properties.alignment,
                                 spacing.line_spacing(),
                                 &p.properties.tab_stops,
@@ -224,13 +225,13 @@ impl Layouter {
                                 }
                             }
                             cell_y += measured.total_height;
-                            cell_y += spacing.after_pt();
+                            cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                         }
                     }
 
                     // Ensure minimum bottom padding to account for font descender space
                     // not captured by line height metrics.
-                    let effective_pad_bottom = pad_bottom.max(1.0);
+                    let effective_pad_bottom = pad_bottom.max(Pt::new(1.0));
                     let content_height = cell_y + effective_pad_bottom;
 
                     measured_cells.push(MeasuredCell {
@@ -273,7 +274,7 @@ impl Layouter {
         }
 
         // Compute base row heights from non-merged cells only.
-        let mut row_heights: Vec<f32> = measured_rows
+        let mut row_heights: Vec<Pt> = measured_rows
             .iter()
             .enumerate()
             .map(|(row_idx, mr)| {
@@ -290,8 +291,9 @@ impl Layouter {
 
         // Distribute vMerge span heights across rows
         for span in &vmerge_spans {
-            let current_total: f32 = row_heights[span.start_row..span.start_row + span.row_count]
+            let current_total: Pt = row_heights[span.start_row..span.start_row + span.row_count]
                 .iter()
+                .copied()
                 .sum();
             if span.total_height > current_total {
                 let deficit = span.total_height - current_total;
@@ -415,7 +417,12 @@ impl Layouter {
 
         // After a table, Word applies the document-default paragraph after-spacing.
         if !next_is_table {
-            self.cursor_y += self.doc_defaults.default_spacing.after_pt();
+            self.cursor_y += self
+                .doc_defaults
+                .default_spacing
+                .after
+                .map(Pt::from)
+                .unwrap_or(Pt::ZERO);
         }
     }
 }
