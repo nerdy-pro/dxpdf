@@ -10,7 +10,7 @@ use crate::error::Error;
 #[derive(Debug)]
 pub struct DocDefaults {
     /// Default font size in half-points.
-    pub font_size: Option<u32>,
+    pub font_size: Option<crate::dimension::HalfPoints>,
     /// Default font family.
     pub font_family: Option<String>,
     /// Default paragraph spacing after in twips.
@@ -398,7 +398,10 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             for attr in e.attributes().flatten() {
                                 if local_name(attr.key.as_ref()) == b"val" {
                                     let val = String::from_utf8_lossy(&attr.value);
-                                    font_size = val.parse().ok();
+                                    font_size = val
+                                        .parse::<i64>()
+                                        .ok()
+                                        .map(crate::dimension::HalfPoints::new);
                                 }
                             }
                         }

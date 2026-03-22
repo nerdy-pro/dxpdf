@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::dimension::EighthPoints;
+use crate::dimension::{EighthPoints, HalfPoints};
 use crate::units::{
-    self, twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
-    DEFAULT_FONT_SIZE_HALF_PTS, DEFAULT_TAB_STOP_TWIPS,
+    twips_to_pt, twips_to_pt_signed, DEFAULT_CELL_MARGIN_LR_TWIPS, DEFAULT_FONT_FAMILY,
+    DEFAULT_TAB_STOP_TWIPS,
 };
 
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ pub struct ResolvedRunStyle {
     pub bold: Option<bool>,
     pub italic: Option<bool>,
     pub underline: Option<bool>,
-    pub font_size: Option<u32>,
+    pub font_size: Option<HalfPoints>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
 }
@@ -85,7 +85,7 @@ pub struct Document {
     /// Default tab stop interval in twips.
     pub default_tab_stop: u32,
     /// Default font size in half-points.
-    pub default_font_size: u32,
+    pub default_font_size: HalfPoints,
     /// Default font family.
     pub default_font_family: Rc<str>,
     /// Default paragraph spacing.
@@ -114,7 +114,7 @@ impl Default for Document {
             blocks: Vec::new(),
             final_section: None,
             default_tab_stop: DEFAULT_TAB_STOP_TWIPS,
-            default_font_size: DEFAULT_FONT_SIZE_HALF_PTS,
+            default_font_size: Self::DEFAULT_FONT_SIZE,
             default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
             default_spacing: Spacing::default(),
             default_cell_margins: CellMargins::default(),
@@ -133,6 +133,10 @@ impl Default for Document {
 }
 
 impl Document {
+    /// Default font size: 24 half-points (12pt).
+    /// Matches Microsoft Word's default; not mandated by the OOXML spec.
+    pub const DEFAULT_FONT_SIZE: HalfPoints = HalfPoints::new(24);
+
     /// Collect all unique font families referenced in this document.
     pub fn font_families(&self) -> Vec<Rc<str>> {
         use std::collections::HashSet;
@@ -469,8 +473,8 @@ pub struct RunProperties {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
-    /// Font size in half-points (OOXML native for w:sz).
-    pub font_size: Option<u32>,
+    /// Font size in half-points (OOXML native for `w:sz`).
+    pub font_size: Option<HalfPoints>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
     /// Character spacing adjustment in twips (positive = expand, negative = condense).
@@ -662,18 +666,6 @@ impl Color {
     }
 }
 
-impl RunProperties {
-    pub fn font_size_pt(&self) -> f32 {
-        self.font_size
-            .map(|s| s as f32 / units::HALF_POINTS_PER_POINT)
-            .unwrap_or(DEFAULT_FONT_SIZE_HALF_PTS as f32 / units::HALF_POINTS_PER_POINT)
-    }
-
-    pub fn font_size_pt_with_default(&self, default_half_pts: u32) -> f32 {
-        self.font_size.unwrap_or(default_half_pts) as f32 / units::HALF_POINTS_PER_POINT
-    }
-}
-
 impl Spacing {
     pub fn before_pt(&self) -> f32 {
         self.before.map(twips_to_pt).unwrap_or(0.0)
@@ -721,7 +713,7 @@ impl Indentation {
 }
 
 // Re-export emu_to_pt from units for backward compatibility
-pub use units::emu_to_pt;
+pub use crate::units::emu_to_pt;
 
 #[cfg(test)]
 mod tests {
@@ -748,17 +740,15 @@ mod tests {
 
     #[test]
     fn font_size_conversion() {
-        let rp = RunProperties {
-            font_size: Some(24),
-            ..Default::default()
-        };
-        assert_eq!(rp.font_size_pt(), 12.0);
+        use crate::dimension::{HalfPoints, Pt};
+        let hp = HalfPoints::new(24);
+        assert_eq!(Pt::from(hp).raw(), 12.0);
     }
 
     #[test]
     fn default_font_size() {
-        let rp = RunProperties::default();
-        assert_eq!(rp.font_size_pt(), 12.0);
+        use crate::dimension::Pt;
+        assert_eq!(Pt::from(Document::DEFAULT_FONT_SIZE).raw(), 12.0);
     }
 
     #[test]

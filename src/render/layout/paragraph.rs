@@ -61,7 +61,7 @@ impl Layouter {
 
         if para.runs.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
-            let default_size = self.doc_defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+            let default_size = crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
             let natural_height = self.measurer.line_height(
                 &self.doc_defaults.font_family,
                 default_size,
@@ -152,7 +152,7 @@ impl Layouter {
             if !first_line_painted {
                 if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
                     let font = &self.doc_defaults.font_family;
-                    let fs = self.doc_defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+                    let fs = crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
                     self.current_page.commands.push(DrawCommand::Text {
                         x: lx,
                         y: self.cursor_y,

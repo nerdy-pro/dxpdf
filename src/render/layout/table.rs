@@ -187,8 +187,8 @@ impl Layouter {
                             );
 
                             if fragments.is_empty() && p.floats.is_empty() {
-                                let default_size = self.doc_defaults.font_size_half_pts as f32
-                                    / HALF_POINTS_PER_POINT;
+                                let default_size =
+                                    crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
                                 let natural = self.measurer.line_height(
                                     &self.doc_defaults.font_family,
                                     default_size,

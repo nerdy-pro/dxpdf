@@ -127,7 +127,10 @@ pub fn handle_empty_element(
                 }
                 b"sz" => {
                     if let Some(val) = get_attr(e, b"val")? {
-                        props.font_size = val.parse::<u32>().ok();
+                        props.font_size = val
+                            .parse::<i64>()
+                            .ok()
+                            .map(crate::dimension::HalfPoints::new);
                     }
                 }
                 b"rFonts" => {

@@ -99,7 +99,7 @@ fn document_default_and_fields() {
     let _: &Vec<dxpdf::model::Block> = &doc.blocks;
     let _: &Option<dxpdf::model::SectionProperties> = &doc.final_section;
     let _: u32 = doc.default_tab_stop;
-    let _: u32 = doc.default_font_size;
+    let _: dxpdf::dimension::HalfPoints = doc.default_font_size;
     let _: &Rc<str> = &doc.default_font_family;
     let _: &dxpdf::model::Spacing = &doc.default_spacing;
     let _: &dxpdf::model::CellMargins = &doc.default_cell_margins;
@@ -218,16 +218,13 @@ fn run_properties_fields_and_methods() {
     let _: bool = rp.bold;
     let _: bool = rp.italic;
     let _: bool = rp.underline;
-    let _: &Option<u32> = &rp.font_size;
+    let _: &Option<dxpdf::dimension::HalfPoints> = &rp.font_size;
     let _: &Option<Rc<str>> = &rp.font_family;
     let _: &Option<Color> = &rp.color;
     let _: &Option<i32> = &rp.char_spacing;
     let _: &Option<Color> = &rp.shading;
     let _: &Option<VertAlign> = &rp.vert_align;
     let _: &Option<String> = &rp.style_id;
-
-    let _: f32 = rp.font_size_pt();
-    let _: f32 = rp.font_size_pt_with_default(24);
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +248,7 @@ fn resolved_run_style_fields() {
     let _: &Option<bool> = &s.bold;
     let _: &Option<bool> = &s.italic;
     let _: &Option<bool> = &s.underline;
-    let _: &Option<u32> = &s.font_size;
+    let _: &Option<dxpdf::dimension::HalfPoints> = &s.font_size;
     let _: &Option<Rc<str>> = &s.font_family;
     let _: &Option<Color> = &s.color;
 }

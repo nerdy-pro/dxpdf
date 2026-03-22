@@ -35,7 +35,7 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
     let mut bold = None;
     let mut italic = None;
     let mut underline = None;
-    let mut font_size = None;
+    let mut font_size: Option<crate::dimension::HalfPoints> = None;
     let mut font_family: Option<Rc<str>> = None;
     let mut color = None;
 
@@ -200,7 +200,8 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                         b"u" => underline = Some(true),
                         b"sz" => {
                             if let Some(v) = attr_val(e, b"val") {
-                                font_size = v.parse().ok();
+                                font_size =
+                                    v.parse::<i64>().ok().map(crate::dimension::HalfPoints::new);
                             }
                         }
                         b"rFonts" => {

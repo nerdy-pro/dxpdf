@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use super::ImageCache;
+use crate::dimension::{HalfPoints, Pt};
 use crate::model::*;
 use crate::units::*;
 
@@ -9,7 +10,7 @@ use super::DrawCommand;
 
 /// Document-level defaults for layout.
 pub struct DocDefaultsLayout {
-    pub font_size_half_pts: u32,
+    pub font_size: HalfPoints,
     pub font_family: Rc<str>,
     pub default_spacing: Spacing,
     pub default_cell_margins: CellMargins,
@@ -23,7 +24,7 @@ pub struct DocDefaultsLayout {
 impl DocDefaultsLayout {
     pub fn from_document(doc: &crate::model::Document) -> Self {
         Self {
-            font_size_half_pts: doc.default_font_size,
+            font_size: doc.default_font_size,
             font_family: Rc::clone(&doc.default_font_family),
             default_spacing: doc.default_spacing,
             default_cell_margins: doc.default_cell_margins,
@@ -148,9 +149,8 @@ pub fn collect_fragments_with_fields(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let base_font_size = tr
-                    .properties
-                    .font_size_pt_with_default(defaults.font_size_half_pts);
+                let base_font_size =
+                    Pt::from(tr.properties.font_size.unwrap_or(defaults.font_size)).raw();
                 let bold = tr.properties.bold;
                 let italic = tr.properties.italic;
                 let char_spacing_pt = tr
@@ -224,12 +224,12 @@ pub fn collect_fragments_with_fields(
                 });
             }
             Inline::Tab => {
-                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+                let default_size = Pt::from(defaults.font_size).raw();
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+                let default_size = Pt::from(defaults.font_size).raw();
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
@@ -245,7 +245,7 @@ pub fn collect_fragments_with_fields(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = rp.font_size_pt_with_default(defaults.font_size_half_pts);
+                let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size)).raw();
                 let bold = rp.bold;
                 let italic = rp.italic;
                 let char_spacing_pt = rp.char_spacing.map(twips_to_pt_signed).unwrap_or(0.0);

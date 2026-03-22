@@ -59,8 +59,14 @@ fn parse_font_size_and_color() {
     let Inline::TextRun(tr) = &p.runs[0] else {
         panic!()
     };
-    assert_eq!(tr.properties.font_size, Some(28));
-    assert_eq!(tr.properties.font_size_pt(), 14.0);
+    assert_eq!(
+        tr.properties.font_size,
+        Some(crate::dimension::HalfPoints::new(28))
+    );
+    assert_eq!(
+        crate::dimension::Pt::from(tr.properties.font_size.unwrap()).raw(),
+        14.0
+    );
     assert_eq!(tr.properties.color, Some(Color { r: 255, g: 0, b: 0 }));
 }
 
