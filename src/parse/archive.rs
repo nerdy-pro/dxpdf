@@ -10,15 +10,15 @@ use crate::error::Error;
 #[derive(Debug)]
 pub struct DocDefaults {
     /// Default font size in half-points.
-    pub font_size: Option<u32>,
+    pub font_size: Option<crate::dimension::HalfPoints>,
     /// Default font family.
     pub font_family: Option<String>,
     /// Default paragraph spacing after in twips.
-    pub spacing_after: Option<u32>,
+    pub spacing_after: Option<crate::dimension::Twips>,
     /// Default paragraph spacing before in twips.
-    pub spacing_before: Option<u32>,
+    pub spacing_before: Option<crate::dimension::Twips>,
     /// Default line spacing in twips.
-    pub spacing_line: Option<u32>,
+    pub spacing_line: Option<crate::dimension::Twips>,
     /// Default line spacing rule.
     pub spacing_line_rule: Option<crate::model::LineRule>,
     /// Default table cell margins from the table grid style.
@@ -38,7 +38,7 @@ pub struct DocxContents {
     /// Path (relative to `word/`, e.g. "media/image1.png") -> raw bytes.
     pub media_files: HashMap<String, Vec<u8>>,
     /// Default tab stop interval in twips (from `word/settings.xml`).
-    pub default_tab_stop: Option<u32>,
+    pub default_tab_stop: Option<crate::dimension::Twips>,
     /// Document-wide default run properties from `word/styles.xml`.
     pub doc_defaults: Option<DocDefaults>,
     /// Header/footer XML contents keyed by relationship ID.
@@ -398,7 +398,10 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             for attr in e.attributes().flatten() {
                                 if local_name(attr.key.as_ref()) == b"val" {
                                     let val = String::from_utf8_lossy(&attr.value);
-                                    font_size = val.parse().ok();
+                                    font_size = val
+                                        .parse::<i64>()
+                                        .ok()
+                                        .map(crate::dimension::HalfPoints::new);
                                 }
                             }
                         }
@@ -421,9 +424,18 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         let key = local_name(attr.key.as_ref());
                         let val = String::from_utf8_lossy(&attr.value);
                         match key {
-                            b"after" => spacing_after = val.parse().ok(),
-                            b"before" => spacing_before = val.parse().ok(),
-                            b"line" => spacing_line = val.parse().ok(),
+                            b"after" => {
+                                spacing_after =
+                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
+                            b"before" => {
+                                spacing_before =
+                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
+                            b"line" => {
+                                spacing_line =
+                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
                             b"lineRule" => {
                                 spacing_line_rule = match val.as_ref() {
                                     "auto" => Some(crate::model::LineRule::Auto),
@@ -446,11 +458,12 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         .map(|a| a.value.as_ref() == b"dxa")
                         .unwrap_or(false);
                     if is_dxa {
-                        let w_val: Option<u32> = e
+                        let w_val: Option<crate::dimension::Twips> = e
                             .attributes()
                             .flatten()
                             .find(|a| local_name(a.key.as_ref()) == b"w")
-                            .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok());
+                            .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
+                            .map(crate::dimension::Twips::new);
                         if let Some(val) = w_val {
                             let m =
                                 cell_margins.get_or_insert(crate::model::CellMargins::default());
@@ -480,12 +493,13 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         "dotted" => crate::model::BorderStyle::Dotted,
                         _ => crate::model::BorderStyle::Single,
                     };
-                    let size: u32 = e
+                    let size = e
                         .attributes()
                         .flatten()
                         .find(|a| local_name(a.key.as_ref()) == b"sz")
-                        .and_then(|a| String::from_utf8_lossy(&a.value).parse().ok())
-                        .unwrap_or(4);
+                        .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
+                        .map(crate::dimension::EighthPoints::new)
+                        .unwrap_or(crate::model::BorderDef::DEFAULT_SIZE);
                     let color_str: String = e
                         .attributes()
                         .flatten()
@@ -517,9 +531,16 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         let key = local_name(attr.key.as_ref());
                         let val = String::from_utf8_lossy(&attr.value);
                         match key {
-                            b"after" => sp.after = val.parse().ok(),
-                            b"before" => sp.before = val.parse().ok(),
-                            b"line" => sp.line = val.parse().ok(),
+                            b"after" => {
+                                sp.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
+                            b"before" => {
+                                sp.before =
+                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
+                            b"line" => {
+                                sp.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                            }
                             _ => {}
                         }
                     }
@@ -558,7 +579,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
 }
 
 /// Parse `word/settings.xml` to find `w:defaultTabStop` value.
-fn parse_default_tab_stop(xml: &str) -> Option<u32> {
+fn parse_default_tab_stop(xml: &str) -> Option<crate::dimension::Twips> {
     let mut reader = Reader::from_str(xml);
     loop {
         match reader.read_event() {
@@ -571,7 +592,7 @@ fn parse_default_tab_stop(xml: &str) -> Option<u32> {
                         let key = local_name(attr.key.as_ref());
                         if key == b"val" {
                             let val = String::from_utf8_lossy(&attr.value);
-                            return val.parse().ok();
+                            return val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                         }
                     }
                 }

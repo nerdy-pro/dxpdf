@@ -71,6 +71,7 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         if let Some(sl) = dd.spacing_line {
             document.default_spacing.line = Some(sl);
         }
+
         if let Some(slr) = dd.spacing_line_rule {
             document.default_spacing.line_rule = slr;
         }

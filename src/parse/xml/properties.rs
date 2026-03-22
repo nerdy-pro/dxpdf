@@ -1,5 +1,6 @@
 use log::warn;
 
+use crate::dimension::EighthPoints;
 use crate::error::Error;
 use crate::model::*;
 use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
@@ -20,8 +21,9 @@ pub fn parse_border_def(e: &quick_xml::events::BytesStart<'_>) -> Result<BorderD
     };
 
     let size = get_attr(e, b"sz")?
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(4);
+        .and_then(|v| v.parse::<i64>().ok())
+        .map(EighthPoints::new)
+        .unwrap_or(BorderDef::DEFAULT_SIZE);
 
     let color_str = get_attr(e, b"color")?.unwrap_or_default();
     let color = if color_str == "auto" || color_str.is_empty() {
@@ -69,11 +71,13 @@ pub fn apply_cell_border(
 }
 
 /// Parse a margin value from an element like `<w:top w:w="0" w:type="dxa"/>`.
-fn parse_margin_value(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, Error> {
+fn parse_margin_value(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<crate::dimension::Twips>, Error> {
     let w_type = get_attr(e, b"type")?.unwrap_or_default();
     if w_type == "dxa" {
         if let Some(val) = get_attr(e, b"w")? {
-            return Ok(val.parse::<u32>().ok());
+            return Ok(val.parse::<i64>().ok().map(crate::dimension::Twips::new));
         }
     }
     Ok(None)
@@ -125,7 +129,10 @@ pub fn handle_empty_element(
                 }
                 b"sz" => {
                     if let Some(val) = get_attr(e, b"val")? {
-                        props.font_size = val.parse::<u32>().ok();
+                        props.font_size = val
+                            .parse::<i64>()
+                            .ok()
+                            .map(crate::dimension::HalfPoints::new);
                     }
                 }
                 b"rFonts" => {
@@ -150,7 +157,8 @@ pub fn handle_empty_element(
                 b"spacing" => {
                     // w:spacing in rPr = character spacing (in twips)
                     if let Some(val) = get_attr(e, b"val")? {
-                        props.char_spacing = val.parse::<i32>().ok();
+                        props.char_spacing =
+                            val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                 }
                 b"strike" | b"dstrike" => {
@@ -215,13 +223,13 @@ pub fn handle_empty_element(
                 b"spacing" => {
                     let mut spacing = Spacing::default();
                     if let Some(val) = get_attr(e, b"before")? {
-                        spacing.before = val.parse().ok();
+                        spacing.before = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"after")? {
-                        spacing.after = val.parse().ok();
+                        spacing.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"line")? {
-                        spacing.line = val.parse().ok();
+                        spacing.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"lineRule")? {
                         spacing.line_rule = match val.as_str() {
@@ -236,17 +244,18 @@ pub fn handle_empty_element(
                 b"ind" => {
                     let mut indent = Indentation::default();
                     if let Some(val) = get_attr(e, b"left")? {
-                        indent.left = val.parse().ok();
+                        indent.left = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"right")? {
-                        indent.right = val.parse().ok();
+                        indent.right = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"firstLine")? {
-                        indent.first_line = val.parse().ok();
+                        indent.first_line =
+                            val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                     }
                     if let Some(val) = get_attr(e, b"hanging")? {
-                        if let Ok(v) = val.parse::<i32>() {
-                            indent.first_line = Some(-v);
+                        if let Ok(v) = val.parse::<i64>() {
+                            indent.first_line = Some(crate::dimension::Twips::new(-v));
                         }
                     }
                     props.indentation = Some(indent);
@@ -261,9 +270,9 @@ pub fn handle_empty_element(
                             "clear" => None,
                             _ => Some(TabStopType::Left),
                         };
-                        if let (Some(st), Ok(p)) = (stop_type, pos.parse::<u32>()) {
+                        if let (Some(st), Ok(p)) = (stop_type, pos.parse::<i64>()) {
                             props.tab_stops.push(TabStop {
-                                position: p,
+                                position: crate::dimension::Twips::new(p),
                                 stop_type: st,
                             });
                         }
@@ -311,7 +320,7 @@ pub fn handle_empty_element(
         ParseState::InTableRow { ref mut height, .. } => {
             if local == b"trHeight" {
                 if let Some(val) = get_attr(e, b"val")? {
-                    *height = val.parse::<u32>().ok();
+                    *height = val.parse::<i64>().ok().map(crate::dimension::Twips::new);
                 }
             }
         }
@@ -332,8 +341,8 @@ pub fn handle_empty_element(
                 apply_margin(default_cell_margins, local, e)?;
             } else if local == b"gridCol" {
                 if let Some(val) = get_attr(e, b"w")? {
-                    if let Ok(w) = val.parse::<u32>() {
-                        grid_cols.push(w);
+                    if let Ok(w) = val.parse::<i64>() {
+                        grid_cols.push(crate::dimension::Twips::new(w));
                     }
                 }
             }
@@ -363,8 +372,8 @@ pub fn handle_empty_element(
                     let w_type = get_attr(e, b"type")?.unwrap_or_default();
                     if w_type == WIDTH_TYPE_DXA {
                         if let Some(val) = get_attr(e, b"w")? {
-                            if let Ok(w) = val.parse::<u32>() {
-                                *width = Some(w);
+                            if let Ok(w) = val.parse::<i64>() {
+                                *width = Some(crate::dimension::Twips::new(w));
                             }
                         }
                     }

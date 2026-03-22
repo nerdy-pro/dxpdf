@@ -1,16 +1,14 @@
 # Benchmark Results
 
-Conversion benchmarks for `dxpdf` using the test document:
-**Protokoll test DIN VDE 0100-600 Erstinbetriebnahme.docx**
+Conversion benchmarks for `dxpdf` using a private 2-page test document with tables, images, and section breaks.
 
 ## Test Document
 
 | Property | Value |
 |---|---|
-| Input file | Protokoll test DIN VDE 0100-600 Erstinbetriebnahme.docx |
 | Input size | 41 KB |
 | Output size | 572 KB |
-| Pages | 3 (2 portrait A4 + 1 landscape A4) |
+| Pages | 2 (portrait + landscape A4) |
 | Tables | 11 |
 | Images | 2 PNG |
 | Sections | 2 (portrait → landscape) |
@@ -42,6 +40,7 @@ Conversion benchmarks for `dxpdf` using the test document:
 | 2026-03-21 | v0.1.3 | 114.2 ms ± 0.6 ms | 113.3 ms | 115.3 ms | 19.3 MB | +char styles, paragraph borders, font-first resolution, field codes, 104 unit tests |
 | 2026-03-21 | cache | 85.2 ms ± 0.9 ms | 83.8 ms | 86.7 ms | 19.0 MB | +typeface cache (thread-local HashMap), 25% faster on macOS, much larger gains on Linux |
 | 2026-03-21 | images | 53.1 ms ± 1.0 ms | 51.5 ms | 55.0 ms | 19.0 MB | Shared FontMgr, upfront image decode into Rc\<Image\>, ImageStore in Document, immutable ImageCache |
+| 2026-03-22 | dimensions | 47.8 ms ± 2.1 ms | 46.0 ms | 56.0 ms | 20.0 MB | Type-safe dimension system (Twips, HalfPoints, EighthPoints, Emu, Pt), LayoutConfig internalized, 160 unit tests |
 
 ### Methodology
 

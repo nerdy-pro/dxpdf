@@ -1,15 +1,17 @@
 use std::rc::Rc;
 
 use super::ImageCache;
+use crate::dimension::{HalfPoints, Pt};
+use crate::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
-use crate::units::*;
+use crate::units::{MIN_TAB_WIDTH, TAB_FALLBACK, UNDERLINE_Y_OFFSET};
 
 use super::measurer::TextMeasurer;
 use super::DrawCommand;
 
 /// Document-level defaults for layout.
 pub struct DocDefaultsLayout {
-    pub font_size_half_pts: u32,
+    pub font_size: HalfPoints,
     pub font_family: Rc<str>,
     pub default_spacing: Spacing,
     pub default_cell_margins: CellMargins,
@@ -23,7 +25,7 @@ pub struct DocDefaultsLayout {
 impl DocDefaultsLayout {
     pub fn from_document(doc: &crate::model::Document) -> Self {
         Self {
-            font_size_half_pts: doc.default_font_size,
+            font_size: doc.default_font_size,
             font_family: Rc::clone(&doc.default_font_family),
             default_spacing: doc.default_spacing,
             default_cell_margins: doc.default_cell_margins,
@@ -41,50 +43,49 @@ pub enum Fragment {
     Text {
         text: String,
         font_family: Rc<str>,
-        font_size: f32,
+        font_size: Pt,
         bold: bool,
         italic: bool,
         underline: bool,
         color: Option<Color>,
         shading: Option<Color>,
         /// Character spacing in points (positive = expand).
-        char_spacing_pt: f32,
-        measured_width: f32,
-        measured_height: f32,
+        char_spacing_pt: Pt,
+        measured_width: Pt,
+        measured_height: Pt,
         /// Hyperlink URL, if this text is part of a link.
         hyperlink_url: Option<String>,
         /// Baseline offset in points (negative = up for superscript, positive = down for subscript).
-        baseline_offset: f32,
+        baseline_offset: Pt,
     },
     Image {
-        width: f32,
-        height: f32,
+        size: PtSize,
         rel_id: String,
     },
     Tab {
-        line_height: f32,
+        line_height: Pt,
     },
     LineBreak {
-        line_height: f32,
+        line_height: Pt,
     },
 }
 
 impl Fragment {
-    pub fn width(&self) -> f32 {
+    pub fn width(&self) -> Pt {
         match self {
             Fragment::Text { measured_width, .. } => *measured_width,
-            Fragment::Image { width, .. } => *width,
-            Fragment::Tab { .. } => MIN_TAB_WIDTH_PT,
-            Fragment::LineBreak { .. } => 0.0,
+            Fragment::Image { size, .. } => size.width,
+            Fragment::Tab { .. } => MIN_TAB_WIDTH,
+            Fragment::LineBreak { .. } => Pt::ZERO,
         }
     }
 
-    pub fn height(&self) -> f32 {
+    pub fn height(&self) -> Pt {
         match self {
             Fragment::Text {
                 measured_height, ..
             } => *measured_height,
-            Fragment::Image { height, .. } => *height,
+            Fragment::Image { size, .. } => size.height,
             Fragment::Tab { line_height } | Fragment::LineBreak { line_height } => *line_height,
         }
     }
@@ -96,7 +97,7 @@ impl Fragment {
 
 /// Compute underline stroke width based on font size and weight.
 /// Bold text gets a thicker underline proportional to the font size.
-pub fn underline_width(font_size: f32, bold: bool) -> f32 {
+pub fn underline_width(font_size: Pt, bold: bool) -> Pt {
     let base = font_size * 0.05; // ~5% of font size
     if bold {
         base * 1.5
@@ -113,8 +114,8 @@ pub struct FieldContext {
 
 pub fn collect_fragments(
     runs: &[Inline],
-    content_width: f32,
-    content_height: f32,
+    content_width: Pt,
+    content_height: Pt,
     defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
@@ -132,8 +133,8 @@ pub fn collect_fragments(
 
 pub fn collect_fragments_with_fields(
     runs: &[Inline],
-    content_width: f32,
-    content_height: f32,
+    content_width: Pt,
+    content_height: Pt,
     defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     field_ctx: Option<&FieldContext>,
@@ -148,16 +149,11 @@ pub fn collect_fragments_with_fields(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let base_font_size = tr
-                    .properties
-                    .font_size_pt_with_default(defaults.font_size_half_pts);
+                let base_font_size =
+                    Pt::from(tr.properties.font_size.unwrap_or(defaults.font_size));
                 let bold = tr.properties.bold;
                 let italic = tr.properties.italic;
-                let char_spacing_pt = tr
-                    .properties
-                    .char_spacing
-                    .map(twips_to_pt_signed)
-                    .unwrap_or(0.0);
+                let char_spacing_pt = tr.properties.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
 
                 // Super/subscript: reduce font size and compute baseline offset
                 let (font_size, baseline_offset) = match tr.properties.vert_align {
@@ -173,7 +169,7 @@ pub fn collect_fragments_with_fields(
                         let offset = base_font_size * 0.08;
                         (reduced, offset)
                     }
-                    None => (base_font_size, 0.0),
+                    None => (base_font_size, Pt::ZERO),
                 };
 
                 let line_height = measurer.line_height(&font_family, base_font_size, bold, italic);
@@ -210,26 +206,27 @@ pub fn collect_fragments_with_fields(
                 }
             }
             Inline::Image(img) if image_cache.contains(&img.rel_id) => {
+                let w = img.size.width;
+                let h = img.size.height;
                 let scale = f32::min(
                     1.0,
                     f32::min(
-                        content_width / img.width_pt.max(1.0),
-                        content_height / img.height_pt.max(1.0),
+                        content_width / w.max(Pt::new(1.0)),
+                        content_height / h.max(Pt::new(1.0)),
                     ),
                 );
                 fragments.push(Fragment::Image {
-                    width: img.width_pt * scale,
-                    height: img.height_pt * scale,
+                    size: PtSize::new(w * scale, h * scale),
                     rel_id: img.rel_id.to_string(),
                 });
             }
             Inline::Tab => {
-                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+                let default_size = Pt::from(defaults.font_size);
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = defaults.font_size_half_pts as f32 / HALF_POINTS_PER_POINT;
+                let default_size = Pt::from(defaults.font_size);
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
@@ -245,10 +242,10 @@ pub fn collect_fragments_with_fields(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = rp.font_size_pt_with_default(defaults.font_size_half_pts);
+                let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size));
                 let bold = rp.bold;
                 let italic = rp.italic;
-                let char_spacing_pt = rp.char_spacing.map(twips_to_pt_signed).unwrap_or(0.0);
+                let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
                 let w = measurer.measure_width(&text, &font_family, font_size, bold, italic);
                 let char_count = text.chars().count() as f32;
                 let measured_width = w + char_spacing_pt * char_count;
@@ -266,7 +263,7 @@ pub fn collect_fragments_with_fields(
                     measured_width,
                     measured_height: lh,
                     hyperlink_url: None,
-                    baseline_offset: 0.0,
+                    baseline_offset: Pt::ZERO,
                 });
             }
         }
@@ -275,18 +272,18 @@ pub fn collect_fragments_with_fields(
 }
 
 /// Find the next tab stop position (in points, relative to paragraph left edge).
-pub fn find_next_tab_stop(current_x: f32, custom_stops: &[TabStop], default_interval: f32) -> f32 {
+pub fn find_next_tab_stop(current_x: Pt, custom_stops: &[TabStop], default_interval: Pt) -> Pt {
     for stop in custom_stops {
-        let pos = stop.position_pt();
-        if pos > current_x + 1.0 {
+        let pos = Pt::from(stop.position);
+        if pos > current_x + Pt::new(1.0) {
             return pos;
         }
     }
-    if default_interval > 0.0 {
+    if default_interval > Pt::ZERO {
         let next_multiple = ((current_x / default_interval).floor() + 1.0) * default_interval;
         return next_multiple;
     }
-    current_x + TAB_FALLBACK_PT
+    current_x + TAB_FALLBACK
 }
 
 /// Split text into segments that can break at spaces and after hyphens.
@@ -324,7 +321,7 @@ fn split_words_and_spaces(text: &str) -> Vec<&str> {
 }
 
 /// Resolve line height from fragment height and spacing rule.
-pub fn resolve_line_height(frag_height: f32, spacing: Option<LineSpacing>) -> f32 {
+pub fn resolve_line_height(frag_height: Pt, spacing: Option<LineSpacing>) -> Pt {
     match spacing {
         Some(LineSpacing::Multiplier(m)) => frag_height * m,
         Some(LineSpacing::Fixed(pt)) => pt,
@@ -333,17 +330,17 @@ pub fn resolve_line_height(frag_height: f32, spacing: Option<LineSpacing>) -> f3
     }
 }
 
-pub fn measure_fragments(fragments: &[Fragment]) -> f32 {
+pub fn measure_fragments(fragments: &[Fragment]) -> Pt {
     fragments.iter().map(|f| f.width()).sum()
 }
 
 /// Find how many fragments fit within the available width.
 /// Trailing space fragments at a line break are included in the count
 /// but not in the returned width.
-pub fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f32) {
-    let mut total_width = 0.0;
+pub fn fit_fragments(fragments: &[Fragment], available_width: Pt) -> (usize, Pt) {
+    let mut total_width = Pt::ZERO;
     let mut last_break_point = 0;
-    let mut width_at_break = 0.0;
+    let mut width_at_break = Pt::ZERO;
 
     for (i, frag) in fragments.iter().enumerate() {
         if frag.is_line_break() {
@@ -382,13 +379,13 @@ pub fn fit_fragments(fragments: &[Fragment], available_width: f32) -> (usize, f3
 /// The y-coordinates in commands are relative: 0.0 = top of the paragraph/cell content.
 pub struct MeasuredLine {
     pub commands: Vec<DrawCommand>,
-    pub height: f32,
+    pub height: Pt,
 }
 
 /// Result of measuring paragraph text content (lines only, no spacing or floats).
 pub struct MeasuredLines {
     pub lines: Vec<MeasuredLine>,
-    pub total_height: f32,
+    pub total_height: Pt,
 }
 
 /// Measure paragraph runs into lines with relative-positioned draw commands.
@@ -401,17 +398,17 @@ pub struct MeasuredLines {
 /// All y-coordinates in the returned commands are relative to 0.0.
 pub fn measure_lines(
     fragments: &[Fragment],
-    x_origin: f32,
-    available_width: f32,
-    first_line_offset: f32,
+    x_origin: Pt,
+    available_width: Pt,
+    first_line_offset: Pt,
     alignment: Option<Alignment>,
     line_spacing: Option<LineSpacing>,
     tab_stops: &[TabStop],
-    default_tab_stop_pt: f32,
+    default_tab_stop_pt: Pt,
     image_cache: &super::ImageCache,
 ) -> MeasuredLines {
     let mut lines = Vec::new();
-    let mut cursor_y = 0.0_f32;
+    let mut cursor_y = Pt::ZERO;
     let mut line_start = 0;
     let mut first_line = true;
 
@@ -432,8 +429,12 @@ pub fn measure_lines(
             }
         }
 
-        let fl_offset = if first_line { first_line_offset } else { 0.0 };
-        let line_avail = (available_width - fl_offset).max(0.0);
+        let fl_offset = if first_line {
+            first_line_offset
+        } else {
+            Pt::ZERO
+        };
+        let line_avail = (available_width - fl_offset).max(Pt::ZERO);
 
         let (line_end, _) = fit_fragments(&fragments[line_start..], line_avail);
         let actual_end = line_start + line_end.max(1);
@@ -441,18 +442,18 @@ pub fn measure_lines(
         let frag_height = fragments[line_start..actual_end]
             .iter()
             .map(|f| f.height())
-            .fold(0.0_f32, f32::max);
+            .fold(Pt::ZERO, Pt::max);
         let line_height = resolve_line_height(frag_height, line_spacing);
 
         let used_width = if actual_end > line_start {
             measure_fragments(&fragments[line_start..actual_end])
         } else {
-            0.0
+            Pt::ZERO
         };
         let x_offset = match alignment {
             Some(Alignment::Center) => (line_avail - used_width) / 2.0,
             Some(Alignment::Right) => line_avail - used_width,
-            _ => 0.0,
+            _ => Pt::ZERO,
         };
 
         cursor_y += line_height;
@@ -479,16 +480,17 @@ pub fn measure_lines(
                     let c = color.map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0));
                     if let Some(bg) = shading {
                         commands.push(DrawCommand::Rect {
-                            x,
-                            y: cursor_y - line_height,
-                            width: *measured_width,
-                            height: line_height,
+                            rect: PtRect::from_xywh(
+                                x,
+                                cursor_y - line_height,
+                                *measured_width,
+                                line_height,
+                            ),
                             color: (bg.r, bg.g, bg.b),
                         });
                     }
                     commands.push(DrawCommand::Text {
-                        x,
-                        y: cursor_y + baseline_offset,
+                        position: PtOffset::new(x, cursor_y + *baseline_offset),
                         text: text.clone(),
                         font_family: font_family.clone(),
                         char_spacing_pt: *char_spacing_pt,
@@ -500,39 +502,34 @@ pub fn measure_lines(
                     if *underline {
                         let uw = underline_width(*font_size, *bold);
                         commands.push(DrawCommand::Underline {
-                            x1: x,
-                            y1: cursor_y + UNDERLINE_Y_OFFSET,
-                            x2: x + measured_width,
-                            y2: cursor_y + UNDERLINE_Y_OFFSET,
+                            line: PtLineSegment::new(
+                                PtOffset::new(x, cursor_y + UNDERLINE_Y_OFFSET),
+                                PtOffset::new(x + *measured_width, cursor_y + UNDERLINE_Y_OFFSET),
+                            ),
                             color: c,
                             width: uw,
                         });
                     }
                     if let Some(url) = hyperlink_url {
                         commands.push(DrawCommand::LinkAnnotation {
-                            x,
-                            y: cursor_y - line_height,
-                            width: *measured_width,
-                            height: line_height,
+                            rect: PtRect::from_xywh(
+                                x,
+                                cursor_y - line_height,
+                                *measured_width,
+                                line_height,
+                            ),
                             url: url.clone(),
                         });
                     }
-                    x += measured_width;
+                    x += *measured_width;
                 }
-                Fragment::Image {
-                    width,
-                    height,
-                    rel_id,
-                } => {
+                Fragment::Image { size, rel_id } => {
                     let image = image_cache.get(rel_id);
                     commands.push(DrawCommand::Image {
-                        x,
-                        y: cursor_y - height,
-                        width: *width,
-                        height: *height,
+                        rect: PtRect::from_xywh(x, cursor_y - size.height, size.width, size.height),
                         image,
                     });
-                    x += width;
+                    x += size.width;
                 }
                 Fragment::Tab { .. } => {
                     let rel_x = x - x_origin;

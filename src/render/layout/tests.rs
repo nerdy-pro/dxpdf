@@ -9,6 +9,18 @@ use super::fragment::{
 use super::header_footer::to_roman;
 use super::ImageCache;
 use super::*;
+use crate::dimension::{Pt, Twips};
+use crate::geometry::{PtOffset, PtSize};
+
+/// Shorthand for Twips::new in tests.
+fn tw(v: i64) -> Twips {
+    Twips::new(v)
+}
+
+/// Shorthand for Pt::new in tests.
+fn pt(v: f32) -> Pt {
+    Pt::new(v)
+}
 
 fn test_font_mgr() -> FontMgr {
     FontMgr::new()
@@ -31,7 +43,7 @@ fn make_doc(blocks: Vec<Block>) -> Document {
 }
 
 fn simple_paragraph(text: &str) -> Block {
-    Block::Paragraph(Paragraph {
+    Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: text.to_string(),
@@ -40,12 +52,12 @@ fn simple_paragraph(text: &str) -> Block {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })
+    }))
 }
 
 fn make_cell(text: &str) -> TableCell {
     TableCell {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties::default(),
             runs: vec![Inline::TextRun(TextRun {
                 text: text.to_string(),
@@ -54,7 +66,7 @@ fn make_cell(text: &str) -> TableCell {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         width: None,
         grid_span: 1,
         vertical_merge: None,
@@ -74,8 +86,13 @@ fn extract_lines(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
     let mut lines = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Line { x1, y1, x2, y2, .. } = cmd {
-                lines.push((*x1, *y1, *x2, *y2));
+            if let DrawCommand::Line { line, .. } = cmd {
+                lines.push((
+                    f32::from(line.start.x),
+                    f32::from(line.start.y),
+                    f32::from(line.end.x),
+                    f32::from(line.end.y),
+                ));
             }
         }
     }
@@ -106,12 +123,12 @@ fn layout_single_paragraph() {
 fn layout_page_break() {
     let mut blocks = Vec::new();
     for i in 0..100 {
-        blocks.push(Block::Paragraph(Paragraph {
+        blocks.push(Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
-                    before: Some(100),
-                    after: Some(100),
-                    line: Some(240),
+                    before: Some(tw(100)),
+                    after: Some(tw(100)),
+                    line: Some(tw(240)),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -123,7 +140,7 @@ fn layout_page_break() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        }));
+        })));
     }
     let doc = make_doc(blocks);
     let pages = layout(&doc, &test_font_mgr());
@@ -136,7 +153,7 @@ fn layout_page_break() {
 
 #[test]
 fn layout_centered_text() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             alignment: Some(Alignment::Center),
             ..Default::default()
@@ -148,18 +165,18 @@ fn layout_centered_text() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
-    if let Some(DrawCommand::Text { x, .. }) = pages[0].commands.first() {
-        assert!(*x > DEFAULT_PAGE_MARGIN_PT);
+    if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
+        assert!(f32::from(position.x) > 72.0);
     }
 }
 
 #[test]
 fn tab_stop_default_interval() {
-    let pos = find_next_tab_stop(10.0, &[], 36.0);
+    let pos = f32::from(find_next_tab_stop(pt(10.0), &[], pt(36.0)));
     assert!((pos - 36.0).abs() < 0.1);
-    let pos = find_next_tab_stop(37.0, &[], 36.0);
+    let pos = f32::from(find_next_tab_stop(pt(37.0), &[], pt(36.0)));
     assert!((pos - 72.0).abs() < 0.1);
 }
 
@@ -167,19 +184,19 @@ fn tab_stop_default_interval() {
 fn tab_stop_custom() {
     let stops = vec![
         TabStop {
-            position: 2880,
+            position: tw(2880),
             stop_type: TabStopType::Left,
         },
         TabStop {
-            position: 5760,
+            position: tw(5760),
             stop_type: TabStopType::Left,
         },
     ];
-    let pos = find_next_tab_stop(10.0, &stops, 36.0);
+    let pos = f32::from(find_next_tab_stop(pt(10.0), &stops, pt(36.0)));
     assert!((pos - 144.0).abs() < 0.1);
-    let pos = find_next_tab_stop(145.0, &stops, 36.0);
+    let pos = f32::from(find_next_tab_stop(pt(145.0), &stops, pt(36.0)));
     assert!((pos - 288.0).abs() < 0.1);
-    let pos = find_next_tab_stop(300.0, &stops, 36.0);
+    let pos = f32::from(find_next_tab_stop(pt(300.0), &stops, pt(36.0)));
     assert!((pos - 324.0).abs() < 0.1);
 }
 
@@ -196,17 +213,17 @@ fn table_borders_simple_2x2() {
                 cells: vec![make_cell("A2"), make_cell("B2")],
             },
         ],
-        grid_cols: vec![2880, 2880],
+        grid_cols: vec![tw(2880), tw(2880)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
-    let margin = DEFAULT_PAGE_MARGIN_PT;
-    let scale = (US_LETTER_WIDTH_PT - 2.0 * DEFAULT_PAGE_MARGIN_PT) / 288.0;
+    let margin = 72.0_f32;
+    let scale = (612.0 - 2.0 * 72.0) / 288.0;
     let col_w = 144.0 * scale;
     let x_left = margin;
     let x_mid = margin + col_w;
@@ -236,17 +253,17 @@ fn table_borders_with_gridspan() {
                 cells: vec![make_cell("A"), make_cell("B"), make_cell("C")],
             },
         ],
-        grid_cols: vec![2000, 2000, 2000],
+        grid_cols: vec![tw(2000), tw(2000), tw(2000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
-    let margin = DEFAULT_PAGE_MARGIN_PT;
-    let scale = (US_LETTER_WIDTH_PT - 2.0 * DEFAULT_PAGE_MARGIN_PT) / 300.0;
+    let margin = 72.0_f32;
+    let scale = (612.0 - 2.0 * 72.0) / 300.0;
     let col_w = 100.0 * scale;
     let x0 = margin;
     let x1 = margin + col_w;
@@ -294,18 +311,18 @@ fn table_borders_alignment_across_rows() {
                 ],
             },
         ],
-        grid_cols: vec![1000, 1000, 1000, 1000],
+        grid_cols: vec![tw(1000), tw(1000), tw(1000), tw(1000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
-    let scale = (US_LETTER_WIDTH_PT - 2.0 * DEFAULT_PAGE_MARGIN_PT) / 200.0;
+    let scale = (612.0 - 2.0 * 72.0) / 200.0;
     let cw = 50.0 * scale;
-    let margin = DEFAULT_PAGE_MARGIN_PT;
+    let margin = 72.0_f32;
     let x_after_2cols = margin + 2.0 * cw;
 
     let v_count = lines
@@ -333,12 +350,12 @@ fn table_borders_tcw_vs_grid_alignment() {
                 cells: vec![
                     {
                         let mut c = make_spanned_cell("AB", 2);
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                     {
                         let mut c = make_cell("C");
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                 ],
@@ -348,33 +365,33 @@ fn table_borders_tcw_vs_grid_alignment() {
                 cells: vec![
                     {
                         let mut c = make_cell("A");
-                        c.width = Some(100);
+                        c.width = Some(tw(100));
                         c
                     },
                     {
                         let mut c = make_cell("B");
-                        c.width = Some(200);
+                        c.width = Some(tw(200));
                         c
                     },
                     {
                         let mut c = make_cell("C");
-                        c.width = Some(300);
+                        c.width = Some(tw(300));
                         c
                     },
                 ],
             },
         ],
-        grid_cols: vec![100, 200, 300],
+        grid_cols: vec![tw(100), tw(200), tw(300)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
-    let scale = (US_LETTER_WIDTH_PT - 2.0 * DEFAULT_PAGE_MARGIN_PT) / 30.0;
-    let margin = DEFAULT_PAGE_MARGIN_PT;
+    let scale = (612.0 - 2.0 * 72.0) / 30.0;
+    let margin = 72.0_f32;
     let boundary_12 = margin + 15.0 * scale;
 
     let v_at_boundary_row0 = lines
@@ -394,8 +411,8 @@ fn extract_texts(pages: &[LayoutedPage]) -> Vec<(f32, f32, String)> {
     let mut texts = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Text { x, y, text, .. } = cmd {
-                texts.push((*x, *y, text.clone()));
+            if let DrawCommand::Text { position, text, .. } = cmd {
+                texts.push((f32::from(position.x), f32::from(position.y), text.clone()));
             }
         }
     }
@@ -407,15 +424,14 @@ fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, (u8, u8, u8
     let mut rects = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Rect {
-                x,
-                y,
-                width,
-                height,
-                color,
-            } = cmd
-            {
-                rects.push((*x, *y, *width, *height, *color));
+            if let DrawCommand::Rect { rect, color } = cmd {
+                rects.push((
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
+                    *color,
+                ));
             }
         }
     }
@@ -428,11 +444,11 @@ fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, (u8, u8, u8
 fn spacing_before_after_affects_position() {
     let doc = Document {
         blocks: vec![
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
-                        before: Some(200),
-                        after: Some(200),
+                        before: Some(tw(200)),
+                        after: Some(tw(200)),
                         line: None,
                         ..Default::default()
                     }),
@@ -445,11 +461,11 @@ fn spacing_before_after_affects_position() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
-            Block::Paragraph(Paragraph {
+            })),
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     spacing: Some(Spacing {
-                        before: Some(100),
+                        before: Some(tw(100)),
                         after: None,
                         line: None,
                         ..Default::default()
@@ -463,7 +479,7 @@ fn spacing_before_after_affects_position() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         ..Document::default()
     };
@@ -489,10 +505,10 @@ fn left_indentation_shifts_text_right() {
     let doc = Document {
         blocks: vec![
             simple_paragraph("NoIndent"),
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties {
                     indentation: Some(Indentation {
-                        left: Some(720), // 36pt
+                        left: Some(tw(720)), // 36pt
                         right: None,
                         first_line: None,
                     }),
@@ -505,7 +521,7 @@ fn left_indentation_shifts_text_right() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         ..Document::default()
     };
@@ -527,7 +543,7 @@ fn left_indentation_shifts_text_right() {
 fn section_break_changes_page_dimensions() {
     let doc = Document {
         blocks: vec![
-            Block::Paragraph(Paragraph {
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Portrait".into(),
@@ -536,18 +552,15 @@ fn section_break_changes_page_dimensions() {
                 })],
                 floats: Vec::new(),
                 section_properties: Some(SectionProperties {
-                    page_size: Some(PageSize {
-                        width: 12240,
-                        height: 15840,
-                    }),
+                    page_size: Some(PageSize::new(tw(12240), tw(15840))),
                     page_margins: None,
                     header: None,
                     footer: None,
                     header_rel_id: None,
                     footer_rel_id: None,
                 }),
-            }),
-            Block::Paragraph(Paragraph {
+            })),
+            Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "Landscape".into(),
@@ -556,13 +569,10 @@ fn section_break_changes_page_dimensions() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            }),
+            })),
         ],
         final_section: Some(SectionProperties {
-            page_size: Some(PageSize {
-                width: 15840,
-                height: 12240,
-            }),
+            page_size: Some(PageSize::new(tw(15840), tw(12240))),
             page_margins: None,
             header: None,
             footer: None,
@@ -573,10 +583,10 @@ fn section_break_changes_page_dimensions() {
     };
     let pages = layout(&doc, &test_font_mgr());
     assert!(pages.len() >= 2);
-    assert!((pages[0].page_width - 612.0).abs() < 1.0);
-    assert!((pages[0].page_height - 792.0).abs() < 1.0);
-    assert!((pages[1].page_width - 792.0).abs() < 1.0);
-    assert!((pages[1].page_height - 612.0).abs() < 1.0);
+    assert!((f32::from(pages[0].page_size.width) - 612.0).abs() < 1.0);
+    assert!((f32::from(pages[0].page_size.height) - 792.0).abs() < 1.0);
+    assert!((f32::from(pages[1].page_size.width) - 792.0).abs() < 1.0);
+    assert!((f32::from(pages[1].page_size.height) - 612.0).abs() < 1.0);
 }
 
 // ---- Adjacent tables ----
@@ -588,13 +598,16 @@ fn adjacent_tables_no_gap() {
             height: None,
             cells: vec![make_cell(text)],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
     let doc = Document {
-        blocks: vec![Block::Table(mk_table("T1")), Block::Table(mk_table("T2"))],
+        blocks: vec![
+            Block::Table(Box::new(mk_table("T1"))),
+            Block::Table(Box::new(mk_table("T2"))),
+        ],
         ..Document::default()
     };
     let pages = layout(&doc, &test_font_mgr());
@@ -643,12 +656,12 @@ fn vmerge_skips_content_and_border() {
                 ],
             },
         ],
-        grid_cols: vec![3000, 3000],
+        grid_cols: vec![tw(3000), tw(3000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
 
@@ -663,7 +676,7 @@ fn vmerge_skips_content_and_border() {
 
 #[test]
 fn line_break_forces_new_line() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -680,7 +693,7 @@ fn line_break_forces_new_line() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let before = texts.iter().find(|(_, _, t)| t == "Before").unwrap();
@@ -697,11 +710,11 @@ fn line_break_forces_new_line() {
 
 #[test]
 fn paragraph_shading_excludes_spacing() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             spacing: Some(Spacing {
-                before: Some(200),
-                after: Some(200),
+                before: Some(tw(200)),
+                after: Some(tw(200)),
                 line: None,
                 ..Default::default()
             }),
@@ -719,7 +732,7 @@ fn paragraph_shading_excludes_spacing() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
     let texts = extract_texts(&pages);
@@ -731,9 +744,8 @@ fn paragraph_shading_excludes_spacing() {
 
     // Rect should NOT start at margin_top (spacing.before pushes it down)
     assert!(
-        rect_top > DEFAULT_PAGE_MARGIN_PT,
-        "Rect top ({rect_top}) should be below margin ({}) due to spacing.before",
-        DEFAULT_PAGE_MARGIN_PT
+        rect_top > 72.0,
+        "Rect top ({rect_top}) should be below margin (72.0) due to spacing.before",
     );
     // Text should be within rect
     assert!(
@@ -761,15 +773,15 @@ fn roman_numerals() {
 fn row_height_minimum_respected() {
     let table = Table {
         rows: vec![TableRow {
-            height: Some(1000), // 50pt minimum
+            height: Some(tw(1000)), // 50pt minimum
             cells: vec![make_cell("Short")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
     let h_ys: Vec<f32> = lines
@@ -790,7 +802,7 @@ fn row_height_minimum_respected() {
 
 #[test]
 fn right_alignment() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             alignment: Some(Alignment::Right),
             ..Default::default()
@@ -802,12 +814,12 @@ fn right_alignment() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text_x = texts.iter().find(|(_, _, t)| t == "Right").unwrap().0;
     assert!(
-        text_x > DEFAULT_PAGE_MARGIN_PT + (US_LETTER_WIDTH_PT - 2.0 * DEFAULT_PAGE_MARGIN_PT) / 2.0,
+        text_x > 72.0 + (612.0 - 2.0 * 72.0) / 2.0,
         "Right-aligned text x ({text_x}) should be in right half"
     );
 }
@@ -818,18 +830,24 @@ fn right_alignment() {
 
 #[test]
 fn resolve_line_height_none_returns_frag_height() {
-    assert!((resolve_line_height(14.0, None) - 14.0).abs() < 0.01);
+    assert!((f32::from(resolve_line_height(pt(14.0), None)) - 14.0).abs() < 0.01);
 }
 
 #[test]
 fn resolve_line_height_multiplier() {
-    let h = resolve_line_height(14.0, Some(LineSpacing::Multiplier(1.15)));
+    let h = f32::from(resolve_line_height(
+        pt(14.0),
+        Some(LineSpacing::Multiplier(1.15)),
+    ));
     assert!((h - 16.1).abs() < 0.1, "14 * 1.15 = {h}");
 }
 
 #[test]
 fn resolve_line_height_fixed() {
-    let h = resolve_line_height(14.0, Some(LineSpacing::Fixed(20.0)));
+    let h = f32::from(resolve_line_height(
+        pt(14.0),
+        Some(LineSpacing::Fixed(pt(20.0))),
+    ));
     assert!(
         (h - 20.0).abs() < 0.01,
         "Fixed should be exactly 20pt, got {h}"
@@ -838,13 +856,19 @@ fn resolve_line_height_fixed() {
 
 #[test]
 fn resolve_line_height_at_least_larger() {
-    let h = resolve_line_height(14.0, Some(LineSpacing::AtLeast(20.0)));
+    let h = f32::from(resolve_line_height(
+        pt(14.0),
+        Some(LineSpacing::AtLeast(pt(20.0))),
+    ));
     assert!((h - 20.0).abs() < 0.01, "AtLeast(20) with frag=14 → {h}");
 }
 
 #[test]
 fn resolve_line_height_at_least_smaller() {
-    let h = resolve_line_height(24.0, Some(LineSpacing::AtLeast(20.0)));
+    let h = f32::from(resolve_line_height(
+        pt(24.0),
+        Some(LineSpacing::AtLeast(pt(20.0))),
+    ));
     assert!((h - 24.0).abs() < 0.01, "AtLeast(20) with frag=24 → {h}");
 }
 
@@ -856,39 +880,39 @@ fn make_text_frag(text: &str, width: f32) -> Fragment {
     Fragment::Text {
         text: text.to_string(),
         font_family: Rc::from("Helvetica"),
-        font_size: 12.0,
+        font_size: pt(12.0),
         bold: false,
         italic: false,
         underline: false,
         color: None,
         shading: None,
-        char_spacing_pt: 0.0,
-        measured_width: width,
-        measured_height: 14.0,
+        char_spacing_pt: Pt::ZERO,
+        measured_width: pt(width),
+        measured_height: pt(14.0),
         hyperlink_url: None,
-        baseline_offset: 0.0,
+        baseline_offset: Pt::ZERO,
     }
 }
 
 #[test]
 fn fit_fragments_empty() {
-    let (count, width) = fit_fragments(&[], 100.0);
+    let (count, width) = fit_fragments(&[], pt(100.0));
     assert_eq!(count, 0);
-    assert!((width).abs() < 0.01);
+    assert!(f32::from(width).abs() < 0.01);
 }
 
 #[test]
 fn fit_fragments_single_fits() {
     let frags = [make_text_frag("Hello", 40.0)];
-    let (count, width) = fit_fragments(&frags, 100.0);
+    let (count, width) = fit_fragments(&frags, pt(100.0));
     assert_eq!(count, 1);
-    assert!((width - 40.0).abs() < 0.01);
+    assert!((f32::from(width) - 40.0).abs() < 0.01);
 }
 
 #[test]
 fn fit_fragments_exact_boundary() {
     let frags = [make_text_frag("Hello", 100.0)];
-    let (count, _) = fit_fragments(&frags, 100.0);
+    let (count, _) = fit_fragments(&frags, pt(100.0));
     assert_eq!(count, 1);
 }
 
@@ -901,10 +925,7 @@ fn fit_fragments_overflow_at_space() {
         make_text_frag(" ", 5.0),
         make_text_frag("Overflow", 50.0),
     ];
-    let (count, _) = fit_fragments(&frags, 90.0);
-    // "Hello"(40) + " "(5) + "World"(40) + " "(5) = 90pt fits exactly.
-    // "Overflow"(50) would push to 140pt.
-    // Break point is after the second space (index 4).
+    let (count, _) = fit_fragments(&frags, pt(90.0));
     assert_eq!(
         count, 4,
         "Should include up to the second space break point"
@@ -915,10 +936,12 @@ fn fit_fragments_overflow_at_space() {
 fn fit_fragments_line_break() {
     let frags = [
         make_text_frag("Before", 30.0),
-        Fragment::LineBreak { line_height: 14.0 },
+        Fragment::LineBreak {
+            line_height: pt(14.0),
+        },
         make_text_frag("After", 30.0),
     ];
-    let (count, _) = fit_fragments(&frags, 200.0);
+    let (count, _) = fit_fragments(&frags, pt(200.0));
     assert_eq!(count, 2, "Should stop at LineBreak (inclusive)");
 }
 
@@ -929,15 +952,15 @@ fn fit_fragments_hyphen_break() {
         make_text_frag("kleinspannungs-", 80.0),
         make_text_frag("Stromkreise", 70.0),
     ];
-    let (count, width) = fit_fragments(&frags, 150.0);
+    let (count, width) = fit_fragments(&frags, pt(150.0));
     assert_eq!(count, 2, "Should break after 'kleinspannungs-'");
-    assert!((width - 140.0).abs() < 0.01);
+    assert!((f32::from(width) - 140.0).abs() < 0.01);
 }
 
 #[test]
 fn fit_fragments_single_oversized() {
     let frags = [make_text_frag("VeryLongWord", 200.0)];
-    let (count, _) = fit_fragments(&frags, 100.0);
+    let (count, _) = fit_fragments(&frags, pt(100.0));
     assert_eq!(
         count, 1,
         "Must include at least 1 fragment even if oversized"
@@ -952,17 +975,17 @@ fn fit_fragments_single_oversized() {
 fn measure_lines_empty_fragments() {
     let measured = measure_lines(
         &[],
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     assert_eq!(measured.lines.len(), 0);
-    assert!((measured.total_height).abs() < 0.01);
+    assert!(f32::from(measured.total_height).abs() < 0.01);
 }
 
 #[test]
@@ -970,17 +993,17 @@ fn measure_lines_single_line() {
     let frags = [make_text_frag("Hello", 40.0)];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     assert_eq!(measured.lines.len(), 1);
-    assert!((measured.total_height - 14.0).abs() < 0.01);
+    assert!((f32::from(measured.total_height) - 14.0).abs() < 0.01);
     // Should have at least one Text command
     assert!(measured.lines[0]
         .commands
@@ -997,20 +1020,20 @@ fn measure_lines_wraps_to_two_lines() {
     ];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     assert_eq!(measured.lines.len(), 2, "Should wrap to 2 lines");
     assert!(
-        (measured.total_height - 28.0).abs() < 0.01,
+        (f32::from(measured.total_height) - 28.0).abs() < 0.01,
         "2 lines × 14pt = {}",
-        measured.total_height
+        f32::from(measured.total_height)
     );
 }
 
@@ -1019,24 +1042,25 @@ fn measure_lines_center_alignment() {
     let frags = [make_text_frag("Short", 40.0)];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         Some(Alignment::Center),
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     // Text x should be offset to center
-    if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
+    if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
         .commands
         .iter()
         .find(|c| matches!(c, DrawCommand::Text { .. }))
     {
+        let x = f32::from(position.x);
         let expected_x = 72.0 + (468.0 - 40.0) / 2.0;
         assert!(
-            (*x - expected_x).abs() < 1.0,
+            (x - expected_x).abs() < 1.0,
             "Center x={x}, expected ~{expected_x}"
         );
     }
@@ -1047,23 +1071,24 @@ fn measure_lines_right_alignment() {
     let frags = [make_text_frag("Short", 40.0)];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         Some(Alignment::Right),
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
-    if let Some(DrawCommand::Text { x, .. }) = measured.lines[0]
+    if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
         .commands
         .iter()
         .find(|c| matches!(c, DrawCommand::Text { .. }))
     {
+        let x = f32::from(position.x);
         let expected_x = 72.0 + 468.0 - 40.0;
         assert!(
-            (*x - expected_x).abs() < 1.0,
+            (x - expected_x).abs() < 1.0,
             "Right x={x}, expected ~{expected_x}"
         );
     }
@@ -1074,27 +1099,27 @@ fn measure_lines_with_underline() {
     let frags = [Fragment::Text {
         text: "Underlined".to_string(),
         font_family: Rc::from("Helvetica"),
-        font_size: 12.0,
+        font_size: pt(12.0),
         bold: false,
         italic: false,
         underline: true,
         color: None,
         shading: None,
-        char_spacing_pt: 0.0,
-        measured_width: 60.0,
-        measured_height: 14.0,
+        char_spacing_pt: Pt::ZERO,
+        measured_width: pt(60.0),
+        measured_height: pt(14.0),
         hyperlink_url: None,
-        baseline_offset: 0.0,
+        baseline_offset: Pt::ZERO,
     }];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     assert!(
@@ -1111,7 +1136,7 @@ fn measure_lines_with_shading() {
     let frags = [Fragment::Text {
         text: "Shaded".to_string(),
         font_family: Rc::from("Helvetica"),
-        font_size: 12.0,
+        font_size: pt(12.0),
         bold: false,
         italic: false,
         underline: false,
@@ -1121,21 +1146,21 @@ fn measure_lines_with_shading() {
             g: 255,
             b: 0,
         }),
-        char_spacing_pt: 0.0,
-        measured_width: 40.0,
-        measured_height: 14.0,
+        char_spacing_pt: Pt::ZERO,
+        measured_width: pt(40.0),
+        measured_height: pt(14.0),
         hyperlink_url: None,
-        baseline_offset: 0.0,
+        baseline_offset: Pt::ZERO,
     }];
     let measured = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     assert!(
@@ -1155,32 +1180,32 @@ fn measure_lines_first_line_offset() {
     let frags = [make_text_frag("Hello", 40.0)];
     let no_offset = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     let with_offset = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        20.0,
+        pt(72.0),
+        pt(468.0),
+        pt(20.0),
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     let x_no = no_offset.lines[0]
         .commands
         .iter()
         .find_map(|c| {
-            if let DrawCommand::Text { x, .. } = c {
-                Some(*x)
+            if let DrawCommand::Text { position, .. } = c {
+                Some(f32::from(position.x))
             } else {
                 None
             }
@@ -1190,8 +1215,8 @@ fn measure_lines_first_line_offset() {
         .commands
         .iter()
         .find_map(|c| {
-            if let DrawCommand::Text { x, .. } = c {
-                Some(*x)
+            if let DrawCommand::Text { position, .. } = c {
+                Some(f32::from(position.x))
             } else {
                 None
             }
@@ -1208,28 +1233,28 @@ fn measure_lines_with_line_spacing() {
     let frags = [make_text_frag("Hello", 40.0)];
     let single = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         None,
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
     let double = measure_lines(
         &frags,
-        72.0,
-        468.0,
-        0.0,
+        pt(72.0),
+        pt(468.0),
+        Pt::ZERO,
         None,
         Some(LineSpacing::Multiplier(2.0)),
         &[],
-        36.0,
+        pt(36.0),
         &ImageCache::new(&HashMap::new()),
     );
-    assert!((single.total_height - 14.0).abs() < 0.01);
-    assert!((double.total_height - 28.0).abs() < 0.01);
+    assert!((f32::from(single.total_height) - 14.0).abs() < 0.01);
+    assert!((f32::from(double.total_height) - 28.0).abs() < 0.01);
 }
 
 // ==============================================================
@@ -1261,12 +1286,12 @@ fn vmerge_three_rows_distributes_height() {
                 cells: vec![continue_cell2, make_cell("R2C1")],
             },
         ],
-        grid_cols: vec![3000, 3000],
+        grid_cols: vec![tw(3000), tw(3000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
 
@@ -1307,16 +1332,15 @@ fn vmerge_multiple_columns() {
                 cells: vec![continue_a, make_cell("B1"), continue_c],
             },
         ],
-        grid_cols: vec![2000, 2000, 2000],
+        grid_cols: vec![tw(2000), tw(2000), tw(2000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
 
-    // Restart cells should render
     assert!(
         texts.iter().any(|(_, _, t)| t == "ColA"),
         "ColA should render"
@@ -1325,7 +1349,6 @@ fn vmerge_multiple_columns() {
         texts.iter().any(|(_, _, t)| t == "ColC"),
         "ColC should render"
     );
-    // Continue cells should NOT render
     assert!(
         !texts.iter().any(|(_, _, t)| t == "HiddenA"),
         "HiddenA should not render"
@@ -1334,7 +1357,6 @@ fn vmerge_multiple_columns() {
         !texts.iter().any(|(_, _, t)| t == "HiddenC"),
         "HiddenC should not render"
     );
-    // Non-merged cells render normally
     assert!(texts.iter().any(|(_, _, t)| t == "B0"));
     assert!(texts.iter().any(|(_, _, t)| t == "B1"));
 }
@@ -1348,8 +1370,8 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
     let doc = Document {
         blocks: vec![simple_paragraph("Test")],
         default_spacing: Spacing {
-            before: Some(100), // 5pt
-            after: Some(200),  // 10pt
+            before: Some(tw(100)), // 5pt
+            after: Some(tw(200)),  // 10pt
             line: None,
             ..Default::default()
         },
@@ -1358,7 +1380,6 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text_y = texts.iter().find(|(_, _, t)| t == "Test").unwrap().1;
-    // Text should be below margin_top + before_spacing(5pt) + line_height
     assert!(
         text_y > 72.0 + 5.0,
         "y={text_y} should include default before spacing"
@@ -1368,10 +1389,10 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
 #[test]
 fn direct_spacing_overrides_defaults() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 spacing: Some(Spacing {
-                    before: Some(400), // 20pt
+                    before: Some(tw(400)), // 20pt
                     after: None,
                     line: None,
                     ..Default::default()
@@ -1385,10 +1406,10 @@ fn direct_spacing_overrides_defaults() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         default_spacing: Spacing {
-            before: Some(100), // 5pt — should be overridden
-            after: Some(200),
+            before: Some(tw(100)),
+            after: Some(tw(200)),
             line: None,
             ..Default::default()
         },
@@ -1409,12 +1430,11 @@ fn direct_spacing_overrides_defaults() {
 
 #[test]
 fn paragraph_shading_split_across_pages() {
-    // Fill page nearly to the bottom, then add a shaded paragraph
     let mut blocks = Vec::new();
     for _ in 0..40 {
         blocks.push(simple_paragraph("Filler line"));
     }
-    blocks.push(Block::Paragraph(Paragraph {
+    blocks.push(Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             shading: Some(Color {
                 r: 200,
@@ -1430,10 +1450,9 @@ fn paragraph_shading_split_across_pages() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    }));
+    })));
     let doc = make_doc(blocks);
     let pages = layout(&doc, &test_font_mgr());
-    // Should not panic — verify at least one page has rect commands
     let total_rects: usize = pages
         .iter()
         .map(|p| {
@@ -1455,30 +1474,28 @@ fn table_splits_across_pages() {
     let mut rows = Vec::new();
     for i in 0..50 {
         rows.push(TableRow {
-            height: Some(400), // 20pt each → 1000pt total > page height
+            height: Some(tw(400)),
             cells: vec![make_cell(&format!("Row {i}"))],
         });
     }
     let table = Table {
         rows,
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     assert!(
         pages.len() > 1,
         "Table should span multiple pages, got {} pages",
         pages.len()
     );
-    // First page should have text content
     assert!(pages[0]
         .commands
         .iter()
         .any(|c| matches!(c, DrawCommand::Text { .. })));
-    // Last page too
     assert!(pages
         .last()
         .unwrap()
@@ -1498,22 +1515,16 @@ fn cell_margins_from_table_default() {
             height: None,
             cells: vec![make_cell("Content")],
         }],
-        grid_cols: vec![5000],
-        default_cell_margins: Some(CellMargins {
-            top: 100, // 5pt
-            bottom: 100,
-            left: 200, // 10pt
-            right: 200,
-        }),
+        grid_cols: vec![tw(5000)],
+        default_cell_margins: Some(CellMargins::new(tw(100), tw(200), tw(100), tw(200))),
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text = texts.iter().find(|(_, _, t)| t == "Content").unwrap();
-    // Text should be offset from cell left edge by left margin (10pt)
-    let expected_min_x = 72.0 + 10.0; // margin_left + cell_margin_left
+    let expected_min_x = 72.0 + 10.0;
     assert!(
         text.0 >= expected_min_x - 1.0,
         "Text x={} should be >= {} (cell left margin)",
@@ -1539,12 +1550,12 @@ fn cell_shading_produces_rect() {
             height: None,
             cells: vec![cell],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
     assert!(
@@ -1566,7 +1577,7 @@ fn empty_table_no_crash() {
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     assert_eq!(pages.len(), 1);
 }
@@ -1578,12 +1589,12 @@ fn single_cell_table() {
             height: None,
             cells: vec![make_cell("Only")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Only"));
@@ -1607,12 +1618,12 @@ fn table_with_empty_cell() {
                 make_cell("Filled"),
             ],
         }],
-        grid_cols: vec![2500, 2500],
+        grid_cols: vec![tw(2500), tw(2500)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
-    let doc = make_doc(vec![Block::Table(table)]);
+    let doc = make_doc(vec![Block::Table(Box::new(table))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     assert!(texts.iter().any(|(_, _, t)| t == "Filled"));
@@ -1625,20 +1636,19 @@ fn table_with_empty_cell() {
 #[test]
 fn empty_paragraph_still_has_height() {
     let doc = make_doc(vec![
-        Block::Paragraph(Paragraph {
+        Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties::default(),
             runs: vec![],
             floats: Vec::new(),
             section_properties: None,
-        }),
+        })),
         simple_paragraph("After"),
     ]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let after_y = texts.iter().find(|(_, _, t)| t == "After").unwrap().1;
-    // Empty paragraph should push "After" down from margin_top
     assert!(
-        after_y > DEFAULT_PAGE_MARGIN_PT + 10.0,
+        after_y > 72.0 + 10.0,
         "After y={after_y} should be pushed down by empty paragraph height"
     );
 }
@@ -1649,13 +1659,12 @@ fn empty_paragraph_still_has_height() {
 
 #[test]
 fn first_line_indent_shifts_first_line_only() {
-    // Use a paragraph with text that wraps to 2 lines
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             indentation: Some(Indentation {
                 left: None,
                 right: None,
-                first_line: Some(720), // 36pt
+                first_line: Some(tw(720)),
             }),
             ..Default::default()
         },
@@ -1674,7 +1683,7 @@ fn first_line_indent_shifts_first_line_only() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let first_x = texts.iter().find(|(_, _, t)| t == "First").unwrap().0;
@@ -1692,7 +1701,7 @@ fn first_line_indent_shifts_first_line_only() {
 #[test]
 fn bullet_list_renders_label() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Paragraph {
+        blocks: vec![Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 list_ref: Some(ListRef {
                     num_id: 1,
@@ -1707,18 +1716,18 @@ fn bullet_list_renders_label() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        })],
+        }))],
         numbering: {
             let mut map = std::collections::HashMap::new();
             map.insert(
                 1,
                 NumberingDef {
                     levels: vec![NumberingLevel {
-                        format: NumberFormat::Bullet("•".to_string()),
+                        format: NumberFormat::Bullet("\u{2022}".to_string()),
                         level_text: "%1".to_string(),
                         start: 1,
-                        indent_left: 720,
-                        indent_hanging: 360,
+                        indent_left: tw(720),
+                        indent_hanging: tw(360),
                     }],
                 },
             );
@@ -1729,7 +1738,7 @@ fn bullet_list_renders_label() {
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     assert!(
-        texts.iter().any(|(_, _, t)| t == "•"),
+        texts.iter().any(|(_, _, t)| t == "\u{2022}"),
         "Should render bullet label, got: {:?}",
         texts
     );
@@ -1739,7 +1748,7 @@ fn bullet_list_renders_label() {
 fn decimal_list_increments_counter() {
     let mut blocks = Vec::new();
     for i in 1..=3 {
-        blocks.push(Block::Paragraph(Paragraph {
+        blocks.push(Block::Paragraph(Box::new(Paragraph {
             properties: ParagraphProperties {
                 list_ref: Some(ListRef {
                     num_id: 1,
@@ -1754,7 +1763,7 @@ fn decimal_list_increments_counter() {
             })],
             floats: Vec::new(),
             section_properties: None,
-        }));
+        })));
     }
     let doc = Document {
         blocks,
@@ -1767,8 +1776,8 @@ fn decimal_list_increments_counter() {
                         format: NumberFormat::Decimal,
                         level_text: "%1.".to_string(),
                         start: 1,
-                        indent_left: 720,
-                        indent_hanging: 360,
+                        indent_left: tw(720),
+                        indent_hanging: tw(360),
                     }],
                 },
             );
@@ -1798,20 +1807,17 @@ fn decimal_list_increments_counter() {
 
 #[test]
 fn float_adjustment_shifts_text() {
-    // Create a paragraph with a float image on the left
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 100.0,
-        height_pt: 100.0,
-        offset_x_pt: 0.0,
-        offset_y_pt: 0.0,
+        size: PtSize::new(pt(100.0), pt(100.0)),
+        offset: PtOffset::new(pt(0.0), pt(0.0)),
         align_h: Some("left".to_string()),
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "FloatTest".into(),
@@ -1820,17 +1826,16 @@ fn float_adjustment_shifts_text() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let text = texts.iter().find(|(_, _, t)| t == "FloatTest").unwrap();
-    // Text should be shifted right of the float (100pt + gap)
     assert!(
-        text.0 > DEFAULT_PAGE_MARGIN_PT + 100.0,
+        text.0 > 72.0 + 100.0,
         "Text x={} should be right of float (margin+100={})",
         text.0,
-        DEFAULT_PAGE_MARGIN_PT + 100.0
+        72.0 + 100.0
     );
 }
 
@@ -1847,7 +1852,7 @@ fn header_renders_on_each_page() {
     let doc = Document {
         blocks,
         default_header: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "HEADER".into(),
@@ -1856,13 +1861,12 @@ fn header_renders_on_each_page() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
     let pages = layout(&doc, &test_font_mgr());
     assert!(pages.len() >= 2, "Need multiple pages");
-    // Each page should have "HEADER" text
     for (i, page) in pages.iter().enumerate() {
         assert!(
             page.commands
@@ -1878,7 +1882,7 @@ fn footer_renders_at_bottom() {
     let doc = Document {
         blocks: vec![simple_paragraph("Body")],
         default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![Inline::TextRun(TextRun {
                     text: "FOOTER".into(),
@@ -1887,7 +1891,7 @@ fn footer_renders_at_bottom() {
                 })],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
@@ -1909,25 +1913,22 @@ fn footer_renders_at_bottom() {
 
 #[test]
 fn twips_to_pt_zero() {
-    assert!((crate::units::twips_to_pt(0) - 0.0).abs() < 0.001);
+    use crate::dimension::Twips;
+    assert!((f32::from(Twips::new(0)) - 0.0).abs() < 0.001);
 }
 
 #[test]
 fn twips_to_pt_signed_negative() {
-    let pt = crate::units::twips_to_pt_signed(-20);
-    assert!(
-        (pt - (-1.0)).abs() < 0.001,
-        "twips_to_pt_signed(-20) = {pt}"
-    );
+    use crate::dimension::Twips;
+    let pt = f32::from(Twips::new(-20));
+    assert!((pt - (-1.0)).abs() < 0.001, "Twips(-20) -> Pt = {pt}");
 }
 
 #[test]
 fn emu_to_pt_signed_negative() {
-    let pt = crate::units::emu_to_pt_signed(-914400);
-    assert!(
-        (pt - (-72.0)).abs() < 0.1,
-        "emu_to_pt_signed(-914400) = {pt}"
-    );
+    use crate::dimension::Emu;
+    let pt = f32::from(Emu::new(-914400));
+    assert!((pt - (-72.0)).abs() < 0.1, "Emu(-914400) -> Pt = {pt}");
 }
 
 // ==============================================================
@@ -1941,15 +1942,15 @@ fn after_table_spacing_uses_doc_default() {
             height: None,
             cells: vec![make_cell("T")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
     let doc = Document {
-        blocks: vec![Block::Table(table), simple_paragraph("After")],
+        blocks: vec![Block::Table(Box::new(table)), simple_paragraph("After")],
         default_spacing: Spacing {
-            after: Some(200), // 10pt
+            after: Some(tw(200)),
             ..Default::default()
         },
         ..Document::default()
@@ -1961,13 +1962,13 @@ fn after_table_spacing_uses_doc_default() {
             height: None,
             cells: vec![make_cell("T")],
         }],
-        grid_cols: vec![5000],
+        grid_cols: vec![tw(5000)],
         default_cell_margins: None,
         cell_spacing: None,
         borders: None,
     };
     let doc_no_sp = Document {
-        blocks: vec![Block::Table(table2), simple_paragraph("After")],
+        blocks: vec![Block::Table(Box::new(table2)), simple_paragraph("After")],
         ..Document::default()
     };
     let pages_without = layout(&doc_no_sp, &test_font_mgr());
@@ -1996,15 +1997,13 @@ fn extract_images(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
     let mut imgs = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::Image {
-                x,
-                y,
-                width,
-                height,
-                ..
-            } = cmd
-            {
-                imgs.push((*x, *y, *width, *height));
+            if let DrawCommand::Image { rect, .. } = cmd {
+                imgs.push((
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
+                ));
             }
         }
     }
@@ -2013,21 +2012,17 @@ fn extract_images(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32)> {
 
 #[test]
 fn pct_pos_offset_positions_float_by_page_percentage() {
-    // pct_pos_v = 10000 → 10% of page height (792pt) = 79.2pt
-    // pct_pos_h = 50000 → 50% of page width (612pt) = 306pt
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 50.0,
-        height_pt: 50.0,
-        offset_x_pt: 0.0,
-        offset_y_pt: 0.0,
+        size: PtSize::new(pt(50.0), pt(50.0)),
+        offset: PtOffset::new(pt(0.0), pt(0.0)),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: Some(50000),
         pct_pos_v: Some(10000),
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -2036,15 +2031,13 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let imgs = extract_images(&pages);
     assert!(!imgs.is_empty(), "Should have an image");
     let (ix, iy, _, _) = imgs[0];
-    // 50% of 612 = 306
     assert!((ix - 306.0).abs() < 1.0, "Image x={ix}, expected ~306");
-    // 10% of 792 = 79.2
     assert!((iy - 79.2).abs() < 1.0, "Image y={iy}, expected ~79.2");
 }
 
@@ -2052,17 +2045,15 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
 fn pct_pos_none_uses_regular_offset() {
     let float_img = FloatingImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 50.0,
-        height_pt: 50.0,
-        offset_x_pt: 20.0,
-        offset_y_pt: 10.0,
+        size: PtSize::new(pt(50.0), pt(50.0)),
+        offset: PtOffset::new(pt(20.0), pt(10.0)),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
         pct_pos_h: None,
         pct_pos_v: None,
     };
-    let mut doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let mut doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Body".into(),
@@ -2071,12 +2062,11 @@ fn pct_pos_none_uses_regular_offset() {
         })],
         floats: vec![float_img],
         section_properties: None,
-    })]);
+    }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = layout(&doc, &test_font_mgr());
     let imgs = extract_images(&pages);
     let (ix, _iy, _, _) = imgs[0];
-    // Should use margin_left + offset_x_pt = 72 + 20 = 92
     assert!((ix - 92.0).abs() < 1.0, "Image x={ix}, expected ~92");
 }
 
@@ -2088,15 +2078,14 @@ fn extract_link_annotations(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, 
     let mut links = Vec::new();
     for page in pages {
         for cmd in &page.commands {
-            if let DrawCommand::LinkAnnotation {
-                x,
-                y,
-                width,
-                height,
-                url,
-            } = cmd
-            {
-                links.push((*x, *y, *width, *height, url.clone()));
+            if let DrawCommand::LinkAnnotation { rect, url } = cmd {
+                links.push((
+                    f32::from(rect.origin.x),
+                    f32::from(rect.origin.y),
+                    f32::from(rect.size.width),
+                    f32::from(rect.size.height),
+                    url.clone(),
+                ));
             }
         }
     }
@@ -2105,7 +2094,7 @@ fn extract_link_annotations(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, 
 
 #[test]
 fn hyperlink_produces_link_annotation() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![Inline::TextRun(TextRun {
             text: "Click".into(),
@@ -2114,7 +2103,7 @@ fn hyperlink_produces_link_annotation() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let links = extract_link_annotations(&pages);
     assert_eq!(links.len(), 1, "Should have one link annotation");
@@ -2137,7 +2126,7 @@ fn no_hyperlink_no_annotation() {
 
 #[test]
 fn paragraph_bottom_border_renders_line() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties {
             paragraph_borders: Some(ParagraphBorders {
                 top: None,
@@ -2154,10 +2143,9 @@ fn paragraph_bottom_border_renders_line() {
         })],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
-    // Should have a horizontal line (bottom border)
     let h_lines: Vec<_> = lines
         .iter()
         .filter(|(x1, y1, x2, y2)| (y1 - y2).abs() < 0.1 && (x2 - x1).abs() > 10.0)
@@ -2182,7 +2170,7 @@ fn page_field_renders_page_number_in_footer() {
     let doc = Document {
         blocks,
         default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Paragraph {
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
                 properties: ParagraphProperties::default(),
                 runs: vec![
                     Inline::TextRun(TextRun {
@@ -2206,14 +2194,13 @@ fn page_field_renders_page_number_in_footer() {
                 ],
                 floats: Vec::new(),
                 section_properties: None,
-            })],
+            }))],
         }),
         ..Document::default()
     };
     let pages = layout(&doc, &test_font_mgr());
     assert!(pages.len() >= 2, "Need multiple pages");
 
-    // Page 1 footer should have "1" and total page count
     let page1_texts = extract_texts(&[pages[0].clone()]);
     assert!(
         page1_texts.iter().any(|(_, _, t)| t == "1"),
@@ -2221,7 +2208,6 @@ fn page_field_renders_page_number_in_footer() {
         page1_texts
     );
 
-    // Page 2 footer should have "2"
     let page2_texts = extract_texts(&[pages[1].clone()]);
     assert!(
         page2_texts.iter().any(|(_, _, t)| t == "2"),
@@ -2229,7 +2215,6 @@ fn page_field_renders_page_number_in_footer() {
         page2_texts
     );
 
-    // NUMPAGES should be the total page count on all pages
     let total = pages.len().to_string();
     assert!(
         page1_texts.iter().any(|(_, _, t)| t == &total),
@@ -2243,7 +2228,7 @@ fn page_field_renders_page_number_in_footer() {
 
 #[test]
 fn superscript_reduces_font_size_and_shifts_up() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -2262,12 +2247,11 @@ fn superscript_reduces_font_size_and_shifts_up() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "m").unwrap();
     let sup = texts.iter().find(|(_, _, t)| t == "2").unwrap();
-    // Superscript should be higher (smaller y value since y is baseline)
     assert!(
         sup.1 < normal.1,
         "Superscript y={} should be above normal y={}",
@@ -2278,7 +2262,7 @@ fn superscript_reduces_font_size_and_shifts_up() {
 
 #[test]
 fn subscript_shifts_down() {
-    let doc = make_doc(vec![Block::Paragraph(Paragraph {
+    let doc = make_doc(vec![Block::Paragraph(Box::new(Paragraph {
         properties: ParagraphProperties::default(),
         runs: vec![
             Inline::TextRun(TextRun {
@@ -2297,12 +2281,11 @@ fn subscript_shifts_down() {
         ],
         floats: Vec::new(),
         section_properties: None,
-    })]);
+    }))]);
     let pages = layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
     let normal = texts.iter().find(|(_, _, t)| t == "H").unwrap();
     let sub = texts.iter().find(|(_, _, t)| t == "2").unwrap();
-    // Subscript should be lower (larger y value)
     assert!(
         sub.1 > normal.1,
         "Subscript y={} should be below normal y={}",

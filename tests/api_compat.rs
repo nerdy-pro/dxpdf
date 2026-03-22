@@ -49,32 +49,19 @@ fn error_is_std_error() {
 
 #[test]
 fn unit_constants() {
-    let _: f32 = dxpdf::units::TWIPS_PER_POINT;
-    let _: f32 = dxpdf::units::EMU_PER_INCH;
-    let _: f32 = dxpdf::units::POINTS_PER_INCH;
-    let _: f32 = dxpdf::units::HALF_POINTS_PER_POINT;
-    let _: f32 = dxpdf::units::BORDER_SIZE_UNITS_PER_POINT;
-
     let _: &str = dxpdf::units::DEFAULT_FONT_FAMILY;
-    let _: u32 = dxpdf::units::DEFAULT_FONT_SIZE_HALF_PTS;
-    let _: u32 = dxpdf::units::DEFAULT_TAB_STOP_TWIPS;
-    let _: u32 = dxpdf::units::DEFAULT_PAGE_MARGIN_TWIPS;
-    let _: u32 = dxpdf::units::DEFAULT_CELL_MARGIN_LR_TWIPS;
     let _: &str = dxpdf::units::WIDTH_TYPE_DXA;
     let _: &str = dxpdf::units::UNDERLINE_NONE;
 
-    let _: f32 = dxpdf::units::FLOAT_TEXT_GAP_PT;
-    let _: f32 = dxpdf::units::MIN_TAB_WIDTH_PT;
-    let _: f32 = dxpdf::units::TAB_FALLBACK_PT;
-    let _: f32 = dxpdf::units::UNDERLINE_Y_OFFSET;
+    let _: dxpdf::dimension::Pt = dxpdf::units::FLOAT_TEXT_GAP;
+    let _: dxpdf::dimension::Pt = dxpdf::units::MIN_TAB_WIDTH;
+    let _: dxpdf::dimension::Pt = dxpdf::units::TAB_FALLBACK;
+    let _: dxpdf::dimension::Pt = dxpdf::units::UNDERLINE_Y_OFFSET;
 }
 
 #[test]
-fn unit_conversion_signatures() {
-    let _: fn(u32) -> f32 = dxpdf::units::twips_to_pt;
-    let _: fn(i32) -> f32 = dxpdf::units::twips_to_pt_signed;
+fn unit_legacy_emu_to_pt() {
     let _: fn(u64) -> f32 = dxpdf::units::emu_to_pt;
-    let _: fn(i64) -> f32 = dxpdf::units::emu_to_pt_signed;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,8 +85,8 @@ fn document_default_and_fields() {
 
     let _: &Vec<dxpdf::model::Block> = &doc.blocks;
     let _: &Option<dxpdf::model::SectionProperties> = &doc.final_section;
-    let _: u32 = doc.default_tab_stop;
-    let _: u32 = doc.default_font_size;
+    let _: dxpdf::dimension::Twips = doc.default_tab_stop;
+    let _: dxpdf::dimension::HalfPoints = doc.default_font_size;
     let _: &Rc<str> = &doc.default_font_family;
     let _: &dxpdf::model::Spacing = &doc.default_spacing;
     let _: &dxpdf::model::CellMargins = &doc.default_cell_margins;
@@ -132,7 +119,7 @@ fn block_variants() {
         floats: vec![],
         section_properties: None,
     };
-    let _ = Block::Paragraph(p);
+    let _ = Block::Paragraph(Box::new(p));
 
     let t = Table {
         rows: vec![],
@@ -141,7 +128,7 @@ fn block_variants() {
         cell_spacing: None,
         borders: None,
     };
-    let _ = Block::Table(t);
+    let _ = Block::Table(Box::new(t));
 }
 
 #[test]
@@ -189,8 +176,10 @@ fn inline_variants() {
     });
     let _ = Inline::Image(InlineImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 0.0,
-        height_pt: 0.0,
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(0.0),
+            dxpdf::dimension::Pt::new(0.0),
+        ),
     });
     let _ = Inline::Field(FieldCode {
         field_type: FieldType::Page,
@@ -218,16 +207,13 @@ fn run_properties_fields_and_methods() {
     let _: bool = rp.bold;
     let _: bool = rp.italic;
     let _: bool = rp.underline;
-    let _: &Option<u32> = &rp.font_size;
+    let _: &Option<dxpdf::dimension::HalfPoints> = &rp.font_size;
     let _: &Option<Rc<str>> = &rp.font_family;
     let _: &Option<Color> = &rp.color;
-    let _: &Option<i32> = &rp.char_spacing;
+    let _: &Option<dxpdf::dimension::Twips> = &rp.char_spacing;
     let _: &Option<Color> = &rp.shading;
     let _: &Option<VertAlign> = &rp.vert_align;
     let _: &Option<String> = &rp.style_id;
-
-    let _: f32 = rp.font_size_pt();
-    let _: f32 = rp.font_size_pt_with_default(24);
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +237,7 @@ fn resolved_run_style_fields() {
     let _: &Option<bool> = &s.bold;
     let _: &Option<bool> = &s.italic;
     let _: &Option<bool> = &s.underline;
-    let _: &Option<u32> = &s.font_size;
+    let _: &Option<dxpdf::dimension::HalfPoints> = &s.font_size;
     let _: &Option<Rc<str>> = &s.font_family;
     let _: &Option<Color> = &s.color;
 }
@@ -264,28 +250,13 @@ fn resolved_run_style_fields() {
 fn spacing_fields_and_methods() {
     use dxpdf::model::*;
     let s = Spacing {
-        before: Some(0),
-        after: Some(0),
-        line: Some(0),
+        before: Some(dxpdf::dimension::Twips::new(0)),
+        after: Some(dxpdf::dimension::Twips::new(0)),
+        line: Some(dxpdf::dimension::Twips::new(0)),
         line_rule: LineRule::Auto,
     };
-    let _: f32 = s.before_pt();
-    let _: f32 = s.after_pt();
     let _: Option<LineSpacing> = s.line_spacing();
-    let _: f32 = s.line_pt();
-}
-
-#[test]
-fn indentation_fields_and_methods() {
-    use dxpdf::model::*;
-    let ind = Indentation {
-        left: Some(0),
-        right: Some(0),
-        first_line: Some(0),
-    };
-    let _: f32 = ind.left_pt();
-    let _: f32 = ind.right_pt();
-    let _: f32 = ind.first_line_pt();
+    let _: dxpdf::dimension::Pt = s.line_pt();
 }
 
 #[test]
@@ -309,8 +280,8 @@ fn line_rule_variants() {
 fn line_spacing_variants() {
     use dxpdf::model::LineSpacing;
     let _ = LineSpacing::Multiplier(1.0);
-    let _ = LineSpacing::Fixed(12.0);
-    let _ = LineSpacing::AtLeast(12.0);
+    let _ = LineSpacing::Fixed(dxpdf::dimension::Pt::new(12.0));
+    let _ = LineSpacing::AtLeast(dxpdf::dimension::Pt::new(12.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -321,10 +292,11 @@ fn line_spacing_variants() {
 fn tab_stop_fields_and_methods() {
     use dxpdf::model::*;
     let ts = TabStop {
-        position: 720,
+        position: dxpdf::dimension::Twips::new(720),
         stop_type: TabStopType::Left,
     };
-    let _: f32 = ts.position_pt();
+    let _: dxpdf::dimension::Twips = ts.position;
+    let _: f32 = f32::from(ts.position);
 }
 
 #[test]
@@ -343,31 +315,31 @@ fn tab_stop_type_variants() {
 #[test]
 fn page_size_fields_and_methods() {
     use dxpdf::model::*;
-    let ps = PageSize {
-        width: 12240,
-        height: 15840,
-    };
-    let _: f32 = ps.width_pt();
-    let _: f32 = ps.height_pt();
+    let ps = PageSize::new(
+        dxpdf::dimension::Twips::new(12240),
+        dxpdf::dimension::Twips::new(15840),
+    );
+    let _: f32 = f32::from(ps.width);
+    let _: f32 = f32::from(ps.height);
 }
 
 #[test]
 fn page_margins_fields_and_methods() {
     use dxpdf::model::*;
     let pm = PageMargins {
-        top: 1440,
-        right: 1440,
-        bottom: 1440,
-        left: 1440,
-        header: 720,
-        footer: 720,
+        top: dxpdf::dimension::Twips::new(1440),
+        right: dxpdf::dimension::Twips::new(1440),
+        bottom: dxpdf::dimension::Twips::new(1440),
+        left: dxpdf::dimension::Twips::new(1440),
+        header: dxpdf::dimension::Twips::new(720),
+        footer: dxpdf::dimension::Twips::new(720),
     };
-    let _: f32 = pm.top_pt();
-    let _: f32 = pm.right_pt();
-    let _: f32 = pm.bottom_pt();
-    let _: f32 = pm.left_pt();
-    let _: f32 = pm.header_pt();
-    let _: f32 = pm.footer_pt();
+    let _: f32 = f32::from(pm.top);
+    let _: f32 = f32::from(pm.right);
+    let _: f32 = f32::from(pm.bottom);
+    let _: f32 = f32::from(pm.left);
+    let _: f32 = f32::from(pm.header);
+    let _: f32 = f32::from(pm.footer);
 }
 
 #[test]
@@ -437,9 +409,8 @@ fn border_def_fields_and_methods() {
     use dxpdf::model::*;
     let bd = BorderDef::single(8, (0, 0, 0));
     let _: &BorderStyle = &bd.style;
-    let _: u32 = bd.size;
+    let _: dxpdf::dimension::EighthPoints = bd.size;
     let _: &Color = &bd.color;
-    let _: f32 = bd.width_pt();
     let _: bool = bd.is_visible();
     let _: (u8, u8, u8) = bd.color_rgb();
 }
@@ -509,7 +480,7 @@ fn table_fields() {
         borders: None,
     };
     let _: &Vec<TableRow> = &t.rows;
-    let _: &Vec<u32> = &t.grid_cols;
+    let _: &Vec<dxpdf::dimension::Twips> = &t.grid_cols;
     let _: &Option<CellMargins> = &t.default_cell_margins;
     let _: &Option<dxpdf::model::Spacing> = &t.cell_spacing;
     let _: &Option<TableBorders> = &t.borders;
@@ -520,10 +491,10 @@ fn table_row_fields() {
     use dxpdf::model::*;
     let row = TableRow {
         cells: vec![],
-        height: Some(720),
+        height: Some(dxpdf::dimension::Twips::new(720)),
     };
     let _: &Vec<TableCell> = &row.cells;
-    let _: &Option<u32> = &row.height;
+    let _: &Option<dxpdf::dimension::Twips> = &row.height;
 }
 
 #[test]
@@ -531,7 +502,7 @@ fn table_cell_fields_and_methods() {
     use dxpdf::model::*;
     let cell = TableCell {
         blocks: vec![],
-        width: Some(3000),
+        width: Some(dxpdf::dimension::Twips::new(3000)),
         grid_span: 1,
         vertical_merge: None,
         cell_margins: None,
@@ -539,29 +510,29 @@ fn table_cell_fields_and_methods() {
         shading: None,
     };
     let _: &Vec<Block> = &cell.blocks;
-    let _: &Option<u32> = &cell.width;
+    let _: &Option<dxpdf::dimension::Twips> = &cell.width;
     let _: u32 = cell.grid_span;
     let _: &Option<VerticalMerge> = &cell.vertical_merge;
     let _: &Option<CellMargins> = &cell.cell_margins;
     let _: &Option<CellBorders> = &cell.cell_borders;
     let _: &Option<Color> = &cell.shading;
-    let _: Option<f32> = cell.width_pt();
+    let _: Option<f32> = cell.width.map(f32::from);
     let _: bool = cell.is_vmerge_continue();
 }
 
 #[test]
 fn cell_margins_fields_and_methods() {
     use dxpdf::model::*;
-    let cm = CellMargins {
-        top: 0,
-        right: 108,
-        bottom: 0,
-        left: 108,
-    };
-    let _: f32 = cm.top_pt();
-    let _: f32 = cm.right_pt();
-    let _: f32 = cm.bottom_pt();
-    let _: f32 = cm.left_pt();
+    let cm = CellMargins::new(
+        dxpdf::dimension::Twips::new(0),
+        dxpdf::dimension::Twips::new(108),
+        dxpdf::dimension::Twips::new(0),
+        dxpdf::dimension::Twips::new(108),
+    );
+    let _: f32 = f32::from(cm.top);
+    let _: f32 = f32::from(cm.right);
+    let _: f32 = f32::from(cm.bottom);
+    let _: f32 = f32::from(cm.left);
 }
 
 #[test]
@@ -580,12 +551,14 @@ fn inline_image_fields() {
     use dxpdf::model::*;
     let img = InlineImage {
         rel_id: RelId::from("rId1"),
-        width_pt: 100.0,
-        height_pt: 100.0,
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(100.0),
+            dxpdf::dimension::Pt::new(100.0),
+        ),
     };
     let _: &RelId = &img.rel_id;
-    let _: f32 = img.width_pt;
-    let _: f32 = img.height_pt;
+    let _: dxpdf::dimension::Pt = img.size.width;
+    let _: dxpdf::dimension::Pt = img.size.height;
 }
 
 #[test]
@@ -593,10 +566,14 @@ fn floating_image_fields() {
     use dxpdf::model::*;
     let img = FloatingImage {
         rel_id: RelId::from("rId2"),
-        width_pt: 200.0,
-        height_pt: 150.0,
-        offset_x_pt: 10.0,
-        offset_y_pt: 20.0,
+        size: dxpdf::geometry::PtSize::new(
+            dxpdf::dimension::Pt::new(200.0),
+            dxpdf::dimension::Pt::new(150.0),
+        ),
+        offset: dxpdf::geometry::PtOffset::new(
+            dxpdf::dimension::Pt::new(10.0),
+            dxpdf::dimension::Pt::new(20.0),
+        ),
         align_h: None,
         align_v: None,
         wrap_side: WrapSide::BothSides,
@@ -604,10 +581,10 @@ fn floating_image_fields() {
         pct_pos_v: None,
     };
     let _: &RelId = &img.rel_id;
-    let _: f32 = img.width_pt;
-    let _: f32 = img.height_pt;
-    let _: f32 = img.offset_x_pt;
-    let _: f32 = img.offset_y_pt;
+    let _: dxpdf::dimension::Pt = img.size.width;
+    let _: dxpdf::dimension::Pt = img.size.height;
+    let _: dxpdf::dimension::Pt = img.offset.x;
+    let _: dxpdf::dimension::Pt = img.offset.y;
     let _: &Option<String> = &img.align_h;
     let _: &Option<String> = &img.align_v;
     let _: &WrapSide = &img.wrap_side;
@@ -666,14 +643,14 @@ fn numbering_level_fields() {
         format: NumberFormat::Decimal,
         level_text: "%1.".into(),
         start: 1,
-        indent_left: 720,
-        indent_hanging: 360,
+        indent_left: dxpdf::dimension::Twips::new(720),
+        indent_hanging: dxpdf::dimension::Twips::new(360),
     };
     let _: &NumberFormat = &nl.format;
     let _: &str = &nl.level_text;
     let _: u32 = nl.start;
-    let _: u32 = nl.indent_left;
-    let _: u32 = nl.indent_hanging;
+    let _: dxpdf::dimension::Twips = nl.indent_left;
+    let _: dxpdf::dimension::Twips = nl.indent_hanging;
 }
 
 #[test]
@@ -751,7 +728,8 @@ fn render_fonts_signatures() {
 
     let _: fn(&FontMgr, &str, FontStyle) -> Typeface = dxpdf::render::fonts::resolve_typeface;
     let _: fn(&FontMgr, &[Rc<str>]) = dxpdf::render::fonts::preload_fonts;
-    let _: fn(&FontMgr, &str, f32, bool, bool) -> Font = dxpdf::render::fonts::make_font;
+    let _: fn(&FontMgr, &str, dxpdf::dimension::Pt, bool, bool) -> Font =
+        dxpdf::render::fonts::make_font;
 }
 
 // ---------------------------------------------------------------------------
@@ -760,59 +738,56 @@ fn render_fonts_signatures() {
 
 #[test]
 fn layouted_page_fields() {
+    use dxpdf::geometry::PtSize;
     use dxpdf::render::layout::{DrawCommand, LayoutedPage};
     let page = LayoutedPage {
         commands: vec![],
-        page_width: 612.0,
-        page_height: 792.0,
+        page_size: PtSize::new(
+            dxpdf::dimension::Pt::new(612.0),
+            dxpdf::dimension::Pt::new(792.0),
+        ),
     };
     let _: &Vec<DrawCommand> = &page.commands;
-    let _: f32 = page.page_width;
-    let _: f32 = page.page_height;
+    let _: PtSize = page.page_size;
 }
 
 #[test]
 fn draw_command_variants() {
+    use dxpdf::dimension::Pt;
+    use dxpdf::geometry::{PtLineSegment, PtOffset, PtRect};
     use dxpdf::render::layout::DrawCommand;
     let _ = DrawCommand::Text {
-        x: 0.0,
-        y: 0.0,
+        position: PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
         text: String::new(),
         font_family: Rc::from("Helvetica"),
-        char_spacing_pt: 0.0,
-        font_size: 12.0,
+        char_spacing_pt: Pt::new(0.0),
+        font_size: Pt::new(12.0),
         bold: false,
         italic: false,
         color: (0, 0, 0),
     };
     let _ = DrawCommand::Underline {
-        x1: 0.0,
-        y1: 0.0,
-        x2: 100.0,
-        y2: 0.0,
+        line: PtLineSegment::new(
+            PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
+            PtOffset::new(Pt::new(100.0), Pt::new(0.0)),
+        ),
         color: (0, 0, 0),
-        width: 1.0,
+        width: Pt::new(1.0),
     };
     let _ = DrawCommand::Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: 100.0,
-        y2: 100.0,
+        line: PtLineSegment::new(
+            PtOffset::new(Pt::new(0.0), Pt::new(0.0)),
+            PtOffset::new(Pt::new(100.0), Pt::new(100.0)),
+        ),
         color: (0, 0, 0),
-        width: 1.0,
+        width: Pt::new(1.0),
     };
     let _ = DrawCommand::Rect {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 50.0,
+        rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(50.0)),
         color: (200, 200, 200),
     };
     let _ = DrawCommand::LinkAnnotation {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 12.0,
+        rect: PtRect::from_xywh(Pt::new(0.0), Pt::new(0.0), Pt::new(100.0), Pt::new(12.0)),
         url: "https://example.com".into(),
     };
     // DrawCommand::Image requires an Rc<skia_safe::Image> — skip construction
@@ -839,8 +814,15 @@ fn text_measurer_api() {
     use dxpdf::render::layout::TextMeasurer;
     let m = TextMeasurer::default();
     let _: &skia_safe::FontMgr = m.font_mgr();
-    let _: f32 = m.measure_width("hello", "Helvetica", 12.0, false, false);
-    let _: f32 = m.line_height("Helvetica", 12.0, false, false);
+    let _: dxpdf::dimension::Pt = m.measure_width(
+        "hello",
+        "Helvetica",
+        dxpdf::dimension::Pt::new(12.0),
+        false,
+        false,
+    );
+    let _: dxpdf::dimension::Pt =
+        m.line_height("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
 
     // Also constructible via new()
     let _ = TextMeasurer::new();

@@ -11,7 +11,6 @@ use quick_xml::Reader;
 
 use crate::error::Error;
 use crate::model::*;
-use crate::units;
 
 use drawing::{handle_drawing_element, handle_drawing_end};
 use helpers::*;
@@ -333,12 +332,12 @@ pub fn parse_document_xml_with_rels(
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 if local == b"p" && matches_body_or_cell(&state) {
-                    let paragraph = Block::Paragraph(Paragraph {
+                    let paragraph = Block::Paragraph(Box::new(Paragraph {
                         properties: ParagraphProperties::default(),
                         runs: Vec::new(),
                         floats: Vec::new(),
                         section_properties: None,
-                    });
+                    }));
                     push_block(&mut state, &mut blocks, paragraph);
                 } else if (local == b"br" || local == b"tab")
                     && matches!(state, ParseState::InRun { .. })
@@ -487,9 +486,10 @@ pub fn parse_document_xml_with_rels(
                     } else if let Some(axis) = reading_pos_offset {
                         let val_str = e.unescape().unwrap_or_default();
                         if let Ok(val) = val_str.trim().parse::<i64>() {
+                            let emu = crate::dimension::Emu::new(val);
                             match axis {
-                                'H' => *pos_h_emu = Some(val),
-                                'V' => *pos_v_emu = Some(val),
+                                'H' => *pos_h_emu = Some(emu),
+                                'V' => *pos_v_emu = Some(emu),
                                 _ => {}
                             }
                         }
@@ -515,12 +515,12 @@ pub fn parse_document_xml_with_rels(
                     b"p" if matches!(state, ParseState::InParagraph { .. }) => {
                         let (props, runs, floats, section_props) = take_paragraph(&mut state);
                         state = stack.pop().unwrap_or(ParseState::Idle);
-                        let paragraph = Block::Paragraph(Paragraph {
+                        let paragraph = Block::Paragraph(Box::new(Paragraph {
                             properties: props,
                             runs,
                             floats,
                             section_properties: section_props,
-                        });
+                        }));
                         push_block(&mut state, &mut blocks, paragraph);
                     }
                     b"pBdr" if matches!(state, ParseState::InParagraphProperties { .. }) => {
@@ -602,13 +602,13 @@ pub fn parse_document_xml_with_rels(
                         } = state
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
-                            let table = Block::Table(Table {
+                            let table = Block::Table(Box::new(Table {
                                 rows,
                                 grid_cols,
                                 default_cell_margins,
                                 cell_spacing: None,
                                 borders,
-                            });
+                            }));
                             push_block(&mut state, &mut blocks, table);
                         }
                     }
@@ -665,19 +665,18 @@ pub fn parse_document_xml_with_rels(
                         {
                             state = stack.pop().unwrap_or(ParseState::Idle);
                             if let Some(rid) = rel_id {
-                                let w = emu_to_pt(width_emu.unwrap_or(0));
-                                let h = emu_to_pt(height_emu.unwrap_or(0));
+                                use crate::dimension::{Emu, Pt};
+                                let zero = Emu::new(0);
+                                let w = Pt::from(width_emu.unwrap_or(zero));
+                                let h = Pt::from(height_emu.unwrap_or(zero));
 
                                 if is_anchor {
                                     let float = FloatingImage {
                                         rel_id: rid,
-                                        width_pt: w,
-                                        height_pt: h,
-                                        offset_x_pt: units::emu_to_pt_signed(
-                                            pos_h_emu.unwrap_or(0),
-                                        ),
-                                        offset_y_pt: units::emu_to_pt_signed(
-                                            pos_v_emu.unwrap_or(0),
+                                        size: crate::geometry::PtSize::new(w, h),
+                                        offset: crate::geometry::PtOffset::new(
+                                            Pt::from(pos_h_emu.unwrap_or(zero)),
+                                            Pt::from(pos_v_emu.unwrap_or(zero)),
                                         ),
                                         align_h,
                                         align_v,
@@ -689,8 +688,7 @@ pub fn parse_document_xml_with_rels(
                                 } else {
                                     let image = Inline::Image(InlineImage {
                                         rel_id: rid,
-                                        width_pt: w,
-                                        height_pt: h,
+                                        size: crate::geometry::PtSize::new(w, h),
                                     });
                                     if matches!(state, ParseState::InRun { .. }) {
                                         if let Some(para_state) = stack
@@ -862,7 +860,7 @@ enum ParseState {
     },
     InTable {
         rows: Vec<TableRow>,
-        grid_cols: Vec<u32>,
+        grid_cols: Vec<crate::dimension::Twips>,
         default_cell_margins: Option<CellMargins>,
         in_cell_mar: bool,
         borders: Option<TableBorders>,
@@ -870,11 +868,11 @@ enum ParseState {
     },
     InTableRow {
         cells: Vec<TableCell>,
-        height: Option<u32>,
+        height: Option<crate::dimension::Twips>,
     },
     InTableCell {
         blocks: Vec<Block>,
-        width: Option<u32>,
+        width: Option<crate::dimension::Twips>,
         grid_span: u32,
         vertical_merge: Option<VerticalMerge>,
         cell_margins: Option<CellMargins>,
@@ -886,11 +884,11 @@ enum ParseState {
     InDrawing {
         depth: u32,
         rel_id: Option<RelId>,
-        width_emu: Option<u64>,
-        height_emu: Option<u64>,
+        width_emu: Option<crate::dimension::Emu>,
+        height_emu: Option<crate::dimension::Emu>,
         is_anchor: bool,
-        pos_h_emu: Option<i64>,
-        pos_v_emu: Option<i64>,
+        pos_h_emu: Option<crate::dimension::Emu>,
+        pos_v_emu: Option<crate::dimension::Emu>,
         align_h: Option<String>,
         align_v: Option<String>,
         /// Tracks whether we're reading text for posOffset ('H'/'V') or align ('h'/'v').

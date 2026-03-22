@@ -31,10 +31,10 @@ pub fn handle_drawing_element(
             b"inline" => {}
             b"extent" => {
                 if let Some(cx) = get_attr(e, b"cx")? {
-                    *width_emu = cx.parse().ok();
+                    *width_emu = cx.parse::<i64>().ok().map(crate::dimension::Emu::new);
                 }
                 if let Some(cy) = get_attr(e, b"cy")? {
-                    *height_emu = cy.parse().ok();
+                    *height_emu = cy.parse::<i64>().ok().map(crate::dimension::Emu::new);
                 }
             }
             b"blip" => {

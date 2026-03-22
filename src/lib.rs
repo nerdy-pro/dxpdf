@@ -4,7 +4,9 @@
     clippy::collapsible_match
 )]
 
+pub mod dimension;
 pub mod error;
+pub mod geometry;
 pub mod model;
 pub mod parse;
 pub mod render;
