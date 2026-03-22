@@ -173,7 +173,7 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
     let image_cache = ImageCache::new(&doc.images);
     let mut effective_config = initial_config;
     if let Some(ref header) = doc.default_header {
-        let pre_measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
+        let pre_measurer = measurer::TextMeasurer::new(font_mgr.clone());
         let (_, header_bottom) = header_footer::layout_header_footer_blocks(
             &header.blocks,
             initial_config.margins.left,
@@ -339,7 +339,7 @@ impl Layouter {
         font_mgr: skia_safe::FontMgr,
         image_cache: ImageCache,
     ) -> Self {
-        let measurer = TextMeasurer::with_font_mgr(font_mgr);
+        let measurer = TextMeasurer::new(font_mgr);
         Self {
             config: *config,
             pages: Vec::new(),

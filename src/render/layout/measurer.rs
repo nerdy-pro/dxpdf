@@ -4,31 +4,14 @@ use crate::dimension::Pt;
 use crate::render::fonts;
 
 /// Measures text using Skia font metrics.
+/// Requires a shared `FontMgr` — use the same instance as the layout/paint pipeline.
 pub struct TextMeasurer {
     font_mgr: FontMgr,
 }
 
-impl Default for TextMeasurer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TextMeasurer {
-    pub fn new() -> Self {
-        Self {
-            font_mgr: FontMgr::new(),
-        }
-    }
-
-    /// Create a measurer sharing an existing FontMgr.
-    pub fn with_font_mgr(font_mgr: FontMgr) -> Self {
+    pub fn new(font_mgr: FontMgr) -> Self {
         Self { font_mgr }
-    }
-
-    /// Get a reference to the underlying FontMgr.
-    pub fn font_mgr(&self) -> &FontMgr {
-        &self.font_mgr
     }
 
     /// Measure the width of a text string in points.

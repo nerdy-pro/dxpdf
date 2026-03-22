@@ -15,7 +15,7 @@ pub(super) fn render_headers_footers(
     font_mgr: &skia_safe::FontMgr,
     image_cache: &super::ImageCache,
 ) {
-    let measurer = measurer::TextMeasurer::with_font_mgr(font_mgr.clone());
+    let measurer = measurer::TextMeasurer::new(font_mgr.clone());
     let num_pages = pages.len() as u32;
 
     for (page_idx, page) in pages.iter_mut().enumerate() {
