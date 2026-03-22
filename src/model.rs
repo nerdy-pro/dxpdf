@@ -450,6 +450,21 @@ pub struct Color {
     pub b: u8,
 }
 
+impl Color {
+    pub const BLACK: Color = Color { r: 0, g: 0, b: 0 };
+
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+}
+
+impl From<Color> for skia_safe::Color4f {
+    fn from(c: Color) -> Self {
+        const MAX: f32 = u8::MAX as f32;
+        skia_safe::Color4f::new(c.r as f32 / MAX, c.g as f32 / MAX, c.b as f32 / MAX, 1.0)
+    }
+}
+
 /// Cell margins (padding) — a newtype over `TwipsEdgeInsets`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellMargins(pub TwipsEdgeInsets);
@@ -512,27 +527,18 @@ impl BorderDef {
     /// Not defined by OOXML spec; matches Microsoft Word's behavior.
     pub const DEFAULT_SIZE: EighthPoints = EighthPoints::new(4);
 
-    /// Create a single-style border with given size (eighths of a point) and RGB color.
-    pub fn single(size: i64, color: (u8, u8, u8)) -> Self {
+    /// Create a single-style border with given size (eighths of a point) and color.
+    pub fn single(size: i64, color: Color) -> Self {
         Self {
             style: BorderStyle::Single,
             size: EighthPoints::new(size),
-            color: Color {
-                r: color.0,
-                g: color.1,
-                b: color.2,
-            },
+            color,
         }
     }
 
     /// Returns true if this border should be drawn.
     pub fn is_visible(&self) -> bool {
         self.style != BorderStyle::None && self.size.is_positive()
-    }
-
-    /// Color as an RGB tuple.
-    pub fn color_rgb(&self) -> (u8, u8, u8) {
-        (self.color.r, self.color.g, self.color.b)
     }
 }
 
@@ -541,7 +547,7 @@ impl Default for BorderDef {
         Self {
             style: BorderStyle::Single,
             size: Self::DEFAULT_SIZE,
-            color: Color { r: 0, g: 0, b: 0 },
+            color: Color::BLACK,
         }
     }
 }
