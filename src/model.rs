@@ -308,10 +308,10 @@ pub enum LineRule {
 pub enum LineSpacing {
     /// Multiplier of font's natural line height (1.0 = single, 1.15 = 1.15x).
     Multiplier(f32),
-    /// Fixed height in points.
-    Fixed(f32),
-    /// Minimum height in points.
-    AtLeast(f32),
+    /// Fixed height.
+    Fixed(Pt),
+    /// Minimum height.
+    AtLeast(Pt),
 }
 
 /// Paragraph spacing.
@@ -616,11 +616,11 @@ impl Color {
 
 impl Spacing {
     pub fn before_pt(&self) -> f32 {
-        self.before.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
+        self.before.map(f32::from).unwrap_or(0.0)
     }
 
     pub fn after_pt(&self) -> f32 {
-        self.after.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
+        self.after.map(f32::from).unwrap_or(0.0)
     }
 
     /// Line spacing semantic value.
@@ -629,35 +629,35 @@ impl Spacing {
     /// Returns `None` if not explicitly set.
     pub fn line_spacing(&self) -> Option<LineSpacing> {
         self.line.map(|v| match self.line_rule {
-            LineRule::Auto => LineSpacing::Multiplier(v.raw() as f32 / 240.0),
-            LineRule::Exact => LineSpacing::Fixed(Pt::from(v).raw()),
-            LineRule::AtLeast => LineSpacing::AtLeast(Pt::from(v).raw()),
+            LineRule::Auto => LineSpacing::Multiplier(i64::from(v) as f32 / 240.0),
+            LineRule::Exact => LineSpacing::Fixed(Pt::from(v)),
+            LineRule::AtLeast => LineSpacing::AtLeast(Pt::from(v)),
         })
     }
 
     /// Line spacing in points with a fixed fallback of 12pt.
     /// For `Auto` rule, returns the multiplier * 12pt as a rough estimate.
     pub fn line_pt(&self) -> f32 {
-        let single_line = Pt::from(Twips::new(240)).raw();
+        let single_line = Pt::from(Twips::new(240));
         match self.line_spacing() {
-            Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => pt,
-            Some(LineSpacing::Multiplier(m)) => m * single_line,
-            None => single_line,
+            Some(LineSpacing::Fixed(pt) | LineSpacing::AtLeast(pt)) => f32::from(pt),
+            Some(LineSpacing::Multiplier(m)) => m * f32::from(single_line),
+            None => f32::from(single_line),
         }
     }
 }
 
 impl Indentation {
     pub fn left_pt(&self) -> f32 {
-        self.left.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
+        self.left.map(f32::from).unwrap_or(0.0)
     }
 
     pub fn right_pt(&self) -> f32 {
-        self.right.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
+        self.right.map(f32::from).unwrap_or(0.0)
     }
 
     pub fn first_line_pt(&self) -> f32 {
-        self.first_line.map(|v| Pt::from(v).raw()).unwrap_or(0.0)
+        self.first_line.map(f32::from).unwrap_or(0.0)
     }
 }
 
@@ -689,15 +689,14 @@ mod tests {
 
     #[test]
     fn font_size_conversion() {
-        use crate::dimension::{HalfPoints, Pt};
+        use crate::dimension::HalfPoints;
         let hp = HalfPoints::new(24);
-        assert_eq!(Pt::from(hp).raw(), 12.0);
+        assert_eq!(f32::from(hp), 12.0);
     }
 
     #[test]
     fn default_font_size() {
-        use crate::dimension::Pt;
-        assert_eq!(Pt::from(Document::DEFAULT_FONT_SIZE).raw(), 12.0);
+        assert_eq!(f32::from(Document::DEFAULT_FONT_SIZE), 12.0);
     }
 
     #[test]

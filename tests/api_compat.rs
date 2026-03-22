@@ -293,8 +293,8 @@ fn line_rule_variants() {
 fn line_spacing_variants() {
     use dxpdf::model::LineSpacing;
     let _ = LineSpacing::Multiplier(1.0);
-    let _ = LineSpacing::Fixed(12.0);
-    let _ = LineSpacing::AtLeast(12.0);
+    let _ = LineSpacing::Fixed(dxpdf::dimension::Pt::new(12.0));
+    let _ = LineSpacing::AtLeast(dxpdf::dimension::Pt::new(12.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +309,7 @@ fn tab_stop_fields_and_methods() {
         stop_type: TabStopType::Left,
     };
     let _: dxpdf::dimension::Twips = ts.position;
-    let _: f32 = dxpdf::dimension::Pt::from(ts.position).raw();
+    let _: f32 = f32::from(ts.position);
 }
 
 #[test]
@@ -332,8 +332,8 @@ fn page_size_fields_and_methods() {
         width: dxpdf::dimension::Twips::new(12240),
         height: dxpdf::dimension::Twips::new(15840),
     };
-    let _: f32 = dxpdf::dimension::Pt::from(ps.width).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(ps.height).raw();
+    let _: f32 = f32::from(ps.width);
+    let _: f32 = f32::from(ps.height);
 }
 
 #[test]
@@ -347,12 +347,12 @@ fn page_margins_fields_and_methods() {
         header: dxpdf::dimension::Twips::new(720),
         footer: dxpdf::dimension::Twips::new(720),
     };
-    let _: f32 = dxpdf::dimension::Pt::from(pm.top).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(pm.right).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(pm.bottom).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(pm.left).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(pm.header).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(pm.footer).raw();
+    let _: f32 = f32::from(pm.top);
+    let _: f32 = f32::from(pm.right);
+    let _: f32 = f32::from(pm.bottom);
+    let _: f32 = f32::from(pm.left);
+    let _: f32 = f32::from(pm.header);
+    let _: f32 = f32::from(pm.footer);
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn table_cell_fields_and_methods() {
     let _: &Option<CellMargins> = &cell.cell_margins;
     let _: &Option<CellBorders> = &cell.cell_borders;
     let _: &Option<Color> = &cell.shading;
-    let _: Option<f32> = cell.width.map(|w| dxpdf::dimension::Pt::from(w).raw());
+    let _: Option<f32> = cell.width.map(f32::from);
     let _: bool = cell.is_vmerge_continue();
 }
 
@@ -542,10 +542,10 @@ fn cell_margins_fields_and_methods() {
         bottom: dxpdf::dimension::Twips::new(0),
         left: dxpdf::dimension::Twips::new(108),
     };
-    let _: f32 = dxpdf::dimension::Pt::from(cm.top).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(cm.right).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(cm.bottom).raw();
-    let _: f32 = dxpdf::dimension::Pt::from(cm.left).raw();
+    let _: f32 = f32::from(cm.top);
+    let _: f32 = f32::from(cm.right);
+    let _: f32 = f32::from(cm.bottom);
+    let _: f32 = f32::from(cm.left);
 }
 
 #[test]

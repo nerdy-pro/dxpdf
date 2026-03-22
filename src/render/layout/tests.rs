@@ -835,7 +835,10 @@ fn resolve_line_height_multiplier() {
 
 #[test]
 fn resolve_line_height_fixed() {
-    let h = resolve_line_height(14.0, Some(LineSpacing::Fixed(20.0)));
+    let h = resolve_line_height(
+        14.0,
+        Some(LineSpacing::Fixed(crate::dimension::Pt::new(20.0))),
+    );
     assert!(
         (h - 20.0).abs() < 0.01,
         "Fixed should be exactly 20pt, got {h}"
@@ -844,13 +847,19 @@ fn resolve_line_height_fixed() {
 
 #[test]
 fn resolve_line_height_at_least_larger() {
-    let h = resolve_line_height(14.0, Some(LineSpacing::AtLeast(20.0)));
+    let h = resolve_line_height(
+        14.0,
+        Some(LineSpacing::AtLeast(crate::dimension::Pt::new(20.0))),
+    );
     assert!((h - 20.0).abs() < 0.01, "AtLeast(20) with frag=14 → {h}");
 }
 
 #[test]
 fn resolve_line_height_at_least_smaller() {
-    let h = resolve_line_height(24.0, Some(LineSpacing::AtLeast(20.0)));
+    let h = resolve_line_height(
+        24.0,
+        Some(LineSpacing::AtLeast(crate::dimension::Pt::new(20.0))),
+    );
     assert!((h - 24.0).abs() < 0.01, "AtLeast(20) with frag=24 → {h}");
 }
 
@@ -1915,21 +1924,21 @@ fn footer_renders_at_bottom() {
 
 #[test]
 fn twips_to_pt_zero() {
-    use crate::dimension::{Pt, Twips};
-    assert!((Pt::from(Twips::new(0)).raw() - 0.0).abs() < 0.001);
+    use crate::dimension::Twips;
+    assert!((f32::from(Twips::new(0)) - 0.0).abs() < 0.001);
 }
 
 #[test]
 fn twips_to_pt_signed_negative() {
-    use crate::dimension::{Pt, Twips};
-    let pt = Pt::from(Twips::new(-20)).raw();
+    use crate::dimension::Twips;
+    let pt = f32::from(Twips::new(-20));
     assert!((pt - (-1.0)).abs() < 0.001, "Twips(-20) -> Pt = {pt}");
 }
 
 #[test]
 fn emu_to_pt_signed_negative() {
-    use crate::dimension::{Emu, Pt};
-    let pt = Pt::from(Emu::new(-914400)).raw();
+    use crate::dimension::Emu;
+    let pt = f32::from(Emu::new(-914400));
     assert!((pt - (-72.0)).abs() < 0.1, "Emu(-914400) -> Pt = {pt}");
 }
 

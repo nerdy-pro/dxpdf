@@ -26,8 +26,8 @@ impl Layouter {
                 continue;
             }
             let content_w = self.config.content_width();
-            let fw = float.width.raw();
-            let fh = float.height.raw();
+            let fw = f32::from(float.width);
+            let fh = f32::from(float.height);
             let img_x = if let Some(pct) = float.pct_pos_h {
                 pct as f32 / 100_000.0 * self.config.page_width
             } else {
@@ -35,13 +35,13 @@ impl Layouter {
                     Some("right") => self.config.margin_left + content_w - fw,
                     Some("center") => self.config.margin_left + (content_w - fw) / 2.0,
                     Some("left") => self.config.margin_left,
-                    _ => self.config.margin_left + float.offset_x.raw(),
+                    _ => self.config.margin_left + f32::from(float.offset_x),
                 }
             };
             let img_y = if let Some(pct) = float.pct_pos_v {
                 pct as f32 / 100_000.0 * self.config.page_height
             } else {
-                self.cursor_y + float.offset_y.raw()
+                self.cursor_y + f32::from(float.offset_y)
             };
 
             let image = self.image_cache.get(&float.rel_id);
@@ -63,7 +63,7 @@ impl Layouter {
 
         if para.runs.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
-            let default_size = crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
+            let default_size = f32::from(self.doc_defaults.font_size);
             let natural_height = self.measurer.line_height(
                 &self.doc_defaults.font_family,
                 default_size,
@@ -90,8 +90,8 @@ impl Layouter {
             if indent.first_line.is_none() {
                 indent.first_line = Some(-hanging);
             }
-            let left_pt = crate::dimension::Pt::from(left).raw();
-            let hanging_pt = crate::dimension::Pt::from(hanging).raw();
+            let left_pt = f32::from(left);
+            let hanging_pt = f32::from(hanging);
             let label_x = self.config.margin_left + left_pt - hanging_pt;
             (Some(label.clone()), Some(label_x))
         } else {
@@ -156,7 +156,7 @@ impl Layouter {
             if !first_line_painted {
                 if let (Some(ref label), Some(lx)) = (&list_label_text, list_label_x) {
                     let font = &self.doc_defaults.font_family;
-                    let fs = crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
+                    let fs = f32::from(self.doc_defaults.font_size);
                     self.current_page.commands.push(DrawCommand::Text {
                         x: lx,
                         y: self.cursor_y,
@@ -243,7 +243,7 @@ impl Layouter {
                         x2: right,
                         y2: top,
                         color: b.color_rgb(),
-                        width: crate::dimension::Pt::from(b.size).raw(),
+                        width: f32::from(b.size),
                     });
                 }
             }
@@ -255,7 +255,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: crate::dimension::Pt::from(b.size).raw(),
+                        width: f32::from(b.size),
                     });
                 }
             }
@@ -267,7 +267,7 @@ impl Layouter {
                         x2: left,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: crate::dimension::Pt::from(b.size).raw(),
+                        width: f32::from(b.size),
                     });
                 }
             }
@@ -279,7 +279,7 @@ impl Layouter {
                         x2: right,
                         y2: bottom,
                         color: b.color_rgb(),
-                        width: crate::dimension::Pt::from(b.size).raw(),
+                        width: f32::from(b.size),
                     });
                 }
             }

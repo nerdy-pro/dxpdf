@@ -127,10 +127,6 @@ impl<U: IntegerUnit> Dimension<U> {
         }
     }
 
-    pub const fn raw(self) -> i64 {
-        self.value
-    }
-
     pub const fn is_positive(self) -> bool {
         self.value > 0
     }
@@ -143,9 +139,21 @@ impl Pt {
             _unit: PhantomData,
         }
     }
+}
 
-    pub fn raw(self) -> f32 {
-        self.value
+// ---------------------------------------------------------------------------
+// Into primitive: extract the inner value
+// ---------------------------------------------------------------------------
+
+impl<U: IntegerUnit> From<Dimension<U>> for i64 {
+    fn from(d: Dimension<U>) -> i64 {
+        d.value
+    }
+}
+
+impl From<Pt> for f32 {
+    fn from(p: Pt) -> f32 {
+        p.value
     }
 }
 
@@ -238,7 +246,7 @@ impl PartialOrd for Pt {
 }
 
 // ---------------------------------------------------------------------------
-// From conversions: OOXML units → Pt
+// From conversions: OOXML units → Pt (and transitively → f32)
 // ---------------------------------------------------------------------------
 
 impl From<Twips> for Pt {
@@ -263,6 +271,34 @@ impl From<Emu> for Pt {
     fn from(e: Emu) -> Self {
         // 914400 EMU = 1 inch = 72 pt → 1 EMU = 72/914400 pt
         Pt::new(e.value as f32 * 72.0 / 914_400.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut conversions: OOXML units → f32 (via Pt)
+// ---------------------------------------------------------------------------
+
+impl From<Twips> for f32 {
+    fn from(t: Twips) -> f32 {
+        f32::from(Pt::from(t))
+    }
+}
+
+impl From<HalfPoints> for f32 {
+    fn from(hp: HalfPoints) -> f32 {
+        f32::from(Pt::from(hp))
+    }
+}
+
+impl From<EighthPoints> for f32 {
+    fn from(ep: EighthPoints) -> f32 {
+        f32::from(Pt::from(ep))
+    }
+}
+
+impl From<Emu> for f32 {
+    fn from(e: Emu) -> f32 {
+        f32::from(Pt::from(e))
     }
 }
 
@@ -338,46 +374,46 @@ mod tests {
     #[test]
     fn twips_new_and_raw() {
         let t = Twips::new(1440);
-        assert_eq!(t.raw(), 1440);
+        assert_eq!(i64::from(t), 1440);
     }
 
     #[test]
     fn half_points_new_and_raw() {
         let hp = HalfPoints::new(24);
-        assert_eq!(hp.raw(), 24);
+        assert_eq!(i64::from(hp), 24);
     }
 
     #[test]
     fn eighth_points_new_and_raw() {
         let ep = EighthPoints::new(8);
-        assert_eq!(ep.raw(), 8);
+        assert_eq!(i64::from(ep), 8);
     }
 
     #[test]
     fn emu_new_and_raw() {
         let e = Emu::new(914400);
-        assert_eq!(e.raw(), 914400);
+        assert_eq!(i64::from(e), 914400);
     }
 
     #[test]
     fn pt_new_and_raw() {
         let p = Pt::new(72.0);
-        assert_eq!(p.raw(), 72.0);
+        assert_eq!(f32::from(p), 72.0);
     }
 
     #[test]
     fn negative_values() {
         let t = Twips::new(-360);
-        assert_eq!(t.raw(), -360);
+        assert_eq!(i64::from(t), -360);
 
         let e = Emu::new(-457200);
-        assert_eq!(e.raw(), -457200);
+        assert_eq!(i64::from(e), -457200);
     }
 
     #[test]
     fn zero_values() {
-        assert_eq!(Twips::new(0).raw(), 0);
-        assert_eq!(Pt::new(0.0).raw(), 0.0);
+        assert_eq!(i64::from(Twips::new(0)), 0);
+        assert_eq!(f32::from(Pt::new(0.0)), 0.0);
     }
 
     // -- Arithmetic --
@@ -386,47 +422,47 @@ mod tests {
     fn twips_add() {
         let a = Twips::new(720);
         let b = Twips::new(360);
-        assert_eq!((a + b).raw(), 1080);
+        assert_eq!(i64::from(a + b), 1080);
     }
 
     #[test]
     fn twips_sub() {
         let a = Twips::new(720);
         let b = Twips::new(360);
-        assert_eq!((a - b).raw(), 360);
+        assert_eq!(i64::from(a - b), 360);
     }
 
     #[test]
     fn twips_neg() {
         let t = Twips::new(720);
-        assert_eq!((-t).raw(), -720);
+        assert_eq!(i64::from(-t), -720);
     }
 
     #[test]
     fn pt_add() {
         let a = Pt::new(36.0);
         let b = Pt::new(36.0);
-        assert_eq!((a + b).raw(), 72.0);
+        assert_eq!(f32::from(a + b), 72.0);
     }
 
     #[test]
     fn pt_sub() {
         let a = Pt::new(72.0);
         let b = Pt::new(36.0);
-        assert_eq!((a - b).raw(), 36.0);
+        assert_eq!(f32::from(a - b), 36.0);
     }
 
     #[test]
     fn pt_neg() {
         let p = Pt::new(12.0);
-        assert_eq!((-p).raw(), -12.0);
+        assert_eq!(f32::from(-p), -12.0);
     }
 
     #[test]
     fn emu_add() {
         let a = Emu::new(914400);
         let b = Emu::new(914400);
-        assert_eq!((a + b).raw(), 1828800);
+        assert_eq!(i64::from(a + b), 1828800);
     }
 
     // -- Conversions: OOXML → Pt via From --
@@ -435,72 +471,72 @@ mod tests {
     fn twips_to_pt() {
         // 1440 twips = 72 pt (1 inch)
         let pt: Pt = Twips::new(1440).into();
-        assert_eq!(pt.raw(), 72.0);
+        assert_eq!(f32::from(pt), 72.0);
     }
 
     #[test]
     fn twips_to_pt_one_twip() {
         let pt: Pt = Twips::new(1).into();
-        assert!((pt.raw() - 0.05).abs() < 0.001);
+        assert!((f32::from(pt) - 0.05).abs() < 0.001);
     }
 
     #[test]
     fn twips_to_pt_negative() {
         let pt: Pt = Twips::new(-240).into();
-        assert_eq!(pt.raw(), -12.0);
+        assert_eq!(f32::from(pt), -12.0);
     }
 
     #[test]
     fn twips_to_pt_zero() {
         let pt: Pt = Twips::new(0).into();
-        assert_eq!(pt.raw(), 0.0);
+        assert_eq!(f32::from(pt), 0.0);
     }
 
     #[test]
     fn half_points_to_pt() {
         // 24 half-points = 12 pt
         let pt: Pt = HalfPoints::new(24).into();
-        assert_eq!(pt.raw(), 12.0);
+        assert_eq!(f32::from(pt), 12.0);
     }
 
     #[test]
     fn half_points_to_pt_odd() {
         // 13 half-points = 6.5 pt
         let pt: Pt = HalfPoints::new(13).into();
-        assert_eq!(pt.raw(), 6.5);
+        assert_eq!(f32::from(pt), 6.5);
     }
 
     #[test]
     fn eighth_points_to_pt() {
         // 8 eighth-points = 1 pt
         let pt: Pt = EighthPoints::new(8).into();
-        assert_eq!(pt.raw(), 1.0);
+        assert_eq!(f32::from(pt), 1.0);
     }
 
     #[test]
     fn eighth_points_to_pt_border_default() {
         // 4 eighth-points = 0.5 pt (default border width)
         let pt: Pt = EighthPoints::new(4).into();
-        assert_eq!(pt.raw(), 0.5);
+        assert_eq!(f32::from(pt), 0.5);
     }
 
     #[test]
     fn emu_to_pt() {
         // 914400 EMU = 1 inch = 72 pt
         let pt: Pt = Emu::new(914400).into();
-        assert!((pt.raw() - 72.0).abs() < 0.01);
+        assert!((f32::from(pt) - 72.0).abs() < 0.01);
     }
 
     #[test]
     fn emu_to_pt_zero() {
         let pt: Pt = Emu::new(0).into();
-        assert_eq!(pt.raw(), 0.0);
+        assert_eq!(f32::from(pt), 0.0);
     }
 
     #[test]
     fn emu_to_pt_negative() {
         let pt: Pt = Emu::new(-914400).into();
-        assert!((pt.raw() + 72.0).abs() < 0.01);
+        assert!((f32::from(pt) + 72.0).abs() < 0.01);
     }
 
     // -- Conversions via Pt::from --
@@ -508,25 +544,25 @@ mod tests {
     #[test]
     fn pt_from_twips() {
         let pt = Pt::from(Twips::new(240));
-        assert_eq!(pt.raw(), 12.0);
+        assert_eq!(f32::from(pt), 12.0);
     }
 
     #[test]
     fn pt_from_half_points() {
         let pt = Pt::from(HalfPoints::new(48));
-        assert_eq!(pt.raw(), 24.0);
+        assert_eq!(f32::from(pt), 24.0);
     }
 
     #[test]
     fn pt_from_eighth_points() {
         let pt = Pt::from(EighthPoints::new(16));
-        assert_eq!(pt.raw(), 2.0);
+        assert_eq!(f32::from(pt), 2.0);
     }
 
     #[test]
     fn pt_from_emu() {
         let pt = Pt::from(Emu::new(457200));
-        assert!((pt.raw() - 36.0).abs() < 0.01);
+        assert!((f32::from(pt) - 36.0).abs() < 0.01);
     }
 
     // -- Equality --
@@ -621,19 +657,19 @@ mod tests {
     #[test]
     fn pt_mul_scalar() {
         let p = Pt::new(12.0);
-        assert_eq!((p * 2.0).raw(), 24.0);
+        assert_eq!(f32::from(p * 2.0), 24.0);
     }
 
     #[test]
     fn pt_scalar_mul() {
         let p = Pt::new(12.0);
-        assert_eq!((2.0 * p).raw(), 24.0);
+        assert_eq!(f32::from(2.0 * p), 24.0);
     }
 
     #[test]
     fn pt_div_scalar() {
         let p = Pt::new(72.0);
-        assert_eq!((p / 2.0).raw(), 36.0);
+        assert_eq!(f32::from(p / 2.0), 36.0);
     }
 
     #[test]

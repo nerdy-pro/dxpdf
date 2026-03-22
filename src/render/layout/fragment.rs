@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use super::ImageCache;
-use crate::dimension::{HalfPoints, Pt};
+use crate::dimension::HalfPoints;
 use crate::model::*;
 use crate::units::{MIN_TAB_WIDTH_PT, TAB_FALLBACK_PT, UNDERLINE_Y_OFFSET};
 
@@ -150,14 +150,10 @@ pub fn collect_fragments_with_fields(
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
                 let base_font_size =
-                    Pt::from(tr.properties.font_size.unwrap_or(defaults.font_size)).raw();
+                    f32::from(tr.properties.font_size.unwrap_or(defaults.font_size));
                 let bold = tr.properties.bold;
                 let italic = tr.properties.italic;
-                let char_spacing_pt = tr
-                    .properties
-                    .char_spacing
-                    .map(|v| Pt::from(v).raw())
-                    .unwrap_or(0.0);
+                let char_spacing_pt = tr.properties.char_spacing.map(f32::from).unwrap_or(0.0);
 
                 // Super/subscript: reduce font size and compute baseline offset
                 let (font_size, baseline_offset) = match tr.properties.vert_align {
@@ -210,8 +206,8 @@ pub fn collect_fragments_with_fields(
                 }
             }
             Inline::Image(img) if image_cache.contains(&img.rel_id) => {
-                let w = img.width.raw();
-                let h = img.height.raw();
+                let w = f32::from(img.width);
+                let h = f32::from(img.height);
                 let scale = f32::min(
                     1.0,
                     f32::min(content_width / w.max(1.0), content_height / h.max(1.0)),
@@ -223,12 +219,12 @@ pub fn collect_fragments_with_fields(
                 });
             }
             Inline::Tab => {
-                let default_size = Pt::from(defaults.font_size).raw();
+                let default_size = f32::from(defaults.font_size);
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = Pt::from(defaults.font_size).raw();
+                let default_size = f32::from(defaults.font_size);
                 let lh = measurer.line_height(&defaults.font_family, default_size, false, false);
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
@@ -244,10 +240,10 @@ pub fn collect_fragments_with_fields(
                     .font_family
                     .clone()
                     .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size)).raw();
+                let font_size = f32::from(rp.font_size.unwrap_or(defaults.font_size));
                 let bold = rp.bold;
                 let italic = rp.italic;
-                let char_spacing_pt = rp.char_spacing.map(|v| Pt::from(v).raw()).unwrap_or(0.0);
+                let char_spacing_pt = rp.char_spacing.map(f32::from).unwrap_or(0.0);
                 let w = measurer.measure_width(&text, &font_family, font_size, bold, italic);
                 let char_count = text.chars().count() as f32;
                 let measured_width = w + char_spacing_pt * char_count;
@@ -276,7 +272,7 @@ pub fn collect_fragments_with_fields(
 /// Find the next tab stop position (in points, relative to paragraph left edge).
 pub fn find_next_tab_stop(current_x: f32, custom_stops: &[TabStop], default_interval: f32) -> f32 {
     for stop in custom_stops {
-        let pos = Pt::from(stop.position).raw();
+        let pos = f32::from(stop.position);
         if pos > current_x + 1.0 {
             return pos;
         }
@@ -326,8 +322,8 @@ fn split_words_and_spaces(text: &str) -> Vec<&str> {
 pub fn resolve_line_height(frag_height: f32, spacing: Option<LineSpacing>) -> f32 {
     match spacing {
         Some(LineSpacing::Multiplier(m)) => frag_height * m,
-        Some(LineSpacing::Fixed(pt)) => pt,
-        Some(LineSpacing::AtLeast(pt)) => frag_height.max(pt),
+        Some(LineSpacing::Fixed(pt)) => f32::from(pt),
+        Some(LineSpacing::AtLeast(pt)) => frag_height.max(f32::from(pt)),
         None => frag_height,
     }
 }

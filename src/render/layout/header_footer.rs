@@ -112,8 +112,8 @@ pub(super) fn layout_header_footer_blocks(
                 if !image_cache.contains(&float.rel_id) {
                     continue;
                 }
-                let fw = float.width.raw();
-                let fh = float.height.raw();
+                let fw = f32::from(float.width);
+                let fh = f32::from(float.height);
                 let scale = f32::min(1.0, content_width / fw.max(1.0));
                 let img_w = fw * scale;
                 let img_h = fh * scale;
@@ -124,7 +124,7 @@ pub(super) fn layout_header_footer_blocks(
                         Some("right") => x_start + content_width - img_w,
                         Some("center") => x_start + (content_width - img_w) / 2.0,
                         Some("left") => x_start,
-                        _ => x_start + float.offset_x.raw(),
+                        _ => x_start + f32::from(float.offset_x),
                     }
                 };
                 let img_y = if let Some(pct) = float.pct_pos_v {
@@ -134,7 +134,7 @@ pub(super) fn layout_header_footer_blocks(
                         Some("center") => (margin_extent - img_h) / 2.0,
                         Some("bottom") => margin_extent - img_h,
                         Some("top") => 0.0,
-                        _ => cursor_y + float.offset_y.raw(),
+                        _ => cursor_y + f32::from(float.offset_y),
                     }
                 };
                 max_y = max_y.max(img_y + img_h);

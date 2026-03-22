@@ -186,7 +186,7 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
     let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
     next_configs.reverse();
 
-    let default_tab_stop_pt = crate::dimension::Pt::from(doc.default_tab_stop).raw();
+    let default_tab_stop_pt = f32::from(doc.default_tab_stop);
     let doc_defaults = DocDefaultsLayout::from_document(doc);
     let image_cache = ImageCache::new(&doc.images);
     let mut effective_config = initial_config;
@@ -246,18 +246,17 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
 }
 
 fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) {
-    use crate::dimension::Pt;
     if let Some(ps) = &sect.page_size {
-        config.page_width = Pt::from(ps.width).raw();
-        config.page_height = Pt::from(ps.height).raw();
+        config.page_width = f32::from(ps.width);
+        config.page_height = f32::from(ps.height);
     }
     if let Some(pm) = &sect.page_margins {
-        config.margin_top = Pt::from(pm.top).raw();
-        config.margin_right = Pt::from(pm.right).raw();
-        config.margin_bottom = Pt::from(pm.bottom).raw();
-        config.margin_left = Pt::from(pm.left).raw();
-        config.header_margin = Pt::from(pm.header).raw();
-        config.footer_margin = Pt::from(pm.footer).raw();
+        config.margin_top = f32::from(pm.top);
+        config.margin_right = f32::from(pm.right);
+        config.margin_bottom = f32::from(pm.bottom);
+        config.margin_left = f32::from(pm.left);
+        config.header_margin = f32::from(pm.header);
+        config.footer_margin = f32::from(pm.footer);
     }
 }
 
@@ -489,9 +488,7 @@ impl Layouter {
                 .map(|i| col_widths.get(i).copied().unwrap_or(72.0))
                 .sum();
         }
-        cell.width
-            .map(|w| crate::dimension::Pt::from(w).raw())
-            .unwrap_or(72.0)
+        cell.width.map(f32::from).unwrap_or(72.0)
     }
 
     /// Resolve list label text and indentation for a paragraph with a list reference.

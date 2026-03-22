@@ -59,7 +59,7 @@ fn emit_border(
             x2,
             y2,
             color: border.color_rgb(),
-            width: crate::dimension::Pt::from(border.size).raw(),
+            width: f32::from(border.size),
         });
     }
 }
@@ -82,11 +82,7 @@ impl Layouter {
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
         let col_widths: Vec<f32> = if !table.grid_cols.is_empty() {
-            let grid_total: f32 = table
-                .grid_cols
-                .iter()
-                .map(|w| crate::dimension::Pt::from(*w).raw())
-                .sum();
+            let grid_total: f32 = table.grid_cols.iter().map(|w| f32::from(*w)).sum();
             let scale = if grid_total > 0.0 {
                 content_width / grid_total
             } else {
@@ -95,7 +91,7 @@ impl Layouter {
             table
                 .grid_cols
                 .iter()
-                .map(|w| crate::dimension::Pt::from(*w).raw() * scale)
+                .map(|w| f32::from(*w) * scale)
                 .collect()
         } else {
             vec![content_width / num_cols as f32; num_cols]
@@ -108,10 +104,7 @@ impl Layouter {
             .rows
             .iter()
             .map(|row| {
-                let min_height = row
-                    .height
-                    .map(|h| crate::dimension::Pt::from(h).raw())
-                    .unwrap_or(0.0);
+                let min_height = row.height.map(f32::from).unwrap_or(0.0);
                 let row_height_limit = self.config.content_height();
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
@@ -133,10 +126,10 @@ impl Layouter {
                     let cell_x = col_x_positions[col_idx];
                     let margins =
                         resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
-                    let pad_left = crate::dimension::Pt::from(margins.left).raw();
-                    let pad_right = crate::dimension::Pt::from(margins.right).raw();
-                    let pad_top = crate::dimension::Pt::from(margins.top).raw();
-                    let pad_bottom = crate::dimension::Pt::from(margins.bottom).raw();
+                    let pad_left = f32::from(margins.left);
+                    let pad_right = f32::from(margins.right);
+                    let pad_top = f32::from(margins.top);
+                    let pad_bottom = f32::from(margins.bottom);
                     let cell_content_width = (col_width - pad_left - pad_right).max(1.0);
 
                     if cell.is_vmerge_continue() {
@@ -162,8 +155,8 @@ impl Layouter {
                                 if !self.image_cache.contains(&float.rel_id) {
                                     continue;
                                 }
-                                let fw = float.width.raw();
-                                let fh = float.height.raw();
+                                let fw = f32::from(float.width);
+                                let fh = f32::from(float.height);
                                 let scale = f32::min(
                                     1.0,
                                     f32::min(
@@ -195,8 +188,7 @@ impl Layouter {
                             );
 
                             if fragments.is_empty() && p.floats.is_empty() {
-                                let default_size =
-                                    crate::dimension::Pt::from(self.doc_defaults.font_size).raw();
+                                let default_size = f32::from(self.doc_defaults.font_size);
                                 let natural = self.measurer.line_height(
                                     &self.doc_defaults.font_family,
                                     default_size,

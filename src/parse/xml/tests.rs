@@ -64,10 +64,7 @@ fn parse_font_size_and_color() {
         tr.properties.font_size,
         Some(crate::dimension::HalfPoints::new(28))
     );
-    assert_eq!(
-        crate::dimension::Pt::from(tr.properties.font_size.unwrap()).raw(),
-        14.0
-    );
+    assert_eq!(f32::from(tr.properties.font_size.unwrap()), 14.0);
     assert_eq!(tr.properties.color, Some(Color { r: 255, g: 0, b: 0 }));
 }
 
@@ -200,8 +197,8 @@ fn parse_inline_image() {
         panic!()
     };
     assert_eq!(img.rel_id, RelId::from("rId5"));
-    assert!((img.width.raw() - 72.0).abs() < 0.1);
-    assert!((img.height.raw() - 36.0).abs() < 0.1);
+    assert!((f32::from(img.width) - 72.0).abs() < 0.1);
+    assert!((f32::from(img.height) - 36.0).abs() < 0.1);
 }
 
 #[test]
@@ -368,7 +365,7 @@ fn parse_floating_image_without_pct_pos_has_none() {
     assert_eq!(float.pct_pos_v, None);
     // Should still have absolute offset
     assert!(
-        (float.offset_x.raw() - 25.25).abs() < 0.5,
+        (f32::from(float.offset_x) - 25.25).abs() < 0.5,
         "offset_x={}",
         float.offset_x
     );
