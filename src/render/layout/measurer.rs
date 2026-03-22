@@ -51,4 +51,12 @@ impl TextMeasurer {
         let (_, metrics) = font.metrics();
         Pt::new(-metrics.ascent + metrics.descent + metrics.leading)
     }
+
+    /// Get the ascent (distance from baseline to top of line) for a font.
+    /// Always positive.
+    pub fn ascent(&self, font_family: &str, font_size: Pt, bold: bool, italic: bool) -> Pt {
+        let font = fonts::make_font(&self.font_mgr, font_family, font_size, bold, italic);
+        let (_, metrics) = font.metrics();
+        Pt::new(-metrics.ascent)
+    }
 }

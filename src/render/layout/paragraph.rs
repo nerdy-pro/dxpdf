@@ -69,8 +69,10 @@ impl Layouter {
                 false,
                 false,
             );
-            self.cursor_y += resolve_line_height(natural_height, spacing.line_spacing());
-            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, self.cursor_y);
+            let line_h = resolve_line_height(natural_height, spacing.line_spacing());
+            // Paint borders before advancing — top border sits at paragraph start
+            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, top + line_h);
+            self.cursor_y += line_h;
             self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
             return;
         }
@@ -223,11 +225,9 @@ impl Layouter {
             if let Some(ref b) = borders.top {
                 // Skip top border if previous paragraph already drew a border
                 if b.is_visible() && !self.prev_para_had_bottom_border {
+                    let y = top - b.space;
                     self.current_page.commands.push(DrawCommand::Line {
-                        line: PtLineSegment::new(
-                            PtOffset::new(left, top),
-                            PtOffset::new(right, top),
-                        ),
+                        line: PtLineSegment::new(PtOffset::new(left, y), PtOffset::new(right, y)),
                         color: b.color,
                         width: Pt::from(b.size),
                     });
@@ -235,11 +235,9 @@ impl Layouter {
             }
             if let Some(ref b) = borders.bottom {
                 if b.is_visible() {
+                    let y = bottom + b.space;
                     self.current_page.commands.push(DrawCommand::Line {
-                        line: PtLineSegment::new(
-                            PtOffset::new(left, bottom),
-                            PtOffset::new(right, bottom),
-                        ),
+                        line: PtLineSegment::new(PtOffset::new(left, y), PtOffset::new(right, y)),
                         color: b.color,
                         width: Pt::from(b.size),
                     });
@@ -247,11 +245,9 @@ impl Layouter {
             }
             if let Some(ref b) = borders.left {
                 if b.is_visible() {
+                    let x = left - b.space;
                     self.current_page.commands.push(DrawCommand::Line {
-                        line: PtLineSegment::new(
-                            PtOffset::new(left, top),
-                            PtOffset::new(left, bottom),
-                        ),
+                        line: PtLineSegment::new(PtOffset::new(x, top), PtOffset::new(x, bottom)),
                         color: b.color,
                         width: Pt::from(b.size),
                     });
@@ -259,11 +255,9 @@ impl Layouter {
             }
             if let Some(ref b) = borders.right {
                 if b.is_visible() {
+                    let x = right + b.space;
                     self.current_page.commands.push(DrawCommand::Line {
-                        line: PtLineSegment::new(
-                            PtOffset::new(right, top),
-                            PtOffset::new(right, bottom),
-                        ),
+                        line: PtLineSegment::new(PtOffset::new(x, top), PtOffset::new(x, bottom)),
                         color: b.color,
                         width: Pt::from(b.size),
                     });
@@ -393,24 +387,22 @@ impl Layouter {
                         shading,
                         char_spacing_pt,
                         measured_width,
+                        ascent,
                         hyperlink_url,
                         baseline_offset,
                         ..
                     } => {
                         let c = color.unwrap_or(Color::BLACK);
+                        let line_top = rel_y - line_height;
+                        let baseline_y = line_top + *ascent;
                         if let Some(bg) = shading {
                             commands.push(DrawCommand::Rect {
-                                rect: PtRect::from_xywh(
-                                    x,
-                                    rel_y - line_height,
-                                    *measured_width,
-                                    line_height,
-                                ),
+                                rect: PtRect::from_xywh(x, line_top, *measured_width, line_height),
                                 color: *bg,
                             });
                         }
                         commands.push(DrawCommand::Text {
-                            position: PtOffset::new(x, rel_y + *baseline_offset),
+                            position: PtOffset::new(x, baseline_y + *baseline_offset),
                             text: text.clone(),
                             font_family: font_family.clone(),
                             char_spacing_pt: *char_spacing_pt,
@@ -421,10 +413,11 @@ impl Layouter {
                         });
                         if *underline {
                             let uw = underline_width(*font_size, *bold);
+                            let underline_y = baseline_y + UNDERLINE_Y_OFFSET;
                             commands.push(DrawCommand::Underline {
                                 line: PtLineSegment::new(
-                                    PtOffset::new(x, rel_y + UNDERLINE_Y_OFFSET),
-                                    PtOffset::new(x + *measured_width, rel_y + UNDERLINE_Y_OFFSET),
+                                    PtOffset::new(x, underline_y),
+                                    PtOffset::new(x + *measured_width, underline_y),
                                 ),
                                 color: c,
                                 width: uw,

@@ -53,6 +53,8 @@ pub enum Fragment {
         char_spacing_pt: Pt,
         measured_width: Pt,
         measured_height: Pt,
+        /// Distance from top of line box to baseline (always positive).
+        ascent: Pt,
         /// Hyperlink URL, if this text is part of a link.
         hyperlink_url: Option<String>,
         /// Baseline offset in points (negative = up for superscript, positive = down for subscript).
@@ -173,6 +175,7 @@ pub fn collect_fragments_with_fields(
                 };
 
                 let line_height = measurer.line_height(&font_family, base_font_size, bold, italic);
+                let ascent = measurer.ascent(&font_family, base_font_size, bold, italic);
                 for part in split_words_and_spaces(&tr.text) {
                     let base_width =
                         measurer.measure_width(part, &font_family, font_size, bold, italic);
@@ -196,6 +199,7 @@ pub fn collect_fragments_with_fields(
                         char_spacing_pt,
                         measured_width,
                         measured_height: line_height,
+                        ascent,
                         hyperlink_url: if is_space {
                             None
                         } else {
@@ -250,6 +254,7 @@ pub fn collect_fragments_with_fields(
                 let char_count = text.chars().count() as f32;
                 let measured_width = w + char_spacing_pt * char_count;
                 let lh = measurer.line_height(&font_family, font_size, bold, italic);
+                let ascent = measurer.ascent(&font_family, font_size, bold, italic);
                 fragments.push(Fragment::Text {
                     text,
                     font_family,
@@ -262,6 +267,7 @@ pub fn collect_fragments_with_fields(
                     char_spacing_pt,
                     measured_width,
                     measured_height: lh,
+                    ascent,
                     hyperlink_url: None,
                     baseline_offset: Pt::ZERO,
                 });
@@ -473,24 +479,22 @@ pub fn measure_lines(
                     shading,
                     char_spacing_pt,
                     measured_width,
+                    ascent,
                     hyperlink_url,
                     baseline_offset,
                     ..
                 } => {
                     let c = color.unwrap_or(Color::BLACK);
+                    let line_top = cursor_y - line_height;
+                    let baseline_y = line_top + *ascent;
                     if let Some(bg) = shading {
                         commands.push(DrawCommand::Rect {
-                            rect: PtRect::from_xywh(
-                                x,
-                                cursor_y - line_height,
-                                *measured_width,
-                                line_height,
-                            ),
+                            rect: PtRect::from_xywh(x, line_top, *measured_width, line_height),
                             color: *bg,
                         });
                     }
                     commands.push(DrawCommand::Text {
-                        position: PtOffset::new(x, cursor_y + *baseline_offset),
+                        position: PtOffset::new(x, baseline_y + *baseline_offset),
                         text: text.clone(),
                         font_family: font_family.clone(),
                         char_spacing_pt: *char_spacing_pt,
@@ -501,10 +505,11 @@ pub fn measure_lines(
                     });
                     if *underline {
                         let uw = underline_width(*font_size, *bold);
+                        let underline_y = baseline_y + UNDERLINE_Y_OFFSET;
                         commands.push(DrawCommand::Underline {
                             line: PtLineSegment::new(
-                                PtOffset::new(x, cursor_y + UNDERLINE_Y_OFFSET),
-                                PtOffset::new(x + *measured_width, cursor_y + UNDERLINE_Y_OFFSET),
+                                PtOffset::new(x, underline_y),
+                                PtOffset::new(x + *measured_width, underline_y),
                             ),
                             color: c,
                             width: uw,

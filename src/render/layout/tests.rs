@@ -888,6 +888,7 @@ fn make_text_frag(text: &str, width: f32) -> Fragment {
         char_spacing_pt: Pt::ZERO,
         measured_width: pt(width),
         measured_height: pt(14.0),
+        ascent: pt(11.0),
         hyperlink_url: None,
         baseline_offset: Pt::ZERO,
     }
@@ -1107,6 +1108,7 @@ fn measure_lines_with_underline() {
         char_spacing_pt: Pt::ZERO,
         measured_width: pt(60.0),
         measured_height: pt(14.0),
+        ascent: pt(11.0),
         hyperlink_url: None,
         baseline_offset: Pt::ZERO,
     }];
@@ -1148,6 +1150,7 @@ fn measure_lines_with_shading() {
         char_spacing_pt: Pt::ZERO,
         measured_width: pt(40.0),
         measured_height: pt(14.0),
+        ascent: pt(11.0),
         hyperlink_url: None,
         baseline_offset: Pt::ZERO,
     }];
