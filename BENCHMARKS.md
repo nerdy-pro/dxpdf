@@ -41,6 +41,7 @@ Conversion benchmarks for `dxpdf` using a private 2-page test document with tabl
 | 2026-03-21 | cache | 85.2 ms ± 0.9 ms | 83.8 ms | 86.7 ms | 19.0 MB | +typeface cache (thread-local HashMap), 25% faster on macOS, much larger gains on Linux |
 | 2026-03-21 | images | 53.1 ms ± 1.0 ms | 51.5 ms | 55.0 ms | 19.0 MB | Shared FontMgr, upfront image decode into Rc\<Image\>, ImageStore in Document, immutable ImageCache |
 | 2026-03-22 | dimensions | 47.8 ms ± 2.1 ms | 46.0 ms | 56.0 ms | 20.0 MB | Type-safe dimension system (Twips, HalfPoints, EighthPoints, Emu, Pt), LayoutConfig internalized, 160 unit tests |
+| 2026-03-22 | v0.1.5 | 48.3 ms ± 0.8 ms | 47.3 ms | 50.8 ms | 20.0 MB | Geometry types (Offset, Size, Rect, EdgeInsets, LineSegment), Color type, baseline positioning fix, border w:space, vMerge height fix, 252 tests |
 
 ### Methodology
 

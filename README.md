@@ -8,8 +8,9 @@ Built by [nerdy.pro](https://nerdy.pro).
 
 ## Why dxpdf?
 
-- **Fast** — converts a 7-page report in ~52ms on Apple Silicon
-- **Accurate** — Flutter-inspired measure→layout→paint pipeline with pixel-level fidelity
+- **Fast** — converts a 7-page report in ~48ms on Apple Silicon
+- **Accurate** — Flutter-inspired measure→layout→paint pipeline with proper baseline positioning
+- **Type-safe** — dimensional type system (Twips, Pt, Emu) prevents unit confusion at compile time
 - **Standalone** — no external dependencies beyond Skia; no Office installation needed
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Dual-use** — works as a CLI tool, Rust library (`use dxpdf;`), or Python package (`import dxpdf`)
@@ -46,8 +47,8 @@ let document = parse::parse(&std::fs::read("document.docx")?)?;
 
 for block in &document.blocks {
     match block {
-        model::Block::Paragraph(p) => { /* ... */ }
-        model::Block::Table(t) => { /* ... */ }
+        model::Block::Paragraph(p) => { /* p: &Box<Paragraph> */ }
+        model::Block::Table(t) => { /* t: &Box<Table> */ }
     }
 }
 
@@ -108,8 +109,11 @@ The release binary will be at `target/release/dxpdf`.
 dxpdf follows a **measure→layout→paint** pipeline inspired by Flutter's rendering model:
 
 ```
-DOCX (ZIP) → Parse → Document Model (ADT) → Measure → Layout → Paint → Skia PDF
+DOCX (ZIP) → Parse → Document Model → Measure → Layout → Paint → Skia PDF
+             Twips/Emu/HalfPoints       ←── Pt throughout ──→      f32
 ```
+
+Type-safe dimensions flow through the entire pipeline: OOXML units (`Twips`, `Emu`, `HalfPoints`) in the model, `Pt` (typographic points) in layout, and `f32` only at the Skia rendering boundary.
 
 Each layout element (paragraphs, table cells, headers/footers) goes through three phases:
 
@@ -121,12 +125,14 @@ Each layout element (paragraphs, table cells, headers/footers) goes through thre
 
 | Module | Description |
 |---|---|
+| `dimension` | Type-safe dimensional units: `Twips`, `HalfPoints`, `EighthPoints`, `Emu`, `Pt` with compile-time unit safety |
+| `geometry` | Spatial types: `Offset`, `Size`, `Rect`, `EdgeInsets`, `LineSegment` — generic over unit, with Skia interop |
 | `model` | Algebraic data types representing the document tree (`Document`, `Block`, `Inline`, etc.) |
 | `parse` | DOCX ZIP extraction, event-driven XML parser, style/numbering resolution |
 | `render/layout` | Measure→layout→paint pipeline: `fragment` (shared line fitting), `paragraph`, `table` (three-pass), `header_footer` |
-| `render/painter` | Skia canvas operations for PDF output |
+| `render/painter` | Skia canvas operations for PDF output — the only `f32` unwrap boundary |
 | `render/fonts` | Font resolution: tries requested font first, falls back to metric-compatible substitutes |
-| `units` | OOXML unit conversions (twips, EMUs, half-points) — spec-defined constants only |
+| `units` | String constants and rendering defaults |
 
 ## Running Tests
 
@@ -134,13 +140,13 @@ Each layout element (paragraphs, table cells, headers/footers) goes through thre
 cargo test
 ```
 
-The test suite includes **104 unit tests** and **9 integration tests** covering layout, tables, lists, floats, headers/footers, hyperlinks, superscript/subscript, field codes, and end-to-end conversion.
+The test suite includes **184 unit tests**, **59 API compatibility tests**, and **9 integration tests** covering dimensions, geometry, layout, tables, lists, floats, headers/footers, hyperlinks, superscript/subscript, field codes, and end-to-end conversion.
 
 Visual regression tests compare rendered PDFs against Word-generated references using pixel matching (see [VISUAL_COMPARISON.md](VISUAL_COMPARISON.md)).
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **34 features fully implemented, 6 partial, 15 not implemented.**
+Validated against ISO 29500 (Office Open XML). **35 features fully implemented, 6 partial, 15 not implemented.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
@@ -172,7 +178,7 @@ Validated against ISO 29500 (Office Open XML). **34 features fully implemented, 
 | Tab stops (left) | ✅ |
 | Tab stops (center, right, decimal) | ⚠️ parsed, render as left |
 | Paragraph shading | ✅ |
-| Paragraph borders | ✅ with adjacent border merging |
+| Paragraph borders | ✅ with adjacent border merging, `w:space` offset |
 | Keep with next, widow/orphan control | ❌ |
 
 ### Styles
@@ -258,9 +264,9 @@ Benchmarked on Apple M3 Max with `hyperfine` (20 runs, 3 warmup):
 
 | Document | Pages | Mean time | Peak RSS |
 |---|---|---|---|
-| 3-page form (11 tables, 2 images) | 3 | **53 ms** | 19 MB |
+| 2-page form (11 tables, 2 images) | 2 | **48 ms** | 20 MB |
 | 7-page inspection report | 7 | **52 ms** | 24 MB |
-| 24-page product sheet | 24 | **349 ms** | 76 MB |
+| 24-page product sheet (61 images) | 24 | **353 ms** | 76 MB |
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full history.
 
