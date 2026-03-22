@@ -814,15 +814,11 @@ fn text_measurer_api() {
     use dxpdf::render::layout::TextMeasurer;
     let fm = skia_safe::FontMgr::new();
     let m = TextMeasurer::new(fm);
-    let _: dxpdf::dimension::Pt = m.measure_width(
-        "hello",
-        "Helvetica",
-        dxpdf::dimension::Pt::new(12.0),
-        false,
-        false,
-    );
-    let _: dxpdf::dimension::Pt =
-        m.line_height("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
+    let f = m.font("Helvetica", dxpdf::dimension::Pt::new(12.0), false, false);
+    let _: dxpdf::dimension::Pt = f.measure_width("hello");
+    let fm = f.metrics();
+    let _: dxpdf::dimension::Pt = fm.line_height;
+    let _: dxpdf::dimension::Pt = fm.ascent;
 }
 
 // ---------------------------------------------------------------------------

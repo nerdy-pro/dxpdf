@@ -63,12 +63,11 @@ impl Layouter {
         if para.runs.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
             let default_size = Pt::from(self.doc_defaults.font_size);
-            let natural_height = self.measurer.line_height(
-                &self.doc_defaults.font_family,
-                default_size,
-                false,
-                false,
-            );
+            let natural_height = self
+                .measurer
+                .font(&self.doc_defaults.font_family, default_size, false, false)
+                .metrics()
+                .line_height;
             let line_h = resolve_line_height(natural_height, spacing.line_spacing());
             // Paint borders before advancing — top border sits at paragraph start
             self.paint_paragraph_borders(&para.properties.paragraph_borders, top, top + line_h);

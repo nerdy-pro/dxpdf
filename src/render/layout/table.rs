@@ -185,12 +185,16 @@ impl Layouter {
 
                             if fragments.is_empty() && p.floats.is_empty() {
                                 let default_size = Pt::from(self.doc_defaults.font_size);
-                                let natural = self.measurer.line_height(
-                                    &self.doc_defaults.font_family,
-                                    default_size,
-                                    false,
-                                    false,
-                                );
+                                let natural = self
+                                    .measurer
+                                    .font(
+                                        &self.doc_defaults.font_family,
+                                        default_size,
+                                        false,
+                                        false,
+                                    )
+                                    .metrics()
+                                    .line_height;
                                 cell_y += resolve_line_height(natural, spacing.line_spacing());
                                 cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                                 continue;
