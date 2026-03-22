@@ -520,6 +520,8 @@ pub struct BorderDef {
     /// Width in eighths of a point (OOXML native for `w:sz`).
     pub size: EighthPoints,
     pub color: Color,
+    /// Space between border and content in points (OOXML `w:space`).
+    pub space: Pt,
 }
 
 impl BorderDef {
@@ -533,6 +535,7 @@ impl BorderDef {
             style: BorderStyle::Single,
             size: EighthPoints::new(size),
             color,
+            space: Pt::ZERO,
         }
     }
 
@@ -548,6 +551,7 @@ impl Default for BorderDef {
             style: BorderStyle::Single,
             size: Self::DEFAULT_SIZE,
             color: Color::BLACK,
+            space: Pt::ZERO,
         }
     }
 }

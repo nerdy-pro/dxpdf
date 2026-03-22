@@ -27,12 +27,22 @@ pub fn parse_border_def(e: &quick_xml::events::BytesStart<'_>) -> Result<BorderD
 
     let color_str = get_attr(e, b"color")?.unwrap_or_default();
     let color = if color_str == "auto" || color_str.is_empty() {
-        Color { r: 0, g: 0, b: 0 }
+        Color::BLACK
     } else {
-        Color::from_hex(&color_str).unwrap_or(Color { r: 0, g: 0, b: 0 })
+        Color::from_hex(&color_str).unwrap_or(Color::BLACK)
     };
 
-    Ok(BorderDef { style, size, color })
+    let space = get_attr(e, b"space")?
+        .and_then(|v| v.parse::<f32>().ok())
+        .map(crate::dimension::Pt::new)
+        .unwrap_or(crate::dimension::Pt::ZERO);
+
+    Ok(BorderDef {
+        style,
+        size,
+        color,
+        space,
+    })
 }
 
 /// Apply a border element to the appropriate side of a TableBorders or CellBorders.

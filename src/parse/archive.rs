@@ -506,14 +506,25 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         .find(|a| local_name(a.key.as_ref()) == b"color")
                         .map(|a| String::from_utf8_lossy(&a.value).into_owned())
                         .unwrap_or_default();
-                    let color =
-                        if color_str == "auto" || color_str.is_empty() {
-                            crate::model::Color { r: 0, g: 0, b: 0 }
-                        } else {
-                            crate::model::Color::from_hex(&color_str)
-                                .unwrap_or(crate::model::Color { r: 0, g: 0, b: 0 })
-                        };
-                    let def = crate::model::BorderDef { style, size, color };
+                    let color = if color_str == "auto" || color_str.is_empty() {
+                        crate::model::Color::BLACK
+                    } else {
+                        crate::model::Color::from_hex(&color_str)
+                            .unwrap_or(crate::model::Color::BLACK)
+                    };
+                    let space = e
+                        .attributes()
+                        .flatten()
+                        .find(|a| local_name(a.key.as_ref()) == b"space")
+                        .and_then(|a| String::from_utf8_lossy(&a.value).parse::<f32>().ok())
+                        .map(crate::dimension::Pt::new)
+                        .unwrap_or(crate::dimension::Pt::ZERO);
+                    let def = crate::model::BorderDef {
+                        style,
+                        size,
+                        color,
+                        space,
+                    };
                     let b = table_borders.get_or_insert(crate::model::TableBorders::default());
                     match local {
                         b"top" => b.top = def,
