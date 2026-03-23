@@ -5,6 +5,7 @@ use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::*;
 use crate::units::UNDERLINE_Y_OFFSET;
 
+use super::context::LayoutConstraints;
 use super::fragment::*;
 use super::measure::MeasuredParagraph;
 use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
@@ -17,6 +18,9 @@ impl Layouter<'_> {
         // Use pre-resolved list label from the measure step
         let list_label = para.list_label.clone();
 
+        // Capture page-level constraints (for floats, borders, shading)
+        let page_ctx = *self.context.current();
+
         self.cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
 
         // Register floating images attached to this paragraph
@@ -24,21 +28,21 @@ impl Layouter<'_> {
             if !self.image_cache.contains(&float.rel_id) {
                 continue;
             }
-            let content_w = self.config.content_width();
+            let content_w = page_ctx.available_width;
             let fw = float.size.width;
             let fh = float.size.height;
             let img_x = if let Some(pct) = float.pct_pos_h {
-                self.config.page_size.width * (pct as f32 / 100_000.0)
+                page_ctx.page_size.width * (pct as f32 / 100_000.0)
             } else {
                 match float.align_h.as_deref() {
-                    Some("right") => self.config.margins.left + content_w - fw,
-                    Some("center") => self.config.margins.left + (content_w - fw) / 2.0,
-                    Some("left") => self.config.margins.left,
-                    _ => self.config.margins.left + float.offset.x,
+                    Some("right") => page_ctx.x_origin + content_w - fw,
+                    Some("center") => page_ctx.x_origin + (content_w - fw) / 2.0,
+                    Some("left") => page_ctx.x_origin,
+                    _ => page_ctx.x_origin + float.offset.x,
                 }
             };
             let img_y = if let Some(pct) = float.pct_pos_v {
-                self.config.page_size.height * (pct as f32 / 100_000.0)
+                page_ctx.page_size.height * (pct as f32 / 100_000.0)
             } else {
                 self.cursor_y + float.offset.y
             };
@@ -62,7 +66,12 @@ impl Layouter<'_> {
             let natural_height = self.doc_defaults.default_line_height;
             let line_h = resolve_line_height(natural_height, spacing.line_spacing());
             // Paint borders before advancing — top border sits at paragraph start
-            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, top + line_h);
+            self.paint_paragraph_borders(
+                &page_ctx,
+                &para.properties.paragraph_borders,
+                top,
+                top + line_h,
+            );
             self.cursor_y += line_h;
             self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
             return;
@@ -84,25 +93,25 @@ impl Layouter<'_> {
             }
             let left_pt = Pt::from(left);
             let hanging_pt = Pt::from(hanging);
-            let label_x = self.config.margins.left + left_pt - hanging_pt;
+            let label_x = page_ctx.x_origin + left_pt - hanging_pt;
             (Some(label.clone()), Some(label_x))
         } else {
             (None, None)
         };
 
-        let base_content_width = self.config.content_width()
-            - indent.left.map(Pt::from).unwrap_or(Pt::ZERO)
-            - indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
+        // Push paragraph-level constraints (narrowed by indentation)
+        let para_ctx = page_ctx.for_paragraph(&indent);
+        self.context.push(para_ctx);
         let fragments = &para.fragments;
-        let base_x = self.config.margins.left + indent.left.map(Pt::from).unwrap_or(Pt::ZERO);
 
         // ============================
         // PASS 1: MEASURE — produce lines with relative y-coordinates
         // ============================
+        let ctx = self.context.current();
         let measured = self.measure_paragraph_lines(
             fragments,
-            base_x,
-            base_content_width,
+            ctx.x_origin,
+            ctx.available_width,
             indent.first_line.map(Pt::from).unwrap_or(Pt::ZERO),
             para.properties.alignment,
             spacing.line_spacing(),
@@ -125,6 +134,7 @@ impl Layouter<'_> {
             if self.cursor_y + line.height > self.content_bottom() {
                 // Paint paragraph shading for the current page before breaking
                 self.paint_paragraph_shading(
+                    &page_ctx,
                     &para.properties.shading,
                     text_area_top,
                     text_area_bottom,
@@ -178,16 +188,25 @@ impl Layouter<'_> {
 
         // Paint paragraph shading for the last page
         self.paint_paragraph_shading(
+            &page_ctx,
             &para.properties.shading,
             text_area_top,
             text_area_bottom,
             shading_insert_idx,
         );
 
-        // Paint paragraph borders
+        // Paint paragraph borders (uses page-level constraints for full width)
         if let Some(top) = text_area_top {
-            self.paint_paragraph_borders(&para.properties.paragraph_borders, top, text_area_bottom);
+            self.paint_paragraph_borders(
+                &page_ctx,
+                &para.properties.paragraph_borders,
+                top,
+                text_area_bottom,
+            );
         }
+
+        // Pop paragraph constraints
+        self.context.pop();
 
         self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
     }
@@ -196,15 +215,21 @@ impl Layouter<'_> {
     /// Word merges adjacent paragraph borders: when the previous paragraph had any
     /// border (top or bottom), the current paragraph's top border is suppressed to
     /// avoid duplicate lines.
-    fn paint_paragraph_borders(&mut self, borders: &Option<ParagraphBorders>, top: Pt, bottom: Pt) {
+    fn paint_paragraph_borders(
+        &mut self,
+        ctx: &LayoutConstraints,
+        borders: &Option<ParagraphBorders>,
+        top: Pt,
+        bottom: Pt,
+    ) {
         let has_any_border = borders.as_ref().is_some_and(|b| {
             b.top.as_ref().is_some_and(|d| d.is_visible())
                 || b.bottom.as_ref().is_some_and(|d| d.is_visible())
         });
 
         if let Some(ref borders) = borders {
-            let left = self.config.margins.left;
-            let right = left + self.config.content_width();
+            let left = ctx.x_origin;
+            let right = left + ctx.available_width;
             if let Some(ref b) = borders.top {
                 // Skip top border if previous paragraph already drew a border
                 if b.is_visible() && !self.prev_para_had_bottom_border {
@@ -254,6 +279,7 @@ impl Layouter<'_> {
     /// Paint paragraph background shading covering the text area.
     fn paint_paragraph_shading(
         &mut self,
+        ctx: &LayoutConstraints,
         shading: &Option<Color>,
         text_area_top: Option<Pt>,
         text_area_bottom: Pt,
@@ -266,12 +292,7 @@ impl Layouter<'_> {
                     self.current_page.commands.insert(
                         insert_idx,
                         DrawCommand::Rect {
-                            rect: PtRect::from_xywh(
-                                self.config.margins.left,
-                                top,
-                                self.config.content_width(),
-                                height,
-                            ),
+                            rect: PtRect::from_xywh(ctx.x_origin, top, ctx.available_width, height),
                             color: *bg,
                         },
                     );
