@@ -283,6 +283,8 @@ dependencies = [
 name = "dxpdf-docx"
 version = "0.1.0"
 dependencies = [
+ "env_logger",
+ "log",
  "quick-xml",
  "thiserror",
  "zip",

@@ -6,6 +6,8 @@ use std::io::Read;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use log::warn;
+
 use crate::error::{ParseError, Result};
 use crate::xml;
 
@@ -120,6 +122,7 @@ impl RelationshipType {
         } else if uri.ends_with("/customXml") {
             Self::CustomXml
         } else {
+            warn!("unknown relationship type: {}", uri);
             Self::Unknown(uri.to_string())
         }
     }

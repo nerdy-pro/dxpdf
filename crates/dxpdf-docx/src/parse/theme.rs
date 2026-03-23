@@ -1,5 +1,6 @@
 //! Parser for `word/theme/theme1.xml` (DrawingML theme).
 
+use log::warn;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -32,7 +33,12 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
                     {
                         current_color_name = Some(String::from_utf8_lossy(&local).into_owned());
                     }
-                    _ => {}
+                    _ => {
+                        warn!(
+                            "theme: unsupported element <{}>",
+                            String::from_utf8_lossy(&local)
+                        );
+                    }
                 }
             }
             Event::Empty(ref e) => {
@@ -90,7 +96,12 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
                             scheme.complex_script = typeface;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        warn!(
+                            "theme: unsupported element <{}>",
+                            String::from_utf8_lossy(&local)
+                        );
+                    }
                 }
             }
             Event::End(ref e) => {

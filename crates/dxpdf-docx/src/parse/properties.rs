@@ -3,6 +3,7 @@
 //! Each parser consumes events from the reader until the corresponding End event,
 //! returning a fully-populated properties struct.
 
+use log::warn;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
@@ -64,7 +65,7 @@ pub fn parse_paragraph_properties(
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("pPr", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -112,7 +113,7 @@ pub fn parse_paragraph_properties(
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("pPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pPr" => break,
@@ -228,7 +229,7 @@ pub fn parse_run_properties(
                     b"shadow" => {
                         props.shadow = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("rPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rPr" => break,
@@ -268,7 +269,7 @@ pub fn parse_table_properties(
                     b"tblLook" => {
                         props.look = parse_table_look(e)?;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tblPr", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -302,7 +303,7 @@ pub fn parse_table_properties(
                     b"tblLook" => {
                         props.look = parse_table_look(e)?;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tblPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblPr" => break,
@@ -345,7 +346,7 @@ pub fn parse_table_row_properties(
                     b"cantSplit" => {
                         props.cant_split = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("trPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"trPr" => break,
@@ -375,7 +376,7 @@ pub fn parse_table_cell_properties(
                     b"tcMar" => {
                         props.margins = Some(parse_edge_insets_twips(reader, buf, b"tcMar")?);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tcPr", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -420,7 +421,7 @@ pub fn parse_table_cell_properties(
                     b"noWrap" => {
                         props.no_wrap = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tcPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcPr" => break,
@@ -523,7 +524,7 @@ pub fn parse_section_properties(
                             props.section_type = parse_section_type(&val);
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("sectPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"sectPr" => break,
@@ -593,7 +594,10 @@ pub fn parse_alignment(val: &str) -> Alignment {
         "both" | "justify" => Alignment::Both,
         "distribute" => Alignment::Distribute,
         "thaiDistribute" => Alignment::Thai,
-        _ => Alignment::Start,
+        other => {
+            warn!("unknown alignment value: {other}");
+            Alignment::Start
+        }
     }
 }
 
@@ -619,7 +623,7 @@ fn parse_numbering_pr(
                             _num_id = val;
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("numPr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numPr" => break,
@@ -700,7 +704,7 @@ fn parse_paragraph_borders(
                     b"left" | b"start" => borders.left = Some(border),
                     b"right" | b"end" => borders.right = Some(border),
                     b"between" => borders.between = Some(border),
-                    _ => {}
+                    _ => xml::warn_unsupported_element("pBdr", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pBdr" => break,
@@ -740,7 +744,10 @@ pub fn parse_border(e: &BytesStart<'_>) -> Result<Border> {
         Some("outset") => BorderStyle::Outset,
         Some("inset") => BorderStyle::Inset,
         Some("none") | Some("nil") | None => BorderStyle::None,
-        Some(_) => BorderStyle::None,
+        Some(other) => {
+            warn!("unknown border style: {other}");
+            BorderStyle::None
+        }
     };
 
     let sz = xml::optional_attr_i64(e, b"sz")?.unwrap_or(0);
@@ -810,7 +817,10 @@ pub fn parse_shading(e: &BytesStart<'_>) -> Result<Shading> {
         Some("pct87") => ShadingPattern::Pct87,
         Some("pct90") => ShadingPattern::Pct90,
         Some("pct95") => ShadingPattern::Pct95,
-        Some(_) => ShadingPattern::Clear,
+        Some(other) => {
+            warn!("unknown shading pattern: {other}");
+            ShadingPattern::Clear
+        }
     };
 
     Ok(Shading {
@@ -868,7 +878,11 @@ fn parse_underline_style(val: &str) -> UnderlineStyle {
         "wave" => UnderlineStyle::Wave,
         "wavyHeavy" => UnderlineStyle::WavyHeavy,
         "wavyDouble" => UnderlineStyle::WavyDouble,
-        _ => UnderlineStyle::None,
+        "none" => UnderlineStyle::None,
+        other => {
+            warn!("unknown underline style: {other}");
+            UnderlineStyle::None
+        }
     }
 }
 
@@ -876,7 +890,11 @@ fn parse_vertical_align(val: &str) -> VerticalAlign {
     match val {
         "superscript" => VerticalAlign::Superscript,
         "subscript" => VerticalAlign::Subscript,
-        _ => VerticalAlign::Baseline,
+        "baseline" => VerticalAlign::Baseline,
+        other => {
+            warn!("unknown vertical align: {other}");
+            VerticalAlign::Baseline
+        }
     }
 }
 
@@ -899,7 +917,10 @@ fn parse_highlight_color(val: &str) -> Option<HighlightColor> {
         "white" => HighlightColor::White,
         "yellow" => HighlightColor::Yellow,
         "none" => return None,
-        _ => return None,
+        other => {
+            warn!("unknown highlight color: {other}");
+            return None;
+        }
     })
 }
 
@@ -912,7 +933,10 @@ fn parse_table_measure(e: &BytesStart<'_>) -> Result<TableMeasure> {
         Some("pct") => TableMeasure::Pct(Dimension::new(w)),
         Some("nil") => TableMeasure::Nil,
         Some("auto") | None => TableMeasure::Auto,
-        Some(_) => TableMeasure::Auto,
+        Some(other) => {
+            warn!("unknown table measure type: {other}");
+            TableMeasure::Auto
+        }
     })
 }
 
@@ -949,7 +973,7 @@ fn parse_table_borders(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<
                     b"right" | b"end" => borders.right = Some(border),
                     b"insideH" => borders.inside_h = Some(border),
                     b"insideV" => borders.inside_v = Some(border),
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tblBorders", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblBorders" => break,
@@ -990,7 +1014,7 @@ fn parse_table_cell_borders(
                     b"insideV" => borders.inside_v = Some(border),
                     b"tl2br" => borders.tl2br = Some(border),
                     b"tr2bl" => borders.tr2bl = Some(border),
-                    _ => {}
+                    _ => xml::warn_unsupported_element("tcBorders", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcBorders" => break,
@@ -1019,7 +1043,7 @@ fn parse_edge_insets_twips(
                     b"bottom" => insets.bottom = Dimension::new(w),
                     b"left" | b"start" => insets.left = Dimension::new(w),
                     b"right" | b"end" => insets.right = Dimension::new(w),
-                    _ => {}
+                    _ => xml::warn_unsupported_element("margins", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
@@ -1033,31 +1057,43 @@ fn parse_edge_insets_twips(
 
 fn parse_cell_vertical_align(val: &str) -> CellVerticalAlign {
     match val {
+        "top" => CellVerticalAlign::Top,
         "center" => CellVerticalAlign::Center,
         "bottom" => CellVerticalAlign::Bottom,
         "both" => CellVerticalAlign::Both,
-        _ => CellVerticalAlign::Top,
+        other => {
+            warn!("unknown cell vertical align: {other}");
+            CellVerticalAlign::Top
+        }
     }
 }
 
 fn parse_text_direction(val: &str) -> TextDirection {
     match val {
+        "lrTb" => TextDirection::LeftToRightTopToBottom,
         "tbRl" => TextDirection::TopToBottomRightToLeft,
         "btLr" => TextDirection::BottomToTopLeftToRight,
         "lrTbV" => TextDirection::LeftToRightTopToBottomRotated,
         "tbRlV" => TextDirection::TopToBottomRightToLeftRotated,
         "tbLrV" => TextDirection::TopToBottomLeftToRightRotated,
-        _ => TextDirection::LeftToRightTopToBottom,
+        other => {
+            warn!("unknown text direction: {other}");
+            TextDirection::LeftToRightTopToBottom
+        }
     }
 }
 
 fn parse_section_type(val: &str) -> SectionType {
     match val {
+        "nextPage" => SectionType::NextPage,
         "continuous" => SectionType::Continuous,
         "evenPage" => SectionType::EvenPage,
         "oddPage" => SectionType::OddPage,
         "nextColumn" => SectionType::NextColumn,
-        _ => SectionType::NextPage,
+        other => {
+            warn!("unknown section type: {other}");
+            SectionType::NextPage
+        }
     }
 }
 

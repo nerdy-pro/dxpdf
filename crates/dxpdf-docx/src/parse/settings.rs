@@ -1,5 +1,6 @@
 //! Parser for `word/settings.xml`.
 
+use log::warn;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -28,7 +29,12 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
                         let enabled = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                         settings.even_and_odd_headers = enabled;
                     }
-                    _ => {}
+                    _ => {
+                        warn!(
+                            "settings: unsupported element <{}>",
+                            String::from_utf8_lossy(&local)
+                        );
+                    }
                 }
             }
             Event::Eof => break,

@@ -52,7 +52,7 @@ pub fn parse_blocks(data: &[u8], ctx: &ParseContext<'_>) -> Result<Vec<Block>> {
                         let sect = properties::parse_section_properties(&mut reader, &mut buf)?;
                         blocks.push(Block::SectionBreak(Box::new(sect)));
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("body", &local),
                 }
             }
             Event::Eof => break,
@@ -96,7 +96,7 @@ pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, Se
                         final_section =
                             properties::parse_section_properties(&mut reader, &mut buf)?;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("body", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"body" => break,
@@ -161,7 +161,7 @@ fn parse_paragraph(
                         let field = parse_simple_field_content(instr, reader, buf, ctx)?;
                         content.push(Inline::Field(field));
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("paragraph", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -183,7 +183,7 @@ fn parse_paragraph(
                             content.push(Inline::BookmarkEnd(BookmarkId(id)));
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("paragraph", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"p" => break,
@@ -263,7 +263,7 @@ fn parse_run(
                             pending_inlines.push(Inline::Image(img));
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("run", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -318,7 +318,7 @@ fn parse_run(
                             pending_inlines.push(Inline::EndnoteRef(NoteId(id)));
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("run", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"r" => break,
@@ -467,7 +467,7 @@ fn parse_drawing(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option
                             buf,
                         )?;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("drawing", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"drawing" => break,
@@ -500,7 +500,7 @@ fn parse_inline_image(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<O
                     b"blip" => {
                         rel_id = xml::optional_attr(e, b"embed")?;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("inline-image", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"inline" => break,
@@ -578,7 +578,10 @@ fn parse_anchor_image(
                             distance_bottom: Dimension::new(db),
                         };
                     }
-                    _ => {}
+                    b"blip" => {
+                        rel_id = xml::optional_attr(e, b"embed")?;
+                    }
+                    _ => xml::warn_unsupported_element("anchor-image", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -598,7 +601,7 @@ fn parse_anchor_image(
                     b"wrapNone" => {
                         wrap = TextWrap::None;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("anchor-image", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"anchor" => break,
@@ -654,7 +657,7 @@ fn parse_anchor_position(
                             alignment: parse_anchor_alignment(text.trim()),
                         };
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("anchor-position", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
@@ -680,7 +683,10 @@ fn parse_anchor_relative_from(val: &str) -> AnchorRelativeFrom {
         "bottomMargin" => AnchorRelativeFrom::BottomMargin,
         "leftMargin" => AnchorRelativeFrom::LeftMargin,
         "rightMargin" => AnchorRelativeFrom::RightMargin,
-        _ => AnchorRelativeFrom::Column,
+        other => {
+            log::warn!("unknown anchor relative-from: {other}");
+            AnchorRelativeFrom::Column
+        }
     }
 }
 
@@ -693,7 +699,10 @@ fn parse_anchor_alignment(val: &str) -> AnchorAlignment {
         "outside" => AnchorAlignment::Outside,
         "top" => AnchorAlignment::Top,
         "bottom" => AnchorAlignment::Bottom,
-        _ => AnchorAlignment::Left,
+        other => {
+            log::warn!("unknown anchor alignment: {other}");
+            AnchorAlignment::Left
+        }
     }
 }
 
@@ -736,7 +745,7 @@ fn parse_table(
                     b"tr" => {
                         rows.push(parse_table_row(reader, buf, ctx)?);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("table", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tbl" => break,
@@ -793,7 +802,7 @@ fn parse_table_row(
                     b"tc" => {
                         cells.push(parse_table_cell(reader, buf, ctx)?);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("table-row", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tr" => break,
@@ -832,7 +841,7 @@ fn parse_table_cell(
                     b"tbl" => {
                         blocks.push(Block::Table(Box::new(parse_table(reader, buf, ctx)?)));
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("table-cell", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tc" => break,

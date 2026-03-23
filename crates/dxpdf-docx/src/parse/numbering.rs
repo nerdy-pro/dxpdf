@@ -56,7 +56,7 @@ pub fn parse_numbering(data: &[u8]) -> Result<NumberingMap> {
                             }
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("numbering", &local),
                 }
             }
             Event::Eof => break,
@@ -132,7 +132,7 @@ fn parse_level(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, ilvl: u8) -> Resul
                         let (rpr, _) = properties::parse_run_properties(reader, buf)?;
                         run_properties = Some(rpr);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("numbering-level", &local),
                 }
             }
             Event::Empty(ref e) => {
@@ -151,7 +151,7 @@ fn parse_level(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, ilvl: u8) -> Resul
                     b"lvlJc" => {
                         // We parse but don't store alignment on levels currently
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("numbering-level", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"lvl" => break,
@@ -233,6 +233,9 @@ fn parse_number_format(val: &str) -> NumberFormat {
         "cardinalText" => NumberFormat::CardinalText,
         "ordinalText" => NumberFormat::OrdinalText,
         "none" => NumberFormat::None,
-        _ => NumberFormat::Decimal,
+        other => {
+            log::warn!("unknown number format: {other}");
+            NumberFormat::Decimal
+        }
     }
 }

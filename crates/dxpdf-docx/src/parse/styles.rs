@@ -76,7 +76,7 @@ pub fn parse_styles(data: &[u8]) -> Result<ResolvedStyles> {
                             raw_styles.push(raw);
                         }
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("styles", &local),
                 }
             }
             Event::Eof => break,
@@ -106,7 +106,7 @@ fn parse_doc_defaults(
                         let (parsed, _, _) = properties::parse_paragraph_properties(reader, buf)?;
                         *ppr = parsed;
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("docDefaults", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"docDefaults" => break,
@@ -127,7 +127,8 @@ fn parse_raw_style(
         Some("character") => StyleType::Character,
         Some("table") => StyleType::Table,
         Some("numbering") => StyleType::Numbering,
-        Some(_) => {
+        Some(other) => {
+            log::warn!("unknown style type: {other}");
             xml::skip_to_end(reader, buf, b"style")?;
             return Ok(None);
         }
@@ -166,7 +167,7 @@ fn parse_raw_style(
                         let (parsed, _) = properties::parse_table_properties(reader, buf)?;
                         tbl_pr = Some(parsed);
                     }
-                    _ => {}
+                    _ => xml::warn_unsupported_element("style", &local),
                 }
             }
             Event::Empty(ref e) => {

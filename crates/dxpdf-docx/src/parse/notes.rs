@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use log::warn;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -74,7 +75,12 @@ fn parse_note_content(
                         let table = body::parse_table_public(reader, buf, ctx)?;
                         blocks.push(Block::Table(Box::new(table)));
                     }
-                    _ => {}
+                    _ => {
+                        warn!(
+                            "note: unsupported block element <{}>",
+                            String::from_utf8_lossy(&local)
+                        );
+                    }
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,

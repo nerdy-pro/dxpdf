@@ -103,6 +103,19 @@ pub fn read_text_content(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Resul
     Ok(text)
 }
 
+/// Log a warning for an unsupported element within a given context.
+pub fn warn_unsupported_element(context: &str, local: &[u8]) {
+    log::warn!(
+        "{context}: unsupported element <{}>",
+        String::from_utf8_lossy(local)
+    );
+}
+
+/// Log a warning for an unsupported attribute value.
+pub fn warn_unsupported_attr(context: &str, attr: &str, value: &str) {
+    log::warn!("{context}: unsupported {attr} value \"{value}\"");
+}
+
 /// Skip elements until we reach the End event for `end_tag`.
 pub fn skip_to_end(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, end_tag: &[u8]) -> Result<()> {
     let mut depth = 1u32;
