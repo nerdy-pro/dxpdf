@@ -6,7 +6,7 @@ use quick_xml::Reader;
 
 use crate::dimension::Dimension;
 use crate::error::Result;
-use crate::model::{DocumentSettings, Rsid};
+use crate::model::{DocumentSettings, RevisionSaveId};
 use crate::xml;
 
 pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
@@ -58,12 +58,12 @@ fn parse_rsids(
                 match local.as_slice() {
                     b"rsidRoot" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            settings.rsid_root = Rsid::from_hex(&val);
+                            settings.rsid_root = RevisionSaveId::from_hex(&val);
                         }
                     }
                     b"rsid" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            if let Some(rsid) = Rsid::from_hex(&val) {
+                            if let Some(rsid) = RevisionSaveId::from_hex(&val) {
                                 settings.rsids.push(rsid);
                             }
                         }

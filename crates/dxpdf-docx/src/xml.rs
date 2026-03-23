@@ -84,9 +84,9 @@ pub fn parse_bool(s: &str) -> bool {
 pub fn optional_rsid(
     elem: &BytesStart<'_>,
     attr_name: &[u8],
-) -> Result<Option<crate::model::Rsid>> {
+) -> Result<Option<crate::model::RevisionSaveId>> {
     match optional_attr(elem, attr_name)? {
-        Some(s) => Ok(crate::model::Rsid::from_hex(&s)),
+        Some(s) => Ok(crate::model::RevisionSaveId::from_hex(&s)),
         None => Ok(None),
     }
 }

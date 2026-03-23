@@ -35,9 +35,9 @@ pub struct BookmarkId(pub(crate) i64);
 /// Revision Save ID — identifies which editing session produced a change.
 /// Stored as a 32-bit value parsed from an 8-digit hex string (e.g., "00A2B3C4").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Rsid(pub(crate) u32);
+pub struct RevisionSaveId(pub(crate) u32);
 
-impl Rsid {
+impl RevisionSaveId {
     pub fn value(self) -> u32 {
         self.0
     }
@@ -53,50 +53,50 @@ impl Rsid {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct RevisionIds {
     /// Session that added this element.
-    pub r: Option<Rsid>,
+    pub r: Option<RevisionSaveId>,
     /// Session that last modified this element's properties.
-    pub r_pr: Option<Rsid>,
+    pub r_pr: Option<RevisionSaveId>,
     /// Session that deleted this element (for tracked deletions).
-    pub del: Option<Rsid>,
+    pub del: Option<RevisionSaveId>,
 }
 
 /// Revision tracking IDs specific to paragraphs.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ParagraphRevisionIds {
     /// Session that added this paragraph.
-    pub r: Option<Rsid>,
+    pub r: Option<RevisionSaveId>,
     /// Session that added the default run content.
-    pub r_default: Option<Rsid>,
+    pub r_default: Option<RevisionSaveId>,
     /// Session that last modified paragraph properties.
-    pub p: Option<Rsid>,
+    pub p: Option<RevisionSaveId>,
     /// Session that last modified run properties on the paragraph mark.
-    pub r_pr: Option<Rsid>,
+    pub r_pr: Option<RevisionSaveId>,
     /// Session that deleted this paragraph.
-    pub del: Option<Rsid>,
+    pub del: Option<RevisionSaveId>,
 }
 
 /// Revision tracking IDs specific to table rows.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TableRowRevisionIds {
     /// Session that added this row.
-    pub r: Option<Rsid>,
+    pub r: Option<RevisionSaveId>,
     /// Session that last modified row properties.
-    pub r_pr: Option<Rsid>,
+    pub r_pr: Option<RevisionSaveId>,
     /// Session that deleted this row.
-    pub del: Option<Rsid>,
+    pub del: Option<RevisionSaveId>,
     /// Session that last modified this row's table-level formatting.
-    pub tr: Option<Rsid>,
+    pub tr: Option<RevisionSaveId>,
 }
 
 /// Revision tracking IDs specific to section properties.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SectionRevisionIds {
     /// Session that added this section.
-    pub r: Option<Rsid>,
+    pub r: Option<RevisionSaveId>,
     /// Session that last modified section run properties.
-    pub r_pr: Option<Rsid>,
+    pub r_pr: Option<RevisionSaveId>,
     /// Session that last modified section properties.
-    pub sect: Option<Rsid>,
+    pub sect: Option<RevisionSaveId>,
 }
 
 // ── Color ────────────────────────────────────────────────────────────────────
@@ -289,9 +289,9 @@ pub struct DocumentSettings {
     /// Whether even/odd headers/footers are enabled.
     pub even_and_odd_headers: bool,
     /// The rsid of the original editing session that created this document.
-    pub rsid_root: Option<Rsid>,
+    pub rsid_root: Option<RevisionSaveId>,
     /// All revision save IDs recorded in this document's history.
-    pub rsids: Vec<Rsid>,
+    pub rsids: Vec<RevisionSaveId>,
 }
 
 // ── Section ──────────────────────────────────────────────────────────────────
