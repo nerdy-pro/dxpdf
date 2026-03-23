@@ -19,7 +19,7 @@ use fragment::DocDefaultsLayout;
 /// Gap between a floating image and adjacent text.
 /// Workaround: OOXML specifies this per-image via wp:distL/distR attributes,
 /// which we don't parse yet.
-const FLOAT_TEXT_GAP: Pt = Pt::new(4.0);
+pub(super) const FLOAT_TEXT_GAP: Pt = Pt::new(4.0);
 
 /// US Letter page width in points (8.5 inches).
 const US_LETTER_WIDTH_PT: Pt = Pt::new(612.0);
@@ -382,19 +382,6 @@ impl<'a> Layouter<'a> {
             self.context
                 .replace_root(context::LayoutConstraints::for_page(&self.config));
         }
-    }
-
-    fn float_adjustment(&self, line_top: Pt, line_bottom: Pt) -> (Pt, Pt) {
-        let mut x_shift = Pt::ZERO;
-        let mut width_reduction = Pt::ZERO;
-        for f in &self.active_floats {
-            if line_top < f.page_y_end && line_bottom > f.page_y_start {
-                let shift = (f.page_x - self.config.margins.left) + f.width + FLOAT_TEXT_GAP;
-                x_shift = x_shift.max(shift);
-                width_reduction = width_reduction.max(shift);
-            }
-        }
-        (x_shift, width_reduction)
     }
 
     fn resolve_spacing(&self, para_spacing: Option<Spacing>) -> Spacing {

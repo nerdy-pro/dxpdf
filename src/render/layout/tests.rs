@@ -990,6 +990,7 @@ fn measure_lines_empty_fragments() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert_eq!(measured.lines.len(), 0);
     assert!(f32::from(measured.total_height).abs() < 0.01);
@@ -1008,6 +1009,7 @@ fn measure_lines_single_line() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert_eq!(measured.lines.len(), 1);
     assert!((f32::from(measured.total_height) - 14.0).abs() < 0.01);
@@ -1035,6 +1037,7 @@ fn measure_lines_wraps_to_two_lines() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert_eq!(measured.lines.len(), 2, "Should wrap to 2 lines");
     assert!(
@@ -1057,6 +1060,7 @@ fn measure_lines_center_alignment() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     // Text x should be offset to center
     if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
@@ -1086,6 +1090,7 @@ fn measure_lines_right_alignment() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     if let Some(DrawCommand::Text { position, .. }) = measured.lines[0]
         .commands
@@ -1129,6 +1134,7 @@ fn measure_lines_with_underline() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert!(
         measured.lines[0]
@@ -1171,6 +1177,7 @@ fn measure_lines_with_shading() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert!(
         measured.lines[0].commands.iter().any(|c| matches!(
@@ -1201,6 +1208,7 @@ fn measure_lines_first_line_offset() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     let with_offset = measure_lines(
         &frags,
@@ -1212,6 +1220,7 @@ fn measure_lines_first_line_offset() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     let x_no = no_offset.lines[0]
         .commands
@@ -1254,6 +1263,7 @@ fn measure_lines_with_line_spacing() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     let double = measure_lines(
         &frags,
@@ -1265,6 +1275,7 @@ fn measure_lines_with_line_spacing() {
         &[],
         pt(36.0),
         &ImageCache::new(&HashMap::new()),
+        None,
     );
     assert!((f32::from(single.total_height) - 14.0).abs() < 0.01);
     assert!((f32::from(double.total_height) - 28.0).abs() < 0.01);

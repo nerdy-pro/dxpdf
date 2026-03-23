@@ -3,14 +3,55 @@
 //! Transforms a `Document` (model) into a `MeasuredDocument` (tree with metrics).
 //! No layout decisions are made here — only data enrichment.
 
-use crate::dimension::Pt;
+use std::rc::Rc;
+
+use crate::dimension::{HalfPoints, Pt};
 use crate::model::*;
 
 use super::context::LayoutConstraints;
-use super::fragment::{collect_fragments_with_fields, DocDefaultsLayout, Fragment};
+use super::fragment::{collect_fragments_with_fields, Fragment};
 use super::measurer::TextMeasurer;
 use super::ImageCache;
 use super::LayoutConfig;
+
+/// Document-level defaults for layout.
+pub struct DocDefaultsLayout {
+    pub font_size: HalfPoints,
+    pub font_family: Rc<str>,
+    pub default_spacing: Spacing,
+    pub default_cell_margins: CellMargins,
+    pub table_cell_spacing: Spacing,
+    pub default_table_borders: TableBorders,
+    pub default_header: Option<HeaderFooter>,
+    pub default_footer: Option<HeaderFooter>,
+    pub numbering: NumberingMap,
+    /// Pre-computed line height of an empty paragraph using the default font.
+    pub default_line_height: Pt,
+}
+
+impl DocDefaultsLayout {
+    pub fn from_document(doc: &Document, measurer: &TextMeasurer) -> Self {
+        let font_size = doc.default_font_size;
+        let font_family = Rc::clone(&doc.default_font_family);
+        let default_size_pt = Pt::from(font_size);
+        let default_line_height = measurer
+            .font(&font_family, default_size_pt, false, false)
+            .metrics()
+            .line_height;
+        Self {
+            font_size,
+            font_family,
+            default_spacing: doc.default_spacing,
+            default_cell_margins: doc.default_cell_margins,
+            table_cell_spacing: doc.table_cell_spacing,
+            default_table_borders: doc.default_table_borders,
+            default_header: doc.default_header.clone(),
+            default_footer: doc.default_footer.clone(),
+            numbering: doc.numbering.clone(),
+            default_line_height,
+        }
+    }
+}
 
 /// A document tree enriched with text metrics and decoded images.
 /// Produced by the measure step, consumed by the layout step.
@@ -21,6 +62,28 @@ pub struct MeasuredDocument {
     pub(crate) doc_defaults: DocDefaultsLayout,
     pub(crate) default_tab_stop: Pt,
     pub(crate) image_cache: ImageCache,
+}
+
+/// Compute column widths by scaling grid columns to fit the available width.
+/// If `grid_cols` is empty, distributes `available_width` equally across `num_cols`.
+pub(super) fn compute_column_widths(
+    grid_cols: &[crate::dimension::Twips],
+    num_cols: usize,
+    available_width: Pt,
+) -> Vec<Pt> {
+    if !grid_cols.is_empty() {
+        let grid_total: Pt = grid_cols.iter().map(|w| Pt::from(*w)).sum();
+        let scale = if grid_total > Pt::ZERO {
+            available_width / grid_total
+        } else {
+            1.0
+        };
+        grid_cols.iter().map(|w| Pt::from(*w) * scale).collect()
+    } else if num_cols > 0 {
+        vec![available_width / num_cols as f32; num_cols]
+    } else {
+        vec![]
+    }
 }
 
 /// A measured block-level element.
@@ -192,26 +255,8 @@ fn measure_table(
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> MeasuredTable {
     let content_width = constraints.available_width;
-
-    // Compute column widths scaled to available width (same logic as layout/table.rs)
     let num_cols = table.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
-    let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
-        let grid_total: Pt = table.grid_cols.iter().map(|w| Pt::from(*w)).sum();
-        let scale = if grid_total > Pt::ZERO {
-            content_width / grid_total
-        } else {
-            1.0
-        };
-        table
-            .grid_cols
-            .iter()
-            .map(|w| Pt::from(*w) * scale)
-            .collect()
-    } else if num_cols > 0 {
-        vec![content_width / num_cols as f32; num_cols]
-    } else {
-        vec![]
-    };
+    let col_widths = compute_column_widths(&table.grid_cols, num_cols, content_width);
 
     let doc_cell_margins = doc_defaults.default_cell_margins;
 

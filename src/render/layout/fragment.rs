@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use super::measurer::TextMeasurer;
 use super::ImageCache;
-use crate::dimension::{HalfPoints, Pt};
+use crate::dimension::Pt;
 use crate::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
 
@@ -17,44 +17,8 @@ pub const TAB_FALLBACK: Pt = Pt::new(36.0);
 pub const UNDERLINE_Y_OFFSET: Pt = Pt::new(2.0);
 use super::DrawCommand;
 
-/// Document-level defaults for layout.
-pub struct DocDefaultsLayout {
-    pub font_size: HalfPoints,
-    pub font_family: Rc<str>,
-    pub default_spacing: Spacing,
-    pub default_cell_margins: CellMargins,
-    pub table_cell_spacing: Spacing,
-    pub default_table_borders: TableBorders,
-    pub default_header: Option<HeaderFooter>,
-    pub default_footer: Option<HeaderFooter>,
-    pub numbering: NumberingMap,
-    /// Pre-computed line height of an empty paragraph using the default font.
-    pub default_line_height: Pt,
-}
-
-impl DocDefaultsLayout {
-    pub fn from_document(doc: &crate::model::Document, measurer: &TextMeasurer) -> Self {
-        let font_size = doc.default_font_size;
-        let font_family = Rc::clone(&doc.default_font_family);
-        let default_size_pt = Pt::from(font_size);
-        let default_line_height = measurer
-            .font(&font_family, default_size_pt, false, false)
-            .metrics()
-            .line_height;
-        Self {
-            font_size,
-            font_family,
-            default_spacing: doc.default_spacing,
-            default_cell_margins: doc.default_cell_margins,
-            table_cell_spacing: doc.table_cell_spacing,
-            default_table_borders: doc.default_table_borders,
-            default_header: doc.default_header.clone(),
-            default_footer: doc.default_footer.clone(),
-            numbering: doc.numbering.clone(),
-            default_line_height,
-        }
-    }
-}
+// DocDefaultsLayout is defined in measure.rs and re-exported here for backward compatibility.
+pub use super::measure::DocDefaultsLayout;
 
 /// A flattened fragment for layout — either text, an image, a tab, or a line break.
 pub enum Fragment {
@@ -410,6 +374,8 @@ pub struct MeasuredLines {
 ///
 /// `x_origin` is the left edge for content (e.g., margin_left + indent.left).
 /// `available_width` is the width for line fitting (content_width - indents).
+/// `float_adjuster` optionally narrows width per-line for floating images:
+///   takes (line_top, line_bottom) in absolute page coords, returns (x_shift, width_reduction).
 /// All y-coordinates in the returned commands are relative to 0.0.
 pub fn measure_lines(
     fragments: &[Fragment],
@@ -421,6 +387,7 @@ pub fn measure_lines(
     tab_stops: &[TabStop],
     default_tab_stop_pt: Pt,
     image_cache: &super::ImageCache,
+    float_adjuster: Option<&dyn Fn(Pt, Pt) -> (Pt, Pt)>,
 ) -> MeasuredLines {
     let mut lines = Vec::new();
     let mut cursor_y = Pt::ZERO;
@@ -449,7 +416,21 @@ pub fn measure_lines(
         } else {
             Pt::ZERO
         };
-        let line_avail = (available_width - fl_offset).max(Pt::ZERO);
+
+        // Float adjustment: optionally narrow width based on overlapping floats
+        let (float_x_shift, float_width_reduction) = if let Some(adjuster) = float_adjuster {
+            let tentative_height = fragments[line_start..]
+                .iter()
+                .take(1)
+                .map(|f| f.height())
+                .fold(Pt::ZERO, Pt::max);
+            let tentative_line_height = resolve_line_height(tentative_height, line_spacing);
+            adjuster(cursor_y, cursor_y + tentative_line_height)
+        } else {
+            (Pt::ZERO, Pt::ZERO)
+        };
+
+        let line_avail = (available_width - fl_offset - float_width_reduction).max(Pt::ZERO);
 
         let (line_end, _) = fit_fragments(&fragments[line_start..], line_avail);
         let actual_end = line_start + line_end.max(1);
@@ -473,7 +454,7 @@ pub fn measure_lines(
 
         cursor_y += line_height;
         let mut commands = Vec::new();
-        let mut x = x_origin + fl_offset + x_offset;
+        let mut x = x_origin + fl_offset + float_x_shift + x_offset;
 
         for frag in &fragments[line_start..actual_end] {
             match frag {

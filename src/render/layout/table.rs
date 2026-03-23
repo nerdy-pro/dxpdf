@@ -82,21 +82,8 @@ impl Layouter<'_> {
         let content_width = page_ctx.available_width;
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
-        let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
-            let grid_total: Pt = table.grid_cols.iter().map(|w| Pt::from(*w)).sum();
-            let scale = if grid_total > Pt::ZERO {
-                content_width / grid_total
-            } else {
-                1.0
-            };
-            table
-                .grid_cols
-                .iter()
-                .map(|w| Pt::from(*w) * scale)
-                .collect()
-        } else {
-            vec![content_width / num_cols as f32; num_cols]
-        };
+        let col_widths =
+            super::measure::compute_column_widths(&table.grid_cols, num_cols, content_width);
 
         // ============================
         // PASS 1: MEASURE all cells
@@ -200,6 +187,7 @@ impl Layouter<'_> {
                                 &p.properties.tab_stops,
                                 self.default_tab_stop_pt,
                                 self.image_cache,
+                                None,
                             );
 
                             // Offset measured commands by cell_y and accumulate

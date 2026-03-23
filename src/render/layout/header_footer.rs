@@ -165,6 +165,7 @@ pub(super) fn layout_header_footer_blocks(
                 &para.properties.tab_stops,
                 default_tab_stop_pt,
                 image_cache,
+                None,
             );
 
             // PAINT: offset measured commands by cursor_y

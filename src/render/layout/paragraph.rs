@@ -105,8 +105,36 @@ impl Layouter<'_> {
         // ============================
         // PASS 1: MEASURE — produce lines with relative y-coordinates
         // ============================
+
+        // Snapshot values needed by the float adjuster closure so we don't
+        // borrow `self` while also passing other `self` fields to `measure_lines`.
+        let abs_cursor_y = self.cursor_y;
+        let default_tab = self.default_tab_stop_pt;
+        let x_origin_page = page_ctx.x_origin;
+        let float_data: Vec<(Pt, Pt, Pt, Pt)> = self
+            .active_floats
+            .iter()
+            .map(|f| (f.page_x, f.page_y_start, f.page_y_end, f.width))
+            .collect();
+
+        let float_adj = |rel_line_top: Pt, rel_line_bottom: Pt| -> (Pt, Pt) {
+            let abs_top = abs_cursor_y + rel_line_top;
+            let abs_bottom = abs_cursor_y + rel_line_bottom;
+            let gap = super::FLOAT_TEXT_GAP;
+            let mut x_shift = Pt::ZERO;
+            let mut width_reduction = Pt::ZERO;
+            for &(page_x, page_y_start, page_y_end, width) in &float_data {
+                if abs_top < page_y_end && abs_bottom > page_y_start {
+                    let shift = (page_x - x_origin_page) + width + gap;
+                    x_shift = x_shift.max(shift);
+                    width_reduction = width_reduction.max(shift);
+                }
+            }
+            (x_shift, width_reduction)
+        };
+
         let ctx = self.context.current();
-        let measured = self.measure_paragraph_lines(
+        let measured = measure_lines(
             fragments,
             ctx.x_origin,
             ctx.available_width,
@@ -114,6 +142,13 @@ impl Layouter<'_> {
             para.properties.alignment,
             spacing.line_spacing(),
             &para.properties.tab_stops,
+            default_tab,
+            self.image_cache,
+            if self.active_floats.is_empty() {
+                None
+            } else {
+                Some(&float_adj)
+            },
         );
 
         // ============================
@@ -296,182 +331,6 @@ impl Layouter<'_> {
                     );
                 }
             }
-        }
-    }
-
-    /// MEASURE: Produce lines with relative y-coordinates from fragments.
-    /// Handles float adjustment using current absolute cursor_y.
-    fn measure_paragraph_lines(
-        &mut self,
-        fragments: &[Fragment],
-        base_x: Pt,
-        base_content_width: Pt,
-        first_line_offset: Pt,
-        alignment: Option<Alignment>,
-        line_spacing: Option<LineSpacing>,
-        tab_stops: &[TabStop],
-    ) -> MeasuredLines {
-        let mut lines = Vec::new();
-        let mut rel_y = Pt::ZERO;
-        let mut line_start = 0;
-        let mut first_line = true;
-
-        while line_start < fragments.len() {
-            if !first_line {
-                while line_start < fragments.len() {
-                    if let Fragment::Text { ref text, .. } = fragments[line_start] {
-                        if text.trim().is_empty() {
-                            line_start += 1;
-                            continue;
-                        }
-                    }
-                    break;
-                }
-                if line_start >= fragments.len() {
-                    break;
-                }
-            }
-
-            let fl_offset = if first_line {
-                first_line_offset
-            } else {
-                Pt::ZERO
-            };
-
-            // Float adjustment: use absolute position for overlap detection
-            let abs_line_top = self.cursor_y + rel_y;
-            let tentative_height = fragments[line_start..]
-                .iter()
-                .take(1)
-                .map(|f| f.height())
-                .fold(Pt::ZERO, Pt::max);
-            let tentative_line_height = resolve_line_height(tentative_height, line_spacing);
-            let (float_x_shift, float_width_reduction) =
-                self.float_adjustment(abs_line_top, abs_line_top + tentative_line_height);
-
-            let available_width =
-                (base_content_width - fl_offset - float_width_reduction).max(Pt::ZERO);
-
-            let (line_end, _) = fit_fragments(&fragments[line_start..], available_width);
-            let actual_end = line_start + line_end.max(1);
-
-            let frag_height = fragments[line_start..actual_end]
-                .iter()
-                .map(|f| f.height())
-                .fold(Pt::ZERO, Pt::max);
-            let line_height = resolve_line_height(frag_height, line_spacing);
-
-            let used_width = if actual_end > line_start {
-                measure_fragments(&fragments[line_start..actual_end])
-            } else {
-                Pt::ZERO
-            };
-            let x_offset = match alignment {
-                Some(Alignment::Center) => (available_width - used_width) / 2.0,
-                Some(Alignment::Right) => available_width - used_width,
-                _ => Pt::ZERO,
-            };
-
-            rel_y += line_height;
-            let mut commands = Vec::new();
-            let mut x = base_x + fl_offset + float_x_shift + x_offset;
-
-            for frag in &fragments[line_start..actual_end] {
-                match frag {
-                    Fragment::Text {
-                        text,
-                        font_family,
-                        font_size,
-                        bold,
-                        italic,
-                        underline,
-                        color,
-                        shading,
-                        char_spacing_pt,
-                        measured_width,
-                        ascent,
-                        hyperlink_url,
-                        baseline_offset,
-                        ..
-                    } => {
-                        let c = color.unwrap_or(Color::BLACK);
-                        let line_top = rel_y - line_height;
-                        let baseline_y = line_top + *ascent;
-                        if let Some(bg) = shading {
-                            commands.push(DrawCommand::Rect {
-                                rect: PtRect::from_xywh(x, line_top, *measured_width, line_height),
-                                color: *bg,
-                            });
-                        }
-                        commands.push(DrawCommand::Text {
-                            position: PtOffset::new(x, baseline_y + *baseline_offset),
-                            text: text.clone(),
-                            font_family: font_family.clone(),
-                            char_spacing_pt: *char_spacing_pt,
-                            font_size: *font_size,
-                            bold: *bold,
-                            italic: *italic,
-                            color: c,
-                        });
-                        if *underline {
-                            let uw = underline_width(*font_size, *bold);
-                            let underline_y = baseline_y + UNDERLINE_Y_OFFSET;
-                            commands.push(DrawCommand::Underline {
-                                line: PtLineSegment::new(
-                                    PtOffset::new(x, underline_y),
-                                    PtOffset::new(x + *measured_width, underline_y),
-                                ),
-                                color: c,
-                                width: uw,
-                            });
-                        }
-                        if let Some(url) = hyperlink_url {
-                            commands.push(DrawCommand::LinkAnnotation {
-                                rect: PtRect::from_xywh(
-                                    x,
-                                    rel_y - line_height,
-                                    *measured_width,
-                                    line_height,
-                                ),
-                                url: url.clone(),
-                            });
-                        }
-                        x += *measured_width;
-                    }
-                    Fragment::Image { size, rel_id } => {
-                        let image = self.image_cache.get(rel_id);
-                        commands.push(DrawCommand::Image {
-                            rect: PtRect::from_xywh(
-                                x,
-                                rel_y - size.height,
-                                size.width,
-                                size.height,
-                            ),
-                            image,
-                        });
-                        x += size.width;
-                    }
-                    Fragment::Tab { .. } => {
-                        let rel_x = x - base_x;
-                        let next_stop =
-                            find_next_tab_stop(rel_x, tab_stops, self.default_tab_stop_pt);
-                        x = base_x + next_stop;
-                    }
-                    Fragment::LineBreak { .. } => {}
-                }
-            }
-
-            lines.push(MeasuredLine {
-                commands,
-                height: line_height,
-            });
-            line_start = actual_end;
-            first_line = false;
-        }
-
-        MeasuredLines {
-            total_height: rel_y,
-            lines,
         }
     }
 }
