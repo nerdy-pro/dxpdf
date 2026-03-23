@@ -80,6 +80,17 @@ pub fn parse_bool(s: &str) -> bool {
     matches!(s, "1" | "true" | "on")
 }
 
+/// Parse an optional rsid attribute from an element.
+pub fn optional_rsid(
+    elem: &BytesStart<'_>,
+    attr_name: &[u8],
+) -> Result<Option<crate::model::Rsid>> {
+    match optional_attr(elem, attr_name)? {
+        Some(s) => Ok(crate::model::Rsid::from_hex(&s)),
+        None => Ok(None),
+    }
+}
+
 /// Parse a hex color string (6 hex digits) → u32 RGB.
 pub fn parse_hex_color(s: &str) -> Option<u32> {
     if s.eq_ignore_ascii_case("auto") {

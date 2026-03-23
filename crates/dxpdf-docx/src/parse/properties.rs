@@ -436,6 +436,15 @@ pub fn parse_table_cell_properties(
 // ── Section Properties ───────────────────────────────────────────────────────
 
 /// Parse `w:sectPr`. Reader should have just read the Start event.
+/// Extract rsid attributes from a `w:sectPr` Start event.
+pub fn parse_section_rsids(e: &BytesStart<'_>) -> Result<SectionRevisionIds> {
+    Ok(SectionRevisionIds {
+        r: xml::optional_rsid(e, b"rsidR")?,
+        r_pr: xml::optional_rsid(e, b"rsidRPr")?,
+        sect: xml::optional_rsid(e, b"rsidSect")?,
+    })
+}
+
 pub fn parse_section_properties(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,

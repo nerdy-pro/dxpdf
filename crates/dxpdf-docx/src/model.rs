@@ -32,6 +32,73 @@ impl NoteId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BookmarkId(pub(crate) i64);
 
+/// Revision Save ID — identifies which editing session produced a change.
+/// Stored as a 32-bit value parsed from an 8-digit hex string (e.g., "00A2B3C4").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Rsid(pub(crate) u32);
+
+impl Rsid {
+    pub fn value(self) -> u32 {
+        self.0
+    }
+
+    /// Parse from an OOXML hex string. Returns None if invalid.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        u32::from_str_radix(s, 16).ok().map(Self)
+    }
+}
+
+/// Revision tracking IDs attached to an element.
+/// Each field records which editing session performed that type of change.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RevisionIds {
+    /// Session that added this element.
+    pub r: Option<Rsid>,
+    /// Session that last modified this element's properties.
+    pub r_pr: Option<Rsid>,
+    /// Session that deleted this element (for tracked deletions).
+    pub del: Option<Rsid>,
+}
+
+/// Revision tracking IDs specific to paragraphs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParagraphRevisionIds {
+    /// Session that added this paragraph.
+    pub r: Option<Rsid>,
+    /// Session that added the default run content.
+    pub r_default: Option<Rsid>,
+    /// Session that last modified paragraph properties.
+    pub p: Option<Rsid>,
+    /// Session that last modified run properties on the paragraph mark.
+    pub r_pr: Option<Rsid>,
+    /// Session that deleted this paragraph.
+    pub del: Option<Rsid>,
+}
+
+/// Revision tracking IDs specific to table rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TableRowRevisionIds {
+    /// Session that added this row.
+    pub r: Option<Rsid>,
+    /// Session that last modified row properties.
+    pub r_pr: Option<Rsid>,
+    /// Session that deleted this row.
+    pub del: Option<Rsid>,
+    /// Session that last modified this row's table-level formatting.
+    pub tr: Option<Rsid>,
+}
+
+/// Revision tracking IDs specific to section properties.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SectionRevisionIds {
+    /// Session that added this section.
+    pub r: Option<Rsid>,
+    /// Session that last modified section run properties.
+    pub r_pr: Option<Rsid>,
+    /// Session that last modified section properties.
+    pub sect: Option<Rsid>,
+}
+
 // ── Color ────────────────────────────────────────────────────────────────────
 
 /// A fully resolved color — no theme references survive parsing.
@@ -150,6 +217,10 @@ pub struct DocumentSettings {
     pub default_paragraph_properties: ParagraphProperties,
     /// Document-level default run properties.
     pub default_run_properties: RunProperties,
+    /// The rsid of the original editing session that created this document.
+    pub rsid_root: Option<Rsid>,
+    /// All revision save IDs recorded in this document's history.
+    pub rsids: Vec<Rsid>,
 }
 
 impl Default for DocumentSettings {
@@ -159,6 +230,8 @@ impl Default for DocumentSettings {
             even_and_odd_headers: false,
             default_paragraph_properties: ParagraphProperties::default(),
             default_run_properties: RunProperties::default(),
+            rsid_root: None,
+            rsids: Vec::new(),
         }
     }
 }
@@ -175,6 +248,7 @@ pub struct SectionProperties {
     /// If true, the first page uses distinct header/footer.
     pub title_page: bool,
     pub section_type: SectionType,
+    pub rsids: SectionRevisionIds,
 }
 
 impl Default for SectionProperties {
@@ -187,6 +261,7 @@ impl Default for SectionProperties {
             footer_refs: SectionHeaderFooterRefs::default(),
             title_page: false,
             section_type: SectionType::NextPage,
+            rsids: SectionRevisionIds::default(),
         }
     }
 }
@@ -291,6 +366,7 @@ pub enum Block {
 pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub content: Vec<Inline>,
+    pub rsids: ParagraphRevisionIds,
 }
 
 #[derive(Clone, Debug)]
@@ -607,6 +683,7 @@ pub enum Inline {
 pub struct TextRun {
     pub properties: RunProperties,
     pub text: String,
+    pub rsids: RevisionIds,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -946,6 +1023,7 @@ pub struct GridColumn {
 pub struct TableRow {
     pub properties: TableRowProperties,
     pub cells: Vec<TableCell>,
+    pub rsids: TableRowRevisionIds,
 }
 
 #[derive(Clone, Debug, Default)]

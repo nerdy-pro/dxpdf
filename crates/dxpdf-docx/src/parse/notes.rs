@@ -68,7 +68,7 @@ fn parse_note_content(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"p" => {
-                        let para = body::parse_paragraph_public(reader, buf, ctx)?;
+                        let para = body::parse_paragraph_public(e, reader, buf, ctx)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                     }
                     b"tbl" => {

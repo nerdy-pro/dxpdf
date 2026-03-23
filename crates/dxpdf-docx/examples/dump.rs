@@ -39,6 +39,15 @@ fn dump(name: &str, doc: &Document) {
         doc.settings.even_and_odd_headers
     );
 
+    // Rsids
+    if let Some(root) = doc.settings.rsid_root {
+        println!("║   rsid root: {:08X}", root.value());
+    }
+    println!(
+        "║   rsid history: {} sessions",
+        doc.settings.rsids.len()
+    );
+
     // Theme
     if let Some(theme) = &doc.theme {
         println!("║ Theme:");
@@ -123,12 +132,7 @@ fn dump(name: &str, doc: &Document) {
             } else {
                 "unknown"
             };
-            println!(
-                "║   {} → {} bytes ({})",
-                rel_id.as_str(),
-                data.len(),
-                kind
-            );
+            println!("║   {} → {} bytes ({})", rel_id.as_str(), data.len(), kind);
         }
     }
 
@@ -200,7 +204,9 @@ fn dump(name: &str, doc: &Document) {
             println!();
 
             // Run properties of first text run
-            if let Some(Inline::TextRun(run)) = p.content.iter().find(|i| matches!(i, Inline::TextRun(_))) {
+            if let Some(Inline::TextRun(run)) =
+                p.content.iter().find(|i| matches!(i, Inline::TextRun(_)))
+            {
                 let rp = &run.properties;
                 print!("║     run: size={}hp", rp.font_size.raw());
                 if rp.bold {

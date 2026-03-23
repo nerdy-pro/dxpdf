@@ -166,9 +166,10 @@ fn sample1_footnotes_endnotes() {
 fn sample1_numbering() {
     let doc = load("sample-docx-files-sample1.docx");
     // With numbering.xml present, some paragraphs should have numbering properties
-    let has_numbering = doc.body.iter().any(|b| {
-        matches!(b, Block::Paragraph(p) if p.properties.numbering.is_some())
-    });
+    let has_numbering = doc
+        .body
+        .iter()
+        .any(|b| matches!(b, Block::Paragraph(p) if p.properties.numbering.is_some()));
     assert!(has_numbering, "expected at least one numbered paragraph");
 }
 
@@ -256,9 +257,10 @@ fn sample3_hyperlinks() {
 #[test]
 fn sample3_numbering() {
     let doc = load("sample-docx-files-sample3.docx");
-    let has_numbering = doc.body.iter().any(|b| {
-        matches!(b, Block::Paragraph(p) if p.properties.numbering.is_some())
-    });
+    let has_numbering = doc
+        .body
+        .iter()
+        .any(|b| matches!(b, Block::Paragraph(p) if p.properties.numbering.is_some()));
     assert!(has_numbering, "expected numbered paragraphs");
 }
 
@@ -455,10 +457,7 @@ fn table_rows_have_cells() {
             for block in blocks {
                 if let Block::Table(t) = block {
                     for (i, row) in t.rows.iter().enumerate() {
-                        assert!(
-                            !row.cells.is_empty(),
-                            "{name}: table row {i} has no cells"
-                        );
+                        assert!(!row.cells.is_empty(), "{name}: table row {i} has no cells");
                         for cell in &row.cells {
                             check(&cell.content, name);
                         }
@@ -511,10 +510,7 @@ fn media_bytes_are_nonempty() {
     for name in ALL_FILES {
         let doc = load(name);
         for (rel_id, data) in &doc.media {
-            assert!(
-                !data.is_empty(),
-                "{name}: media {rel_id:?} has empty bytes"
-            );
+            assert!(!data.is_empty(), "{name}: media {rel_id:?} has empty bytes");
         }
     }
 }

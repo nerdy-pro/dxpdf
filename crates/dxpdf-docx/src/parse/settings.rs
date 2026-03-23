@@ -6,7 +6,7 @@ use quick_xml::Reader;
 
 use crate::dimension::Dimension;
 use crate::error::Result;
-use crate::model::DocumentSettings;
+use crate::model::{DocumentSettings, Rsid};
 use crate::xml;
 
 pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
@@ -17,7 +17,13 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
 
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
-            Event::Empty(ref e) | Event::Start(ref e) => {
+            Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                if local.as_slice() == b"rsids" {
+                    parse_rsids(&mut reader, &mut buf, &mut settings)?;
+                }
+            }
+            Event::Empty(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"defaultTabStop" => {
@@ -29,12 +35,7 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
                         let enabled = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                         settings.even_and_odd_headers = enabled;
                     }
-                    _ => {
-                        warn!(
-                            "settings: unsupported element <{}>",
-                            String::from_utf8_lossy(&local)
-                        );
-                    }
+                    _ => {}
                 }
             }
             Event::Eof => break,
@@ -43,4 +44,42 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
     }
 
     Ok(settings)
+}
+
+fn parse_rsids(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    settings: &mut DocumentSettings,
+) -> Result<()> {
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Empty(ref e) | Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"rsidRoot" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            settings.rsid_root = Rsid::from_hex(&val);
+                        }
+                    }
+                    b"rsid" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            if let Some(rsid) = Rsid::from_hex(&val) {
+                                settings.rsids.push(rsid);
+                            }
+                        }
+                    }
+                    _ => {
+                        warn!(
+                            "rsids: unsupported element <{}>",
+                            String::from_utf8_lossy(&local)
+                        );
+                    }
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rsids" => break,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(())
 }
