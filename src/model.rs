@@ -592,16 +592,6 @@ impl BorderDef {
     /// Not defined by OOXML spec; matches Microsoft Word's behavior.
     pub const DEFAULT_SIZE: EighthPoints = EighthPoints::new(4);
 
-    /// Create a single-style border with given size (eighths of a point) and color.
-    pub fn single(size: i64, color: Color) -> Self {
-        Self {
-            style: BorderStyle::Single,
-            size: EighthPoints::new(size),
-            color,
-            space: Pt::ZERO,
-        }
-    }
-
     /// Returns true if this border should be drawn.
     pub fn is_visible(&self) -> bool {
         self.style != BorderStyle::None && self.size.is_positive()
@@ -674,12 +664,6 @@ pub struct TableCell {
     pub cell_borders: Option<CellBorders>,
     /// Background fill color from `w:shd`.
     pub shading: Option<Color>,
-}
-
-impl TableCell {
-    pub fn is_vmerge_continue(&self) -> bool {
-        self.vertical_merge == Some(VerticalMerge::Continue)
-    }
 }
 
 impl Color {

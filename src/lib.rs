@@ -1,17 +1,11 @@
 #![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
-#[doc(hidden)]
-pub mod dimension;
-#[doc(hidden)]
-pub mod error;
-#[doc(hidden)]
-pub mod geometry;
-#[doc(hidden)]
-pub mod model;
-#[doc(hidden)]
-pub mod parse;
-#[doc(hidden)]
-pub mod render;
+pub(crate) mod dimension;
+pub(crate) mod error;
+pub(crate) mod geometry;
+pub(crate) mod model;
+pub(crate) mod parse;
+pub(crate) mod render;
 
 pub use error::Error;
 

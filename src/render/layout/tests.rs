@@ -2198,7 +2198,12 @@ fn paragraph_bottom_border_renders_line() {
         properties: ParagraphProperties {
             paragraph_borders: Some(ParagraphBorders {
                 top: None,
-                bottom: Some(BorderDef::single(4, Color::BLACK)),
+                bottom: Some(BorderDef {
+                    style: BorderStyle::Single,
+                    size: crate::dimension::EighthPoints::new(4),
+                    color: Color::BLACK,
+                    space: crate::dimension::Pt::ZERO,
+                }),
                 left: None,
                 right: None,
             }),

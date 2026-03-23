@@ -6,8 +6,6 @@ mod measurer;
 mod paragraph;
 mod table;
 
-pub use measurer::TextMeasurer;
-
 use std::collections::HashMap;
 use std::rc::Rc;
 

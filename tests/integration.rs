@@ -52,25 +52,6 @@ fn simple_docx(body_content: &str) -> Vec<u8> {
 }
 
 #[test]
-fn parse_simple_docx() {
-    let docx = simple_docx(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
-    let doc = dxpdf::parse::parse(&docx).unwrap();
-    assert_eq!(doc.sections[0].blocks.len(), 1);
-    match &doc.sections[0].blocks[0] {
-        dxpdf::model::Block::Paragraph(p) => {
-            assert_eq!(p.runs.len(), 1);
-            match &p.runs[0] {
-                dxpdf::model::Inline::TextRun(tr) => {
-                    assert_eq!(tr.text, "Hello World");
-                }
-                _ => panic!("Expected TextRun"),
-            }
-        }
-        _ => panic!("Expected Paragraph"),
-    }
-}
-
-#[test]
 fn convert_simple_docx_to_pdf() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
     let pdf = dxpdf::convert(&docx).unwrap();
@@ -144,7 +125,7 @@ fn convert_writes_to_file() {
 
 #[test]
 fn parse_invalid_zip_returns_error() {
-    let result = dxpdf::parse::parse(b"not a zip file");
+    let result = dxpdf::convert(b"not a zip file");
     assert!(result.is_err());
 }
 
@@ -159,7 +140,7 @@ fn parse_zip_without_document_xml_returns_error() {
     let cursor = zip.finish().unwrap();
     let bytes = cursor.into_inner();
 
-    let result = dxpdf::parse::parse(&bytes);
+    let result = dxpdf::convert(&bytes);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
