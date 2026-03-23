@@ -4,6 +4,7 @@ use crate::model::*;
 
 use super::context::LayoutConstraints;
 use super::fragment::*;
+use super::measure::compute_column_widths;
 use super::measurer;
 use super::{DrawCommand, LayoutConfig, LayoutedPage};
 
@@ -46,20 +47,27 @@ pub(super) fn render_headers_footers(
             page.commands.extend(body_commands);
         }
 
-        // Render footer
+        // Render footer: measure at y=0 first, then shift so content
+        // ends at footer_margin from the page bottom edge.
         if let Some(ref footer) = doc_defaults.default_footer {
-            let footer_y = hf_constraints.page_size().height - config.margins.bottom;
-            let (commands, _) = layout_header_footer_blocks(
+            let page_height = hf_constraints.page_size().height;
+            let (mut commands, content_bottom) = layout_header_footer_blocks(
                 &footer.blocks,
                 &hf_constraints,
-                footer_y,
-                config.margins.bottom,
+                Pt::ZERO,
+                page_height, // no clipping during measurement
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
                 Some(&field_ctx),
                 image_cache,
             );
+            // Position so the footer content sits above the page bottom,
+            // starting at footer_margin from the edge.
+            let footer_top = page_height - config.footer_margin - content_bottom;
+            for cmd in &mut commands {
+                cmd.shift_y(footer_top);
+            }
             page.commands.extend(commands);
         }
     }
@@ -92,7 +100,75 @@ pub(super) fn layout_header_footer_blocks(
         if cursor_y >= page_height {
             break;
         }
-        if let Block::Paragraph(para) = block {
+        if let Block::Table(table) = block {
+            let num_cols = table.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+            if num_cols == 0 {
+                continue;
+            }
+            let col_widths = compute_column_widths(&table.grid_cols, num_cols, content_width);
+
+            for row in &table.rows {
+                let mut row_height = Pt::ZERO;
+                let mut row_commands = Vec::new();
+                let mut grid_col_idx = 0;
+
+                for cell in &row.cells {
+                    let span = cell.grid_span.max(1) as usize;
+                    let cell_x = x_start + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
+                    let cell_w: Pt = (grid_col_idx..grid_col_idx + span)
+                        .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                        .sum();
+                    grid_col_idx += span;
+
+                    let mut cell_y = Pt::ZERO;
+                    for cell_block in &cell.blocks {
+                        if let Block::Paragraph(p) = cell_block {
+                            let sp = p.properties.spacing.unwrap_or_default();
+                            cell_y += sp.before_pt();
+                            let frags = collect_fragments_with_fields(
+                                &p.runs,
+                                constraints,
+                                defaults,
+                                measurer,
+                                field_ctx,
+                                image_cache,
+                            );
+                            if frags.is_empty() {
+                                cell_y += sp.line_pt();
+                                cell_y += sp.after_pt();
+                                continue;
+                            }
+                            let measured = measure_lines(
+                                &frags,
+                                cell_x,
+                                cell_w,
+                                Pt::ZERO,
+                                p.properties.alignment,
+                                sp.line_spacing(),
+                                &p.properties.tab_stops,
+                                default_tab_stop_pt,
+                                image_cache,
+                                None,
+                            );
+                            for line in &measured.lines {
+                                for cmd in &line.commands {
+                                    row_commands.push(cmd.offset_y(cell_y));
+                                }
+                            }
+                            cell_y += measured.total_height;
+                            cell_y += sp.after_pt();
+                        }
+                    }
+                    row_height = row_height.max(cell_y);
+                }
+
+                // Offset all row commands by cursor_y
+                for cmd in &row_commands {
+                    commands.push(cmd.offset_y(cursor_y));
+                }
+                cursor_y += row_height;
+            }
+        } else if let Block::Paragraph(para) = block {
             let spacing = para.properties.spacing.unwrap_or_default();
             cursor_y += spacing.before_pt();
 
