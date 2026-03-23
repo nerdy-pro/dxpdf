@@ -643,6 +643,9 @@ pub enum Inline {
     LineBreak(BreakKind),
     ColumnBreak,
     PageBreak,
+    /// §17.3.3.13: position where the previous application rendered a page break.
+    /// This is a rendering hint, not a content break.
+    LastRenderedPageBreak,
     Image(Image),
     FootnoteRef(NoteId),
     EndnoteRef(NoteId),

@@ -284,6 +284,10 @@ fn parse_run(
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         pending_inlines.push(Inline::LineBreak(BreakKind::TextWrapping));
                     }
+                    b"lastRenderedPageBreak" => {
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        pending_inlines.push(Inline::LastRenderedPageBreak);
+                    }
                     b"sym" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let font = xml::optional_attr(e, b"font")?.unwrap_or_default();
