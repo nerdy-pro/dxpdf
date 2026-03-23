@@ -269,7 +269,7 @@ pub struct NumberingLevelDefinition {
     pub format: NumberFormat,
     pub level_text: String,
     pub start: Option<u32>,
-    pub indentation: Indentation,
+    pub indentation: Option<Indentation>,
     pub run_properties: Option<RunProperties>,
 }
 
@@ -442,47 +442,26 @@ pub struct Paragraph {
     pub rsids: ParagraphRevisionIds,
 }
 
-#[derive(Clone, Debug)]
+/// Paragraph properties — only fields explicitly present in the XML are `Some`.
+#[derive(Clone, Debug, Default)]
 pub struct ParagraphProperties {
-    pub alignment: Alignment,
-    pub indentation: Indentation,
-    pub spacing: ParagraphSpacing,
+    pub alignment: Option<Alignment>,
+    pub indentation: Option<Indentation>,
+    pub spacing: Option<ParagraphSpacing>,
     pub numbering: Option<NumberingReference>,
     pub tabs: Vec<TabStop>,
     pub borders: Option<ParagraphBorders>,
     pub shading: Option<Shading>,
-    pub keep_next: bool,
-    pub keep_lines: bool,
-    pub widow_control: bool,
-    pub page_break_before: bool,
-    pub suppress_auto_hyphens: bool,
-    pub bidi: bool,
+    pub keep_next: Option<bool>,
+    pub keep_lines: Option<bool>,
+    pub widow_control: Option<bool>,
+    pub page_break_before: Option<bool>,
+    pub suppress_auto_hyphens: Option<bool>,
+    pub bidi: Option<bool>,
     pub outline_level: Option<OutlineLevel>,
 }
 
-impl Default for ParagraphProperties {
-    fn default() -> Self {
-        Self {
-            alignment: Alignment::Start,
-            indentation: Indentation::default(),
-            spacing: ParagraphSpacing::default(),
-            numbering: None,
-            tabs: Vec::new(),
-            borders: None,
-            shading: None,
-            keep_next: false,
-            keep_lines: false,
-            widow_control: true, // OOXML default is true
-            page_break_before: false,
-            suppress_auto_hyphens: false,
-            bidi: false,
-            outline_level: None,
-        }
-    }
-}
-
 /// Heading outline level (0–8, where 0 = Heading 1 in OOXML).
-/// We normalize: Level(1) = Heading 1 .. Level(9) = Heading 9.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutlineLevel(u8);
 
@@ -520,10 +499,10 @@ pub enum Alignment {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Indentation {
-    pub start: Dimension<Twips>,
-    pub end: Dimension<Twips>,
-    pub first_line: FirstLineIndent,
-    pub mirror: bool,
+    pub start: Option<Dimension<Twips>>,
+    pub end: Option<Dimension<Twips>>,
+    pub first_line: Option<FirstLineIndent>,
+    pub mirror: Option<bool>,
 }
 
 /// First-line indent: either hanging (negative) or first-line (positive).
@@ -536,25 +515,14 @@ pub enum FirstLineIndent {
     Hanging(Dimension<Twips>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Paragraph spacing — only fields explicitly present in the XML are `Some`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ParagraphSpacing {
-    pub before: Dimension<Twips>,
-    pub after: Dimension<Twips>,
-    pub line: LineSpacing,
-    pub before_auto_spacing: bool,
-    pub after_auto_spacing: bool,
-}
-
-impl Default for ParagraphSpacing {
-    fn default() -> Self {
-        Self {
-            before: Dimension::ZERO,
-            after: Dimension::ZERO,
-            line: LineSpacing::default(),
-            before_auto_spacing: false,
-            after_auto_spacing: false,
-        }
-    }
+    pub before: Option<Dimension<Twips>>,
+    pub after: Option<Dimension<Twips>>,
+    pub line: Option<LineSpacing>,
+    pub before_auto_spacing: Option<bool>,
+    pub after_auto_spacing: Option<bool>,
 }
 
 /// Line spacing rule — the three OOXML modes.
@@ -566,13 +534,6 @@ pub enum LineSpacing {
     Exact(Dimension<Twips>),
     /// Minimum line height (at least this much).
     AtLeast(Dimension<Twips>),
-}
-
-impl Default for LineSpacing {
-    fn default() -> Self {
-        // OOXML default: single spacing = 240 twips in auto mode
-        Self::Auto(Dimension::new(240))
-    }
 }
 
 // ── Numbering ────────────────────────────────────────────────────────────────
@@ -785,61 +746,34 @@ pub struct Symbol {
 
 // ── Run Properties ───────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq)]
+/// Run properties — only fields explicitly present in the XML are `Some`.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RunProperties {
     pub fonts: FontSet,
-    pub font_size: Dimension<HalfPoints>,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: UnderlineStyle,
-    pub strike: StrikeStyle,
-    pub color: Color,
+    pub font_size: Option<Dimension<HalfPoints>>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<UnderlineStyle>,
+    pub strike: Option<StrikeStyle>,
+    pub color: Option<Color>,
     pub highlight: Option<HighlightColor>,
     pub shading: Option<Shading>,
-    pub vertical_align: VerticalAlign,
-    pub spacing: Dimension<Twips>,
+    pub vertical_align: Option<VerticalAlign>,
+    pub spacing: Option<Dimension<Twips>>,
     pub kerning: Option<Dimension<HalfPoints>>,
-    pub all_caps: bool,
-    pub small_caps: bool,
-    pub vanish: bool,
+    pub all_caps: Option<bool>,
+    pub small_caps: Option<bool>,
+    pub vanish: Option<bool>,
     /// §17.3.2.21: suppress spell/grammar checking for this run.
-    pub no_proof: bool,
-    pub rtl: bool,
-    pub emboss: bool,
-    pub imprint: bool,
-    pub outline: bool,
-    pub shadow: bool,
+    pub no_proof: Option<bool>,
+    pub rtl: Option<bool>,
+    pub emboss: Option<bool>,
+    pub imprint: Option<bool>,
+    pub outline: Option<bool>,
+    pub shadow: Option<bool>,
 }
 
-impl Default for RunProperties {
-    fn default() -> Self {
-        Self {
-            fonts: FontSet::default(),
-            font_size: Dimension::new(20), // 10pt
-            bold: false,
-            italic: false,
-            underline: UnderlineStyle::None,
-            strike: StrikeStyle::None,
-            color: Color::Auto,
-            highlight: None,
-            shading: None,
-            vertical_align: VerticalAlign::Baseline,
-            spacing: Dimension::ZERO,
-            kerning: None,
-            all_caps: false,
-            small_caps: false,
-            vanish: false,
-            no_proof: false,
-            rtl: false,
-            emboss: false,
-            imprint: false,
-            outline: false,
-            shadow: false,
-        }
-    }
-}
-
-/// Resolved font family names for each script category.
+/// Font family names for each script category.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FontSet {
     pub ascii: Option<String>,
@@ -1105,8 +1039,8 @@ pub struct TableRow {
 #[derive(Clone, Debug, Default)]
 pub struct TableRowProperties {
     pub height: Option<TableRowHeight>,
-    pub is_header: bool,
-    pub cant_split: bool,
+    pub is_header: Option<bool>,
+    pub cant_split: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1129,48 +1063,29 @@ pub struct TableCell {
     pub content: Vec<Block>,
 }
 
-#[derive(Clone, Debug)]
+/// Table cell properties — only fields explicitly present in the XML are `Some`.
+#[derive(Clone, Debug, Default)]
 pub struct TableCellProperties {
-    pub width: TableMeasure,
+    pub width: Option<TableMeasure>,
     pub borders: Option<TableCellBorders>,
     pub shading: Option<Shading>,
     pub margins: Option<EdgeInsets<Twips>>,
-    pub vertical_align: CellVerticalAlign,
-    pub merge: CellMerge,
-    pub text_direction: TextDirection,
-    pub no_wrap: bool,
+    pub vertical_align: Option<CellVerticalAlign>,
+    /// Vertical merge (w:vMerge): None = not present, Some(Restart) or Some(Continue).
+    pub vertical_merge: Option<VerticalMerge>,
+    /// Horizontal span (w:gridSpan): None = not present, Some(n) = spans n columns.
+    pub grid_span: Option<u32>,
+    pub text_direction: Option<TextDirection>,
+    pub no_wrap: Option<bool>,
 }
 
-impl Default for TableCellProperties {
-    fn default() -> Self {
-        Self {
-            width: TableMeasure::Auto,
-            borders: None,
-            shading: None,
-            margins: None,
-            vertical_align: CellVerticalAlign::Top,
-            merge: CellMerge::None,
-            text_direction: TextDirection::LeftToRightTopToBottom,
-            no_wrap: false,
-        }
-    }
-}
-
-/// Cell merge state — makes vertical/horizontal merge explicit.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CellMerge {
-    #[default]
-    None,
-    /// This cell starts a vertical merge group.
-    VerticalStart,
-    /// This cell continues a vertical merge from above.
-    VerticalContinue,
-    /// Horizontal span count (grid_span > 1).
-    HorizontalSpan(u32),
-    /// Both vertical start and horizontal span.
-    VerticalStartWithSpan(u32),
-    /// Both vertical continue and horizontal span.
-    VerticalContinueWithSpan(u32),
+/// Vertical merge state from `w:vMerge` attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerticalMerge {
+    /// `w:vMerge val="restart"` — this cell starts a new vertical merge group.
+    Restart,
+    /// `w:vMerge` (no val or val="continue") — this cell continues from above.
+    Continue,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1218,10 +1133,10 @@ pub struct TableCellBorders {
 /// Table conditional formatting flags (ST_TblLook).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TableLook {
-    pub first_row: bool,
-    pub last_row: bool,
-    pub first_column: bool,
-    pub last_column: bool,
-    pub no_h_band: bool,
-    pub no_v_band: bool,
+    pub first_row: Option<bool>,
+    pub last_row: Option<bool>,
+    pub first_column: Option<bool>,
+    pub last_column: Option<bool>,
+    pub no_h_band: Option<bool>,
+    pub no_v_band: Option<bool>,
 }

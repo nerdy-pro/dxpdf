@@ -45,14 +45,14 @@ pub fn parse_paragraph_properties(
                         style_id = xml::optional_attr(e, b"val")?;
                     }
                     b"ind" => {
-                        props.indentation = parse_indentation(e)?;
+                        props.indentation = Some(parse_indentation(e)?);
                     }
                     b"spacing" => {
-                        props.spacing = parse_paragraph_spacing(e)?;
+                        props.spacing = Some(parse_paragraph_spacing(e)?);
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = parse_alignment(&val);
+                            props.alignment = Some(parse_alignment(&val));
                         }
                     }
                     b"numPr" => {
@@ -95,38 +95,40 @@ pub fn parse_paragraph_properties(
                         style_id = xml::optional_attr(e, b"val")?;
                     }
                     b"ind" => {
-                        props.indentation = parse_indentation(e)?;
+                        props.indentation = Some(parse_indentation(e)?);
                     }
                     b"spacing" => {
-                        props.spacing = parse_paragraph_spacing(e)?;
+                        props.spacing = Some(parse_paragraph_spacing(e)?);
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = parse_alignment(&val);
+                            props.alignment = Some(parse_alignment(&val));
                         }
                     }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
                     b"keepNext" => {
-                        props.keep_next = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.keep_next = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"keepLines" => {
-                        props.keep_lines = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.keep_lines =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"widowControl" => {
-                        props.widow_control = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.widow_control =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"pageBreakBefore" => {
                         props.page_break_before =
-                            xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"suppressAutoHyphens" => {
                         props.suppress_auto_hyphens =
-                            xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"bidi" => {
-                        props.bidi = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
@@ -181,39 +183,39 @@ pub fn parse_run_properties(
                     }
                     b"sz" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
-                            props.font_size = Dimension::new(val);
+                            props.font_size = Some(Dimension::new(val));
                         }
                     }
                     b"szCs" => {}
                     b"b" => {
-                        props.bold = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.bold = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"bCs" => {}
                     b"i" => {
-                        props.italic = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.italic = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"iCs" => {}
                     b"u" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.underline = parse_underline_style(&val);
+                            props.underline = Some(parse_underline_style(&val));
                         } else {
-                            props.underline = UnderlineStyle::Single;
+                            props.underline = Some(UnderlineStyle::Single);
                         }
                     }
                     b"strike" => {
                         let on = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                         if on {
-                            props.strike = StrikeStyle::Single;
+                            props.strike = Some(StrikeStyle::Single);
                         }
                     }
                     b"dstrike" => {
                         let on = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                         if on {
-                            props.strike = StrikeStyle::Double;
+                            props.strike = Some(StrikeStyle::Double);
                         }
                     }
                     b"color" => {
-                        props.color = parse_color_attr(e)?;
+                        props.color = Some(parse_color_attr(e)?);
                     }
                     b"highlight" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -225,12 +227,12 @@ pub fn parse_run_properties(
                     }
                     b"vertAlign" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = parse_vertical_align(&val);
+                            props.vertical_align = Some(parse_vertical_align(&val));
                         }
                     }
                     b"spacing" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
-                            props.spacing = Dimension::new(val);
+                            props.spacing = Some(Dimension::new(val));
                         }
                     }
                     b"kern" => {
@@ -239,31 +241,32 @@ pub fn parse_run_properties(
                         }
                     }
                     b"caps" => {
-                        props.all_caps = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.all_caps = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"smallCaps" => {
-                        props.small_caps = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.small_caps =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"vanish" => {
-                        props.vanish = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.vanish = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"noProof" => {
-                        props.no_proof = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.no_proof = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"rtl" => {
-                        props.rtl = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.rtl = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"emboss" => {
-                        props.emboss = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.emboss = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"imprint" => {
-                        props.imprint = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.imprint = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"outline" => {
-                        props.outline = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.outline = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"shadow" => {
-                        props.shadow = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.shadow = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     _ => xml::warn_unsupported_element("rPr", &local),
                 }
@@ -377,10 +380,11 @@ pub fn parse_table_row_properties(
                         }
                     }
                     b"tblHeader" => {
-                        props.is_header = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.is_header = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"cantSplit" => {
-                        props.cant_split = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.cant_split =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     _ => xml::warn_unsupported_element("trPr", &local),
                 }
@@ -419,43 +423,36 @@ pub fn parse_table_cell_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tcW" => {
-                        props.width = parse_table_measure(e)?;
+                        props.width = Some(parse_table_measure(e)?);
                     }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
                     b"vAlign" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = parse_cell_vertical_align(&val);
+                            props.vertical_align = Some(parse_cell_vertical_align(&val));
                         }
                     }
                     b"vMerge" => {
-                        let is_start = xml::optional_attr(e, b"val")?
+                        let is_restart = xml::optional_attr(e, b"val")?
                             .map(|v| v == "restart")
                             .unwrap_or(false);
-                        props.merge = if is_start {
-                            merge_with_span(CellMerge::VerticalStart, &props.merge)
+                        props.vertical_merge = Some(if is_restart {
+                            VerticalMerge::Restart
                         } else {
-                            merge_with_span(CellMerge::VerticalContinue, &props.merge)
-                        };
+                            VerticalMerge::Continue
+                        });
                     }
                     b"gridSpan" => {
-                        if let Some(val) = xml::optional_attr_u32(e, b"val")? {
-                            if val > 1 {
-                                props.merge = merge_with_vertical(
-                                    CellMerge::HorizontalSpan(val),
-                                    &props.merge,
-                                );
-                            }
-                        }
+                        props.grid_span = xml::optional_attr_u32(e, b"val")?;
                     }
                     b"textDirection" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_direction = parse_text_direction(&val);
+                            props.text_direction = Some(parse_text_direction(&val));
                         }
                     }
                     b"noWrap" => {
-                        props.no_wrap = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.no_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     _ => xml::warn_unsupported_element("tcPr", &local),
                 }
@@ -586,48 +583,44 @@ pub fn parse_section_properties(
 fn parse_indentation(e: &BytesStart<'_>) -> Result<Indentation> {
     let start = xml::optional_attr_i64(e, b"left")?
         .or(xml::optional_attr_i64(e, b"start")?)
-        .unwrap_or(0);
+        .map(Dimension::new);
     let end = xml::optional_attr_i64(e, b"right")?
         .or(xml::optional_attr_i64(e, b"end")?)
-        .unwrap_or(0);
+        .map(Dimension::new);
     let first_line = if let Some(val) = xml::optional_attr_i64(e, b"hanging")? {
-        FirstLineIndent::Hanging(Dimension::new(val))
-    } else if let Some(val) = xml::optional_attr_i64(e, b"firstLine")? {
-        FirstLineIndent::FirstLine(Dimension::new(val))
+        Some(FirstLineIndent::Hanging(Dimension::new(val)))
     } else {
-        FirstLineIndent::None
+        xml::optional_attr_i64(e, b"firstLine")?
+            .map(|val| FirstLineIndent::FirstLine(Dimension::new(val)))
     };
-    let mirror = xml::optional_attr_bool(e, b"mirrorIndents")?.unwrap_or(false);
+    let mirror = xml::optional_attr_bool(e, b"mirrorIndents")?;
 
     Ok(Indentation {
-        start: Dimension::new(start),
-        end: Dimension::new(end),
+        start,
+        end,
         first_line,
         mirror,
     })
 }
 
 fn parse_paragraph_spacing(e: &BytesStart<'_>) -> Result<ParagraphSpacing> {
-    let before = xml::optional_attr_i64(e, b"before")?.unwrap_or(0);
-    let after = xml::optional_attr_i64(e, b"after")?.unwrap_or(0);
-    let line_val = xml::optional_attr_i64(e, b"line")?.unwrap_or(240);
+    let before = xml::optional_attr_i64(e, b"before")?.map(Dimension::new);
+    let after = xml::optional_attr_i64(e, b"after")?.map(Dimension::new);
+    let line_val = xml::optional_attr_i64(e, b"line")?;
     let line_rule = xml::optional_attr(e, b"lineRule")?;
 
-    let line = match line_rule.as_deref() {
-        Some("exact") => LineSpacing::Exact(Dimension::new(line_val)),
-        Some("atLeast") => LineSpacing::AtLeast(Dimension::new(line_val)),
-        _ => LineSpacing::Auto(Dimension::new(line_val)),
-    };
-
-    let before_auto = xml::optional_attr_bool(e, b"beforeAutospacing")?.unwrap_or(false);
-    let after_auto = xml::optional_attr_bool(e, b"afterAutospacing")?.unwrap_or(false);
+    let line = line_val.map(|val| match line_rule.as_deref() {
+        Some("exact") => LineSpacing::Exact(Dimension::new(val)),
+        Some("atLeast") => LineSpacing::AtLeast(Dimension::new(val)),
+        _ => LineSpacing::Auto(Dimension::new(val)),
+    });
 
     Ok(ParagraphSpacing {
-        before: Dimension::new(before),
-        after: Dimension::new(after),
+        before,
+        after,
         line,
-        before_auto_spacing: before_auto,
-        after_auto_spacing: after_auto,
+        before_auto_spacing: xml::optional_attr_bool(e, b"beforeAutospacing")?,
+        after_auto_spacing: xml::optional_attr_bool(e, b"afterAutospacing")?,
     })
 }
 
@@ -978,12 +971,12 @@ fn parse_table_measure(e: &BytesStart<'_>) -> Result<TableMeasure> {
 
 fn parse_table_look(e: &BytesStart<'_>) -> Result<TableLook> {
     Ok(TableLook {
-        first_row: xml::optional_attr_bool(e, b"firstRow")?.unwrap_or(false),
-        last_row: xml::optional_attr_bool(e, b"lastRow")?.unwrap_or(false),
-        first_column: xml::optional_attr_bool(e, b"firstColumn")?.unwrap_or(false),
-        last_column: xml::optional_attr_bool(e, b"lastColumn")?.unwrap_or(false),
-        no_h_band: xml::optional_attr_bool(e, b"noHBand")?.unwrap_or(false),
-        no_v_band: xml::optional_attr_bool(e, b"noVBand")?.unwrap_or(false),
+        first_row: xml::optional_attr_bool(e, b"firstRow")?,
+        last_row: xml::optional_attr_bool(e, b"lastRow")?,
+        first_column: xml::optional_attr_bool(e, b"firstColumn")?,
+        last_column: xml::optional_attr_bool(e, b"lastColumn")?,
+        no_h_band: xml::optional_attr_bool(e, b"noHBand")?,
+        no_v_band: xml::optional_attr_bool(e, b"noVBand")?,
     })
 }
 
@@ -1130,29 +1123,5 @@ fn parse_section_type(val: &str) -> SectionType {
             warn!("unknown section type: {other}");
             SectionType::NextPage
         }
-    }
-}
-
-fn merge_with_span(vertical: CellMerge, current: &CellMerge) -> CellMerge {
-    match (vertical, current) {
-        (CellMerge::VerticalStart, CellMerge::HorizontalSpan(n)) => {
-            CellMerge::VerticalStartWithSpan(*n)
-        }
-        (CellMerge::VerticalContinue, CellMerge::HorizontalSpan(n)) => {
-            CellMerge::VerticalContinueWithSpan(*n)
-        }
-        (v, _) => v,
-    }
-}
-
-fn merge_with_vertical(horizontal: CellMerge, current: &CellMerge) -> CellMerge {
-    match (horizontal, current) {
-        (CellMerge::HorizontalSpan(n), CellMerge::VerticalStart) => {
-            CellMerge::VerticalStartWithSpan(n)
-        }
-        (CellMerge::HorizontalSpan(n), CellMerge::VerticalContinue) => {
-            CellMerge::VerticalContinueWithSpan(n)
-        }
-        (h, _) => h,
     }
 }

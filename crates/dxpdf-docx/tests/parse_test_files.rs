@@ -184,21 +184,24 @@ fn sample1_theme() {
 }
 
 #[test]
-fn sample1_styles_resolved() {
+fn sample1_has_direct_formatting() {
     let doc = load("sample-docx-files-sample1.docx");
+    // Some runs should have explicit font sizes set (direct formatting)
     let mut sizes = std::collections::HashSet::new();
     for block in &doc.body {
         if let Block::Paragraph(p) = block {
             for inline in &p.content {
                 if let Inline::TextRun(run) = inline {
-                    sizes.insert(run.properties.font_size.raw());
+                    if let Some(sz) = run.properties.font_size {
+                        sizes.insert(sz.raw());
+                    }
                 }
             }
         }
     }
     assert!(
-        sizes.len() > 1,
-        "expected multiple distinct font sizes from style resolution, got {sizes:?}"
+        !sizes.is_empty(),
+        "expected some runs to have explicit font sizes"
     );
 }
 

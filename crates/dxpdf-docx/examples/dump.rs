@@ -182,20 +182,23 @@ fn dump(name: &str, doc: &Document) {
             }
             let pp = &p.properties;
             print!("║   ¶ align={:?}", pp.alignment);
-            if pp.spacing.before.raw() != 0 || pp.spacing.after.raw() != 0 {
-                print!(
-                    " spacing(before={}, after={})",
-                    pp.spacing.before.raw(),
-                    pp.spacing.after.raw()
-                );
+            if let Some(ref sp) = pp.spacing {
+                if let Some(before) = sp.before {
+                    print!(" before={}", before.raw());
+                }
+                if let Some(after) = sp.after {
+                    print!(" after={}", after.raw());
+                }
             }
-            if pp.indentation.start.raw() != 0 {
-                print!(" indent.start={}", pp.indentation.start.raw());
+            if let Some(ref ind) = pp.indentation {
+                if let Some(start) = ind.start {
+                    print!(" indent.start={}", start.raw());
+                }
             }
             if pp.numbering.is_some() {
                 print!(" [numbered]");
             }
-            if pp.keep_next {
+            if pp.keep_next == Some(true) {
                 print!(" [keepNext]");
             }
             println!();
@@ -205,15 +208,19 @@ fn dump(name: &str, doc: &Document) {
                 p.content.iter().find(|i| matches!(i, Inline::TextRun(_)))
             {
                 let rp = &run.properties;
-                print!("║     run: size={}hp", rp.font_size.raw());
-                if rp.bold {
+                if let Some(sz) = rp.font_size {
+                    print!("║     run: size={}hp", sz.raw());
+                } else {
+                    print!("║     run:");
+                }
+                if rp.bold == Some(true) {
                     print!(" bold");
                 }
-                if rp.italic {
+                if rp.italic == Some(true) {
                     print!(" italic");
                 }
-                if rp.underline != UnderlineStyle::None {
-                    print!(" underline={:?}", rp.underline);
+                if let Some(ref u) = rp.underline {
+                    print!(" underline={u:?}");
                 }
                 if let Some(ref f) = rp.fonts.ascii {
                     print!(" font=\"{f}\"");

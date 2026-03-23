@@ -74,7 +74,7 @@ fn parse_level(
     let mut format = NumberFormat::Decimal;
     let mut level_text = String::new();
     let mut start: Option<u32> = None;
-    let mut indentation = Indentation::default();
+    let mut indentation: Option<Indentation> = None;
     let mut run_properties: Option<RunProperties> = None;
 
     loop {
