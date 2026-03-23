@@ -1,6 +1,6 @@
 mod drawing;
-mod helpers;
-mod properties;
+pub(crate) mod helpers;
+pub(crate) mod properties;
 mod section;
 
 use std::collections::{HashMap, HashSet};

@@ -35,11 +35,22 @@ pub fn get_attr(
     Ok(None)
 }
 
-pub fn matches_body_or_cell(state: &ParseState) -> bool {
+/// Get an attribute value by local name, ignoring malformed attributes.
+/// Infallible alternative to [`get_attr`] for contexts that don't propagate errors.
+pub fn get_attr_lossy(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        if local_name(attr.key.as_ref()) == name {
+            return Some(String::from_utf8_lossy(&attr.value).into_owned());
+        }
+    }
+    None
+}
+
+pub(super) fn matches_body_or_cell(state: &ParseState) -> bool {
     matches!(state, ParseState::InBody | ParseState::InTableCell { .. })
 }
 
-pub fn take_paragraph(
+pub(super) fn take_paragraph(
     state: &mut ParseState,
 ) -> (
     ParagraphProperties,
@@ -60,7 +71,7 @@ pub fn take_paragraph(
     }
 }
 
-pub fn take_run(state: &mut ParseState) -> (RunProperties, String) {
+pub(super) fn take_run(state: &mut ParseState) -> (RunProperties, String) {
     let old = std::mem::replace(state, ParseState::Idle);
     match old {
         ParseState::InRun { props, text } => (props, text),
@@ -68,7 +79,7 @@ pub fn take_run(state: &mut ParseState) -> (RunProperties, String) {
     }
 }
 
-pub fn push_block(state: &mut ParseState, top_blocks: &mut Vec<Block>, block: Block) {
+pub(super) fn push_block(state: &mut ParseState, top_blocks: &mut Vec<Block>, block: Block) {
     match state {
         ParseState::InBody => top_blocks.push(block),
         ParseState::InTableCell { ref mut blocks, .. } => blocks.push(block),
@@ -77,7 +88,7 @@ pub fn push_block(state: &mut ParseState, top_blocks: &mut Vec<Block>, block: Bl
 }
 
 /// Push a floating image into the nearest paragraph context.
-pub fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: FloatingImage) {
+pub(super) fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: FloatingImage) {
     if let ParseState::InParagraph { ref mut floats, .. } = state {
         floats.push(float);
         return;
@@ -91,7 +102,7 @@ pub fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: Float
 }
 
 /// Push an inline element into the nearest paragraph — current state first, then stack.
-pub fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState], inline: Inline) {
+pub(super) fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState], inline: Inline) {
     if let ParseState::InParagraph { ref mut runs, .. } = state {
         runs.push(inline);
         return;
@@ -105,7 +116,7 @@ pub fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState]
 }
 
 /// Set or clear the `in_cell_mar` flag on InTable or InTableCell state.
-pub fn set_in_cell_mar(state: &mut ParseState, value: bool) {
+pub(super) fn set_in_cell_mar(state: &mut ParseState, value: bool) {
     match state {
         ParseState::InTable {
             ref mut in_cell_mar,
@@ -120,7 +131,7 @@ pub fn set_in_cell_mar(state: &mut ParseState, value: bool) {
 }
 
 /// Set or clear the `in_borders` flag on InTable or InTableCell state.
-pub fn set_in_borders(state: &mut ParseState, value: bool) {
+pub(super) fn set_in_borders(state: &mut ParseState, value: bool) {
     match state {
         ParseState::InTable {
             ref mut in_borders, ..
@@ -133,7 +144,7 @@ pub fn set_in_borders(state: &mut ParseState, value: bool) {
 }
 
 /// Handle a w:fldChar element (begin/separate/end field code state machine).
-pub fn handle_fld_char(
+pub(super) fn handle_fld_char(
     e: &quick_xml::events::BytesStart<'_>,
     state: &mut ParseState,
     stack: &mut [ParseState],

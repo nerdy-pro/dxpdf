@@ -478,62 +478,18 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                     }
                 }
                 if in_table_style_borders && table_borders.is_none() {
-                    // Parse border children (top/bottom/left/right/insideH/insideV)
-                    let val = e
-                        .attributes()
-                        .flatten()
-                        .find(|a| local_name(a.key.as_ref()) == b"val")
-                        .map(|a| String::from_utf8_lossy(&a.value).into_owned())
-                        .unwrap_or_default();
-                    let style = match val.as_str() {
-                        "none" | "nil" => crate::model::BorderStyle::None,
-                        "single" => crate::model::BorderStyle::Single,
-                        "double" => crate::model::BorderStyle::Double,
-                        "dashed" => crate::model::BorderStyle::Dashed,
-                        "dotted" => crate::model::BorderStyle::Dotted,
-                        _ => crate::model::BorderStyle::Single,
-                    };
-                    let size = e
-                        .attributes()
-                        .flatten()
-                        .find(|a| local_name(a.key.as_ref()) == b"sz")
-                        .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
-                        .map(crate::dimension::EighthPoints::new)
-                        .unwrap_or(crate::model::BorderDef::DEFAULT_SIZE);
-                    let color_str: String = e
-                        .attributes()
-                        .flatten()
-                        .find(|a| local_name(a.key.as_ref()) == b"color")
-                        .map(|a| String::from_utf8_lossy(&a.value).into_owned())
-                        .unwrap_or_default();
-                    let color = if color_str == "auto" || color_str.is_empty() {
-                        crate::model::Color::BLACK
-                    } else {
-                        crate::model::Color::from_hex(&color_str)
-                            .unwrap_or(crate::model::Color::BLACK)
-                    };
-                    let space = e
-                        .attributes()
-                        .flatten()
-                        .find(|a| local_name(a.key.as_ref()) == b"space")
-                        .and_then(|a| String::from_utf8_lossy(&a.value).parse::<f32>().ok())
-                        .map(crate::dimension::Pt::new)
-                        .unwrap_or(crate::dimension::Pt::ZERO);
-                    let def = crate::model::BorderDef {
-                        style,
-                        size,
-                        color,
-                        space,
-                    };
-                    let b = table_borders.get_or_insert(crate::model::TableBorders::default());
-                    match local {
-                        b"top" => b.top = def,
-                        b"bottom" => b.bottom = def,
-                        b"left" | b"start" => b.left = def,
-                        b"right" | b"end" => b.right = def,
-                        b"insideH" => b.inside_h = def,
-                        b"insideV" => b.inside_v = def,
-                        _ => {}
+                    if let Ok(def) = super::xml::properties::parse_border_def(e) {
+                        let b =
+                            table_borders.get_or_insert(crate::model::TableBorders::default());
+                        match local {
+                            b"top" => b.top = def,
+                            b"bottom" => b.bottom = def,
+                            b"left" | b"start" => b.left = def,
+                            b"right" | b"end" => b.right = def,
+                            b"insideH" => b.inside_h = def,
+                            b"insideV" => b.inside_v = def,
+                            _ => {}
+                        }
                     }
                 }
                 if in_table_style_ppr && local == b"spacing" && table_cell_spacing.is_none() {
@@ -615,24 +571,7 @@ fn parse_default_tab_stop(xml: &str) -> Option<crate::dimension::Twips> {
     None
 }
 
-/// Parse numbering definitions from word/numbering.xml.
-/// Get an attribute value by local name from a BytesStart element.
-pub(crate) fn attr_val(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<String> {
-    for attr in e.attributes().flatten() {
-        if local_name(attr.key.as_ref()) == name {
-            return Some(String::from_utf8_lossy(&attr.value).into_owned());
-        }
-    }
-    None
-}
-
-/// Strip namespace prefix from an element/attribute name.
-pub(crate) fn local_name(name: &[u8]) -> &[u8] {
-    name.iter()
-        .position(|&b| b == b':')
-        .map(|i| &name[i + 1..])
-        .unwrap_or(name)
-}
+use super::xml::helpers::local_name;
 
 #[cfg(test)]
 mod tests {

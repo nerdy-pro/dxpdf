@@ -21,6 +21,22 @@ pub struct ResolvedParagraphStyle {
     pub run_props: ResolvedRunStyle,
 }
 
+impl ResolvedParagraphStyle {
+    /// Fill in `None` fields from a base (parent) style.
+    pub fn merge_from(&mut self, base: &ResolvedParagraphStyle) {
+        if self.alignment.is_none() {
+            self.alignment = base.alignment;
+        }
+        if self.spacing.is_none() {
+            self.spacing = base.spacing;
+        }
+        if self.indentation.is_none() {
+            self.indentation = base.indentation;
+        }
+        self.run_props.merge_from(&base.run_props);
+    }
+}
+
 /// Resolved run (character) style properties.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ResolvedRunStyle {
@@ -30,6 +46,30 @@ pub struct ResolvedRunStyle {
     pub font_size: Option<HalfPoints>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
+}
+
+impl ResolvedRunStyle {
+    /// Fill in `None` fields from a base (parent) style.
+    pub fn merge_from(&mut self, base: &ResolvedRunStyle) {
+        if self.bold.is_none() {
+            self.bold = base.bold;
+        }
+        if self.italic.is_none() {
+            self.italic = base.italic;
+        }
+        if self.underline.is_none() {
+            self.underline = base.underline;
+        }
+        if self.font_size.is_none() {
+            self.font_size = base.font_size;
+        }
+        if self.font_family.is_none() {
+            self.font_family = base.font_family.clone();
+        }
+        if self.color.is_none() {
+            self.color = base.color;
+        }
+    }
 }
 
 /// Map of style IDs to resolved properties.
@@ -327,6 +367,20 @@ pub struct Indentation {
     pub left: Option<Twips>,
     pub right: Option<Twips>,
     pub first_line: Option<Twips>,
+}
+
+impl Indentation {
+    pub fn left_pt(&self) -> Pt {
+        self.left.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    pub fn right_pt(&self) -> Pt {
+        self.right.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    pub fn first_line_pt(&self) -> Pt {
+        self.first_line.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
 }
 
 /// A type-safe wrapper for OOXML relationship IDs (e.g., "rId5").
@@ -633,6 +687,16 @@ impl Color {
 }
 
 impl Spacing {
+    /// Spacing before in points, defaulting to zero.
+    pub fn before_pt(&self) -> Pt {
+        self.before.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    /// Spacing after in points, defaulting to zero.
+    pub fn after_pt(&self) -> Pt {
+        self.after.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
     /// Line spacing semantic value.
     /// For `Auto`: multiplier (1.0 = single spacing).
     /// For `Exact`/`AtLeast`: value in points.
@@ -707,8 +771,8 @@ mod tests {
             line: Some(Twips::new(360)),
             ..Default::default()
         };
-        assert_eq!(f32::from(s.before.map(Pt::from).unwrap_or(Pt::ZERO)), 12.0);
-        assert_eq!(f32::from(s.after.map(Pt::from).unwrap_or(Pt::ZERO)), 6.0);
+        assert_eq!(f32::from(s.before_pt()), 12.0);
+        assert_eq!(f32::from(s.after_pt()), 6.0);
         assert_eq!(f32::from(s.line_pt()), 18.0);
     }
 

@@ -20,7 +20,7 @@ impl Layouter<'_> {
         let page_w = self.constraints.available_width();
         let page_size = self.constraints.page_size();
 
-        self.cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
+        self.cursor_y += spacing.before_pt();
 
         // Register floating images attached to this paragraph
         for float in &para.floats {
@@ -73,13 +73,13 @@ impl Layouter<'_> {
                 top + line_h,
             );
             self.cursor_y += line_h;
-            self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+            self.cursor_y += spacing.after_pt();
             return;
         }
 
         if para.fragments.is_empty() {
             self.prev_para_had_bottom_border = false;
-            self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+            self.cursor_y += spacing.after_pt();
             return;
         }
 
@@ -138,7 +138,7 @@ impl Layouter<'_> {
             fragments,
             self.constraints.x_origin(),
             self.constraints.available_width(),
-            indent.first_line.map(Pt::from).unwrap_or(Pt::ZERO),
+            indent.first_line_pt(),
             para.properties.alignment,
             spacing.line_spacing(),
             &para.properties.tab_stops,
@@ -242,7 +242,7 @@ impl Layouter<'_> {
         // Pop paragraph constraints
         self.constraints.pop();
 
-        self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+        self.cursor_y += spacing.after_pt();
     }
 
     /// Paint paragraph border lines (w:pBdr).

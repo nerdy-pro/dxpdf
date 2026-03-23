@@ -136,7 +136,7 @@ impl Layouter<'_> {
                         if let MeasuredBlock::Paragraph(p) = block {
                             let spacing =
                                 self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
-                            cell_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
+                            cell_y += spacing.before_pt();
 
                             // Floating images in cell
                             for float in &p.floats {
@@ -168,11 +168,11 @@ impl Layouter<'_> {
                             if fragments.is_empty() && p.floats.is_empty() {
                                 let natural = self.doc_defaults.default_line_height;
                                 cell_y += resolve_line_height(natural, spacing.line_spacing());
-                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+                                cell_y += spacing.after_pt();
                                 continue;
                             }
                             if fragments.is_empty() {
-                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+                                cell_y += spacing.after_pt();
                                 continue;
                             }
 
@@ -197,7 +197,7 @@ impl Layouter<'_> {
                                 }
                             }
                             cell_y += measured.total_height;
-                            cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+                            cell_y += spacing.after_pt();
                         }
                     }
 

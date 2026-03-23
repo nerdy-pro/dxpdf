@@ -122,8 +122,8 @@ impl LayoutConstraints {
 
     /// Push narrowed constraints for a paragraph (indentation reduces width).
     pub fn push_paragraph(&mut self, indent: &Indentation) {
-        let left = indent.left.map(Pt::from).unwrap_or(Pt::ZERO);
-        let right = indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
+        let left = indent.left_pt();
+        let right = indent.right_pt();
         self.push(
             ConstraintFrame::new()
                 .x_origin(self.x_origin() + left)

@@ -1,7 +1,7 @@
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use super::archive::{attr_val, local_name};
+use super::xml::helpers::{get_attr_lossy as attr_val, local_name};
 
 pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
     use std::rc::Rc;
@@ -99,31 +99,7 @@ pub(super) fn parse_styles(xml: &str) -> crate::model::StyleMap {
                             // Inherit from basedOn style
                             if let Some(ref base_id) = based_on {
                                 if let Some(base) = styles.get(base_id) {
-                                    if resolved.alignment.is_none() {
-                                        resolved.alignment = base.alignment;
-                                    }
-                                    if resolved.spacing.is_none() {
-                                        resolved.spacing = base.spacing;
-                                    }
-                                    if resolved.indentation.is_none() {
-                                        resolved.indentation = base.indentation;
-                                    }
-                                    if resolved.run_props.bold.is_none() {
-                                        resolved.run_props.bold = base.run_props.bold;
-                                    }
-                                    if resolved.run_props.italic.is_none() {
-                                        resolved.run_props.italic = base.run_props.italic;
-                                    }
-                                    if resolved.run_props.font_size.is_none() {
-                                        resolved.run_props.font_size = base.run_props.font_size;
-                                    }
-                                    if resolved.run_props.font_family.is_none() {
-                                        resolved.run_props.font_family =
-                                            base.run_props.font_family.clone();
-                                    }
-                                    if resolved.run_props.color.is_none() {
-                                        resolved.run_props.color = base.run_props.color;
-                                    }
+                                    resolved.merge_from(base);
                                 }
                             }
                             styles.insert(style_id.clone(), resolved);

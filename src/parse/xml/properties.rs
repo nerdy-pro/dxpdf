@@ -116,7 +116,7 @@ fn apply_margin(
 }
 
 /// Handle empty elements that set properties on runs, paragraphs, tables, and cells.
-pub fn handle_empty_element(
+pub(super) fn handle_empty_element(
     local: &[u8],
     e: &quick_xml::events::BytesStart<'_>,
     state: &mut ParseState,

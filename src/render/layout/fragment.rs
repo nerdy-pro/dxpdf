@@ -13,6 +13,16 @@ pub const MIN_TAB_WIDTH: Pt = Pt::new(12.0);
 /// Fallback tab advance when no stops and no default interval.
 pub const TAB_FALLBACK: Pt = Pt::new(36.0);
 
+/// Super/subscript font size as a fraction of the base size.
+/// Matches Word's default rendering (~58% of base).
+const VERT_ALIGN_SIZE_FACTOR: f32 = 0.58;
+
+/// Superscript baseline shift as a fraction of the base font size (negative = up).
+const SUPERSCRIPT_BASELINE_SHIFT: f32 = -0.33;
+
+/// Subscript baseline shift as a fraction of the base font size (positive = down).
+const SUBSCRIPT_BASELINE_SHIFT: f32 = 0.08;
+
 /// Underline offset below the text baseline.
 pub const UNDERLINE_Y_OFFSET: Pt = Pt::new(2.0);
 use super::DrawCommand;
@@ -129,15 +139,13 @@ pub fn collect_fragments_with_fields(
                 // Super/subscript: reduce font size and compute baseline offset
                 let (font_size, baseline_offset) = match tr.properties.vert_align {
                     Some(VertAlign::Superscript) => {
-                        let reduced = base_font_size * 0.58;
-                        // Shift up by ~33% of the original line height
-                        let offset = -(base_font_size * 0.33);
+                        let reduced = base_font_size * VERT_ALIGN_SIZE_FACTOR;
+                        let offset = base_font_size * SUPERSCRIPT_BASELINE_SHIFT;
                         (reduced, offset)
                     }
                     Some(VertAlign::Subscript) => {
-                        let reduced = base_font_size * 0.58;
-                        // Shift down by ~8% of the original line height
-                        let offset = base_font_size * 0.08;
+                        let reduced = base_font_size * VERT_ALIGN_SIZE_FACTOR;
+                        let offset = base_font_size * SUBSCRIPT_BASELINE_SHIFT;
                         (reduced, offset)
                     }
                     None => (base_font_size, Pt::ZERO),

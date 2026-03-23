@@ -93,7 +93,7 @@ pub(super) fn layout_header_footer_blocks(
         }
         if let Block::Paragraph(para) = block {
             let spacing = para.properties.spacing.unwrap_or_default();
-            cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
+            cursor_y += spacing.before_pt();
 
             // Render floating images with alignment support
             for float in &para.floats {
@@ -145,18 +145,16 @@ pub(super) fn layout_header_footer_blocks(
 
             if fragments.is_empty() {
                 cursor_y += spacing.line_pt();
-                cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+                cursor_y += spacing.after_pt();
                 continue;
             }
 
             let indent = para.properties.indentation.unwrap_or_default();
-            let avail = content_width
-                - indent.left.map(Pt::from).unwrap_or(Pt::ZERO)
-                - indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
+            let avail = content_width - indent.left_pt() - indent.right_pt();
 
             let measured = measure_lines(
                 &fragments,
-                x_start + indent.left.map(Pt::from).unwrap_or(Pt::ZERO),
+                x_start + indent.left_pt(),
                 avail,
                 Pt::ZERO,
                 para.properties.alignment,
@@ -174,7 +172,7 @@ pub(super) fn layout_header_footer_blocks(
                 }
             }
             cursor_y += measured.total_height;
-            cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
+            cursor_y += spacing.after_pt();
         }
     }
 
