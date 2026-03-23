@@ -78,7 +78,8 @@ impl Layouter<'_> {
             return;
         }
 
-        let content_width = self.config.content_width();
+        let page_ctx = *self.context.current();
+        let content_width = page_ctx.available_width;
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
         let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
@@ -105,14 +106,14 @@ impl Layouter<'_> {
             .iter()
             .map(|row| {
                 let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
-                let row_height_limit = self.config.content_height();
+                let row_height_limit = page_ctx.available_height;
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
                 let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
                 let mut grid_col_idx = 0;
                 for cell in &row.cells {
-                    let x = self.config.margins.left
-                        + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
+                    let x =
+                        page_ctx.x_origin + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
                     let w = self.cell_width(grid_col_idx, cell, &col_widths);
                     col_x_positions.push(x);
                     cell_widths_computed.push(w);
