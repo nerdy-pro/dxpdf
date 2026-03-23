@@ -1,4 +1,4 @@
-pub(crate) mod context;
+pub mod context;
 mod fragment;
 mod header_footer;
 pub mod measure;
@@ -315,6 +315,7 @@ struct ActiveFloat {
 
 struct Layouter<'a> {
     config: LayoutConfig,
+    context: context::LayoutContext,
     pages: Vec<LayoutedPage>,
     current_page: LayoutedPage,
     cursor_y: Pt,
@@ -336,6 +337,7 @@ impl<'a> Layouter<'a> {
         image_cache: &'a ImageCache,
     ) -> Self {
         Self {
+            context: context::LayoutContext::new(context::LayoutConstraints::for_page(config)),
             config: *config,
             pages: Vec::new(),
             current_page: LayoutedPage {
@@ -375,6 +377,8 @@ impl<'a> Layouter<'a> {
             self.config = next_config;
             self.current_page.page_size = self.config.page_size;
             self.cursor_y = self.config.margins.top;
+            self.context
+                .replace_root(context::LayoutConstraints::for_page(&self.config));
         }
     }
 

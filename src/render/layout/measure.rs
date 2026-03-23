@@ -13,25 +13,25 @@ use super::LayoutConfig;
 
 /// A document tree enriched with text metrics and decoded images.
 /// Produced by the measure step, consumed by the layout step.
-pub(crate) struct MeasuredDocument {
+pub struct MeasuredDocument {
     pub blocks: Vec<MeasuredBlock>,
     /// Section configs derived from inline section breaks + final section.
-    pub section_configs: Vec<LayoutConfig>,
-    pub doc_defaults: DocDefaultsLayout,
-    pub default_tab_stop: Pt,
-    pub image_cache: ImageCache,
+    pub(crate) section_configs: Vec<LayoutConfig>,
+    pub(crate) doc_defaults: DocDefaultsLayout,
+    pub(crate) default_tab_stop: Pt,
+    pub(crate) image_cache: ImageCache,
     pub header: Option<Vec<MeasuredBlock>>,
     pub footer: Option<Vec<MeasuredBlock>>,
 }
 
 /// A measured block-level element.
-pub(crate) enum MeasuredBlock {
-    Paragraph(MeasuredParagraph),
-    Table(MeasuredTable),
+pub enum MeasuredBlock {
+    Paragraph(Box<MeasuredParagraph>),
+    Table(Box<MeasuredTable>),
 }
 
 /// A paragraph with pre-measured fragments.
-pub(crate) struct MeasuredParagraph {
+pub struct MeasuredParagraph {
     pub fragments: Vec<Fragment>,
     pub properties: ParagraphProperties,
     pub floats: Vec<FloatingImage>,
@@ -41,7 +41,7 @@ pub(crate) struct MeasuredParagraph {
 }
 
 /// A table with pre-measured cells.
-pub(crate) struct MeasuredTable {
+pub struct MeasuredTable {
     pub rows: Vec<MeasuredTableRow>,
     pub grid_cols: Vec<crate::dimension::Twips>,
     pub default_cell_margins: Option<CellMargins>,
@@ -50,13 +50,13 @@ pub(crate) struct MeasuredTable {
 }
 
 /// A table row with pre-measured cells.
-pub(crate) struct MeasuredTableRow {
+pub struct MeasuredTableRow {
     pub cells: Vec<MeasuredTableCell>,
     pub height: Option<crate::dimension::Twips>,
 }
 
 /// A table cell with pre-measured paragraph blocks.
-pub(crate) struct MeasuredTableCell {
+pub struct MeasuredTableCell {
     pub blocks: Vec<MeasuredBlock>,
     pub width: Option<crate::dimension::Twips>,
     pub grid_span: u32,
@@ -66,11 +66,17 @@ pub(crate) struct MeasuredTableCell {
     pub shading: Option<Color>,
 }
 
+impl MeasuredTableCell {
+    pub fn is_vmerge_continue(&self) -> bool {
+        self.vertical_merge == Some(VerticalMerge::Continue)
+    }
+}
+
 /// Measure a document: resolve fonts, measure text, decode images.
 /// This is Step 1 of the pipeline.
-pub(crate) fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocument {
+pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocument {
     let measurer = TextMeasurer::new(font_mgr.clone());
-    let doc_defaults = DocDefaultsLayout::from_document(doc);
+    let doc_defaults = DocDefaultsLayout::from_document(doc, &measurer);
     let image_cache = ImageCache::new(&doc.images);
     let default_tab_stop = Pt::from(doc.default_tab_stop);
 
@@ -135,25 +141,25 @@ fn measure_blocks(
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
-    list_c ounters: &mut std::collections::HashMap<(u32, u32), u32>,
+    list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> Vec<MeasuredBlock> {
     blocks
         .iter()
         .map(|block| match block {
-            Block::Paragraph(p) => MeasuredBlock::Paragraph(measure_paragraph(
+            Block::Paragraph(p) => MeasuredBlock::Paragraph(Box::new(measure_paragraph(
                 p,
                 doc_defaults,
                 measurer,
                 image_cache,
                 list_counters,
-            )),
-            Block::Table(t) => MeasuredBlock::Table(measure_table(
+            ))),
+            Block::Table(t) => MeasuredBlock::Table(Box::new(measure_table(
                 t,
                 doc_defaults,
                 measurer,
                 image_cache,
                 list_counters,
-            )),
+            ))),
         })
         .collect()
 }

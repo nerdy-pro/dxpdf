@@ -30,7 +30,7 @@ pub struct LayoutConstraints {
 
 impl LayoutConstraints {
     /// Create constraints for a full page from a layout config.
-    pub fn for_page(config: &LayoutConfig) -> Self {
+    pub(crate) fn for_page(config: &LayoutConfig) -> Self {
         Self {
             x_origin: config.margins.left,
             available_width: config.content_width(),
@@ -62,7 +62,7 @@ impl LayoutConstraints {
     }
 
     /// Create constraints for header/footer layout.
-    pub fn for_header_footer(config: &LayoutConfig, y_extent: Pt) -> Self {
+    pub(crate) fn for_header_footer(config: &LayoutConfig, y_extent: Pt) -> Self {
         Self {
             x_origin: config.margins.left,
             available_width: config.content_width(),
