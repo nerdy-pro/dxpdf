@@ -280,6 +280,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dxpdf-docx"
+version = "0.1.0"
+dependencies = [
+ "quick-xml",
+ "thiserror",
+ "zip",
+]
+
+[[package]]
 name = "dxpdf-model"
 version = "0.1.5"
 dependencies = [

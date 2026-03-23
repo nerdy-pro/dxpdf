@@ -1,0 +1,11 @@
+[package]
+name = "dxpdf-docx"
+version = "0.1.0"
+edition = "2021"
+description = "OOXML DOCX parser for dxpdf"
+license = "MIT"
+
+[dependencies]
+quick-xml = "0.37"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+thiserror = "2"
