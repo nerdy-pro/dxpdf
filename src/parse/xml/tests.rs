@@ -1,5 +1,11 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::dimension::Twips;
+
+fn parse_document_xml(xml: &str) -> Result<crate::model::Document, crate::error::Error> {
+    parse_document_xml_with_rels(xml, &HashMap::new())
+}
 
 fn wrap_body(content: &str) -> String {
     format!(

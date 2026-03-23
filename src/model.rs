@@ -187,11 +187,6 @@ impl Document {
         self.sections.iter().map(|s| &s.properties)
     }
 
-    /// Iterate over all blocks across all sections.
-    pub fn all_blocks(&self) -> impl Iterator<Item = &Block> {
-        self.sections.iter().flat_map(|s| &s.blocks)
-    }
-
     /// Collect all unique font families referenced in this document.
     pub fn font_families(&self) -> Vec<Rc<str>> {
         use std::collections::HashSet;

@@ -23,12 +23,6 @@ fn warn_once(warned: &mut HashSet<&'static str>, key: &'static str, msg: &str) {
     }
 }
 
-/// Parse the `word/document.xml` content into a `Document`.
-pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
-    let empty = HashMap::new();
-    parse_document_xml_with_rels(xml, &empty)
-}
-
 /// Parse document XML with relationship data for hyperlink resolution.
 pub fn parse_document_xml_with_rels(
     xml: &str,
@@ -56,14 +50,6 @@ pub fn parse_document_xml_with_rels(
         sections: ctx.sections,
         ..Document::default()
     })
-}
-
-/// Parse a header or footer XML file into a list of blocks.
-/// Header/footer XML has the same structure as document body
-/// but with `w:hdr` or `w:ftr` as the root element.
-pub fn parse_header_footer_xml(xml: &str) -> Result<HeaderFooter, Error> {
-    let empty = HashMap::new();
-    parse_header_footer_xml_with_rels(xml, &empty)
 }
 
 pub fn parse_header_footer_xml_with_rels(

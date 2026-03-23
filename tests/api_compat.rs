@@ -95,13 +95,6 @@ fn document_font_families_method() {
 }
 
 #[test]
-fn document_all_blocks_method() {
-    let doc = dxpdf::model::Document::default();
-    let blocks: Vec<&dxpdf::model::Block> = doc.all_blocks().collect();
-    assert!(blocks.is_empty());
-}
-
-#[test]
 fn document_section_properties_method() {
     let doc = dxpdf::model::Document::default();
     let props: Vec<&dxpdf::model::SectionProperties> = doc.section_properties().collect();
@@ -707,14 +700,8 @@ fn parse_function_signature() {
 #[test]
 fn parse_xml_functions_exist() {
     // Verify the xml submodule functions are accessible.
-    let _: fn(&str) -> Result<dxpdf::model::Document, dxpdf::Error> =
-        dxpdf::parse::xml::parse_document_xml;
-
     let _: fn(&str, &HashMap<String, String>) -> Result<dxpdf::model::Document, dxpdf::Error> =
         dxpdf::parse::xml::parse_document_xml_with_rels;
-
-    let _: fn(&str) -> Result<dxpdf::model::HeaderFooter, dxpdf::Error> =
-        dxpdf::parse::xml::parse_header_footer_xml;
 
     let _: fn(&str, &HashMap<String, String>) -> Result<dxpdf::model::HeaderFooter, dxpdf::Error> =
         dxpdf::parse::xml::parse_header_footer_xml_with_rels;
