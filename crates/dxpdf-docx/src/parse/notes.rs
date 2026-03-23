@@ -68,8 +68,11 @@ fn parse_note_content(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"p" => {
-                        let para = body::parse_paragraph_public(e, reader, buf, ctx)?;
+                        let (para, sect) = body::parse_paragraph_public(e, reader, buf, ctx)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
+                        if let Some(sp) = sect {
+                            blocks.push(Block::SectionBreak(Box::new(sp)));
+                        }
                     }
                     b"tbl" => {
                         let table = body::parse_table_public(reader, buf, ctx)?;

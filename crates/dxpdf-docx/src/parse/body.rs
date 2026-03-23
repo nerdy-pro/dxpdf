@@ -38,12 +38,11 @@ pub fn parse_blocks(data: &[u8], ctx: &ParseContext<'_>) -> Result<Vec<Block>> {
                 match local.as_slice() {
                     b"p" => {
                         let rsids = parse_paragraph_rsids(e)?;
-                        blocks.push(Block::Paragraph(Box::new(parse_paragraph(
-                            &mut reader,
-                            &mut buf,
-                            ctx,
-                            rsids,
-                        )?)));
+                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, ctx, rsids)?;
+                        blocks.push(Block::Paragraph(Box::new(para)));
+                        if let Some(sp) = sect {
+                            blocks.push(Block::SectionBreak(Box::new(sp)));
+                        }
                     }
                     b"tbl" => {
                         blocks.push(Block::Table(Box::new(parse_table(
@@ -86,12 +85,11 @@ pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, Se
                     b"body" => in_body = true,
                     b"p" if in_body => {
                         let rsids = parse_paragraph_rsids(e)?;
-                        blocks.push(Block::Paragraph(Box::new(parse_paragraph(
-                            &mut reader,
-                            &mut buf,
-                            ctx,
-                            rsids,
-                        )?)));
+                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, ctx, rsids)?;
+                        blocks.push(Block::Paragraph(Box::new(para)));
+                        if let Some(sp) = sect {
+                            blocks.push(Block::SectionBreak(Box::new(sp)));
+                        }
                     }
                     b"tbl" if in_body => {
                         blocks.push(Block::Table(Box::new(parse_table(
@@ -120,15 +118,18 @@ pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, Se
 
 // ── Paragraph ────────────────────────────────────────────────────────────────
 
+/// Returns the paragraph and optionally a section break that follows it
+/// (per §17.6.18, sectPr inside pPr means this paragraph ends a section).
 fn parse_paragraph(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
     ctx: &ParseContext<'_>,
     rsids: ParagraphRevisionIds,
-) -> Result<Paragraph> {
+) -> Result<(Paragraph, Option<SectionProperties>)> {
     let mut para_props = ParagraphProperties::default();
     let mut run_props_from_ppr: Option<RunProperties> = None;
     let mut style_id: Option<String> = None;
+    let mut section_props: Option<SectionProperties> = None;
     let mut content = Vec::new();
 
     loop {
@@ -137,10 +138,11 @@ fn parse_paragraph(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pPr" => {
-                        let (pp, sid, rp) = properties::parse_paragraph_properties(reader, buf)?;
-                        para_props = pp;
-                        style_id = sid;
-                        run_props_from_ppr = rp;
+                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                        para_props = parsed.properties;
+                        style_id = parsed.style_id;
+                        run_props_from_ppr = parsed.run_properties;
+                        section_props = parsed.section_properties;
                     }
                     b"r" => {
                         let run_rsids = parse_run_rsids(e)?;
@@ -217,20 +219,24 @@ fn parse_paragraph(
         }
     }
 
-    Ok(Paragraph {
-        properties: para_props,
-        content,
-        rsids,
-    })
+    Ok((
+        Paragraph {
+            properties: para_props,
+            content,
+            rsids,
+        },
+        section_props,
+    ))
 }
 
 /// Public wrapper for cross-module use (notes.rs).
+/// Returns paragraph + optional trailing section break.
 pub fn parse_paragraph_public(
     start_event: &BytesStart<'_>,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
     ctx: &ParseContext<'_>,
-) -> Result<Paragraph> {
+) -> Result<(Paragraph, Option<SectionProperties>)> {
     let rsids = parse_paragraph_rsids(start_event)?;
     parse_paragraph(reader, buf, ctx, rsids)
 }
@@ -862,9 +868,11 @@ fn parse_table_cell(
                     }
                     b"p" => {
                         let p_rsids = parse_paragraph_rsids(e)?;
-                        blocks.push(Block::Paragraph(Box::new(parse_paragraph(
-                            reader, buf, ctx, p_rsids,
-                        )?)));
+                        let (para, sect) = parse_paragraph(reader, buf, ctx, p_rsids)?;
+                        blocks.push(Block::Paragraph(Box::new(para)));
+                        if let Some(sp) = sect {
+                            blocks.push(Block::SectionBreak(Box::new(sp)));
+                        }
                     }
                     b"tbl" => {
                         blocks.push(Block::Table(Box::new(parse_table(reader, buf, ctx)?)));

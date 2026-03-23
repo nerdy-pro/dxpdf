@@ -15,15 +15,26 @@ use crate::xml;
 
 // ── Paragraph Properties ─────────────────────────────────────────────────────
 
+/// Parsed result of a `w:pPr` element.
+pub struct ParsedParagraphProperties {
+    pub properties: ParagraphProperties,
+    pub style_id: Option<String>,
+    pub run_properties: Option<RunProperties>,
+    /// Per §17.6.18, a `w:sectPr` child of `w:pPr` means this paragraph
+    /// is the last paragraph of a section. The section break occurs after
+    /// the paragraph, and these are the properties for that section.
+    pub section_properties: Option<SectionProperties>,
+}
+
 /// Parse `w:pPr` element. Reader must have just read the Start event for `pPr`.
-/// Returns the parsed properties, optionally the style ID, and optionally run properties.
 pub fn parse_paragraph_properties(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<(ParagraphProperties, Option<String>, Option<RunProperties>)> {
+) -> Result<ParsedParagraphProperties> {
     let mut props = ParagraphProperties::default();
     let mut style_id: Option<String> = None;
     let mut run_props: Option<RunProperties> = None;
+    let mut sect_props: Option<SectionProperties> = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -64,6 +75,15 @@ pub fn parse_paragraph_properties(
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
+                    }
+                    // §17.6.18: sectPr inside pPr defines the section that ends
+                    // with this paragraph. Contains pgSz, pgMar, cols, headerReference,
+                    // footerReference, titlePg, type, pgNumType, docGrid, etc.
+                    b"sectPr" => {
+                        let rsids = parse_section_rsids(e)?;
+                        let mut sp = parse_section_properties(reader, buf)?;
+                        sp.rsids = rsids;
+                        sect_props = Some(sp);
                     }
                     _ => xml::warn_unsupported_element("pPr", &local),
                 }
@@ -113,6 +133,14 @@ pub fn parse_paragraph_properties(
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
                     }
+                    // §17.6.18: an empty sectPr is valid (inherits all defaults).
+                    b"sectPr" => {
+                        let rsids = parse_section_rsids(e)?;
+                        sect_props = Some(SectionProperties {
+                            rsids,
+                            ..SectionProperties::default()
+                        });
+                    }
                     _ => xml::warn_unsupported_element("pPr", &local),
                 }
             }
@@ -122,7 +150,12 @@ pub fn parse_paragraph_properties(
         }
     }
 
-    Ok((props, style_id, run_props))
+    Ok(ParsedParagraphProperties {
+        properties: props,
+        style_id,
+        run_properties: run_props,
+        section_properties: sect_props,
+    })
 }
 
 // ── Run Properties ───────────────────────────────────────────────────────────

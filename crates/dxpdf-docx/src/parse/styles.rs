@@ -103,8 +103,8 @@ fn parse_doc_defaults(
                         *rpr = parsed;
                     }
                     b"pPr" => {
-                        let (parsed, _, _) = properties::parse_paragraph_properties(reader, buf)?;
-                        *ppr = parsed;
+                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                        *ppr = parsed.properties;
                     }
                     _ => xml::warn_unsupported_element("docDefaults", &local),
                 }
@@ -153,9 +153,9 @@ fn parse_raw_style(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pPr" => {
-                        let (parsed, _, rp) = properties::parse_paragraph_properties(reader, buf)?;
-                        ppr = parsed;
-                        if let Some(rp) = rp {
+                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                        ppr = parsed.properties;
+                        if let Some(rp) = parsed.run_properties {
                             rpr = rp;
                         }
                     }

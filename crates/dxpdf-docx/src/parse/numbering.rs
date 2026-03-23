@@ -125,8 +125,8 @@ fn parse_level(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, ilvl: u8) -> Resul
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pPr" => {
-                        let (ppr, _, _) = properties::parse_paragraph_properties(reader, buf)?;
-                        indentation = ppr.indentation;
+                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                        indentation = parsed.properties.indentation;
                     }
                     b"rPr" => {
                         let (rpr, _) = properties::parse_run_properties(reader, buf)?;

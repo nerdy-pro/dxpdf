@@ -43,10 +43,7 @@ fn dump(name: &str, doc: &Document) {
     if let Some(root) = doc.settings.rsid_root {
         println!("║   rsid root: {:08X}", root.value());
     }
-    println!(
-        "║   rsid history: {} sessions",
-        doc.settings.rsids.len()
-    );
+    println!("║   rsid history: {} sessions", doc.settings.rsids.len());
 
     // Theme
     if let Some(theme) = &doc.theme {
