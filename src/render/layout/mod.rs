@@ -268,44 +268,23 @@ impl DrawCommand {
     ///
     /// Note: `Line` is not offset — table borders use absolute coordinates.
     pub(super) fn offset_y(&self, dy: Pt) -> DrawCommand {
+        let mut cmd = self.clone();
+        cmd.shift_y(dy);
+        cmd
+    }
+
+    /// Shift y-coordinates in place by `dy`.
+    /// `Line` is not shifted — table borders use absolute coordinates.
+    fn shift_y(&mut self, dy: Pt) {
         match self {
             DrawCommand::Text {
-                position,
-                text,
-                font_family,
-                char_spacing_pt,
-                font_size,
-                bold,
-                italic,
-                color,
-            } => DrawCommand::Text {
-                position: position.offset_y(dy),
-                text: text.clone(),
-                font_family: font_family.clone(),
-                char_spacing_pt: *char_spacing_pt,
-                font_size: *font_size,
-                bold: *bold,
-                italic: *italic,
-                color: *color,
-            },
-            DrawCommand::Underline { line, color, width } => DrawCommand::Underline {
-                line: line.offset_y(dy),
-                color: *color,
-                width: *width,
-            },
-            DrawCommand::Image { rect, image } => DrawCommand::Image {
-                rect: rect.offset_y(dy),
-                image: image.clone(),
-            },
-            DrawCommand::Rect { rect, color } => DrawCommand::Rect {
-                rect: rect.offset_y(dy),
-                color: *color,
-            },
-            DrawCommand::Line { .. } => self.clone(),
-            DrawCommand::LinkAnnotation { rect, url } => DrawCommand::LinkAnnotation {
-                rect: rect.offset_y(dy),
-                url: url.clone(),
-            },
+                ref mut position, ..
+            } => *position = position.offset_y(dy),
+            DrawCommand::Underline { ref mut line, .. } => *line = line.offset_y(dy),
+            DrawCommand::Image { ref mut rect, .. } => *rect = rect.offset_y(dy),
+            DrawCommand::Rect { ref mut rect, .. } => *rect = rect.offset_y(dy),
+            DrawCommand::LinkAnnotation { ref mut rect, .. } => *rect = rect.offset_y(dy),
+            DrawCommand::Line { .. } => {}
         }
     }
 }

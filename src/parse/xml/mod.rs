@@ -214,32 +214,14 @@ impl ParserContext {
             {
                 self.stack
                     .push(std::mem::replace(&mut self.state, ParseState::Idle));
-                self.state = ParseState::InDrawing {
-                    depth: 1,
-                    rel_id: None,
-                    width_emu: None,
-                    height_emu: None,
-                    is_anchor: false,
-                    pos_h_emu: None,
-                    pos_v_emu: None,
-                    align_h: None,
-                    align_v: None,
-                    reading_align: None,
-                    wrap_side: None,
-                    reading_pos_offset: None,
-                    in_position_h: false,
-                    in_position_v: false,
-                    pct_pos_h: None,
-                    pct_pos_v: None,
-                    reading_pct_pos: None,
-                };
+                self.state = ParseState::InDrawing(DrawingState::new());
             }
             _ if matches!(self.state, ParseState::InSectionProperties { .. }) => {
                 handle_section_element(local, e, &mut self.state)?;
             }
-            _ if matches!(self.state, ParseState::InDrawing { .. }) => {
-                if let ParseState::InDrawing { ref mut depth, .. } = self.state {
-                    *depth += 1;
+            _ if matches!(self.state, ParseState::InDrawing(..)) => {
+                if let ParseState::InDrawing(ref mut ds) = self.state {
+                    ds.depth += 1;
                 }
                 handle_drawing_element(local, e, &mut self.state)?;
             }
@@ -377,7 +359,7 @@ impl ParserContext {
                 &mut self.field_suppressing,
                 &mut self.field_props,
             )?;
-        } else if matches!(self.state, ParseState::InDrawing { .. }) {
+        } else if matches!(self.state, ParseState::InDrawing(..)) {
             handle_drawing_element(local, e, &mut self.state)?;
         } else if matches!(self.state, ParseState::InSectionProperties { .. }) {
             handle_section_element(local, e, &mut self.state)?;
@@ -407,43 +389,31 @@ impl ParserContext {
 
         if let ParseState::InText { ref mut text, .. } = self.state {
             text.push_str(&e.unescape()?);
-        } else if let ParseState::InDrawing {
-            ref reading_pos_offset,
-            ref reading_align,
-            ref reading_pct_pos,
-            ref mut pos_h_emu,
-            ref mut pos_v_emu,
-            ref mut align_h,
-            ref mut align_v,
-            ref mut pct_pos_h,
-            ref mut pct_pos_v,
-            ..
-        } = self.state
-        {
-            if let Some(axis) = reading_align {
+        } else if let ParseState::InDrawing(ref mut ds) = self.state {
+            if let Some(axis) = ds.reading_align {
                 let val_str = e.unescape().unwrap_or_default();
                 let val = val_str.trim().to_string();
                 match axis {
-                    'H' => *align_h = Some(val),
-                    'V' => *align_v = Some(val),
+                    'H' => ds.align_h = Some(val),
+                    'V' => ds.align_v = Some(val),
                     _ => {}
                 }
-            } else if let Some(axis) = reading_pct_pos {
+            } else if let Some(axis) = ds.reading_pct_pos {
                 let val_str = e.unescape().unwrap_or_default();
                 if let Ok(val) = val_str.trim().parse::<i32>() {
                     match axis {
-                        'H' => *pct_pos_h = Some(val),
-                        'V' => *pct_pos_v = Some(val),
+                        'H' => ds.pct_pos_h = Some(val),
+                        'V' => ds.pct_pos_v = Some(val),
                         _ => {}
                     }
                 }
-            } else if let Some(axis) = reading_pos_offset {
+            } else if let Some(axis) = ds.reading_pos_offset {
                 let val_str = e.unescape().unwrap_or_default();
                 if let Ok(val) = val_str.trim().parse::<i64>() {
                     let emu = crate::dimension::Emu::new(val);
                     match axis {
-                        'H' => *pos_h_emu = Some(emu),
-                        'V' => *pos_v_emu = Some(emu),
+                        'H' => ds.pos_h_emu = Some(emu),
+                        'V' => ds.pos_v_emu = Some(emu),
                         _ => {}
                     }
                 }
@@ -608,43 +578,29 @@ impl ParserContext {
                     }
                 }
             }
-            b"drawing" if matches!(self.state, ParseState::InDrawing { .. }) => {
+            b"drawing" if matches!(self.state, ParseState::InDrawing(..)) => {
                 let old = std::mem::replace(&mut self.state, ParseState::Idle);
-                if let ParseState::InDrawing {
-                    rel_id,
-                    width_emu,
-                    height_emu,
-                    is_anchor,
-                    pos_h_emu,
-                    pos_v_emu,
-                    align_h,
-                    align_v,
-                    wrap_side,
-                    pct_pos_h,
-                    pct_pos_v,
-                    ..
-                } = old
-                {
+                if let ParseState::InDrawing(ds) = old {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
-                    if let Some(rid) = rel_id {
+                    if let Some(rid) = ds.rel_id {
                         use crate::dimension::{Emu, Pt};
                         let zero = Emu::new(0);
-                        let w = Pt::from(width_emu.unwrap_or(zero));
-                        let h = Pt::from(height_emu.unwrap_or(zero));
+                        let w = Pt::from(ds.width_emu.unwrap_or(zero));
+                        let h = Pt::from(ds.height_emu.unwrap_or(zero));
 
-                        if is_anchor {
+                        if ds.is_anchor {
                             let float = FloatingImage {
                                 rel_id: rid,
                                 size: crate::geometry::PtSize::new(w, h),
                                 offset: crate::geometry::PtOffset::new(
-                                    Pt::from(pos_h_emu.unwrap_or(zero)),
-                                    Pt::from(pos_v_emu.unwrap_or(zero)),
+                                    Pt::from(ds.pos_h_emu.unwrap_or(zero)),
+                                    Pt::from(ds.pos_v_emu.unwrap_or(zero)),
                                 ),
-                                align_h,
-                                align_v,
-                                wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
-                                pct_pos_h,
-                                pct_pos_v,
+                                align_h: ds.align_h,
+                                align_v: ds.align_v,
+                                wrap_side: ds.wrap_side.unwrap_or(WrapSide::BothSides),
+                                pct_pos_h: ds.pct_pos_h,
+                                pct_pos_v: ds.pct_pos_v,
                             };
                             push_float(&mut self.state, &mut self.stack, float);
                         } else {
@@ -676,10 +632,10 @@ impl ParserContext {
                     }
                 }
             }
-            _ if matches!(self.state, ParseState::InDrawing { .. }) => {
+            _ if matches!(self.state, ParseState::InDrawing(..)) => {
                 handle_drawing_end(local, &mut self.state);
-                if let ParseState::InDrawing { ref mut depth, .. } = self.state {
-                    *depth -= 1;
+                if let ParseState::InDrawing(ref mut ds) = self.state {
+                    ds.depth -= 1;
                 }
             }
             b"tblCellMar" | b"tcMar" => set_in_cell_mar(&mut self.state, false),
@@ -745,29 +701,56 @@ enum ParseState {
         in_borders: bool,
         shading: Option<Color>,
     },
-    InDrawing {
-        depth: u32,
-        rel_id: Option<RelId>,
-        width_emu: Option<crate::dimension::Emu>,
-        height_emu: Option<crate::dimension::Emu>,
-        is_anchor: bool,
-        pos_h_emu: Option<crate::dimension::Emu>,
-        pos_v_emu: Option<crate::dimension::Emu>,
-        align_h: Option<String>,
-        align_v: Option<String>,
-        /// Tracks whether we're reading text for posOffset ('H'/'V') or align ('h'/'v').
-        reading_align: Option<char>,
-        wrap_side: Option<WrapSide>,
-        reading_pos_offset: Option<char>,
-        in_position_h: bool,
-        in_position_v: bool,
-        /// wp14:pctPosHOffset value (percentage × 1000).
-        pct_pos_h: Option<i32>,
-        /// wp14:pctPosVOffset value (percentage × 1000).
-        pct_pos_v: Option<i32>,
-        /// Tracks whether reading text for pctPosHOffset ('H') or pctPosVOffset ('V').
-        reading_pct_pos: Option<char>,
-    },
+    InDrawing(DrawingState),
+}
+
+/// Mutable state accumulated while parsing a `w:drawing` subtree.
+struct DrawingState {
+    depth: u32,
+    rel_id: Option<RelId>,
+    width_emu: Option<crate::dimension::Emu>,
+    height_emu: Option<crate::dimension::Emu>,
+    is_anchor: bool,
+    pos_h_emu: Option<crate::dimension::Emu>,
+    pos_v_emu: Option<crate::dimension::Emu>,
+    align_h: Option<String>,
+    align_v: Option<String>,
+    /// Tracks whether we're reading text for alignment ('H'/'V').
+    reading_align: Option<char>,
+    wrap_side: Option<WrapSide>,
+    reading_pos_offset: Option<char>,
+    in_position_h: bool,
+    in_position_v: bool,
+    /// wp14:pctPosHOffset value (percentage × 1000).
+    pct_pos_h: Option<i32>,
+    /// wp14:pctPosVOffset value (percentage × 1000).
+    pct_pos_v: Option<i32>,
+    /// Tracks whether reading text for pctPosHOffset ('H') or pctPosVOffset ('V').
+    reading_pct_pos: Option<char>,
+}
+
+impl DrawingState {
+    fn new() -> Self {
+        Self {
+            depth: 1,
+            rel_id: None,
+            width_emu: None,
+            height_emu: None,
+            is_anchor: false,
+            pos_h_emu: None,
+            pos_v_emu: None,
+            align_h: None,
+            align_v: None,
+            reading_align: None,
+            wrap_side: None,
+            reading_pos_offset: None,
+            in_position_h: false,
+            in_position_v: false,
+            pct_pos_h: None,
+            pct_pos_v: None,
+            reading_pct_pos: None,
+        }
+    }
 }
 
 #[cfg(test)]
