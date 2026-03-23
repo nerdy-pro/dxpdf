@@ -302,6 +302,8 @@ pub struct ParagraphProperties {
     pub list_ref: Option<ListRef>,
     /// Paragraph borders from `w:pBdr`.
     pub paragraph_borders: Option<ParagraphBorders>,
+    /// Default run properties from `w:pPr/w:rPr` — applied to runs that lack explicit formatting.
+    pub default_run_props: Option<RunProperties>,
 }
 
 /// Paragraph border edges from `w:pBdr`.

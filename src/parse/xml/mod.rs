@@ -139,6 +139,7 @@ impl ParserContext {
                     props,
                     section_props: None,
                     in_pbdr: false,
+                    in_rpr: false,
                 };
             }
             b"hyperlink" if matches!(self.state, ParseState::InParagraph { .. }) => {
@@ -234,6 +235,11 @@ impl ParserContext {
                 } = self.state
                 {
                     *in_pbdr = true;
+                }
+            }
+            b"rPr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
+                if let ParseState::InParagraphProperties { ref mut in_rpr, .. } = self.state {
+                    *in_rpr = true;
                 }
             }
             b"sectPr"
@@ -467,6 +473,16 @@ impl ParserContext {
                     *in_pbdr = false;
                 }
             }
+            b"rPr"
+                if matches!(
+                    self.state,
+                    ParseState::InParagraphProperties { in_rpr: true, .. }
+                ) =>
+            {
+                if let ParseState::InParagraphProperties { ref mut in_rpr, .. } = self.state {
+                    *in_rpr = false;
+                }
+            }
             b"pPr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
                 if let ParseState::InParagraphProperties {
                     props,
@@ -674,6 +690,8 @@ enum ParseState {
         props: ParagraphProperties,
         section_props: Option<SectionProperties>,
         in_pbdr: bool,
+        /// True when inside `w:pPr/w:rPr` (paragraph default run properties).
+        in_rpr: bool,
     },
     InSectionProperties {
         section: SectionProperties,
