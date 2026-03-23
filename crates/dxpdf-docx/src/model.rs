@@ -192,6 +192,10 @@ pub struct ThemeFontScheme {
 pub struct Document {
     pub settings: DocumentSettings,
     pub theme: Option<Theme>,
+    /// Style definitions from `word/styles.xml`, with `basedOn` references intact.
+    pub styles: StyleSheet,
+    /// Numbering definitions from `word/numbering.xml`.
+    pub numbering: NumberingDefinitions,
     pub body: Vec<Block>,
     /// Final section properties (from the last `w:sectPr` in `w:body`).
     pub final_section: SectionProperties,
@@ -205,6 +209,77 @@ pub struct Document {
     pub media: HashMap<RelId, Vec<u8>>,
 }
 
+// ── Style Sheet ──────────────────────────────────────────────────────────────
+
+/// Raw style definitions as parsed from `word/styles.xml`.
+/// No inheritance resolution — `basedOn` references are preserved as-is.
+#[derive(Clone, Debug, Default)]
+pub struct StyleSheet {
+    /// Document-level default paragraph properties (from `w:docDefaults/w:pPrDefault`).
+    pub doc_defaults_paragraph: ParagraphProperties,
+    /// Document-level default run properties (from `w:docDefaults/w:rPrDefault`).
+    pub doc_defaults_run: RunProperties,
+    /// All style definitions keyed by style ID.
+    pub styles: HashMap<String, Style>,
+}
+
+/// A single style definition.
+#[derive(Clone, Debug)]
+pub struct Style {
+    pub name: Option<String>,
+    pub style_type: StyleType,
+    /// Parent style ID. Properties not specified here should be inherited from this style.
+    pub based_on: Option<String>,
+    pub is_default: bool,
+    pub paragraph_properties: Option<ParagraphProperties>,
+    pub run_properties: Option<RunProperties>,
+    pub table_properties: Option<TableProperties>,
+}
+
+/// The type of a style definition (§17.7.4.17).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleType {
+    Paragraph,
+    Character,
+    Table,
+    Numbering,
+}
+
+// ── Numbering Definitions ────────────────────────────────────────────────────
+
+/// Raw numbering definitions as parsed from `word/numbering.xml`.
+#[derive(Clone, Debug, Default)]
+pub struct NumberingDefinitions {
+    /// Abstract numbering definitions keyed by abstract numbering ID.
+    pub abstract_nums: HashMap<i64, AbstractNumbering>,
+    /// Numbering instances keyed by numbering ID.
+    pub numbering_instances: HashMap<i64, NumberingInstance>,
+}
+
+/// An abstract numbering definition.
+#[derive(Clone, Debug)]
+pub struct AbstractNumbering {
+    pub levels: Vec<NumberingLevelDefinition>,
+}
+
+/// A single level within an abstract numbering definition.
+#[derive(Clone, Debug)]
+pub struct NumberingLevelDefinition {
+    pub level: u8,
+    pub format: NumberFormat,
+    pub level_text: String,
+    pub start: Option<u32>,
+    pub indentation: Indentation,
+    pub run_properties: Option<RunProperties>,
+}
+
+/// A numbering instance — maps to an abstract numbering, with optional level overrides.
+#[derive(Clone, Debug)]
+pub struct NumberingInstance {
+    pub abstract_num_id: i64,
+    pub level_overrides: Vec<NumberingLevelDefinition>,
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -213,10 +288,6 @@ pub struct DocumentSettings {
     pub default_tab_stop: Dimension<Twips>,
     /// Whether even/odd headers/footers are enabled.
     pub even_and_odd_headers: bool,
-    /// Document-level default paragraph properties.
-    pub default_paragraph_properties: ParagraphProperties,
-    /// Document-level default run properties.
-    pub default_run_properties: RunProperties,
     /// The rsid of the original editing session that created this document.
     pub rsid_root: Option<Rsid>,
     /// All revision save IDs recorded in this document's history.
@@ -228,8 +299,6 @@ impl Default for DocumentSettings {
         Self {
             default_tab_stop: Dimension::new(720),
             even_and_odd_headers: false,
-            default_paragraph_properties: ParagraphProperties::default(),
-            default_run_properties: RunProperties::default(),
             rsid_root: None,
             rsids: Vec::new(),
         }
@@ -364,7 +433,11 @@ pub enum Block {
 
 #[derive(Clone, Debug)]
 pub struct Paragraph {
+    /// Style ID reference (e.g., "Heading1"). Resolve via `Document.styles`.
+    pub style_id: Option<String>,
     pub properties: ParagraphProperties,
+    /// Run properties specified on the paragraph mark (w:rPr inside w:pPr).
+    pub mark_run_properties: Option<RunProperties>,
     pub content: Vec<Inline>,
     pub rsids: ParagraphRevisionIds,
 }
@@ -374,7 +447,7 @@ pub struct ParagraphProperties {
     pub alignment: Alignment,
     pub indentation: Indentation,
     pub spacing: ParagraphSpacing,
-    pub numbering: Option<NumberingProperties>,
+    pub numbering: Option<NumberingReference>,
     pub tabs: Vec<TabStop>,
     pub borders: Option<ParagraphBorders>,
     pub shading: Option<Shading>,
@@ -504,14 +577,12 @@ impl Default for LineSpacing {
 
 // ── Numbering ────────────────────────────────────────────────────────────────
 
-/// Fully resolved numbering properties for a paragraph.
+/// Raw numbering reference on a paragraph (w:numPr).
+/// Resolve via `Document.numbering` using `num_id` + `level`.
 #[derive(Clone, Debug)]
-pub struct NumberingProperties {
+pub struct NumberingReference {
+    pub num_id: i64,
     pub level: u8,
-    pub format: NumberFormat,
-    pub level_text: String,
-    pub indent: Indentation,
-    pub run_properties: Option<RunProperties>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -681,6 +752,8 @@ pub enum Inline {
 
 #[derive(Clone, Debug)]
 pub struct TextRun {
+    /// Character style ID reference (e.g., "Hyperlink"). Resolve via `Document.styles`.
+    pub style_id: Option<String>,
     pub properties: RunProperties,
     pub text: String,
     pub rsids: RevisionIds,

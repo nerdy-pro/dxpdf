@@ -646,12 +646,9 @@ pub fn parse_alignment(val: &str) -> Alignment {
     }
 }
 
-fn parse_numbering_pr(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<NumberingProperties> {
+fn parse_numbering_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NumberingReference> {
     let mut level = 0u8;
-    let mut _num_id = 0i64;
+    let mut num_id = 0i64;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -665,7 +662,7 @@ fn parse_numbering_pr(
                     }
                     b"numId" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
-                            _num_id = val;
+                            num_id = val;
                         }
                     }
                     _ => xml::warn_unsupported_element("numPr", &local),
@@ -677,13 +674,7 @@ fn parse_numbering_pr(
         }
     }
 
-    Ok(NumberingProperties {
-        level,
-        format: NumberFormat::Decimal,
-        level_text: String::new(),
-        indent: Indentation::default(),
-        run_properties: None,
-    })
+    Ok(NumberingReference { num_id, level })
 }
 
 fn parse_tabs(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<TabStop>> {

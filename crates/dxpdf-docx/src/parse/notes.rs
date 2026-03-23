@@ -10,14 +10,10 @@ use crate::error::Result;
 use crate::model::{Block, NoteId};
 use crate::xml;
 
-use super::body::{self, ParseContext};
+use super::body;
 
 /// Parse footnotes.xml or endnotes.xml into a map of note ID → blocks.
-pub fn parse_notes(
-    data: &[u8],
-    note_tag: &str,
-    ctx: &ParseContext<'_>,
-) -> Result<HashMap<NoteId, Vec<Block>>> {
+pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Block>>> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -40,7 +36,7 @@ pub fn parse_notes(
                 }
 
                 if let Some(note_id) = id {
-                    let blocks = parse_note_content(&mut reader, &mut buf, note_tag_bytes, ctx)?;
+                    let blocks = parse_note_content(&mut reader, &mut buf, note_tag_bytes)?;
                     notes.insert(NoteId(note_id), blocks);
                 } else {
                     xml::skip_to_end(&mut reader, &mut buf, note_tag_bytes)?;
@@ -58,7 +54,6 @@ fn parse_note_content(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
     end_tag: &[u8],
-    ctx: &ParseContext<'_>,
 ) -> Result<Vec<Block>> {
     let mut blocks = Vec::new();
 
@@ -68,14 +63,14 @@ fn parse_note_content(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"p" => {
-                        let (para, sect) = body::parse_paragraph_public(e, reader, buf, ctx)?;
+                        let (para, sect) = body::parse_paragraph_public(e, reader, buf)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" => {
-                        let table = body::parse_table_public(reader, buf, ctx)?;
+                        let table = body::parse_table_public(reader, buf)?;
                         blocks.push(Block::Table(Box::new(table)));
                     }
                     _ => {

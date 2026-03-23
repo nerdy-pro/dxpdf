@@ -1,31 +1,21 @@
 //! Parser for document body content: blocks (paragraphs, tables, section breaks)
 //! and inline content (text runs, images, hyperlinks, fields, etc.).
+//!
+//! No style resolution or property merging — output is raw parsed data.
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
-
-use quick_xml::events::BytesStart;
 
 use crate::dimension::{Dimension, Emu};
 use crate::error::Result;
 use crate::geometry::{EdgeInsets, Size};
 use crate::model::*;
 use crate::xml;
-use crate::zip::Relationships;
 
-use super::numbering::NumberingMap;
 use super::properties;
-use super::styles::ResolvedStyles;
-
-/// Context needed during body parsing for resolving references.
-pub struct ParseContext<'a> {
-    pub styles: &'a ResolvedStyles,
-    pub numbering: &'a NumberingMap,
-    pub rels: &'a Relationships,
-}
 
 /// Parse a body-level XML part (header, footer, footnotes, etc.) into blocks.
-pub fn parse_blocks(data: &[u8], ctx: &ParseContext<'_>) -> Result<Vec<Block>> {
+pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -38,18 +28,14 @@ pub fn parse_blocks(data: &[u8], ctx: &ParseContext<'_>) -> Result<Vec<Block>> {
                 match local.as_slice() {
                     b"p" => {
                         let rsids = parse_paragraph_rsids(e)?;
-                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, ctx, rsids)?;
+                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, rsids)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" => {
-                        blocks.push(Block::Table(Box::new(parse_table(
-                            &mut reader,
-                            &mut buf,
-                            ctx,
-                        )?)));
+                        blocks.push(Block::Table(Box::new(parse_table(&mut reader, &mut buf)?)));
                     }
                     b"sectPr" => {
                         let sect_rsids = properties::parse_section_rsids(e)?;
@@ -69,7 +55,7 @@ pub fn parse_blocks(data: &[u8], ctx: &ParseContext<'_>) -> Result<Vec<Block>> {
 }
 
 /// Parse `w:body`, returning blocks and final section properties.
-pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, SectionProperties)> {
+pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -85,18 +71,14 @@ pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, Se
                     b"body" => in_body = true,
                     b"p" if in_body => {
                         let rsids = parse_paragraph_rsids(e)?;
-                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, ctx, rsids)?;
+                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, rsids)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" if in_body => {
-                        blocks.push(Block::Table(Box::new(parse_table(
-                            &mut reader,
-                            &mut buf,
-                            ctx,
-                        )?)));
+                        blocks.push(Block::Table(Box::new(parse_table(&mut reader, &mut buf)?)));
                     }
                     b"sectPr" if in_body => {
                         let sect_rsids = properties::parse_section_rsids(e)?;
@@ -123,11 +105,10 @@ pub fn parse_body(data: &[u8], ctx: &ParseContext<'_>) -> Result<(Vec<Block>, Se
 fn parse_paragraph(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
     rsids: ParagraphRevisionIds,
 ) -> Result<(Paragraph, Option<SectionProperties>)> {
     let mut para_props = ParagraphProperties::default();
-    let mut run_props_from_ppr: Option<RunProperties> = None;
+    let mut mark_run_props: Option<RunProperties> = None;
     let mut style_id: Option<String> = None;
     let mut section_props: Option<SectionProperties> = None;
     let mut content = Vec::new();
@@ -141,17 +122,17 @@ fn parse_paragraph(
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         para_props = parsed.properties;
                         style_id = parsed.style_id;
-                        run_props_from_ppr = parsed.run_properties;
+                        mark_run_props = parsed.run_properties;
                         section_props = parsed.section_properties;
                     }
                     b"r" => {
                         let run_rsids = parse_run_rsids(e)?;
-                        parse_run(reader, buf, ctx, &mut content, run_rsids)?;
+                        parse_run(reader, buf, &mut content, run_rsids)?;
                     }
                     b"hyperlink" => {
                         let r_id = xml::optional_attr(e, b"id")?;
                         let anchor = xml::optional_attr(e, b"anchor")?;
-                        let hyperlink = parse_hyperlink_content(r_id, anchor, reader, buf, ctx)?;
+                        let hyperlink = parse_hyperlink_content(r_id, anchor, reader, buf)?;
                         content.push(Inline::Hyperlink(hyperlink));
                     }
                     b"bookmarkStart" => {
@@ -172,7 +153,7 @@ fn parse_paragraph(
                     }
                     b"fldSimple" => {
                         let instr = xml::optional_attr(e, b"instr")?.unwrap_or_default();
-                        let field = parse_simple_field_content(instr, reader, buf, ctx)?;
+                        let field = parse_simple_field_content(instr, reader, buf)?;
                         content.push(Inline::Field(field));
                     }
                     _ => xml::warn_unsupported_element("paragraph", &local),
@@ -206,22 +187,11 @@ fn parse_paragraph(
         }
     }
 
-    // Resolve style
-    if let Some(ref sid) = style_id {
-        if let Some(resolved) = ctx.styles.paragraph.get(sid) {
-            let mut base_ppr = resolved.paragraph_properties.clone();
-            merge_direct_paragraph(&mut base_ppr, &para_props);
-            if let Some(ref direct_rpr) = run_props_from_ppr {
-                let mut base_rpr = resolved.run_properties.clone();
-                merge_direct_run(&mut base_rpr, direct_rpr);
-            }
-            para_props = base_ppr;
-        }
-    }
-
     Ok((
         Paragraph {
+            style_id,
             properties: para_props,
+            mark_run_properties: mark_run_props,
             content,
             rsids,
         },
@@ -230,24 +200,18 @@ fn parse_paragraph(
 }
 
 /// Public wrapper for cross-module use (notes.rs).
-/// Returns paragraph + optional trailing section break.
 pub fn parse_paragraph_public(
     start_event: &BytesStart<'_>,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
 ) -> Result<(Paragraph, Option<SectionProperties>)> {
     let rsids = parse_paragraph_rsids(start_event)?;
-    parse_paragraph(reader, buf, ctx, rsids)
+    parse_paragraph(reader, buf, rsids)
 }
 
 /// Public wrapper for cross-module use (notes.rs).
-pub fn parse_table_public(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
-) -> Result<Table> {
-    parse_table(reader, buf, ctx)
+pub fn parse_table_public(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Table> {
+    parse_table(reader, buf)
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────────
@@ -255,7 +219,6 @@ pub fn parse_table_public(
 fn parse_run(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
     content: &mut Vec<Inline>,
     run_rsids: RevisionIds,
 ) -> Result<()> {
@@ -275,12 +238,12 @@ fn parse_run(
                         char_style_id = sid;
                     }
                     b"t" | b"delText" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let text = xml::read_text_content(reader, buf)?;
                         texts.push(text);
                     }
                     b"drawing" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(img) = parse_drawing(reader, buf)? {
                             pending_inlines.push(Inline::Image(img));
                         }
@@ -292,11 +255,11 @@ fn parse_run(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tab" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         pending_inlines.push(Inline::Tab);
                     }
                     b"br" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let br_type = xml::optional_attr(e, b"type")?;
                         match br_type.as_deref() {
                             Some("page") => pending_inlines.push(Inline::PageBreak),
@@ -318,24 +281,24 @@ fn parse_run(
                         }
                     }
                     b"cr" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         pending_inlines.push(Inline::LineBreak(BreakKind::TextWrapping));
                     }
                     b"sym" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let font = xml::optional_attr(e, b"font")?.unwrap_or_default();
                         let char_str = xml::optional_attr(e, b"char")?.unwrap_or_default();
                         let char_code = u16::from_str_radix(&char_str, 16).unwrap_or(0);
                         pending_inlines.push(Inline::Symbol(Symbol { font, char_code }));
                     }
                     b"footnoteReference" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
                             pending_inlines.push(Inline::FootnoteRef(NoteId(id)));
                         }
                     }
                     b"endnoteReference" => {
-                        flush_text(&mut texts, &run_props, &run_rsids, content);
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
                             pending_inlines.push(Inline::EndnoteRef(NoteId(id)));
                         }
@@ -349,16 +312,7 @@ fn parse_run(
         }
     }
 
-    // Resolve character style
-    if let Some(ref sid) = char_style_id {
-        if let Some(resolved_rpr) = ctx.styles.character.get(sid) {
-            let mut base = resolved_rpr.clone();
-            merge_direct_run(&mut base, &run_props);
-            run_props = base;
-        }
-    }
-
-    flush_text(&mut texts, &run_props, &run_rsids, content);
+    flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
     content.extend(pending_inlines);
 
     Ok(())
@@ -366,6 +320,7 @@ fn parse_run(
 
 fn flush_text(
     texts: &mut Vec<String>,
+    style_id: &Option<String>,
     props: &RunProperties,
     rsids: &RevisionIds,
     content: &mut Vec<Inline>,
@@ -376,6 +331,7 @@ fn flush_text(
     let combined: String = texts.drain(..).collect();
     if !combined.is_empty() {
         content.push(Inline::TextRun(TextRun {
+            style_id: style_id.clone(),
             properties: props.clone(),
             text: combined,
             rsids: rsids.clone(),
@@ -390,7 +346,6 @@ fn parse_hyperlink_content(
     anchor: Option<String>,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
 ) -> Result<Hyperlink> {
     let target = if let Some(id) = r_id {
         HyperlinkTarget::External(RelId(id))
@@ -408,7 +363,7 @@ fn parse_hyperlink_content(
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"r" => {
                 let r_rsids = parse_run_rsids(e)?;
-                parse_run(reader, buf, ctx, &mut inline_content, r_rsids)?;
+                parse_run(reader, buf, &mut inline_content, r_rsids)?;
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"hyperlink" => break,
             Event::Eof => break,
@@ -428,7 +383,6 @@ fn parse_simple_field_content(
     instr: String,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
 ) -> Result<Field> {
     let kind = parse_field_kind(&instr);
     let mut field_content = Vec::new();
@@ -437,7 +391,7 @@ fn parse_simple_field_content(
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"r" => {
                 let r_rsids = parse_run_rsids(e)?;
-                parse_run(reader, buf, ctx, &mut field_content, r_rsids)?;
+                parse_run(reader, buf, &mut field_content, r_rsids)?;
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"fldSimple" => break,
             Event::Eof => break,
@@ -736,7 +690,7 @@ fn parse_anchor_alignment(val: &str) -> AnchorAlignment {
     }
 }
 
-fn parse_wrap_distance(e: &quick_xml::events::BytesStart<'_>) -> Result<EdgeInsets<Emu>> {
+fn parse_wrap_distance(e: &BytesStart<'_>) -> Result<EdgeInsets<Emu>> {
     let t = xml::optional_attr_i64(e, b"distT")?.unwrap_or(0);
     let b = xml::optional_attr_i64(e, b"distB")?.unwrap_or(0);
     let l = xml::optional_attr_i64(e, b"distL")?.unwrap_or(0);
@@ -751,11 +705,7 @@ fn parse_wrap_distance(e: &quick_xml::events::BytesStart<'_>) -> Result<EdgeInse
 
 // ── Table ────────────────────────────────────────────────────────────────────
 
-fn parse_table(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
-) -> Result<Table> {
+fn parse_table(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Table> {
     let mut tbl_props = TableProperties::default();
     let mut grid = Vec::new();
     let mut rows = Vec::new();
@@ -774,7 +724,7 @@ fn parse_table(
                     }
                     b"tr" => {
                         let tr_rsids = parse_table_row_rsids(e)?;
-                        rows.push(parse_table_row(reader, buf, ctx, tr_rsids)?);
+                        rows.push(parse_table_row(reader, buf, tr_rsids)?);
                     }
                     _ => xml::warn_unsupported_element("table", &local),
                 }
@@ -817,7 +767,6 @@ fn parse_table_grid(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec
 fn parse_table_row(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
     row_rsids: TableRowRevisionIds,
 ) -> Result<TableRow> {
     let mut row_props = TableRowProperties::default();
@@ -832,7 +781,7 @@ fn parse_table_row(
                         row_props = properties::parse_table_row_properties(reader, buf)?;
                     }
                     b"tc" => {
-                        cells.push(parse_table_cell(reader, buf, ctx)?);
+                        cells.push(parse_table_cell(reader, buf)?);
                     }
                     _ => xml::warn_unsupported_element("table-row", &local),
                 }
@@ -850,11 +799,7 @@ fn parse_table_row(
     })
 }
 
-fn parse_table_cell(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    ctx: &ParseContext<'_>,
-) -> Result<TableCell> {
+fn parse_table_cell(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<TableCell> {
     let mut cell_props = TableCellProperties::default();
     let mut blocks = Vec::new();
 
@@ -868,14 +813,14 @@ fn parse_table_cell(
                     }
                     b"p" => {
                         let p_rsids = parse_paragraph_rsids(e)?;
-                        let (para, sect) = parse_paragraph(reader, buf, ctx, p_rsids)?;
+                        let (para, sect) = parse_paragraph(reader, buf, p_rsids)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" => {
-                        blocks.push(Block::Table(Box::new(parse_table(reader, buf, ctx)?)));
+                        blocks.push(Block::Table(Box::new(parse_table(reader, buf)?)));
                     }
                     _ => xml::warn_unsupported_element("table-cell", &local),
                 }
@@ -919,113 +864,4 @@ fn parse_table_row_rsids(e: &BytesStart<'_>) -> Result<TableRowRevisionIds> {
         del: xml::optional_rsid(e, b"rsidDel")?,
         tr: xml::optional_rsid(e, b"rsidTr")?,
     })
-}
-
-// ── Property merging (direct formatting on top of resolved style) ────────────
-
-fn merge_direct_paragraph(base: &mut ParagraphProperties, direct: &ParagraphProperties) {
-    let defaults = ParagraphProperties::default();
-    if direct.alignment != defaults.alignment {
-        base.alignment = direct.alignment;
-    }
-    if direct.indentation != defaults.indentation {
-        base.indentation = direct.indentation;
-    }
-    if direct.spacing != defaults.spacing {
-        base.spacing = direct.spacing;
-    }
-    if direct.numbering.is_some() {
-        base.numbering = direct.numbering.clone();
-    }
-    if !direct.tabs.is_empty() {
-        base.tabs = direct.tabs.clone();
-    }
-    if direct.borders.is_some() {
-        base.borders = direct.borders.clone();
-    }
-    if direct.shading.is_some() {
-        base.shading = direct.shading.clone();
-    }
-    if direct.keep_next {
-        base.keep_next = true;
-    }
-    if direct.keep_lines {
-        base.keep_lines = true;
-    }
-    if !direct.widow_control {
-        base.widow_control = false;
-    }
-    if direct.page_break_before {
-        base.page_break_before = true;
-    }
-    if direct.bidi {
-        base.bidi = true;
-    }
-    if direct.outline_level.is_some() {
-        base.outline_level = direct.outline_level;
-    }
-}
-
-fn merge_direct_run(base: &mut RunProperties, direct: &RunProperties) {
-    let defaults = RunProperties::default();
-    if direct.fonts.ascii.is_some() {
-        base.fonts.ascii = direct.fonts.ascii.clone();
-    }
-    if direct.fonts.high_ansi.is_some() {
-        base.fonts.high_ansi = direct.fonts.high_ansi.clone();
-    }
-    if direct.fonts.east_asian.is_some() {
-        base.fonts.east_asian = direct.fonts.east_asian.clone();
-    }
-    if direct.fonts.complex_script.is_some() {
-        base.fonts.complex_script = direct.fonts.complex_script.clone();
-    }
-    if direct.font_size != defaults.font_size {
-        base.font_size = direct.font_size;
-    }
-    if direct.bold != defaults.bold {
-        base.bold = direct.bold;
-    }
-    if direct.italic != defaults.italic {
-        base.italic = direct.italic;
-    }
-    if direct.underline != defaults.underline {
-        base.underline = direct.underline;
-    }
-    if direct.strike != defaults.strike {
-        base.strike = direct.strike;
-    }
-    if direct.color != defaults.color {
-        base.color = direct.color;
-    }
-    if direct.highlight.is_some() {
-        base.highlight = direct.highlight;
-    }
-    if direct.shading.is_some() {
-        base.shading = direct.shading.clone();
-    }
-    if direct.vertical_align != defaults.vertical_align {
-        base.vertical_align = direct.vertical_align;
-    }
-    if direct.spacing != defaults.spacing {
-        base.spacing = direct.spacing;
-    }
-    if direct.kerning.is_some() {
-        base.kerning = direct.kerning;
-    }
-    if direct.all_caps {
-        base.all_caps = true;
-    }
-    if direct.small_caps {
-        base.small_caps = true;
-    }
-    if direct.vanish {
-        base.vanish = true;
-    }
-    if direct.no_proof {
-        base.no_proof = true;
-    }
-    if direct.rtl {
-        base.rtl = true;
-    }
 }
