@@ -269,7 +269,16 @@ impl DrawCommand {
     /// Note: `Line` is not offset — table borders use absolute coordinates.
     pub(super) fn offset_y(&self, dy: Pt) -> DrawCommand {
         match self {
-            DrawCommand::Text { position, text, font_family, char_spacing_pt, font_size, bold, italic, color } => DrawCommand::Text {
+            DrawCommand::Text {
+                position,
+                text,
+                font_family,
+                char_spacing_pt,
+                font_size,
+                bold,
+                italic,
+                color,
+            } => DrawCommand::Text {
                 position: position.offset_y(dy),
                 text: text.clone(),
                 font_family: font_family.clone(),
@@ -311,7 +320,7 @@ struct ActiveFloat {
 
 struct Layouter<'a> {
     config: LayoutConfig,
-    context: context::LayoutContext,
+    constraints: context::LayoutConstraints,
     pages: Vec<LayoutedPage>,
     current_page: LayoutedPage,
     cursor_y: Pt,
@@ -333,7 +342,7 @@ impl<'a> Layouter<'a> {
         image_cache: &'a ImageCache,
     ) -> Self {
         Self {
-            context: context::LayoutContext::new(context::LayoutConstraints::for_page(config)),
+            constraints: context::LayoutConstraints::for_page(config),
             config: *config,
             pages: Vec::new(),
             current_page: LayoutedPage {
@@ -373,8 +382,7 @@ impl<'a> Layouter<'a> {
             self.config = next_config;
             self.current_page.page_size = self.config.page_size;
             self.cursor_y = self.config.margins.top;
-            self.context
-                .replace_root(context::LayoutConstraints::for_page(&self.config));
+            self.constraints.replace_page(&self.config);
         }
     }
 

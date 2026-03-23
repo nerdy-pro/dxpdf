@@ -48,7 +48,7 @@ pub(super) fn render_headers_footers(
 
         // Render footer
         if let Some(ref footer) = doc_defaults.default_footer {
-            let footer_y = hf_constraints.page_size.height - config.margins.bottom;
+            let footer_y = hf_constraints.page_size().height - config.margins.bottom;
             let (commands, _) = layout_header_footer_blocks(
                 &footer.blocks,
                 &hf_constraints,
@@ -78,10 +78,10 @@ pub(super) fn layout_header_footer_blocks(
     field_ctx: Option<&FieldContext>,
     image_cache: &super::ImageCache,
 ) -> (Vec<DrawCommand>, Pt) {
-    let x_start = constraints.x_origin;
-    let content_width = constraints.available_width;
-    let page_width = constraints.page_size.width;
-    let page_height = constraints.page_size.height;
+    let x_start = constraints.x_origin();
+    let content_width = constraints.available_width();
+    let page_width = constraints.page_size().width;
+    let page_height = constraints.page_size().height;
 
     let mut commands = Vec::new();
     let mut cursor_y = y_start;

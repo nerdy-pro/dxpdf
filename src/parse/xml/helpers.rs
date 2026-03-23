@@ -91,11 +91,7 @@ pub fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: Float
 }
 
 /// Push an inline element into the nearest paragraph — current state first, then stack.
-pub fn push_inline_to_paragraph(
-    state: &mut ParseState,
-    stack: &mut [ParseState],
-    inline: Inline,
-) {
+pub fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState], inline: Inline) {
     if let ParseState::InParagraph { ref mut runs, .. } = state {
         runs.push(inline);
         return;
@@ -111,8 +107,14 @@ pub fn push_inline_to_paragraph(
 /// Set or clear the `in_cell_mar` flag on InTable or InTableCell state.
 pub fn set_in_cell_mar(state: &mut ParseState, value: bool) {
     match state {
-        ParseState::InTable { ref mut in_cell_mar, .. } => *in_cell_mar = value,
-        ParseState::InTableCell { ref mut in_cell_mar, .. } => *in_cell_mar = value,
+        ParseState::InTable {
+            ref mut in_cell_mar,
+            ..
+        } => *in_cell_mar = value,
+        ParseState::InTableCell {
+            ref mut in_cell_mar,
+            ..
+        } => *in_cell_mar = value,
         _ => {}
     }
 }
@@ -120,8 +122,12 @@ pub fn set_in_cell_mar(state: &mut ParseState, value: bool) {
 /// Set or clear the `in_borders` flag on InTable or InTableCell state.
 pub fn set_in_borders(state: &mut ParseState, value: bool) {
     match state {
-        ParseState::InTable { ref mut in_borders, .. } => *in_borders = value,
-        ParseState::InTableCell { ref mut in_borders, .. } => *in_borders = value,
+        ParseState::InTable {
+            ref mut in_borders, ..
+        } => *in_borders = value,
+        ParseState::InTableCell {
+            ref mut in_borders, ..
+        } => *in_borders = value,
         _ => {}
     }
 }

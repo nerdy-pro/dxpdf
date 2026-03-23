@@ -157,7 +157,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
 
     // Derive page constraints from the first section config (or defaults)
     let initial_config = section_configs.first().copied().unwrap_or_default();
-    let page_constraints = LayoutConstraints::for_page(&initial_config);
+    let mut constraints = LayoutConstraints::for_page(&initial_config);
 
     // List counter state for numbering
     let mut list_counters: std::collections::HashMap<(u32, u32), u32> =
@@ -165,7 +165,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
 
     let blocks = measure_blocks(
         &doc.blocks,
-        &page_constraints,
+        &mut constraints,
         &doc_defaults,
         &measurer,
         &image_cache,
@@ -183,15 +183,15 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
 
 fn measure_blocks(
     blocks: &[Block],
-    constraints: &LayoutConstraints,
+    constraints: &mut LayoutConstraints,
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> Vec<MeasuredBlock> {
-    blocks
-        .iter()
-        .map(|block| match block {
+    let mut result = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let measured = match block {
             Block::Paragraph(p) => MeasuredBlock::Paragraph(Box::new(measure_paragraph(
                 p,
                 constraints,
@@ -208,8 +208,10 @@ fn measure_blocks(
                 image_cache,
                 list_counters,
             ))),
-        })
-        .collect()
+        };
+        result.push(measured);
+    }
+    result
 }
 
 fn measure_paragraph(
@@ -222,8 +224,8 @@ fn measure_paragraph(
 ) -> MeasuredParagraph {
     let fragments = collect_fragments_with_fields(
         &para.runs,
-        constraints.available_width,
-        constraints.available_height,
+        constraints.available_width(),
+        constraints.available_height(),
         doc_defaults,
         measurer,
         None,
@@ -248,72 +250,66 @@ fn measure_paragraph(
 
 fn measure_table(
     table: &Table,
-    constraints: &LayoutConstraints,
+    constraints: &mut LayoutConstraints,
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> MeasuredTable {
-    let content_width = constraints.available_width;
+    let content_width = constraints.available_width();
+    let available_height = constraints.available_height();
     let num_cols = table.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
     let col_widths = compute_column_widths(&table.grid_cols, num_cols, content_width);
 
     let doc_cell_margins = doc_defaults.default_cell_margins;
 
-    let rows = table
-        .rows
-        .iter()
-        .map(|row| {
-            let mut grid_col_idx = 0;
-            MeasuredTableRow {
-                cells: row
-                    .cells
-                    .iter()
-                    .map(|cell| {
-                        // Compute cell width from grid columns
-                        let span = cell.grid_span.max(1) as usize;
-                        let cell_width: Pt = (grid_col_idx..grid_col_idx + span)
-                            .map(|i| col_widths.get(i).copied().unwrap_or(Pt::new(72.0)))
-                            .sum();
-                        grid_col_idx += span;
+    let mut rows = Vec::with_capacity(table.rows.len());
+    for row in &table.rows {
+        let mut grid_col_idx = 0;
+        let mut cells = Vec::with_capacity(row.cells.len());
+        for cell in &row.cells {
+            // Compute cell width from grid columns
+            let span = cell.grid_span.max(1) as usize;
+            let cell_width: Pt = (grid_col_idx..grid_col_idx + span)
+                .map(|i| col_widths.get(i).copied().unwrap_or(Pt::new(72.0)))
+                .sum();
+            grid_col_idx += span;
 
-                        // Compute cell content constraints
-                        let margins = cell
-                            .cell_margins
-                            .or(table.default_cell_margins)
-                            .unwrap_or(doc_cell_margins);
-                        let pad_left = Pt::from(margins.left);
-                        let pad_right = Pt::from(margins.right);
-                        let cell_content_width =
-                            (cell_width - pad_left - pad_right).max(Pt::new(1.0));
-                        let cell_constraints = constraints.for_cell(
-                            Pt::ZERO, // x_origin not relevant during measure
-                            cell_content_width,
-                            constraints.available_height,
-                        );
+            // Compute cell content constraints
+            let margins = cell
+                .cell_margins
+                .or(table.default_cell_margins)
+                .unwrap_or(doc_cell_margins);
+            let pad_left = Pt::from(margins.left);
+            let pad_right = Pt::from(margins.right);
+            let cell_content_width = (cell_width - pad_left - pad_right).max(Pt::new(1.0));
 
-                        MeasuredTableCell {
-                            blocks: measure_blocks(
-                                &cell.blocks,
-                                &cell_constraints,
-                                doc_defaults,
-                                measurer,
-                                image_cache,
-                                list_counters,
-                            ),
-                            width: cell.width,
-                            grid_span: cell.grid_span,
-                            vertical_merge: cell.vertical_merge,
-                            cell_margins: cell.cell_margins,
-                            cell_borders: cell.cell_borders,
-                            shading: cell.shading,
-                        }
-                    })
-                    .collect(),
-                height: row.height,
-            }
-        })
-        .collect();
+            constraints.push_cell(Pt::ZERO, cell_content_width, available_height);
+            let blocks = measure_blocks(
+                &cell.blocks,
+                constraints,
+                doc_defaults,
+                measurer,
+                image_cache,
+                list_counters,
+            );
+            constraints.pop();
+
+            cells.push(MeasuredTableCell {
+                blocks,
+                width: cell.width,
+                grid_span: cell.grid_span,
+                vertical_merge: cell.vertical_merge,
+                cell_margins: cell.cell_margins,
+                cell_borders: cell.cell_borders,
+                shading: cell.shading,
+            });
+        }
+        rows.push(MeasuredTableRow {
+            cells,
+            height: row.height,
+        });
+    }
 
     MeasuredTable {
         rows,

@@ -101,7 +101,11 @@ impl ParserContext {
         }
     }
 
-    fn handle_start(&mut self, e: &BytesStart<'_>, rels: &HashMap<String, String>) -> Result<(), Error> {
+    fn handle_start(
+        &mut self,
+        e: &BytesStart<'_>,
+        rels: &HashMap<String, String>,
+    ) -> Result<(), Error> {
         let name = e.name();
         let local = local_name(name.as_ref());
         match local {
@@ -109,7 +113,8 @@ impl ParserContext {
                 self.state = ParseState::InBody;
             }
             b"p" if matches_body_or_cell(&self.state) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InParagraph {
                     props: ParagraphProperties::default(),
                     runs: Vec::new(),
@@ -134,13 +139,18 @@ impl ParserContext {
                 };
             }
             b"hyperlink" if matches!(self.state, ParseState::InParagraph { .. }) => {
-                if let ParseState::InParagraph { ref mut hyperlink_url, .. } = self.state {
+                if let ParseState::InParagraph {
+                    ref mut hyperlink_url,
+                    ..
+                } = self.state
+                {
                     let url = get_attr(e, b"id")?.and_then(|rid| rels.get(&rid).cloned());
                     *hyperlink_url = url;
                 }
             }
             b"r" if matches!(self.state, ParseState::InParagraph { .. }) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InRun {
                     props: RunProperties::default(),
                     text: String::new(),
@@ -155,7 +165,8 @@ impl ParserContext {
                 self.state = ParseState::InRunProperties { props };
             }
             b"tbl" if matches_body_or_cell(&self.state) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InTable {
                     rows: Vec::new(),
                     grid_cols: Vec::new(),
@@ -166,14 +177,16 @@ impl ParserContext {
                 };
             }
             b"tr" if matches!(self.state, ParseState::InTable { .. }) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InTableRow {
                     cells: Vec::new(),
                     height: None,
                 };
             }
             b"tc" if matches!(self.state, ParseState::InTableRow { .. }) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InTableCell {
                     blocks: Vec::new(),
                     width: None,
@@ -187,7 +200,8 @@ impl ParserContext {
                 };
             }
             b"t" if matches!(self.state, ParseState::InRun { .. }) => {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InText {
                     text: String::new(),
                 };
@@ -198,7 +212,8 @@ impl ParserContext {
                     ParseState::InRun { .. } | ParseState::InParagraph { .. }
                 ) =>
             {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InDrawing {
                     depth: 1,
                     rel_id: None,
@@ -229,7 +244,10 @@ impl ParserContext {
                 handle_drawing_element(local, e, &mut self.state)?;
             }
             b"pBdr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
-                if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = self.state {
+                if let ParseState::InParagraphProperties {
+                    ref mut in_pbdr, ..
+                } = self.state
+                {
                     *in_pbdr = true;
                 }
             }
@@ -239,7 +257,8 @@ impl ParserContext {
                     ParseState::InParagraphProperties { .. } | ParseState::InBody
                 ) =>
             {
-                self.stack.push(std::mem::replace(&mut self.state, ParseState::Idle));
+                self.stack
+                    .push(std::mem::replace(&mut self.state, ParseState::Idle));
                 self.state = ParseState::InSectionProperties {
                     section: SectionProperties {
                         page_size: None,
@@ -257,22 +276,41 @@ impl ParserContext {
                 warn_once(&mut self.warned, "pict", "Unsupported: VML image/object (w:pict/w:object) — use DrawingML (w:drawing) instead");
             }
             b"fldChar" => {
-                handle_fld_char(e, &mut self.state, &mut self.stack, &mut self.field_instr, &mut self.field_suppressing, &mut self.field_props)?;
+                handle_fld_char(
+                    e,
+                    &mut self.state,
+                    &mut self.stack,
+                    &mut self.field_instr,
+                    &mut self.field_suppressing,
+                    &mut self.field_props,
+                )?;
             }
             b"instrText" => {
                 // instrText content will be captured in handle_text
             }
             b"footnoteReference" => {
-                warn_once(&mut self.warned, "footnote", "Unsupported: footnote reference (w:footnoteReference)");
+                warn_once(
+                    &mut self.warned,
+                    "footnote",
+                    "Unsupported: footnote reference (w:footnoteReference)",
+                );
             }
             b"endnoteReference" => {
-                warn_once(&mut self.warned, "endnote", "Unsupported: endnote reference (w:endnoteReference)");
+                warn_once(
+                    &mut self.warned,
+                    "endnote",
+                    "Unsupported: endnote reference (w:endnoteReference)",
+                );
             }
             b"ins" | b"moveTo" => {
                 // Tracked insertions — content inside is valid, just not marked as tracked
             }
             b"del" | b"moveFrom" => {
-                warn_once(&mut self.warned, "del", "Unsupported: tracked deletion (w:del/w:moveFrom) — deleted content may appear");
+                warn_once(
+                    &mut self.warned,
+                    "del",
+                    "Unsupported: tracked deletion (w:del/w:moveFrom) — deleted content may appear",
+                );
             }
             b"commentRangeStart" | b"commentRangeEnd" | b"commentReference" => {}
             b"bookmarkStart" | b"bookmarkEnd" | b"proofErr" | b"lastRenderedPageBreak" => {}
@@ -281,7 +319,11 @@ impl ParserContext {
         Ok(())
     }
 
-    fn handle_empty(&mut self, e: &BytesStart<'_>, rels: &HashMap<String, String>) -> Result<(), Error> {
+    fn handle_empty(
+        &mut self,
+        e: &BytesStart<'_>,
+        rels: &HashMap<String, String>,
+    ) -> Result<(), Error> {
         let _ = rels; // only used by handle_start for hyperlinks
         let name = e.name();
         let local = local_name(name.as_ref());
@@ -296,14 +338,20 @@ impl ParserContext {
         } else if (local == b"br" || local == b"tab")
             && matches!(self.state, ParseState::InRun { .. })
         {
-            if let ParseState::InRun { ref props, ref mut text, .. } = self.state {
+            if let ParseState::InRun {
+                ref props,
+                ref mut text,
+                ..
+            } = self.state
+            {
                 let flushed_text = std::mem::take(text);
                 let inline_to_push = if local == b"br" {
                     Inline::LineBreak
                 } else {
                     Inline::Tab
                 };
-                if let Some(para_state) = self.stack
+                if let Some(para_state) = self
+                    .stack
                     .iter_mut()
                     .rev()
                     .find(|s| matches!(s, ParseState::InParagraph { .. }))
@@ -321,7 +369,14 @@ impl ParserContext {
                 }
             }
         } else if local == b"fldChar" {
-            handle_fld_char(e, &mut self.state, &mut self.stack, &mut self.field_instr, &mut self.field_suppressing, &mut self.field_props)?;
+            handle_fld_char(
+                e,
+                &mut self.state,
+                &mut self.stack,
+                &mut self.field_instr,
+                &mut self.field_suppressing,
+                &mut self.field_props,
+            )?;
         } else if matches!(self.state, ParseState::InDrawing { .. }) {
             handle_drawing_element(local, e, &mut self.state)?;
         } else if matches!(self.state, ParseState::InSectionProperties { .. }) {
@@ -405,7 +460,11 @@ impl ParserContext {
                 self.state = ParseState::Idle;
             }
             b"hyperlink" if matches!(self.state, ParseState::InParagraph { .. }) => {
-                if let ParseState::InParagraph { ref mut hyperlink_url, .. } = self.state {
+                if let ParseState::InParagraph {
+                    ref mut hyperlink_url,
+                    ..
+                } = self.state
+                {
                     *hyperlink_url = None;
                 }
             }
@@ -421,12 +480,20 @@ impl ParserContext {
                 push_block(&mut self.state, &mut self.blocks, paragraph);
             }
             b"pBdr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
-                if let ParseState::InParagraphProperties { ref mut in_pbdr, .. } = self.state {
+                if let ParseState::InParagraphProperties {
+                    ref mut in_pbdr, ..
+                } = self.state
+                {
                     *in_pbdr = false;
                 }
             }
             b"pPr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
-                if let ParseState::InParagraphProperties { props, section_props, .. } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InParagraphProperties {
+                    props,
+                    section_props,
+                    ..
+                } = std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
                     if let ParseState::InParagraph {
                         props: ref mut p,
@@ -443,7 +510,12 @@ impl ParserContext {
                 let (props, text) = take_run(&mut self.state);
                 self.state = self.stack.pop().unwrap_or(ParseState::Idle);
                 if !text.is_empty() {
-                    if let ParseState::InParagraph { ref mut runs, ref hyperlink_url, .. } = self.state {
+                    if let ParseState::InParagraph {
+                        ref mut runs,
+                        ref hyperlink_url,
+                        ..
+                    } = self.state
+                    {
                         runs.push(Inline::TextRun(TextRun {
                             text,
                             properties: props,
@@ -453,17 +525,27 @@ impl ParserContext {
                 }
             }
             b"rPr" if matches!(self.state, ParseState::InRunProperties { .. }) => {
-                if let ParseState::InRunProperties { props } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InRunProperties { props } =
+                    std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
-                    if let ParseState::InRun { props: ref mut p, .. } = self.state {
+                    if let ParseState::InRun {
+                        props: ref mut p, ..
+                    } = self.state
+                    {
                         *p = props;
                     }
                 }
             }
             b"t" if matches!(self.state, ParseState::InText { .. }) => {
-                if let ParseState::InText { text, .. } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InText { text, .. } =
+                    std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
-                    if let ParseState::InRun { text: ref mut t, .. } = self.state {
+                    if let ParseState::InRun {
+                        text: ref mut t, ..
+                    } = self.state
+                    {
                         let cleaned: String =
                             text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
                         t.push_str(&cleaned);
@@ -471,7 +553,14 @@ impl ParserContext {
                 }
             }
             b"tbl" if matches!(self.state, ParseState::InTable { .. }) => {
-                if let ParseState::InTable { rows, grid_cols, default_cell_margins, borders, .. } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InTable {
+                    rows,
+                    grid_cols,
+                    default_cell_margins,
+                    borders,
+                    ..
+                } = std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
                     let table = Block::Table(Box::new(Table {
                         rows,
@@ -484,7 +573,9 @@ impl ParserContext {
                 }
             }
             b"tr" if matches!(self.state, ParseState::InTableRow { .. }) => {
-                if let ParseState::InTableRow { cells, height } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InTableRow { cells, height } =
+                    std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
                     if let ParseState::InTable { ref mut rows, .. } = self.state {
                         rows.push(TableRow { cells, height });
@@ -567,10 +658,15 @@ impl ParserContext {
                 }
             }
             b"sectPr" if matches!(self.state, ParseState::InSectionProperties { .. }) => {
-                if let ParseState::InSectionProperties { section } = std::mem::replace(&mut self.state, ParseState::Idle) {
+                if let ParseState::InSectionProperties { section } =
+                    std::mem::replace(&mut self.state, ParseState::Idle)
+                {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
                     match self.state {
-                        ParseState::InParagraphProperties { ref mut section_props, .. } => {
+                        ParseState::InParagraphProperties {
+                            ref mut section_props,
+                            ..
+                        } => {
                             *section_props = Some(section);
                         }
                         ParseState::InBody => {

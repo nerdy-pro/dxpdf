@@ -78,8 +78,9 @@ impl Layouter<'_> {
             return;
         }
 
-        let page_ctx = *self.context.current();
-        let content_width = page_ctx.available_width;
+        let page_x = self.constraints.x_origin();
+        let content_width = self.constraints.available_width();
+        let available_height = self.constraints.available_height();
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
         let col_widths =
@@ -93,14 +94,13 @@ impl Layouter<'_> {
             .iter()
             .map(|row| {
                 let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
-                let row_height_limit = page_ctx.available_height;
+                let row_height_limit = available_height;
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
                 let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
                 let mut grid_col_idx = 0;
                 for cell in &row.cells {
-                    let x =
-                        page_ctx.x_origin + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
+                    let x = page_x + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
                     let w = self.cell_width(grid_col_idx, cell, &col_widths);
                     col_x_positions.push(x);
                     cell_widths_computed.push(w);
@@ -309,9 +309,7 @@ impl Layouter<'_> {
 
                 // 2. Cell content (offset by row_top)
                 for cmd in &mc.commands {
-                    self.current_page
-                        .commands
-                        .push(cmd.offset_y(row_top));
+                    self.current_page.commands.push(cmd.offset_y(row_top));
                 }
 
                 // 3. Cell borders
