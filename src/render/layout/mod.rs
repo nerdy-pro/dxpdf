@@ -245,65 +245,59 @@ fn apply_section_to_config(config: &mut LayoutConfig, sect: &SectionProperties) 
     }
 }
 
-/// Offset all y-coordinates in a draw command by a given amount.
-/// Used to translate relative-positioned commands to absolute page positions.
-pub(super) fn offset_command(cmd: &DrawCommand, y_offset: Pt) -> DrawCommand {
-    match cmd {
-        DrawCommand::Text {
-            position,
-            text,
-            font_family,
-            char_spacing_pt,
-            font_size,
-            bold,
-            italic,
-            color,
-        } => DrawCommand::Text {
-            position: PtOffset::new(position.x, y_offset + position.y),
-            text: text.clone(),
-            font_family: font_family.clone(),
-            char_spacing_pt: *char_spacing_pt,
-            font_size: *font_size,
-            bold: *bold,
-            italic: *italic,
-            color: *color,
+/// Merge paragraph-level spacing with defaults, preferring explicit values.
+fn merge_spacing(para: Option<Spacing>, defaults: &Spacing) -> Spacing {
+    match para {
+        Some(s) => Spacing {
+            before: s.before.or(defaults.before),
+            after: s.after.or(defaults.after),
+            line: s.line.or(defaults.line),
+            line_rule: if s.line.is_some() {
+                s.line_rule
+            } else {
+                defaults.line_rule
+            },
         },
-        DrawCommand::Underline { line, color, width } => DrawCommand::Underline {
-            line: PtLineSegment::new(
-                PtOffset::new(line.start.x, y_offset + line.start.y),
-                PtOffset::new(line.end.x, y_offset + line.end.y),
-            ),
-            color: *color,
-            width: *width,
-        },
-        DrawCommand::Image { rect, image } => DrawCommand::Image {
-            rect: PtRect::from_xywh(
-                rect.origin.x,
-                y_offset + rect.origin.y,
-                rect.size.width,
-                rect.size.height,
-            ),
-            image: image.clone(),
-        },
-        DrawCommand::Rect { rect, color } => DrawCommand::Rect {
-            rect: PtRect::from_xywh(
-                rect.origin.x,
-                y_offset + rect.origin.y,
-                rect.size.width,
-                rect.size.height,
-            ),
-            color: *color,
-        },
-        DrawCommand::Line { .. } => cmd.clone(),
-        DrawCommand::LinkAnnotation { rect, url } => DrawCommand::LinkAnnotation {
-            rect: PtRect::from_xywh(
-                rect.origin.x,
-                y_offset + rect.origin.y,
-                rect.size.width,
-                rect.size.height,
-            ),
-            url: url.clone(),
-        },
+        None => *defaults,
+    }
+}
+
+impl DrawCommand {
+    /// Return a copy with all y-coordinates shifted by `dy`.
+    /// Used to translate relative-positioned commands to absolute page positions.
+    ///
+    /// Note: `Line` is not offset — table borders use absolute coordinates.
+    pub(super) fn offset_y(&self, dy: Pt) -> DrawCommand {
+        match self {
+            DrawCommand::Text { position, text, font_family, char_spacing_pt, font_size, bold, italic, color } => DrawCommand::Text {
+                position: position.offset_y(dy),
+                text: text.clone(),
+                font_family: font_family.clone(),
+                char_spacing_pt: *char_spacing_pt,
+                font_size: *font_size,
+                bold: *bold,
+                italic: *italic,
+                color: *color,
+            },
+            DrawCommand::Underline { line, color, width } => DrawCommand::Underline {
+                line: line.offset_y(dy),
+                color: *color,
+                width: *width,
+            },
+            DrawCommand::Image { rect, image } => DrawCommand::Image {
+                rect: rect.offset_y(dy),
+                image: image.clone(),
+            },
+            DrawCommand::Rect { rect, color } => DrawCommand::Rect {
+                rect: rect.offset_y(dy),
+                color: *color,
+            },
+            DrawCommand::Line { .. } => self.clone(),
+            DrawCommand::LinkAnnotation { rect, url } => DrawCommand::LinkAnnotation {
+                rect: rect.offset_y(dy),
+                url: url.clone(),
+            },
+        }
     }
 }
 
@@ -385,20 +379,7 @@ impl<'a> Layouter<'a> {
     }
 
     fn resolve_spacing(&self, para_spacing: Option<Spacing>) -> Spacing {
-        let defaults = &self.doc_defaults.default_spacing;
-        match para_spacing {
-            Some(s) => Spacing {
-                before: s.before.or(defaults.before),
-                after: s.after.or(defaults.after),
-                line: s.line.or(defaults.line),
-                line_rule: if s.line.is_some() {
-                    s.line_rule
-                } else {
-                    defaults.line_rule
-                },
-            },
-            None => *defaults,
-        }
+        merge_spacing(para_spacing, &self.doc_defaults.default_spacing)
     }
 
     /// Resolve spacing for paragraphs inside table cells.
@@ -408,20 +389,8 @@ impl<'a> Layouter<'a> {
         para_spacing: Option<Spacing>,
         table_spacing: Option<Spacing>,
     ) -> Spacing {
-        let table_defaults = table_spacing.unwrap_or(self.doc_defaults.table_cell_spacing);
-        match para_spacing {
-            Some(s) => Spacing {
-                before: s.before.or(table_defaults.before),
-                after: s.after.or(table_defaults.after),
-                line: s.line.or(table_defaults.line),
-                line_rule: if s.line.is_some() {
-                    s.line_rule
-                } else {
-                    table_defaults.line_rule
-                },
-            },
-            None => table_defaults,
-        }
+        let defaults = table_spacing.unwrap_or(self.doc_defaults.table_cell_spacing);
+        merge_spacing(para_spacing, &defaults)
     }
 
     /// Get the width of a table cell, accounting for grid_span.

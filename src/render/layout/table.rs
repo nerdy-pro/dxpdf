@@ -4,7 +4,7 @@ use crate::model::*;
 
 use super::fragment::*;
 use super::measure::{MeasuredBlock, MeasuredTable, MeasuredTableCell};
-use super::{offset_command, DrawCommand, Layouter};
+use super::{DrawCommand, Layouter};
 
 // ============================================================
 // Types for the measure→layout→paint pipeline
@@ -193,7 +193,7 @@ impl Layouter<'_> {
                             // Offset measured commands by cell_y and accumulate
                             for line in &measured.lines {
                                 for cmd in &line.commands {
-                                    commands.push(offset_command(cmd, cell_y));
+                                    commands.push(cmd.offset_y(cell_y));
                                 }
                             }
                             cell_y += measured.total_height;
@@ -311,7 +311,7 @@ impl Layouter<'_> {
                 for cmd in &mc.commands {
                     self.current_page
                         .commands
-                        .push(offset_command(cmd, row_top));
+                        .push(cmd.offset_y(row_top));
                 }
 
                 // 3. Cell borders

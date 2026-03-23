@@ -5,7 +5,7 @@ use crate::model::*;
 use super::context::LayoutConstraints;
 use super::fragment::*;
 use super::measurer;
-use super::{offset_command, DrawCommand, LayoutConfig, LayoutedPage};
+use super::{DrawCommand, LayoutConfig, LayoutedPage};
 
 /// Render header and footer content on each page.
 pub(super) fn render_headers_footers(
@@ -171,7 +171,7 @@ pub(super) fn layout_header_footer_blocks(
             // PAINT: offset measured commands by cursor_y
             for line in &measured.lines {
                 for cmd in &line.commands {
-                    commands.push(offset_command(cmd, cursor_y));
+                    commands.push(cmd.offset_y(cursor_y));
                 }
             }
             cursor_y += measured.total_height;

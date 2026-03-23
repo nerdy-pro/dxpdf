@@ -37,6 +37,14 @@ impl Offset<PtUnit> {
         x: Pt::ZERO,
         y: Pt::ZERO,
     };
+
+    /// Return a copy with y shifted by `dy`.
+    pub fn offset_y(self, dy: Pt) -> Self {
+        Self {
+            x: self.x,
+            y: self.y + dy,
+        }
+    }
 }
 
 impl<U: Unit + UnitLabel> fmt::Debug for Offset<U>
@@ -120,6 +128,16 @@ impl<U: Unit> Rect<U> {
         Self {
             origin: Offset::new(x, y),
             size: Size::new(width, height),
+        }
+    }
+}
+
+impl Rect<PtUnit> {
+    /// Return a copy with origin.y shifted by `dy`.
+    pub fn offset_y(self, dy: Pt) -> Self {
+        Self {
+            origin: self.origin.offset_y(dy),
+            size: self.size,
         }
     }
 }
@@ -210,6 +228,16 @@ impl<U: IntegerUnit> Eq for LineSegment<U> {}
 impl<U: Unit> LineSegment<U> {
     pub fn new(start: Offset<U>, end: Offset<U>) -> Self {
         Self { start, end }
+    }
+}
+
+impl LineSegment<PtUnit> {
+    /// Return a copy with both endpoints' y shifted by `dy`.
+    pub fn offset_y(self, dy: Pt) -> Self {
+        Self {
+            start: self.start.offset_y(dy),
+            end: self.end.offset_y(dy),
+        }
     }
 }
 

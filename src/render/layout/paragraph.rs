@@ -3,7 +3,7 @@ use std::rc::Rc;
 use super::context::LayoutConstraints;
 use super::fragment::*;
 use super::measure::MeasuredParagraph;
-use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
+use super::{ActiveFloat, DrawCommand, Layouter};
 use crate::dimension::Pt;
 use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::*;
@@ -212,7 +212,7 @@ impl Layouter<'_> {
             for cmd in &line.commands {
                 self.current_page
                     .commands
-                    .push(offset_command(cmd, y_offset));
+                    .push(cmd.offset_y(y_offset));
             }
 
             self.cursor_y += line.height;
