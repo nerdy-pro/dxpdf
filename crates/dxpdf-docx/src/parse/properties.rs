@@ -3,14 +3,21 @@
 //! Each parser consumes events from the reader until the corresponding End event,
 //! returning a fully-populated properties struct.
 
-use log::warn;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
 use crate::dimension::Dimension;
-use crate::error::Result;
+use crate::error::{ParseError, Result};
 use crate::geometry::EdgeInsets;
 use crate::model::*;
+
+fn invalid_value(attr: &str, value: &str) -> ParseError {
+    ParseError::InvalidAttributeValue {
+        attr: attr.to_string(),
+        value: value.to_string(),
+        reason: "unsupported value per OOXML spec".to_string(),
+    }
+}
 use crate::xml;
 
 // ── Paragraph Properties ─────────────────────────────────────────────────────
@@ -52,7 +59,7 @@ pub fn parse_paragraph_properties(
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val));
+                            props.alignment = Some(parse_alignment(&val)?);
                         }
                     }
                     b"numPr" => {
@@ -102,7 +109,7 @@ pub fn parse_paragraph_properties(
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val));
+                            props.alignment = Some(parse_alignment(&val)?);
                         }
                     }
                     b"shd" => {
@@ -197,7 +204,7 @@ pub fn parse_run_properties(
                     b"iCs" => {}
                     b"u" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.underline = Some(parse_underline_style(&val));
+                            props.underline = Some(parse_underline_style(&val)?);
                         } else {
                             props.underline = Some(UnderlineStyle::Single);
                         }
@@ -219,7 +226,7 @@ pub fn parse_run_properties(
                     }
                     b"highlight" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.highlight = parse_highlight_color(&val);
+                            props.highlight = parse_highlight_color(&val)?;
                         }
                     }
                     b"shd" => {
@@ -227,7 +234,7 @@ pub fn parse_run_properties(
                     }
                     b"vertAlign" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_vertical_align(&val));
+                            props.vertical_align = Some(parse_vertical_align(&val)?);
                         }
                     }
                     b"spacing" => {
@@ -319,7 +326,7 @@ pub fn parse_table_properties(
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val));
+                            props.alignment = Some(parse_alignment(&val)?);
                         }
                     }
                     b"tblW" => {
@@ -330,10 +337,7 @@ pub fn parse_table_properties(
                             props.layout = Some(match val.as_str() {
                                 "fixed" => TableLayout::Fixed,
                                 "autofit" | "auto" => TableLayout::Auto,
-                                other => {
-                                    warn!("unknown table layout: {other}");
-                                    TableLayout::Auto
-                                }
+                                other => return Err(invalid_value("tblLayout/val", other)),
                             });
                         }
                     }
@@ -434,7 +438,7 @@ pub fn parse_table_cell_properties(
                     }
                     b"vAlign" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_cell_vertical_align(&val));
+                            props.vertical_align = Some(parse_cell_vertical_align(&val)?);
                         }
                     }
                     b"vMerge" => {
@@ -452,7 +456,7 @@ pub fn parse_table_cell_properties(
                     }
                     b"textDirection" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_direction = Some(parse_text_direction(&val));
+                            props.text_direction = Some(parse_text_direction(&val)?);
                         }
                     }
                     b"noWrap" => {
@@ -494,19 +498,16 @@ pub fn parse_section_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pgSz" => {
+                        let orientation = match xml::optional_attr(e, b"orient")?.as_deref() {
+                            Some("landscape") => Some(PageOrientation::Landscape),
+                            Some("portrait") => Some(PageOrientation::Portrait),
+                            Some(other) => return Err(invalid_value("orient", other)),
+                            None => None,
+                        };
                         props.page_size = Some(PageSize {
                             width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
                             height: xml::optional_attr_i64(e, b"h")?.map(Dimension::new),
-                            orientation: xml::optional_attr(e, b"orient")?.map(|s| {
-                                match s.as_str() {
-                                    "landscape" => PageOrientation::Landscape,
-                                    "portrait" => PageOrientation::Portrait,
-                                    other => {
-                                        warn!("unknown page orientation: {other}");
-                                        PageOrientation::Portrait
-                                    }
-                                }
-                            }),
+                            orientation,
                         });
                     }
                     b"pgMar" => {
@@ -555,7 +556,7 @@ pub fn parse_section_properties(
                     }
                     b"type" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.section_type = Some(parse_section_type(&val));
+                            props.section_type = Some(parse_section_type(&val)?);
                         }
                     }
                     _ => xml::warn_unsupported_element("sectPr", &local),
@@ -616,18 +617,16 @@ fn parse_paragraph_spacing(e: &BytesStart<'_>) -> Result<ParagraphSpacing> {
     })
 }
 
-pub fn parse_alignment(val: &str) -> Alignment {
+/// §17.18.44 ST_Jc
+pub fn parse_alignment(val: &str) -> Result<Alignment> {
     match val {
-        "start" | "left" => Alignment::Start,
-        "center" => Alignment::Center,
-        "end" | "right" => Alignment::End,
-        "both" | "justify" => Alignment::Both,
-        "distribute" => Alignment::Distribute,
-        "thaiDistribute" => Alignment::Thai,
-        other => {
-            warn!("unknown alignment value: {other}");
-            Alignment::Start
-        }
+        "start" | "left" => Ok(Alignment::Start),
+        "center" => Ok(Alignment::Center),
+        "end" | "right" => Ok(Alignment::End),
+        "both" | "justify" => Ok(Alignment::Both),
+        "distribute" => Ok(Alignment::Distribute),
+        "thaiDistribute" => Ok(Alignment::Thai),
+        other => Err(invalid_value("jc", other)),
     }
 }
 
@@ -672,20 +671,23 @@ fn parse_tabs(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<TabSt
             {
                 let pos = xml::optional_attr_i64(e, b"pos")?.unwrap_or(0);
                 let alignment = match xml::optional_attr(e, b"val")?.as_deref() {
+                    Some("left") | None => TabAlignment::Left,
                     Some("center") => TabAlignment::Center,
                     Some("right") => TabAlignment::Right,
                     Some("decimal") => TabAlignment::Decimal,
                     Some("bar") => TabAlignment::Bar,
                     Some("clear") => TabAlignment::Clear,
-                    _ => TabAlignment::Left,
+                    Some("num") => TabAlignment::Left, // §17.18.81: num is legacy, treat as left
+                    Some(other) => return Err(invalid_value("tab/val", other)),
                 };
                 let leader = match xml::optional_attr(e, b"leader")?.as_deref() {
+                    Some("none") | None => TabLeader::None,
                     Some("dot") => TabLeader::Dot,
                     Some("hyphen") => TabLeader::Hyphen,
                     Some("underscore") => TabLeader::Underscore,
                     Some("heavy") => TabLeader::Heavy,
                     Some("middleDot") => TabLeader::MiddleDot,
-                    _ => TabLeader::None,
+                    Some(other) => return Err(invalid_value("tab/leader", other)),
                 };
                 tabs.push(TabStop {
                     position: Dimension::new(pos),
@@ -765,10 +767,7 @@ pub fn parse_border(e: &BytesStart<'_>) -> Result<Border> {
         Some("outset") => BorderStyle::Outset,
         Some("inset") => BorderStyle::Inset,
         Some("none") | Some("nil") | None => BorderStyle::None,
-        Some(other) => {
-            warn!("unknown border style: {other}");
-            BorderStyle::None
-        }
+        Some(other) => return Err(invalid_value("border/val", other)),
     };
 
     let sz = xml::optional_attr_i64(e, b"sz")?.unwrap_or(0);
@@ -788,7 +787,7 @@ pub fn parse_shading(e: &BytesStart<'_>) -> Result<Shading> {
         Some(ref s) if s.eq_ignore_ascii_case("auto") => Color::Auto,
         Some(ref s) => xml::parse_hex_color(s)
             .map(Color::Rgb)
-            .unwrap_or(Color::Auto),
+            .ok_or_else(|| invalid_value("color", s))?,
         None => Color::Auto,
     };
 
@@ -796,7 +795,7 @@ pub fn parse_shading(e: &BytesStart<'_>) -> Result<Shading> {
         Some(ref s) if s.eq_ignore_ascii_case("auto") => Color::Auto,
         Some(ref s) => xml::parse_hex_color(s)
             .map(Color::Rgb)
-            .unwrap_or(Color::Auto),
+            .ok_or_else(|| invalid_value("color", s))?,
         None => Color::Auto,
     };
 
@@ -838,10 +837,7 @@ pub fn parse_shading(e: &BytesStart<'_>) -> Result<Shading> {
         Some("pct87") => ShadingPattern::Pct87,
         Some("pct90") => ShadingPattern::Pct90,
         Some("pct95") => ShadingPattern::Pct95,
-        Some(other) => {
-            warn!("unknown shading pattern: {other}");
-            ShadingPattern::Clear
-        }
+        Some(other) => return Err(invalid_value("shd/val", other)),
     };
 
     Ok(Shading {
@@ -856,7 +852,7 @@ fn parse_color_attr(e: &BytesStart<'_>) -> Result<Color> {
         Some(ref s) if s.eq_ignore_ascii_case("auto") => Ok(Color::Auto),
         Some(ref s) => Ok(xml::parse_hex_color(s)
             .map(Color::Rgb)
-            .unwrap_or(Color::Auto)),
+            .ok_or_else(|| invalid_value("color", s))?),
         None => Ok(Color::Auto),
     }
 }
@@ -866,7 +862,7 @@ fn parse_color_from_attr(e: &BytesStart<'_>) -> Result<Color> {
         Some(ref s) if s.eq_ignore_ascii_case("auto") => Ok(Color::Auto),
         Some(ref s) => Ok(xml::parse_hex_color(s)
             .map(Color::Rgb)
-            .unwrap_or(Color::Auto)),
+            .ok_or_else(|| invalid_value("color", s))?),
         None => Ok(Color::Auto),
     }
 }
@@ -880,85 +876,77 @@ fn parse_font_set(e: &BytesStart<'_>) -> Result<FontSet> {
     })
 }
 
-fn parse_underline_style(val: &str) -> UnderlineStyle {
+/// §17.18.99 ST_Underline
+fn parse_underline_style(val: &str) -> Result<UnderlineStyle> {
     match val {
-        "single" => UnderlineStyle::Single,
-        "words" => UnderlineStyle::Words,
-        "double" => UnderlineStyle::Double,
-        "thick" => UnderlineStyle::Thick,
-        "dotted" => UnderlineStyle::Dotted,
-        "dottedHeavy" => UnderlineStyle::DottedHeavy,
-        "dash" => UnderlineStyle::Dash,
-        "dashedHeavy" => UnderlineStyle::DashedHeavy,
-        "dashLong" => UnderlineStyle::DashLong,
-        "dashLongHeavy" => UnderlineStyle::DashLongHeavy,
-        "dotDash" => UnderlineStyle::DotDash,
-        "dashDotHeavy" => UnderlineStyle::DashDotHeavy,
-        "dotDotDash" => UnderlineStyle::DotDotDash,
-        "dashDotDotHeavy" => UnderlineStyle::DashDotDotHeavy,
-        "wave" => UnderlineStyle::Wave,
-        "wavyHeavy" => UnderlineStyle::WavyHeavy,
-        "wavyDouble" => UnderlineStyle::WavyDouble,
-        "none" => UnderlineStyle::None,
-        other => {
-            warn!("unknown underline style: {other}");
-            UnderlineStyle::None
-        }
+        "single" => Ok(UnderlineStyle::Single),
+        "words" => Ok(UnderlineStyle::Words),
+        "double" => Ok(UnderlineStyle::Double),
+        "thick" => Ok(UnderlineStyle::Thick),
+        "dotted" => Ok(UnderlineStyle::Dotted),
+        "dottedHeavy" => Ok(UnderlineStyle::DottedHeavy),
+        "dash" => Ok(UnderlineStyle::Dash),
+        "dashedHeavy" => Ok(UnderlineStyle::DashedHeavy),
+        "dashLong" => Ok(UnderlineStyle::DashLong),
+        "dashLongHeavy" => Ok(UnderlineStyle::DashLongHeavy),
+        "dotDash" => Ok(UnderlineStyle::DotDash),
+        "dashDotHeavy" => Ok(UnderlineStyle::DashDotHeavy),
+        "dotDotDash" => Ok(UnderlineStyle::DotDotDash),
+        "dashDotDotHeavy" => Ok(UnderlineStyle::DashDotDotHeavy),
+        "wave" => Ok(UnderlineStyle::Wave),
+        "wavyHeavy" => Ok(UnderlineStyle::WavyHeavy),
+        "wavyDouble" => Ok(UnderlineStyle::WavyDouble),
+        "none" => Ok(UnderlineStyle::None),
+        other => Err(invalid_value("u/val", other)),
     }
 }
 
-fn parse_vertical_align(val: &str) -> VerticalAlign {
+/// §17.18.100 ST_VerticalAlignRun
+fn parse_vertical_align(val: &str) -> Result<VerticalAlign> {
     match val {
-        "superscript" => VerticalAlign::Superscript,
-        "subscript" => VerticalAlign::Subscript,
-        "baseline" => VerticalAlign::Baseline,
-        other => {
-            warn!("unknown vertical align: {other}");
-            VerticalAlign::Baseline
-        }
+        "baseline" => Ok(VerticalAlign::Baseline),
+        "superscript" => Ok(VerticalAlign::Superscript),
+        "subscript" => Ok(VerticalAlign::Subscript),
+        other => Err(invalid_value("vertAlign/val", other)),
     }
 }
 
-fn parse_highlight_color(val: &str) -> Option<HighlightColor> {
-    Some(match val {
-        "black" => HighlightColor::Black,
-        "blue" => HighlightColor::Blue,
-        "cyan" => HighlightColor::Cyan,
-        "darkBlue" => HighlightColor::DarkBlue,
-        "darkCyan" => HighlightColor::DarkCyan,
-        "darkGray" => HighlightColor::DarkGray,
-        "darkGreen" => HighlightColor::DarkGreen,
-        "darkMagenta" => HighlightColor::DarkMagenta,
-        "darkRed" => HighlightColor::DarkRed,
-        "darkYellow" => HighlightColor::DarkYellow,
-        "green" => HighlightColor::Green,
-        "lightGray" => HighlightColor::LightGray,
-        "magenta" => HighlightColor::Magenta,
-        "red" => HighlightColor::Red,
-        "white" => HighlightColor::White,
-        "yellow" => HighlightColor::Yellow,
-        "none" => return None,
-        other => {
-            warn!("unknown highlight color: {other}");
-            return None;
-        }
-    })
+/// §17.18.40 ST_HighlightColor
+fn parse_highlight_color(val: &str) -> Result<Option<HighlightColor>> {
+    match val {
+        "black" => Ok(Some(HighlightColor::Black)),
+        "blue" => Ok(Some(HighlightColor::Blue)),
+        "cyan" => Ok(Some(HighlightColor::Cyan)),
+        "darkBlue" => Ok(Some(HighlightColor::DarkBlue)),
+        "darkCyan" => Ok(Some(HighlightColor::DarkCyan)),
+        "darkGray" => Ok(Some(HighlightColor::DarkGray)),
+        "darkGreen" => Ok(Some(HighlightColor::DarkGreen)),
+        "darkMagenta" => Ok(Some(HighlightColor::DarkMagenta)),
+        "darkRed" => Ok(Some(HighlightColor::DarkRed)),
+        "darkYellow" => Ok(Some(HighlightColor::DarkYellow)),
+        "green" => Ok(Some(HighlightColor::Green)),
+        "lightGray" => Ok(Some(HighlightColor::LightGray)),
+        "magenta" => Ok(Some(HighlightColor::Magenta)),
+        "red" => Ok(Some(HighlightColor::Red)),
+        "white" => Ok(Some(HighlightColor::White)),
+        "yellow" => Ok(Some(HighlightColor::Yellow)),
+        "none" => Ok(None),
+        other => Err(invalid_value("highlight/val", other)),
+    }
 }
 
+/// §17.18.96 ST_TblWidth
 fn parse_table_measure(e: &BytesStart<'_>) -> Result<TableMeasure> {
     let w = xml::optional_attr_i64(e, b"w")?.unwrap_or(0);
     let measure_type = xml::optional_attr(e, b"type")?;
 
-    Ok(match measure_type.as_deref() {
-        Some("dxa") => TableMeasure::Twips(Dimension::new(w)),
-        Some("pct") => TableMeasure::Pct(Dimension::new(w)),
-        Some("nil") => TableMeasure::Nil,
-        Some("auto") | None => TableMeasure::Auto,
-        Some(other) => {
-            warn!("unknown table measure type: {other}");
-            TableMeasure::Auto
-        }
-    })
+    match measure_type.as_deref() {
+        Some("dxa") => Ok(TableMeasure::Twips(Dimension::new(w))),
+        Some("pct") => Ok(TableMeasure::Pct(Dimension::new(w))),
+        Some("nil") => Ok(TableMeasure::Nil),
+        Some("auto") | None => Ok(TableMeasure::Auto),
+        Some(other) => Err(invalid_value("type", other)),
+    }
 }
 
 fn parse_table_look(e: &BytesStart<'_>) -> Result<TableLook> {
@@ -1076,44 +1064,38 @@ fn parse_edge_insets_twips(
     Ok(insets)
 }
 
-fn parse_cell_vertical_align(val: &str) -> CellVerticalAlign {
+/// §17.18.101 ST_VerticalJc
+fn parse_cell_vertical_align(val: &str) -> Result<CellVerticalAlign> {
     match val {
-        "top" => CellVerticalAlign::Top,
-        "center" => CellVerticalAlign::Center,
-        "bottom" => CellVerticalAlign::Bottom,
-        "both" => CellVerticalAlign::Both,
-        other => {
-            warn!("unknown cell vertical align: {other}");
-            CellVerticalAlign::Top
-        }
+        "top" => Ok(CellVerticalAlign::Top),
+        "center" => Ok(CellVerticalAlign::Center),
+        "bottom" => Ok(CellVerticalAlign::Bottom),
+        "both" => Ok(CellVerticalAlign::Both),
+        other => Err(invalid_value("vAlign/val", other)),
     }
 }
 
-fn parse_text_direction(val: &str) -> TextDirection {
+/// §17.18.93 ST_TextDirection
+fn parse_text_direction(val: &str) -> Result<TextDirection> {
     match val {
-        "lrTb" => TextDirection::LeftToRightTopToBottom,
-        "tbRl" => TextDirection::TopToBottomRightToLeft,
-        "btLr" => TextDirection::BottomToTopLeftToRight,
-        "lrTbV" => TextDirection::LeftToRightTopToBottomRotated,
-        "tbRlV" => TextDirection::TopToBottomRightToLeftRotated,
-        "tbLrV" => TextDirection::TopToBottomLeftToRightRotated,
-        other => {
-            warn!("unknown text direction: {other}");
-            TextDirection::LeftToRightTopToBottom
-        }
+        "lrTb" => Ok(TextDirection::LeftToRightTopToBottom),
+        "tbRl" => Ok(TextDirection::TopToBottomRightToLeft),
+        "btLr" => Ok(TextDirection::BottomToTopLeftToRight),
+        "lrTbV" => Ok(TextDirection::LeftToRightTopToBottomRotated),
+        "tbRlV" => Ok(TextDirection::TopToBottomRightToLeftRotated),
+        "tbLrV" => Ok(TextDirection::TopToBottomLeftToRightRotated),
+        other => Err(invalid_value("textDirection/val", other)),
     }
 }
 
-fn parse_section_type(val: &str) -> SectionType {
+/// §17.18.77 ST_SectionMark
+fn parse_section_type(val: &str) -> Result<SectionType> {
     match val {
-        "nextPage" => SectionType::NextPage,
-        "continuous" => SectionType::Continuous,
-        "evenPage" => SectionType::EvenPage,
-        "oddPage" => SectionType::OddPage,
-        "nextColumn" => SectionType::NextColumn,
-        other => {
-            warn!("unknown section type: {other}");
-            SectionType::NextPage
-        }
+        "nextPage" => Ok(SectionType::NextPage),
+        "continuous" => Ok(SectionType::Continuous),
+        "evenPage" => Ok(SectionType::EvenPage),
+        "oddPage" => Ok(SectionType::OddPage),
+        "nextColumn" => Ok(SectionType::NextColumn),
+        other => Err(invalid_value("type/val", other)),
     }
 }

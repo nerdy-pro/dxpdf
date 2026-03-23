@@ -334,7 +334,7 @@ fn flush_text(
             style_id: style_id.clone(),
             properties: props.clone(),
             text: combined,
-            rsids: rsids.clone(),
+            rsids: *rsids,
         }));
     }
 }
@@ -380,11 +380,10 @@ fn parse_hyperlink_content(
 // ── Field ────────────────────────────────────────────────────────────────────
 
 fn parse_simple_field_content(
-    instr: String,
+    instruction: String,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
 ) -> Result<Field> {
-    let kind = parse_field_kind(&instr);
     let mut field_content = Vec::new();
 
     loop {
@@ -400,25 +399,9 @@ fn parse_simple_field_content(
     }
 
     Ok(Field {
-        kind,
+        instruction,
         content: field_content,
     })
-}
-
-fn parse_field_kind(instr: &str) -> FieldKind {
-    let first_word = instr.split_whitespace().next().unwrap_or("").to_uppercase();
-
-    match first_word.as_str() {
-        "PAGE" => FieldKind::Page,
-        "NUMPAGES" => FieldKind::NumPages,
-        "DATE" => FieldKind::Date,
-        "TIME" => FieldKind::Time,
-        "FILENAME" => FieldKind::FileName,
-        "AUTHOR" => FieldKind::Author,
-        "TITLE" => FieldKind::Title,
-        "TOC" => FieldKind::Toc,
-        _ => FieldKind::Other(instr.trim().to_string()),
-    }
 }
 
 // ── Drawing / Image ──────────────────────────────────────────────────────────
@@ -513,11 +496,11 @@ fn parse_anchor_image(
     let mut rel_id: Option<String> = None;
     let mut description: Option<String> = None;
     let mut h_pos = AnchorPosition::Offset {
-        relative_from: AnchorRelativeFrom::Column,
+        relative_from: None,
         offset: Dimension::ZERO,
     };
     let mut v_pos = AnchorPosition::Offset {
-        relative_from: AnchorRelativeFrom::Paragraph,
+        relative_from: None,
         offset: Dimension::ZERO,
     };
     let mut wrap = TextWrap::None;
@@ -530,13 +513,13 @@ fn parse_anchor_image(
                     b"positionH" => {
                         let rel_from = xml::optional_attr(e, b"relativeFrom")?
                             .map(|s| parse_anchor_relative_from(&s))
-                            .unwrap_or(AnchorRelativeFrom::Column);
+                            .transpose()?;
                         h_pos = parse_anchor_position(reader, buf, rel_from, b"positionH")?;
                     }
                     b"positionV" => {
                         let rel_from = xml::optional_attr(e, b"relativeFrom")?
                             .map(|s| parse_anchor_relative_from(&s))
-                            .unwrap_or(AnchorRelativeFrom::Paragraph);
+                            .transpose()?;
                         v_pos = parse_anchor_position(reader, buf, rel_from, b"positionV")?;
                     }
                     b"wrapSquare" => {
@@ -613,7 +596,7 @@ fn parse_anchor_image(
 fn parse_anchor_position(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-    relative_from: AnchorRelativeFrom,
+    relative_from: Option<AnchorRelativeFrom>,
     end_tag: &[u8],
 ) -> Result<AnchorPosition> {
     let mut result = AnchorPosition::Offset {
@@ -638,7 +621,7 @@ fn parse_anchor_position(
                         let text = xml::read_text_content(reader, buf)?;
                         result = AnchorPosition::Align {
                             relative_from,
-                            alignment: parse_anchor_alignment(text.trim()),
+                            alignment: parse_anchor_alignment(text.trim())?,
                         };
                     }
                     _ => xml::warn_unsupported_element("anchor-position", &local),
@@ -653,40 +636,44 @@ fn parse_anchor_position(
     Ok(result)
 }
 
-fn parse_anchor_relative_from(val: &str) -> AnchorRelativeFrom {
+fn parse_anchor_relative_from(val: &str) -> Result<AnchorRelativeFrom> {
+    use crate::error::ParseError;
     match val {
-        "page" => AnchorRelativeFrom::Page,
-        "margin" => AnchorRelativeFrom::Margin,
-        "column" => AnchorRelativeFrom::Column,
-        "character" => AnchorRelativeFrom::Character,
-        "paragraph" => AnchorRelativeFrom::Paragraph,
-        "line" => AnchorRelativeFrom::Line,
-        "insideMargin" => AnchorRelativeFrom::InsideMargin,
-        "outsideMargin" => AnchorRelativeFrom::OutsideMargin,
-        "topMargin" => AnchorRelativeFrom::TopMargin,
-        "bottomMargin" => AnchorRelativeFrom::BottomMargin,
-        "leftMargin" => AnchorRelativeFrom::LeftMargin,
-        "rightMargin" => AnchorRelativeFrom::RightMargin,
-        other => {
-            log::warn!("unknown anchor relative-from: {other}");
-            AnchorRelativeFrom::Column
-        }
+        "page" => Ok(AnchorRelativeFrom::Page),
+        "margin" => Ok(AnchorRelativeFrom::Margin),
+        "column" => Ok(AnchorRelativeFrom::Column),
+        "character" => Ok(AnchorRelativeFrom::Character),
+        "paragraph" => Ok(AnchorRelativeFrom::Paragraph),
+        "line" => Ok(AnchorRelativeFrom::Line),
+        "insideMargin" => Ok(AnchorRelativeFrom::InsideMargin),
+        "outsideMargin" => Ok(AnchorRelativeFrom::OutsideMargin),
+        "topMargin" => Ok(AnchorRelativeFrom::TopMargin),
+        "bottomMargin" => Ok(AnchorRelativeFrom::BottomMargin),
+        "leftMargin" => Ok(AnchorRelativeFrom::LeftMargin),
+        "rightMargin" => Ok(AnchorRelativeFrom::RightMargin),
+        other => Err(ParseError::InvalidAttributeValue {
+            attr: "relativeFrom".into(),
+            value: other.into(),
+            reason: "unsupported value per OOXML spec".into(),
+        }),
     }
 }
 
-fn parse_anchor_alignment(val: &str) -> AnchorAlignment {
+fn parse_anchor_alignment(val: &str) -> Result<AnchorAlignment> {
+    use crate::error::ParseError;
     match val {
-        "left" => AnchorAlignment::Left,
-        "center" => AnchorAlignment::Center,
-        "right" => AnchorAlignment::Right,
-        "inside" => AnchorAlignment::Inside,
-        "outside" => AnchorAlignment::Outside,
-        "top" => AnchorAlignment::Top,
-        "bottom" => AnchorAlignment::Bottom,
-        other => {
-            log::warn!("unknown anchor alignment: {other}");
-            AnchorAlignment::Left
-        }
+        "left" => Ok(AnchorAlignment::Left),
+        "center" => Ok(AnchorAlignment::Center),
+        "right" => Ok(AnchorAlignment::Right),
+        "inside" => Ok(AnchorAlignment::Inside),
+        "outside" => Ok(AnchorAlignment::Outside),
+        "top" => Ok(AnchorAlignment::Top),
+        "bottom" => Ok(AnchorAlignment::Bottom),
+        other => Err(ParseError::InvalidAttributeValue {
+            attr: "align".into(),
+            value: other.into(),
+            reason: "unsupported value per OOXML spec".into(),
+        }),
     }
 }
 

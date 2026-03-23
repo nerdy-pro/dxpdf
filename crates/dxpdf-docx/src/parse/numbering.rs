@@ -71,7 +71,7 @@ fn parse_level(
     buf: &mut Vec<u8>,
     ilvl: u8,
 ) -> Result<NumberingLevelDefinition> {
-    let mut format = NumberFormat::Decimal;
+    let mut format: Option<NumberFormat> = None;
     let mut level_text = String::new();
     let mut start: Option<u32> = None;
     let mut indentation: Option<Indentation> = None;
@@ -98,7 +98,7 @@ fn parse_level(
                 match local.as_slice() {
                     b"numFmt" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            format = parse_number_format(&val);
+                            format = Some(parse_number_format(&val)?);
                         }
                     }
                     b"lvlText" => {
@@ -182,21 +182,23 @@ fn parse_lvl_override(
     Ok(result)
 }
 
-fn parse_number_format(val: &str) -> NumberFormat {
+/// §17.18.59 ST_NumberFormat
+fn parse_number_format(val: &str) -> Result<NumberFormat> {
     match val {
-        "decimal" => NumberFormat::Decimal,
-        "upperRoman" => NumberFormat::UpperRoman,
-        "lowerRoman" => NumberFormat::LowerRoman,
-        "upperLetter" => NumberFormat::UpperLetter,
-        "lowerLetter" => NumberFormat::LowerLetter,
-        "bullet" => NumberFormat::Bullet,
-        "ordinal" => NumberFormat::Ordinal,
-        "cardinalText" => NumberFormat::CardinalText,
-        "ordinalText" => NumberFormat::OrdinalText,
-        "none" => NumberFormat::None,
-        other => {
-            log::warn!("unknown number format: {other}");
-            NumberFormat::Decimal
-        }
+        "decimal" => Ok(NumberFormat::Decimal),
+        "upperRoman" => Ok(NumberFormat::UpperRoman),
+        "lowerRoman" => Ok(NumberFormat::LowerRoman),
+        "upperLetter" => Ok(NumberFormat::UpperLetter),
+        "lowerLetter" => Ok(NumberFormat::LowerLetter),
+        "bullet" => Ok(NumberFormat::Bullet),
+        "ordinal" => Ok(NumberFormat::Ordinal),
+        "cardinalText" => Ok(NumberFormat::CardinalText),
+        "ordinalText" => Ok(NumberFormat::OrdinalText),
+        "none" => Ok(NumberFormat::None),
+        other => Err(crate::error::ParseError::InvalidAttributeValue {
+            attr: "numFmt/val".into(),
+            value: other.into(),
+            reason: "unsupported value per OOXML spec".into(),
+        }),
     }
 }

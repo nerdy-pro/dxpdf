@@ -61,7 +61,7 @@ impl RevisionSaveId {
 
 /// Revision tracking IDs attached to an element.
 /// Each field records which editing session performed that type of change.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct RevisionIds {
     /// Session that added this element.
     pub r: Option<RevisionSaveId>,
@@ -72,7 +72,7 @@ pub struct RevisionIds {
 }
 
 /// Revision tracking IDs specific to paragraphs.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct ParagraphRevisionIds {
     /// Session that added this paragraph.
     pub r: Option<RevisionSaveId>,
@@ -87,7 +87,7 @@ pub struct ParagraphRevisionIds {
 }
 
 /// Revision tracking IDs specific to table rows.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct TableRowRevisionIds {
     /// Session that added this row.
     pub r: Option<RevisionSaveId>,
@@ -100,7 +100,7 @@ pub struct TableRowRevisionIds {
 }
 
 /// Revision tracking IDs specific to section properties.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SectionRevisionIds {
     /// Session that added this section.
     pub r: Option<RevisionSaveId>,
@@ -112,12 +112,12 @@ pub struct SectionRevisionIds {
 
 // ── Color ────────────────────────────────────────────────────────────────────
 
-/// A fully resolved color — no theme references survive parsing.
+/// A color value as specified in the XML (§17.18.5 ST_HexColor).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Color {
-    /// sRGB color (0xRRGGBB).
+    /// sRGB color parsed from a 6-digit hex string (0xRRGGBB).
     Rgb(u32),
-    /// The special "auto" color — meaning context-dependent (usually black for text).
+    /// The special "auto" color — meaning context-dependent.
     Auto,
 }
 
@@ -136,7 +136,7 @@ pub struct Theme {
     pub minor_font: ThemeFontScheme,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ThemeColorScheme {
     pub dark1: u32,
     pub light1: u32,
@@ -277,7 +277,7 @@ pub struct AbstractNumbering {
 #[derive(Clone, Debug)]
 pub struct NumberingLevelDefinition {
     pub level: u8,
-    pub format: NumberFormat,
+    pub format: Option<NumberFormat>,
     pub level_text: String,
     pub start: Option<u32>,
     pub indentation: Option<Indentation>,
@@ -328,7 +328,7 @@ pub enum SectionType {
     NextColumn,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PageSize {
     pub width: Option<Dimension<Twips>>,
     pub height: Option<Dimension<Twips>>,
@@ -341,7 +341,7 @@ pub enum PageOrientation {
     Landscape,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PageMargins {
     pub top: Option<Dimension<Twips>>,
     pub right: Option<Dimension<Twips>>,
@@ -352,7 +352,7 @@ pub struct PageMargins {
     pub gutter: Option<Dimension<Twips>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Columns {
     pub count: Option<u32>,
     pub space: Option<Dimension<Twips>>,
@@ -486,7 +486,7 @@ pub enum LineSpacing {
 
 /// Raw numbering reference on a paragraph (w:numPr).
 /// Resolve via `Document.numbering` using `num_id` + `level`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct NumberingReference {
     pub num_id: i64,
     pub level: u8,
@@ -537,7 +537,7 @@ pub enum TabLeader {
 
 // ── Borders ──────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParagraphBorders {
     pub top: Option<Border>,
     pub bottom: Option<Border>,
@@ -546,7 +546,7 @@ pub struct ParagraphBorders {
     pub between: Option<Border>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Border {
     pub style: BorderStyle,
     pub width: Dimension<EighthPoints>,
@@ -586,7 +586,7 @@ pub enum BorderStyle {
 
 // ── Shading ──────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shading {
     pub fill: Color,
     pub pattern: ShadingPattern,
@@ -798,7 +798,7 @@ pub enum ImagePlacement {
     Anchor(AnchorProperties),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AnchorProperties {
     pub horizontal_position: AnchorPosition,
     pub vertical_position: AnchorPosition,
@@ -809,16 +809,16 @@ pub struct AnchorProperties {
     pub relative_height: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum AnchorPosition {
     /// Offset from the anchor base.
     Offset {
-        relative_from: AnchorRelativeFrom,
+        relative_from: Option<AnchorRelativeFrom>,
         offset: Dimension<Emu>,
     },
     /// Aligned to an edge of the relative area.
     Align {
-        relative_from: AnchorRelativeFrom,
+        relative_from: Option<AnchorRelativeFrom>,
         alignment: AnchorAlignment,
     },
 }
@@ -850,7 +850,7 @@ pub enum AnchorAlignment {
     Bottom,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum TextWrap {
     /// No wrapping — text does not flow around the image.
     None,
@@ -884,26 +884,12 @@ pub enum HyperlinkTarget {
 
 // ── Field ────────────────────────────────────────────────────────────────────
 
-/// A resolved field (e.g., PAGE, NUMPAGES, TOC, etc.).
+/// A simple field (w:fldSimple). Stores the raw instruction string.
 #[derive(Clone, Debug)]
 pub struct Field {
-    pub kind: FieldKind,
+    /// Raw field instruction string (e.g., " PAGE ", " NUMPAGES ", " TOC \\o ").
+    pub instruction: String,
     pub content: Vec<Inline>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FieldKind {
-    Page,
-    NumPages,
-    Date,
-    Time,
-    FileName,
-    Author,
-    Title,
-    /// Table of contents field.
-    Toc,
-    /// An unrecognized field — stores the raw field code for forward compatibility.
-    Other(String),
 }
 
 // ── Table ────────────────────────────────────────────────────────────────────
@@ -944,7 +930,7 @@ pub enum TableLayout {
     Fixed,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridColumn {
     pub width: Dimension<Twips>,
 }
@@ -956,7 +942,7 @@ pub struct TableRow {
     pub rsids: TableRowRevisionIds,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct TableRowProperties {
     pub height: Option<TableRowHeight>,
     pub is_header: Option<bool>,
@@ -983,7 +969,7 @@ pub struct TableCell {
 }
 
 /// Table cell properties — only fields explicitly present in the XML are `Some`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct TableCellProperties {
     pub width: Option<TableMeasure>,
     pub borders: Option<TableCellBorders>,
@@ -1025,7 +1011,7 @@ pub enum TextDirection {
     TopToBottomLeftToRightRotated,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TableBorders {
     pub top: Option<Border>,
     pub bottom: Option<Border>,
@@ -1035,7 +1021,7 @@ pub struct TableBorders {
     pub inside_v: Option<Border>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TableCellBorders {
     pub top: Option<Border>,
     pub bottom: Option<Border>,

@@ -25,15 +25,6 @@ pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Bl
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) if xml::local_name(e.name().as_ref()) == note_tag_bytes => {
                 let id = xml::optional_attr(e, b"id")?.and_then(|s| s.parse::<i64>().ok());
-                let note_type = xml::optional_attr(e, b"type")?;
-
-                // Skip separator and continuation separator notes
-                if let Some(ref t) = note_type {
-                    if t == "separator" || t == "continuationSeparator" {
-                        xml::skip_to_end(&mut reader, &mut buf, note_tag_bytes)?;
-                        continue;
-                    }
-                }
 
                 if let Some(note_id) = id {
                     let blocks = parse_note_content(&mut reader, &mut buf, note_tag_bytes)?;
