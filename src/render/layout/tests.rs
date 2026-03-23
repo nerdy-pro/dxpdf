@@ -4,7 +4,7 @@ use std::rc::Rc;
 use skia_safe::FontMgr;
 
 use super::fragment::{
-    find_next_tab_stop, fit_fragments, measure_lines, resolve_line_height, Fragment,
+    find_next_tab_stop, fit_fragments, measure_lines, resolve_line_height, FontProps, Fragment,
 };
 use super::measure;
 use super::measure::to_roman;
@@ -885,14 +885,16 @@ fn resolve_line_height_at_least_smaller() {
 fn make_text_frag(text: &str, width: f32) -> Fragment {
     Fragment::Text {
         text: text.to_string(),
-        font_family: Rc::from("Helvetica"),
-        font_size: pt(12.0),
-        bold: false,
-        italic: false,
-        underline: false,
+        font: FontProps {
+            font_family: Rc::from("Helvetica"),
+            font_size: pt(12.0),
+            bold: false,
+            italic: false,
+            underline: false,
+            char_spacing_pt: Pt::ZERO,
+        },
         color: None,
         shading: None,
-        char_spacing_pt: Pt::ZERO,
         measured_width: pt(width),
         measured_height: pt(14.0),
         ascent: pt(11.0),
@@ -1110,14 +1112,16 @@ fn measure_lines_right_alignment() {
 fn measure_lines_with_underline() {
     let frags = [Fragment::Text {
         text: "Underlined".to_string(),
-        font_family: Rc::from("Helvetica"),
-        font_size: pt(12.0),
-        bold: false,
-        italic: false,
-        underline: true,
+        font: FontProps {
+            font_family: Rc::from("Helvetica"),
+            font_size: pt(12.0),
+            bold: false,
+            italic: false,
+            underline: true,
+            char_spacing_pt: Pt::ZERO,
+        },
         color: None,
         shading: None,
-        char_spacing_pt: Pt::ZERO,
         measured_width: pt(60.0),
         measured_height: pt(14.0),
         ascent: pt(11.0),
@@ -1149,18 +1153,20 @@ fn measure_lines_with_underline() {
 fn measure_lines_with_shading() {
     let frags = [Fragment::Text {
         text: "Shaded".to_string(),
-        font_family: Rc::from("Helvetica"),
-        font_size: pt(12.0),
-        bold: false,
-        italic: false,
-        underline: false,
+        font: FontProps {
+            font_family: Rc::from("Helvetica"),
+            font_size: pt(12.0),
+            bold: false,
+            italic: false,
+            underline: false,
+            char_spacing_pt: Pt::ZERO,
+        },
         color: None,
         shading: Some(Color {
             r: 255,
             g: 255,
             b: 0,
         }),
-        char_spacing_pt: Pt::ZERO,
         measured_width: pt(40.0),
         measured_height: pt(14.0),
         ascent: pt(11.0),

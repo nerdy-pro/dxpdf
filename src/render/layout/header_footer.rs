@@ -136,8 +136,7 @@ pub(super) fn layout_header_footer_blocks(
             // MEASURE: collect fragments and produce measured lines
             let fragments = collect_fragments_with_fields(
                 &para.runs,
-                content_width,
-                margin_extent,
+                constraints,
                 defaults,
                 measurer,
                 field_ctx,

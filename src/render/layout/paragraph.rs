@@ -161,8 +161,9 @@ impl Layouter<'_> {
         let mut text_area_bottom = self.cursor_y;
         let mut shading_insert_idx = self.current_page.commands.len();
         let mut first_line_painted = false;
+        let mut rel_y_before = Pt::ZERO;
 
-        for (i, line) in measured.lines.iter().enumerate() {
+        for line in &measured.lines {
             // Page break check
             if self.cursor_y + line.height > self.content_bottom() {
                 // Paint paragraph shading for the current page before breaking
@@ -207,13 +208,12 @@ impl Layouter<'_> {
             }
 
             // Paint line content at absolute position
-            let rel_y_before: Pt = measured.lines[..i].iter().map(|l| l.height).sum();
             let y_offset = self.cursor_y - rel_y_before;
-
             for cmd in &line.commands {
                 self.current_page.commands.push(cmd.offset_y(y_offset));
             }
 
+            rel_y_before += line.height;
             self.cursor_y += line.height;
             text_area_bottom = self.cursor_y;
         }

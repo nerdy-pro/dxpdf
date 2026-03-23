@@ -224,8 +224,7 @@ fn measure_paragraph(
 ) -> MeasuredParagraph {
     let fragments = collect_fragments_with_fields(
         &para.runs,
-        constraints.available_width(),
-        constraints.available_height(),
+        constraints,
         doc_defaults,
         measurer,
         None,
