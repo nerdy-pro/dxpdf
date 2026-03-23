@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::dimension::{EighthPoints, HalfPoints, Pt, Twips};
 use crate::geometry::{PtOffset, PtSize, TwipsEdgeInsets, TwipsSize};
-use crate::units::DEFAULT_FONT_FAMILY;
+/// Default font family when nothing is specified.
+pub const DEFAULT_FONT_FAMILY: &str = "Helvetica";
 
 use std::collections::HashMap;
 
@@ -655,9 +656,6 @@ impl Spacing {
     }
 }
 
-// Re-export for backward compatibility
-pub use crate::units::emu_to_pt;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,9 +693,10 @@ mod tests {
 
     #[test]
     fn emu_to_pt_conversion() {
-        let pt = emu_to_pt(914400);
+        use crate::dimension::{Emu, Pt};
+        let pt = f32::from(Pt::from(Emu::new(914400)));
         assert!((pt - 72.0).abs() < 0.01);
-        assert_eq!(emu_to_pt(0), 0.0);
+        assert_eq!(f32::from(Pt::from(Emu::new(0))), 0.0);
     }
 
     #[test]

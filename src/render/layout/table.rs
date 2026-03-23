@@ -3,22 +3,23 @@ use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::*;
 
 use super::fragment::*;
-use super::{offset_command, DrawCommand, Layouter};
+use super::measure::{MeasuredBlock, MeasuredTable, MeasuredTableCell};
+use super::{DrawCommand, Layouter};
 
 // ============================================================
 // Types for the measure→layout→paint pipeline
 // ============================================================
 
 /// Result of measuring a single cell's content.
-struct MeasuredCell {
+struct LayoutedCell {
     commands: Vec<DrawCommand>,
     content_height: Pt,
     col_width: Pt,
 }
 
 /// Result of measuring all cells in a row.
-struct MeasuredRow {
-    cells: Vec<MeasuredCell>,
+struct LayoutedRow {
+    cells: Vec<LayoutedCell>,
     col_x_positions: Vec<Pt>,
     min_height: Pt,
 }
@@ -35,7 +36,7 @@ struct VmergeSpan {
 // ============================================================
 
 fn resolve_cell_margins(
-    cell: &TableCell,
+    cell: &MeasuredTableCell,
     table_default: &Option<CellMargins>,
     doc_default: &CellMargins,
 ) -> CellMargins {
@@ -67,8 +68,8 @@ fn emit_border(
 // Main entry point
 // ============================================================
 
-impl Layouter {
-    pub(super) fn layout_table(&mut self, table: &Table, next_is_table: bool) {
+impl Layouter<'_> {
+    pub(super) fn layout_table(&mut self, table: &MeasuredTable, next_is_table: bool) {
         if table.rows.is_empty() {
             return;
         }
@@ -77,48 +78,36 @@ impl Layouter {
             return;
         }
 
-        let content_width = self.config.content_width();
+        let page_x = self.constraints.x_origin();
+        let content_width = self.constraints.available_width();
+        let available_height = self.constraints.available_height();
         let doc_cell_margins = self.doc_defaults.default_cell_margins;
 
-        let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
-            let grid_total: Pt = table.grid_cols.iter().map(|w| Pt::from(*w)).sum();
-            let scale = if grid_total > Pt::ZERO {
-                content_width / grid_total
-            } else {
-                1.0
-            };
-            table
-                .grid_cols
-                .iter()
-                .map(|w| Pt::from(*w) * scale)
-                .collect()
-        } else {
-            vec![content_width / num_cols as f32; num_cols]
-        };
+        let col_widths =
+            super::measure::compute_column_widths(&table.grid_cols, num_cols, content_width);
 
         // ============================
         // PASS 1: MEASURE all cells
         // ============================
-        let measured_rows: Vec<MeasuredRow> = table
+        let layouted_rows: Vec<LayoutedRow> = table
             .rows
             .iter()
             .map(|row| {
                 let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
-                let row_height_limit = self.config.content_height();
+                let row_height_limit = available_height;
 
                 let mut col_x_positions = Vec::with_capacity(row.cells.len());
                 let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
                 let mut grid_col_idx = 0;
                 for cell in &row.cells {
-                    let x = self.config.margins.left
-                        + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
+                    let x = page_x + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
                     let w = self.cell_width(grid_col_idx, cell, &col_widths);
                     col_x_positions.push(x);
                     cell_widths_computed.push(w);
                     grid_col_idx += cell.grid_span.max(1) as usize;
                 }
 
-                let mut measured_cells = Vec::with_capacity(row.cells.len());
+                let mut layouted_cells = Vec::with_capacity(row.cells.len());
 
                 for (col_idx, cell) in row.cells.iter().enumerate() {
                     let col_width = cell_widths_computed[col_idx];
@@ -132,7 +121,7 @@ impl Layouter {
                     let cell_content_width = (col_width - pad_left - pad_right).max(Pt::new(1.0));
 
                     if cell.is_vmerge_continue() {
-                        measured_cells.push(MeasuredCell {
+                        layouted_cells.push(LayoutedCell {
                             commands: Vec::new(),
                             content_height: Pt::ZERO,
                             col_width,
@@ -144,7 +133,7 @@ impl Layouter {
                     let mut cell_y = pad_top;
 
                     for block in &cell.blocks {
-                        if let Block::Paragraph(p) = block {
+                        if let MeasuredBlock::Paragraph(p) = block {
                             let spacing =
                                 self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
                             cell_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
@@ -174,27 +163,10 @@ impl Layouter {
                                 cell_y += img_h;
                             }
 
-                            let fragments = collect_fragments(
-                                &p.runs,
-                                cell_content_width,
-                                self.config.content_height(),
-                                &self.doc_defaults,
-                                &self.measurer,
-                                &self.image_cache,
-                            );
+                            let fragments = &p.fragments;
 
                             if fragments.is_empty() && p.floats.is_empty() {
-                                let default_size = Pt::from(self.doc_defaults.font_size);
-                                let natural = self
-                                    .measurer
-                                    .font(
-                                        &self.doc_defaults.font_family,
-                                        default_size,
-                                        false,
-                                        false,
-                                    )
-                                    .metrics()
-                                    .line_height;
+                                let natural = self.doc_defaults.default_line_height;
                                 cell_y += resolve_line_height(natural, spacing.line_spacing());
                                 cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                                 continue;
@@ -206,7 +178,7 @@ impl Layouter {
 
                             // Use shared measure_lines for fragment → command conversion
                             let measured = measure_lines(
-                                &fragments,
+                                fragments,
                                 cell_x + pad_left,
                                 cell_content_width,
                                 Pt::ZERO, // no first-line indent in cells
@@ -214,13 +186,14 @@ impl Layouter {
                                 spacing.line_spacing(),
                                 &p.properties.tab_stops,
                                 self.default_tab_stop_pt,
-                                &self.image_cache,
+                                self.image_cache,
+                                None,
                             );
 
                             // Offset measured commands by cell_y and accumulate
                             for line in &measured.lines {
                                 for cmd in &line.commands {
-                                    commands.push(offset_command(cmd, cell_y));
+                                    commands.push(cmd.offset_y(cell_y));
                                 }
                             }
                             cell_y += measured.total_height;
@@ -233,15 +206,15 @@ impl Layouter {
                     let effective_pad_bottom = pad_bottom.max(Pt::new(1.0));
                     let content_height = cell_y + effective_pad_bottom;
 
-                    measured_cells.push(MeasuredCell {
+                    layouted_cells.push(LayoutedCell {
                         commands,
                         content_height,
                         col_width,
                     });
                 }
 
-                MeasuredRow {
-                    cells: measured_cells,
+                LayoutedRow {
+                    cells: layouted_cells,
                     col_x_positions,
                     min_height,
                 }
@@ -262,7 +235,7 @@ impl Layouter {
                             r.cells.get(col_idx).is_some_and(|c| c.is_vmerge_continue())
                         })
                         .count();
-                    let content_height = measured_rows[row_idx].cells[col_idx].content_height;
+                    let content_height = layouted_rows[row_idx].cells[col_idx].content_height;
                     vmerge_spans.push(VmergeSpan {
                         total_height: content_height,
                         start_row: row_idx,
@@ -273,7 +246,7 @@ impl Layouter {
         }
 
         // Compute base row heights from non-merged cells only.
-        let mut row_heights: Vec<Pt> = measured_rows
+        let mut row_heights: Vec<Pt> = layouted_rows
             .iter()
             .enumerate()
             .map(|(row_idx, mr)| {
@@ -311,7 +284,7 @@ impl Layouter {
             .unwrap_or(self.doc_defaults.default_table_borders);
         let num_rows = table.rows.len();
 
-        for (row_idx, (mrow, row)) in measured_rows.iter().zip(table.rows.iter()).enumerate() {
+        for (row_idx, (mrow, row)) in layouted_rows.iter().zip(table.rows.iter()).enumerate() {
             let row_height = row_heights[row_idx];
 
             if self.cursor_y + row_height > self.content_bottom() {
@@ -336,9 +309,7 @@ impl Layouter {
 
                 // 2. Cell content (offset by row_top)
                 for cmd in &mc.commands {
-                    self.current_page
-                        .commands
-                        .push(offset_command(cmd, row_top));
+                    self.current_page.commands.push(cmd.offset_y(row_top));
                 }
 
                 // 3. Cell borders

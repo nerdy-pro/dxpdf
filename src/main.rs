@@ -32,7 +32,8 @@ fn main() -> Result<(), dxpdf::Error> {
         let font_mgr = skia_safe::FontMgr::new();
         dxpdf::render::fonts::preload_fonts(&font_mgr, &document.font_families());
         let t_fonts = Instant::now();
-        let pages = dxpdf::render::layout::layout(&document, &font_mgr);
+        let measured = dxpdf::render::layout::measure::measure(&document, &font_mgr);
+        let pages = dxpdf::render::layout::layout(&measured, &font_mgr);
         let t2 = Instant::now();
         let pdf_bytes = dxpdf::render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)?;
         let t3 = Instant::now();

@@ -90,13 +90,91 @@ pub fn push_float(state: &mut ParseState, stack: &mut [ParseState], float: Float
     }
 }
 
-/// Push an inline element into the current paragraph or run context.
-pub fn push_inline(state: &mut ParseState, inline: Inline) {
-    match state {
-        ParseState::InParagraph { ref mut runs, .. } => {
+/// Push an inline element into the nearest paragraph — current state first, then stack.
+pub fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState], inline: Inline) {
+    if let ParseState::InParagraph { ref mut runs, .. } = state {
+        runs.push(inline);
+        return;
+    }
+    for s in stack.iter_mut().rev() {
+        if let ParseState::InParagraph { ref mut runs, .. } = s {
             runs.push(inline);
+            return;
         }
-        ParseState::InRun { .. } => {}
+    }
+}
+
+/// Set or clear the `in_cell_mar` flag on InTable or InTableCell state.
+pub fn set_in_cell_mar(state: &mut ParseState, value: bool) {
+    match state {
+        ParseState::InTable {
+            ref mut in_cell_mar,
+            ..
+        } => *in_cell_mar = value,
+        ParseState::InTableCell {
+            ref mut in_cell_mar,
+            ..
+        } => *in_cell_mar = value,
         _ => {}
     }
+}
+
+/// Set or clear the `in_borders` flag on InTable or InTableCell state.
+pub fn set_in_borders(state: &mut ParseState, value: bool) {
+    match state {
+        ParseState::InTable {
+            ref mut in_borders, ..
+        } => *in_borders = value,
+        ParseState::InTableCell {
+            ref mut in_borders, ..
+        } => *in_borders = value,
+        _ => {}
+    }
+}
+
+/// Handle a w:fldChar element (begin/separate/end field code state machine).
+pub fn handle_fld_char(
+    e: &quick_xml::events::BytesStart<'_>,
+    state: &mut ParseState,
+    stack: &mut [ParseState],
+    field_instr: &mut Option<String>,
+    field_suppressing: &mut bool,
+    field_props: &mut RunProperties,
+) -> Result<(), Error> {
+    if let Some(val) = get_attr(e, b"fldCharType")? {
+        match val.as_str() {
+            "begin" => {
+                *field_instr = Some(String::new());
+                *field_suppressing = false;
+                if let ParseState::InRun { ref props, .. } = state {
+                    *field_props = props.clone();
+                }
+            }
+            "separate" => {
+                *field_suppressing = true;
+            }
+            "end" => {
+                if let Some(instr) = field_instr.take() {
+                    let trimmed = instr.trim().to_uppercase();
+                    let field_type = if trimmed.starts_with("PAGE") {
+                        Some(FieldType::Page)
+                    } else if trimmed.starts_with("NUMPAGES") {
+                        Some(FieldType::NumPages)
+                    } else {
+                        None
+                    };
+                    if let Some(ft) = field_type {
+                        let fc = FieldCode {
+                            field_type: ft,
+                            properties: field_props.clone(),
+                        };
+                        push_inline_to_paragraph(state, stack, Inline::Field(fc));
+                    }
+                }
+                *field_suppressing = false;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
