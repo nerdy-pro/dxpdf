@@ -10,47 +10,20 @@ use std::rc::Rc;
 use crate::error::Error;
 use crate::model::{Block, Document, HeaderFooter, ImageStore, Inline, Spacing, StyleMap};
 
-/// Build an image store mapping relationship IDs to raw image bytes.
-/// Body images use the document relationships; header/footer images use their own rels
-/// (prefixed with the header/footer filename to avoid collisions).
-fn build_image_store(
-    rels: &HashMap<String, String>,
-    media: &HashMap<String, Vec<u8>>,
-    hf_rels: &HashMap<String, HashMap<String, String>>,
-) -> ImageStore {
-    let mut store = ImageStore::new();
-
-    // Body images: rel_id -> bytes
-    for (rel_id, target) in rels {
-        if let Some(bytes) = media.get(target) {
-            store.insert(rel_id.clone(), bytes.clone());
-        }
-    }
-
-    // Header/footer images: prefix with hf filename to avoid collisions
-    // e.g., "header1.xml::rId1"
-    for (hf_name, hf_rel_map) in hf_rels {
-        for (rel_id, target) in hf_rel_map {
-            if let Some(bytes) = media.get(target) {
-                let prefixed_key = format!("{hf_name}::{rel_id}");
-                store.insert(prefixed_key, bytes.clone());
-            }
-        }
-    }
-
-    store
-}
-
 /// Parse a DOCX file (as raw bytes) into a `Document`.
+///
+/// Returns the raw parsed model with no style resolution or property merging.
+/// Call [`resolve`] on the result before rendering.
 pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     let contents = archive::extract_docx_contents(docx_bytes)?;
     let mut document =
         xml::parse_document_xml_with_rels(&contents.document_xml, &contents.relationships)?;
+
+    // Populate document defaults from auxiliary XML files
     let defs = &mut document.defaults;
     if let Some(dts) = contents.default_tab_stop {
         defs.tab_stop = dts;
     }
-    // Apply theme font as default (can be overridden by docDefaults)
     if let Some(ref tf) = contents.theme_minor_font {
         defs.font_family = Rc::from(tf.as_str());
     }
@@ -97,13 +70,7 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
         &contents.header_footer.rels,
     );
 
-    // Apply named styles to paragraphs and runs
-    let styles = document.defaults.styles.clone();
-    for section in &mut document.sections {
-        apply_styles(&mut section.blocks, &styles);
-    }
-
-    // Resolve headers/footers on sections
+    // Resolve headers/footers from XML files
     resolve_headers_footers(
         &mut document,
         &contents.relationships,
@@ -112,6 +79,49 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     );
 
     Ok(document)
+}
+
+/// Resolve styles and inherited properties on a parsed document.
+///
+/// Applies named styles, character styles, and paragraph default run
+/// properties so that every run carries its final formatting.
+/// Must be called before rendering.
+pub fn resolve(document: &mut Document) {
+    let styles = document.defaults.styles.clone();
+    for section in &mut document.sections {
+        apply_styles(&mut section.blocks, &styles);
+        apply_paragraph_run_defaults(&mut section.blocks);
+    }
+}
+
+// ============================================================
+// Internal helpers
+// ============================================================
+
+/// Build an image store mapping relationship IDs to raw image bytes.
+fn build_image_store(
+    rels: &HashMap<String, String>,
+    media: &HashMap<String, Vec<u8>>,
+    hf_rels: &HashMap<String, HashMap<String, String>>,
+) -> ImageStore {
+    let mut store = ImageStore::new();
+
+    for (rel_id, target) in rels {
+        if let Some(bytes) = media.get(target) {
+            store.insert(rel_id.clone(), bytes.clone());
+        }
+    }
+
+    for (hf_name, hf_rel_map) in hf_rels {
+        for (rel_id, target) in hf_rel_map {
+            if let Some(bytes) = media.get(target) {
+                let prefixed_key = format!("{hf_name}::{rel_id}");
+                store.insert(prefixed_key, bytes.clone());
+            }
+        }
+    }
+
+    store
 }
 
 /// Resolve headers and footers from XML files, linking them to sections.
@@ -138,31 +148,24 @@ fn resolve_headers_footers(
     }
 }
 
-/// Resolve a single header or footer from its relationship ID.
 fn resolve_hf(
     rid: &str,
     rels: &HashMap<String, String>,
     hf_xml: &HashMap<String, String>,
     hf_rels: &HashMap<String, HashMap<String, String>>,
 ) -> Option<HeaderFooter> {
-    // Map rId -> filename (e.g., "header2.xml")
     let target = rels.get(rid)?;
     let xml_content = hf_xml.get(target)?;
 
-    // Parse with the header/footer's own rels so hyperlinks resolve correctly.
-    // Image data is resolved separately via the ImageStore.
     let empty_rels = HashMap::new();
     let own_rels = hf_rels.get(target).unwrap_or(&empty_rels);
 
-    // Prefix rel_ids for header/footer images so they match the ImageStore keys
     let mut hf = xml::parse_header_footer_xml_with_rels(xml_content, own_rels).ok()?;
     prefix_image_rel_ids(&mut hf.blocks, target);
 
     Some(hf)
 }
 
-/// Prefix image rel_ids in header/footer blocks so they match the ImageStore keys.
-/// E.g., "rId1" in "header1.xml" becomes "header1.xml::rId1".
 fn prefix_image_rel_ids(blocks: &mut [Block], hf_name: &str) {
     for block in blocks {
         match block {
@@ -219,13 +222,10 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
             Block::Paragraph(p) => {
                 if let Some(ref sid) = p.properties.style_id {
                     if let Some(style) = styles.get(sid) {
-                        // Merge style properties as defaults (direct formatting wins)
                         let props = &mut p.properties;
                         if props.alignment.is_none() {
                             props.alignment = style.alignment;
                         }
-                        // Merge spacing field-by-field so direct line=276 doesn't
-                        // block style's after=0
                         if let Some(ref style_sp) = style.spacing {
                             let sp = props.spacing.get_or_insert(Spacing::default());
                             if sp.before.is_none() {
@@ -243,8 +243,6 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                             props.indentation = style.indentation;
                         }
 
-                        // Apply style's run properties to all runs that lack
-                        // direct formatting
                         for run in &mut p.runs {
                             if let Inline::TextRun(tr) = run {
                                 let rp = &mut tr.properties;
@@ -267,7 +265,6 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                         }
                     }
                 }
-                // Apply character styles (w:rStyle) to individual runs
                 for run in &mut p.runs {
                     if let Inline::TextRun(tr) = run {
                         if let Some(ref sid) = tr.properties.style_id {
@@ -282,6 +279,38 @@ fn apply_styles(blocks: &mut [Block], styles: &StyleMap) {
                 for row in &mut t.rows {
                     for cell in &mut row.cells {
                         apply_styles(&mut cell.blocks, styles);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Apply paragraph-level default run properties (`pPr/rPr`) to runs that lack
+/// explicit font size or family. Only metric-affecting properties are inherited —
+/// `pPr/rPr` defines the paragraph mark's formatting, not a general default
+/// for bold/italic/color/underline.
+fn apply_paragraph_run_defaults(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => {
+                if let Some(ref drp) = p.properties.default_run_props {
+                    for run in &mut p.runs {
+                        if let Inline::TextRun(tr) = run {
+                            if tr.properties.font_size.is_none() {
+                                tr.properties.font_size = drp.font_size;
+                            }
+                            if tr.properties.font_family.is_none() {
+                                tr.properties.font_family = drp.font_family.clone();
+                            }
+                        }
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        apply_paragraph_run_defaults(&mut cell.blocks);
                     }
                 }
             }

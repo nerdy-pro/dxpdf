@@ -204,8 +204,37 @@ pub(super) fn handle_empty_element(
         ParseState::InParagraphProperties {
             ref mut props,
             ref in_pbdr,
+            ref in_rpr,
             ..
         } => {
+            if *in_rpr {
+                // Inside w:pPr/w:rPr — only capture metric-affecting properties
+                // (font size and family) used to resolve line height for runs
+                // that lack explicit sizing. pPr/rPr defines the paragraph mark's
+                // formatting; bold/italic/color/underline are NOT inherited by runs.
+                let rp = props
+                    .default_run_props
+                    .get_or_insert(RunProperties::default());
+                match local {
+                    b"sz" => {
+                        if let Some(val) = get_attr(e, b"val")? {
+                            rp.font_size = val
+                                .parse::<i64>()
+                                .ok()
+                                .map(crate::dimension::HalfPoints::new);
+                        }
+                    }
+                    b"rFonts" => {
+                        if let Some(val) = get_attr(e, b"ascii")? {
+                            rp.font_family = Some(std::rc::Rc::from(val.as_str()));
+                        } else if let Some(val) = get_attr(e, b"hAnsi")? {
+                            rp.font_family = Some(std::rc::Rc::from(val.as_str()));
+                        }
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
             if *in_pbdr {
                 // Inside w:pBdr — parse border edge elements
                 let border = parse_border_def(e)?;

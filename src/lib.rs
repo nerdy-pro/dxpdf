@@ -14,7 +14,8 @@ pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
     use std::time::Instant;
 
     let t0 = Instant::now();
-    let document = parse::parse(docx_bytes)?;
+    let mut document = parse::parse(docx_bytes)?;
+    parse::resolve(&mut document);
     log::debug!("Parse:  {:?}", t0.elapsed());
 
     let t1 = Instant::now();
