@@ -1407,10 +1407,13 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
             properties: SectionProperties::default(),
             blocks: vec![simple_paragraph("Test")],
         }],
-        default_spacing: Spacing {
-            before: Some(tw(100)), // 5pt
-            after: Some(tw(200)),  // 10pt
-            line: None,
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                before: Some(tw(100)), // 5pt
+                after: Some(tw(200)),  // 10pt
+                line: None,
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Document::default()
@@ -1447,10 +1450,13 @@ fn direct_spacing_overrides_defaults() {
                 floats: Vec::new(),
             }))],
         }],
-        default_spacing: Spacing {
-            before: Some(tw(100)),
-            after: Some(tw(200)),
-            line: None,
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                before: Some(tw(100)),
+                after: Some(tw(200)),
+                line: None,
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Document::default()
@@ -1758,21 +1764,24 @@ fn bullet_list_renders_label() {
                 floats: Vec::new(),
             }))],
         }],
-        numbering: {
-            let mut map = std::collections::HashMap::new();
-            map.insert(
-                1,
-                NumberingDef {
-                    levels: vec![NumberingLevel {
-                        format: NumberFormat::Bullet("\u{2022}".to_string()),
-                        level_text: "%1".to_string(),
-                        start: 1,
-                        indent_left: tw(720),
-                        indent_hanging: tw(360),
-                    }],
-                },
-            );
-            map
+        defaults: DocumentDefaults {
+            numbering: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    1,
+                    NumberingDef {
+                        levels: vec![NumberingLevel {
+                            format: NumberFormat::Bullet("\u{2022}".to_string()),
+                            level_text: "%1".to_string(),
+                            start: 1,
+                            indent_left: tw(720),
+                            indent_hanging: tw(360),
+                        }],
+                    },
+                );
+                map
+            },
+            ..Default::default()
         },
         ..Document::default()
     };
@@ -1810,21 +1819,24 @@ fn decimal_list_increments_counter() {
             properties: SectionProperties::default(),
             blocks,
         }],
-        numbering: {
-            let mut map = std::collections::HashMap::new();
-            map.insert(
-                1,
-                NumberingDef {
-                    levels: vec![NumberingLevel {
-                        format: NumberFormat::Decimal,
-                        level_text: "%1.".to_string(),
-                        start: 1,
-                        indent_left: tw(720),
-                        indent_hanging: tw(360),
-                    }],
-                },
-            );
-            map
+        defaults: DocumentDefaults {
+            numbering: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    1,
+                    NumberingDef {
+                        levels: vec![NumberingLevel {
+                            format: NumberFormat::Decimal,
+                            level_text: "%1.".to_string(),
+                            start: 1,
+                            indent_left: tw(720),
+                            indent_hanging: tw(360),
+                        }],
+                    },
+                );
+                map
+            },
+            ..Default::default()
         },
         ..Document::default()
     };
@@ -2002,8 +2014,11 @@ fn after_table_spacing_uses_doc_default() {
             properties: SectionProperties::default(),
             blocks: vec![Block::Table(Box::new(table)), simple_paragraph("After")],
         }],
-        default_spacing: Spacing {
-            after: Some(tw(200)),
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                after: Some(tw(200)),
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Document::default()

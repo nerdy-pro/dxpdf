@@ -122,51 +122,56 @@ pub struct Section {
     pub blocks: Vec<Block>,
 }
 
-/// Root of the document tree.
+/// Document-wide defaults from `word/styles.xml`, `word/settings.xml`, and theme.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Document {
-    pub sections: Vec<Section>,
+pub struct DocumentDefaults {
     /// Default tab stop interval.
-    pub default_tab_stop: Twips,
+    pub tab_stop: Twips,
     /// Default font size in half-points.
-    pub default_font_size: HalfPoints,
+    pub font_size: HalfPoints,
     /// Default font family.
-    pub default_font_family: Rc<str>,
+    pub font_family: Rc<str>,
     /// Default paragraph spacing.
-    pub default_spacing: Spacing,
+    pub spacing: Spacing,
     /// Default table cell margins.
-    pub default_cell_margins: CellMargins,
+    pub cell_margins: CellMargins,
     /// Default paragraph spacing inside table cells.
     pub table_cell_spacing: Spacing,
     /// Default table borders (from table style).
-    pub default_table_borders: TableBorders,
+    pub table_borders: TableBorders,
     /// Named paragraph/run styles resolved from `word/styles.xml`.
     pub styles: StyleMap,
     /// Numbering definitions from `word/numbering.xml`.
     pub numbering: NumberingMap,
-    /// Raw image bytes keyed by relationship ID.
-    pub images: ImageStore,
 }
 
-impl Default for Document {
+impl Default for DocumentDefaults {
     fn default() -> Self {
         Self {
-            sections: Vec::new(),
-            default_tab_stop: Self::DEFAULT_TAB_STOP,
-            default_font_size: Self::DEFAULT_FONT_SIZE,
-            default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
-            default_spacing: Spacing::default(),
-            default_cell_margins: CellMargins::default(),
+            tab_stop: Document::DEFAULT_TAB_STOP,
+            font_size: Document::DEFAULT_FONT_SIZE,
+            font_family: Rc::from(DEFAULT_FONT_FAMILY),
+            spacing: Spacing::default(),
+            cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing {
                 after: Some(Twips::new(0)),
                 ..Default::default()
             },
-            default_table_borders: TableBorders::default(),
+            table_borders: TableBorders::default(),
             styles: StyleMap::new(),
             numbering: NumberingMap::new(),
-            images: ImageStore::new(),
         }
     }
+}
+
+/// Root of the document tree.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Document {
+    pub sections: Vec<Section>,
+    /// Document-wide defaults (fonts, spacing, styles, numbering).
+    pub defaults: DocumentDefaults,
+    /// Raw image bytes keyed by relationship ID.
+    pub images: ImageStore,
 }
 
 impl Document {
@@ -191,10 +196,10 @@ impl Document {
     pub fn font_families(&self) -> Vec<Rc<str>> {
         use std::collections::HashSet;
         let mut families = HashSet::new();
-        families.insert(self.default_font_family.clone());
+        families.insert(self.defaults.font_family.clone());
 
         // From styles
-        for style in self.styles.values() {
+        for style in self.defaults.styles.values() {
             if let Some(ref f) = style.run_props.font_family {
                 families.insert(f.clone());
             }

@@ -31,8 +31,9 @@ pub struct DocDefaultsLayout {
 
 impl DocDefaultsLayout {
     pub fn from_document(doc: &Document, measurer: &TextMeasurer) -> Self {
-        let font_size = doc.default_font_size;
-        let font_family = Rc::clone(&doc.default_font_family);
+        let defs = &doc.defaults;
+        let font_size = defs.font_size;
+        let font_family = Rc::clone(&defs.font_family);
         let default_size_pt = Pt::from(font_size);
         let default_line_height = measurer
             .font(&font_family, default_size_pt, false, false)
@@ -57,13 +58,13 @@ impl DocDefaultsLayout {
         Self {
             font_size,
             font_family,
-            default_spacing: doc.default_spacing,
-            default_cell_margins: doc.default_cell_margins,
-            table_cell_spacing: doc.table_cell_spacing,
-            default_table_borders: doc.default_table_borders,
+            default_spacing: defs.spacing,
+            default_cell_margins: defs.cell_margins,
+            table_cell_spacing: defs.table_cell_spacing,
+            default_table_borders: defs.table_borders,
             default_header,
             default_footer,
-            numbering: doc.numbering.clone(),
+            numbering: defs.numbering.clone(),
             default_line_height,
         }
     }
@@ -159,7 +160,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
     let measurer = TextMeasurer::new(font_mgr.clone());
     let doc_defaults = DocDefaultsLayout::from_document(doc, &measurer);
     let image_cache = ImageCache::new(&doc.images);
-    let default_tab_stop = Pt::from(doc.default_tab_stop);
+    let default_tab_stop = Pt::from(doc.defaults.tab_stop);
 
     // List counter state for numbering (shared across sections)
     let mut list_counters: std::collections::HashMap<(u32, u32), u32> =

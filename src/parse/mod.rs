@@ -46,48 +46,48 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     let contents = archive::extract_docx_contents(docx_bytes)?;
     let mut document =
         xml::parse_document_xml_with_rels(&contents.document_xml, &contents.relationships)?;
+    let defs = &mut document.defaults;
     if let Some(dts) = contents.default_tab_stop {
-        document.default_tab_stop = dts;
+        defs.tab_stop = dts;
     }
     // Apply theme font as default (can be overridden by docDefaults)
     if let Some(ref tf) = contents.theme_minor_font {
-        document.default_font_family = Rc::from(tf.as_str());
+        defs.font_family = Rc::from(tf.as_str());
     }
     if let Some(dd) = &contents.doc_defaults {
         if let Some(fs) = dd.font_size {
-            document.default_font_size = fs;
+            defs.font_size = fs;
         }
         if let Some(ref ff) = dd.font_family {
-            document.default_font_family = Rc::from(ff.as_str());
+            defs.font_family = Rc::from(ff.as_str());
         }
         if let Some(sa) = dd.spacing_after {
-            document.default_spacing.after = Some(sa);
+            defs.spacing.after = Some(sa);
         }
         if let Some(sb) = dd.spacing_before {
-            document.default_spacing.before = Some(sb);
+            defs.spacing.before = Some(sb);
         }
         if let Some(sl) = dd.spacing_line {
-            document.default_spacing.line = Some(sl);
+            defs.spacing.line = Some(sl);
         }
-
         if let Some(slr) = dd.spacing_line_rule {
-            document.default_spacing.line_rule = slr;
+            defs.spacing.line_rule = slr;
         }
         if let Some(cm) = dd.cell_margins {
-            document.default_cell_margins = cm;
+            defs.cell_margins = cm;
         }
         if let Some(tcs) = dd.table_cell_spacing {
-            document.table_cell_spacing = tcs;
+            defs.table_cell_spacing = tcs;
         }
         if let Some(tb) = dd.table_borders {
-            document.default_table_borders = tb;
+            defs.table_borders = tb;
         }
         if !dd.styles.is_empty() {
-            document.styles = dd.styles.clone();
+            defs.styles = dd.styles.clone();
         }
     }
     if !contents.numbering.is_empty() {
-        document.numbering = contents.numbering.clone();
+        defs.numbering = contents.numbering.clone();
     }
 
     // Build the image store from relationships + media files
@@ -98,7 +98,7 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     );
 
     // Apply named styles to paragraphs and runs
-    let styles = document.styles.clone();
+    let styles = document.defaults.styles.clone();
     for section in &mut document.sections {
         apply_styles(&mut section.blocks, &styles);
     }

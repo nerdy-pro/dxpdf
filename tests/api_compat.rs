@@ -72,16 +72,20 @@ fn document_default_and_fields() {
     let doc = dxpdf::model::Document::default();
 
     let _: &Vec<dxpdf::model::Section> = &doc.sections;
-    let _: dxpdf::dimension::Twips = doc.default_tab_stop;
-    let _: dxpdf::dimension::HalfPoints = doc.default_font_size;
-    let _: &Rc<str> = &doc.default_font_family;
-    let _: &dxpdf::model::Spacing = &doc.default_spacing;
-    let _: &dxpdf::model::CellMargins = &doc.default_cell_margins;
-    let _: &dxpdf::model::Spacing = &doc.table_cell_spacing;
-    let _: &dxpdf::model::TableBorders = &doc.default_table_borders;
-    let _: &dxpdf::model::StyleMap = &doc.styles;
-    let _: &dxpdf::model::NumberingMap = &doc.numbering;
+    let _: &dxpdf::model::DocumentDefaults = &doc.defaults;
     let _: &dxpdf::model::ImageStore = &doc.images;
+
+    // DocumentDefaults fields
+    let d = &doc.defaults;
+    let _: dxpdf::dimension::Twips = d.tab_stop;
+    let _: dxpdf::dimension::HalfPoints = d.font_size;
+    let _: &Rc<str> = &d.font_family;
+    let _: &dxpdf::model::Spacing = &d.spacing;
+    let _: &dxpdf::model::CellMargins = &d.cell_margins;
+    let _: &dxpdf::model::Spacing = &d.table_cell_spacing;
+    let _: &dxpdf::model::TableBorders = &d.table_borders;
+    let _: &dxpdf::model::StyleMap = &d.styles;
+    let _: &dxpdf::model::NumberingMap = &d.numbering;
 }
 
 #[test]
