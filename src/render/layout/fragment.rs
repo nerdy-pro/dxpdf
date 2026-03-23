@@ -261,7 +261,12 @@ pub fn collect_fragments_with_fields(
                     (FieldType::NumPages, Some(ctx)) => ctx.num_pages.to_string(),
                     _ => "?".to_string(),
                 };
-                fragments.push(build_field_fragment(text, &fc.properties, defaults, measurer));
+                fragments.push(build_field_fragment(
+                    text,
+                    &fc.properties,
+                    defaults,
+                    measurer,
+                ));
             }
         }
     }

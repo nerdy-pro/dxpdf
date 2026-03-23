@@ -98,8 +98,7 @@ impl Layouter<'_> {
         for (col_idx, cell) in row.cells.iter().enumerate() {
             let col_width = cell_widths_computed[col_idx];
             let cell_x = col_x_positions[col_idx];
-            let margins =
-                resolve_cell_margins(cell, &table.default_cell_margins, doc_cell_margins);
+            let margins = resolve_cell_margins(cell, &table.default_cell_margins, doc_cell_margins);
             let pad_left = Pt::from(margins.left);
             let pad_right = Pt::from(margins.right);
             let pad_top = Pt::from(margins.top);
@@ -226,7 +225,14 @@ impl Layouter<'_> {
             .rows
             .iter()
             .map(|row| {
-                self.layout_table_row(row, table, &col_widths, page_x, available_height, &doc_cell_margins)
+                self.layout_table_row(
+                    row,
+                    table,
+                    &col_widths,
+                    page_x,
+                    available_height,
+                    &doc_cell_margins,
+                )
             })
             .collect();
 

@@ -102,7 +102,11 @@ pub(super) fn push_float(state: &mut ParseState, stack: &mut [ParseState], float
 }
 
 /// Push an inline element into the nearest paragraph — current state first, then stack.
-pub(super) fn push_inline_to_paragraph(state: &mut ParseState, stack: &mut [ParseState], inline: Inline) {
+pub(super) fn push_inline_to_paragraph(
+    state: &mut ParseState,
+    stack: &mut [ParseState],
+    inline: Inline,
+) {
     if let ParseState::InParagraph { ref mut runs, .. } = state {
         runs.push(inline);
         return;

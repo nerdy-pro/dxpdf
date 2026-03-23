@@ -72,7 +72,10 @@ fn collect_entry_names(
 /// Extract header/footer XML content and their relationships from the archive.
 fn extract_headers_footers(
     archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
-) -> (HashMap<String, String>, HashMap<String, HashMap<String, String>>) {
+) -> (
+    HashMap<String, String>,
+    HashMap<String, HashMap<String, String>>,
+) {
     let mut header_footer_xml = HashMap::new();
     let mut header_footer_rels = HashMap::new();
 
@@ -368,16 +371,13 @@ impl DocDefaultsBuilder {
             let val = String::from_utf8_lossy(&attr.value);
             match key {
                 b"after" => {
-                    self.spacing_after =
-                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                    self.spacing_after = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
                 }
                 b"before" => {
-                    self.spacing_before =
-                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                    self.spacing_before = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
                 }
                 b"line" => {
-                    self.spacing_line =
-                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                    self.spacing_line = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
                 }
                 b"lineRule" => {
                     self.spacing_line_rule = match val.as_ref() {
@@ -448,15 +448,9 @@ impl DocDefaultsBuilder {
             let key = local_name(attr.key.as_ref());
             let val = String::from_utf8_lossy(&attr.value);
             match key {
-                b"after" => {
-                    sp.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                }
-                b"before" => {
-                    sp.before = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                }
-                b"line" => {
-                    sp.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                }
+                b"after" => sp.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new),
+                b"before" => sp.before = val.parse::<i64>().ok().map(crate::dimension::Twips::new),
+                b"line" => sp.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new),
                 _ => {}
             }
         }
@@ -564,9 +558,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 if in_table_style_borders && builder.table_borders.is_none() {
                     builder.handle_table_border(local, e);
                 }
-                if in_table_style_ppr
-                    && local == b"spacing"
-                    && builder.table_cell_spacing.is_none()
+                if in_table_style_ppr && local == b"spacing" && builder.table_cell_spacing.is_none()
                 {
                     builder.handle_table_cell_spacing(e);
                 }
