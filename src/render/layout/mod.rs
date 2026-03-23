@@ -175,16 +175,14 @@ pub fn layout(
     // Pre-measure header height using a TextMeasurer (headers contain field codes
     // that require per-page context, so they remain unmeasured in MeasuredDocument).
     let hf_measurer = measurer::TextMeasurer::new(font_mgr.clone());
+    let hf_constraints =
+        context::LayoutConstraints::for_header_footer(&initial_config, initial_config.margins.top);
     if let Some(ref header) = measured.doc_defaults.default_header {
         let (_, header_bottom) = header_footer::layout_header_footer_blocks(
             &header.blocks,
-            initial_config.margins.left,
+            &hf_constraints,
             initial_config.header_margin,
-            initial_config.content_width(),
             initial_config.margins.top,
-            initial_config.page_size.height,
-            initial_config.page_size.width,
-            initial_config.page_size.height,
             &measured.doc_defaults,
             &hf_measurer,
             default_tab_stop_pt,

@@ -2,6 +2,7 @@ use crate::dimension::Pt;
 use crate::geometry::PtRect;
 use crate::model::*;
 
+use super::context::LayoutConstraints;
 use super::fragment::*;
 use super::measurer;
 use super::{offset_command, DrawCommand, LayoutConfig, LayoutedPage};
@@ -18,19 +19,10 @@ pub(super) fn render_headers_footers(
     let measurer = measurer::TextMeasurer::new(font_mgr.clone());
     let num_pages = pages.len() as u32;
 
+    let hf_constraints = LayoutConstraints::for_header_footer(config, config.margins.top);
+
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let page_number = (page_idx + 1) as u32;
-        let page_width = page.page_size.width;
-        let page_height = page.page_size.height;
-        let margin_left = config.margins.left;
-        let margin_right = config.margins.right;
-        let content_width = page_width - margin_left - margin_right;
-        let header_y = config.header_margin;
-        let footer_y = page_height - config.margins.bottom;
-
-        let margin_top = config.margins.top;
-        let margin_bottom = config.margins.bottom;
-
         let field_ctx = FieldContext {
             page_number,
             num_pages,
@@ -40,13 +32,9 @@ pub(super) fn render_headers_footers(
         if let Some(ref header) = doc_defaults.default_header {
             let (commands, _header_bottom) = layout_header_footer_blocks(
                 &header.blocks,
-                margin_left,
-                header_y,
-                content_width,
-                margin_top,
-                page_height,
-                page_width,
-                page_height,
+                &hf_constraints,
+                config.header_margin,
+                config.margins.top,
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
@@ -60,15 +48,12 @@ pub(super) fn render_headers_footers(
 
         // Render footer
         if let Some(ref footer) = doc_defaults.default_footer {
+            let footer_y = hf_constraints.page_size.height - config.margins.bottom;
             let (commands, _) = layout_header_footer_blocks(
                 &footer.blocks,
-                margin_left,
+                &hf_constraints,
                 footer_y,
-                content_width,
-                margin_bottom,
-                page_height,
-                page_width,
-                page_height,
+                config.margins.bottom,
                 doc_defaults,
                 &measurer,
                 default_tab_stop_pt,
@@ -84,25 +69,26 @@ pub(super) fn render_headers_footers(
 /// Returns (draw_commands, max_y_extent).
 pub(super) fn layout_header_footer_blocks(
     blocks: &[Block],
-    x_start: Pt,
+    constraints: &LayoutConstraints,
     y_start: Pt,
-    content_width: Pt,
     margin_extent: Pt,
-    y_limit: Pt,
-    page_width: Pt,
-    page_height: Pt,
     defaults: &DocDefaultsLayout,
     measurer: &measurer::TextMeasurer,
     default_tab_stop_pt: Pt,
     field_ctx: Option<&FieldContext>,
     image_cache: &super::ImageCache,
 ) -> (Vec<DrawCommand>, Pt) {
+    let x_start = constraints.x_origin;
+    let content_width = constraints.available_width;
+    let page_width = constraints.page_size.width;
+    let page_height = constraints.page_size.height;
+
     let mut commands = Vec::new();
     let mut cursor_y = y_start;
     let mut max_y = y_start;
 
     for block in blocks {
-        if cursor_y >= y_limit {
+        if cursor_y >= page_height {
             break;
         }
         if let Block::Paragraph(para) = block {
