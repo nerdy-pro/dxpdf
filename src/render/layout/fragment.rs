@@ -161,7 +161,7 @@ pub fn collect_fragments_with_fields(
                             font_size,
                             bold,
                             italic,
-                            underline: !is_space && tr.properties.underline,
+                            underline: tr.properties.underline,
                             char_spacing_pt,
                         },
                         color: tr.properties.color,
