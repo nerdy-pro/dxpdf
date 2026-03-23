@@ -6,6 +6,7 @@
 use crate::dimension::Pt;
 use crate::model::*;
 
+use super::context::LayoutConstraints;
 use super::fragment::{collect_fragments, DocDefaultsLayout, Fragment};
 use super::measurer::TextMeasurer;
 use super::ImageCache;
@@ -93,12 +94,17 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
         section_configs.push(LayoutConfig::from_section(sect));
     }
 
+    // Derive page constraints from the first section config (or defaults)
+    let initial_config = section_configs.first().copied().unwrap_or_default();
+    let page_constraints = LayoutConstraints::for_page(&initial_config);
+
     // List counter state for numbering
     let mut list_counters: std::collections::HashMap<(u32, u32), u32> =
         std::collections::HashMap::new();
 
     let blocks = measure_blocks(
         &doc.blocks,
+        &page_constraints,
         &doc_defaults,
         &measurer,
         &image_cache,
@@ -108,6 +114,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
     let header = doc.default_header.as_ref().map(|hf| {
         measure_blocks(
             &hf.blocks,
+            &page_constraints,
             &doc_defaults,
             &measurer,
             &image_cache,
@@ -118,6 +125,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
     let footer = doc.default_footer.as_ref().map(|hf| {
         measure_blocks(
             &hf.blocks,
+            &page_constraints,
             &doc_defaults,
             &measurer,
             &image_cache,
@@ -138,6 +146,7 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
 
 fn measure_blocks(
     blocks: &[Block],
+    constraints: &LayoutConstraints,
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
@@ -148,6 +157,7 @@ fn measure_blocks(
         .map(|block| match block {
             Block::Paragraph(p) => MeasuredBlock::Paragraph(Box::new(measure_paragraph(
                 p,
+                constraints,
                 doc_defaults,
                 measurer,
                 image_cache,
@@ -155,6 +165,7 @@ fn measure_blocks(
             ))),
             Block::Table(t) => MeasuredBlock::Table(Box::new(measure_table(
                 t,
+                constraints,
                 doc_defaults,
                 measurer,
                 image_cache,
@@ -166,21 +177,16 @@ fn measure_blocks(
 
 fn measure_paragraph(
     para: &Paragraph,
+    constraints: &LayoutConstraints,
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> MeasuredParagraph {
-    // Use a generous content width for initial measurement — layout will re-measure
-    // with actual available width if needed (e.g., after float adjustment).
-    // For now, use a large value so no text is prematurely truncated.
-    let content_width = Pt::new(10000.0);
-    let content_height = Pt::new(10000.0);
-
     let fragments = collect_fragments(
         &para.runs,
-        content_width,
-        content_height,
+        constraints.available_width,
+        constraints.available_height,
         doc_defaults,
         measurer,
         image_cache,
@@ -204,35 +210,88 @@ fn measure_paragraph(
 
 fn measure_table(
     table: &Table,
+    constraints: &LayoutConstraints,
     doc_defaults: &DocDefaultsLayout,
     measurer: &TextMeasurer,
     image_cache: &ImageCache,
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> MeasuredTable {
+    let content_width = constraints.available_width;
+
+    // Compute column widths scaled to available width (same logic as layout/table.rs)
+    let num_cols = table.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+    let col_widths: Vec<Pt> = if !table.grid_cols.is_empty() {
+        let grid_total: Pt = table.grid_cols.iter().map(|w| Pt::from(*w)).sum();
+        let scale = if grid_total > Pt::ZERO {
+            content_width / grid_total
+        } else {
+            1.0
+        };
+        table
+            .grid_cols
+            .iter()
+            .map(|w| Pt::from(*w) * scale)
+            .collect()
+    } else if num_cols > 0 {
+        vec![content_width / num_cols as f32; num_cols]
+    } else {
+        vec![]
+    };
+
+    let doc_cell_margins = doc_defaults.default_cell_margins;
+
     let rows = table
         .rows
         .iter()
-        .map(|row| MeasuredTableRow {
-            cells: row
-                .cells
-                .iter()
-                .map(|cell| MeasuredTableCell {
-                    blocks: measure_blocks(
-                        &cell.blocks,
-                        doc_defaults,
-                        measurer,
-                        image_cache,
-                        list_counters,
-                    ),
-                    width: cell.width,
-                    grid_span: cell.grid_span,
-                    vertical_merge: cell.vertical_merge,
-                    cell_margins: cell.cell_margins,
-                    cell_borders: cell.cell_borders,
-                    shading: cell.shading,
-                })
-                .collect(),
-            height: row.height,
+        .map(|row| {
+            let mut grid_col_idx = 0;
+            MeasuredTableRow {
+                cells: row
+                    .cells
+                    .iter()
+                    .map(|cell| {
+                        // Compute cell width from grid columns
+                        let span = cell.grid_span.max(1) as usize;
+                        let cell_width: Pt = (grid_col_idx..grid_col_idx + span)
+                            .map(|i| col_widths.get(i).copied().unwrap_or(Pt::new(72.0)))
+                            .sum();
+                        grid_col_idx += span;
+
+                        // Compute cell content constraints
+                        let margins = cell
+                            .cell_margins
+                            .or(table.default_cell_margins)
+                            .unwrap_or(doc_cell_margins);
+                        let pad_left = Pt::from(margins.left);
+                        let pad_right = Pt::from(margins.right);
+                        let cell_content_width =
+                            (cell_width - pad_left - pad_right).max(Pt::new(1.0));
+                        let cell_constraints = constraints.for_cell(
+                            Pt::ZERO, // x_origin not relevant during measure
+                            cell_content_width,
+                            constraints.available_height,
+                        );
+
+                        MeasuredTableCell {
+                            blocks: measure_blocks(
+                                &cell.blocks,
+                                &cell_constraints,
+                                doc_defaults,
+                                measurer,
+                                image_cache,
+                                list_counters,
+                            ),
+                            width: cell.width,
+                            grid_span: cell.grid_span,
+                            vertical_merge: cell.vertical_merge,
+                            cell_margins: cell.cell_margins,
+                            cell_borders: cell.cell_borders,
+                            shading: cell.shading,
+                        }
+                    })
+                    .collect(),
+                height: row.height,
+            }
         })
         .collect();
 
