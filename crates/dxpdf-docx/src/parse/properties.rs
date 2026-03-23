@@ -260,6 +260,10 @@ pub fn parse_run_properties(
                     b"noProof" => {
                         props.no_proof = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"webHidden" => {
+                        props.web_hidden =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
                     b"rtl" => {
                         props.rtl = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }

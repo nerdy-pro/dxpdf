@@ -706,6 +706,8 @@ pub struct RunProperties {
     pub vanish: Option<bool>,
     /// §17.3.2.21: suppress spell/grammar checking for this run.
     pub no_proof: Option<bool>,
+    /// §17.3.2.44: hidden when displayed as a web page, visible in print view.
+    pub web_hidden: Option<bool>,
     pub rtl: Option<bool>,
     pub emboss: Option<bool>,
     pub imprint: Option<bool>,
