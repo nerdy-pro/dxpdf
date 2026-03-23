@@ -51,6 +51,69 @@ pub struct DocxContents {
     pub numbering: crate::model::NumberingMap,
 }
 
+/// Collect ZIP entry names that match a predicate.
+fn collect_entry_names(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    predicate: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    (0..archive.len())
+        .filter_map(|i| {
+            let file = archive.by_index(i).ok()?;
+            let name = file.name().to_string();
+            if predicate(&name) {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Extract header/footer XML content and their relationships from the archive.
+fn extract_headers_footers(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+) -> (HashMap<String, String>, HashMap<String, HashMap<String, String>>) {
+    let mut header_footer_xml = HashMap::new();
+    let mut header_footer_rels = HashMap::new();
+
+    let hf_names = collect_entry_names(archive, |name| {
+        (name.starts_with("word/header") || name.starts_with("word/footer"))
+            && name.ends_with(".xml")
+            && !name.contains("_rels")
+    });
+    for name in &hf_names {
+        if let Ok(mut file) = archive.by_name(name) {
+            let mut xml = String::new();
+            if file.read_to_string(&mut xml).is_ok() {
+                let short = name.strip_prefix("word/").unwrap_or(name).to_string();
+                header_footer_xml.insert(short, xml);
+            }
+        }
+    }
+
+    let hf_rel_names = collect_entry_names(archive, |name| {
+        name.starts_with("word/_rels/header") || name.starts_with("word/_rels/footer")
+    });
+    for name in &hf_rel_names {
+        if let Ok(mut file) = archive.by_name(name) {
+            let mut xml = String::new();
+            if file.read_to_string(&mut xml).is_ok() {
+                if let Ok(rels) = parse_relationships(&xml) {
+                    let hf_name = name
+                        .strip_prefix("word/_rels/")
+                        .unwrap_or(name)
+                        .strip_suffix(".rels")
+                        .unwrap_or(name)
+                        .to_string();
+                    header_footer_rels.insert(hf_name, rels);
+                }
+            }
+        }
+    }
+
+    (header_footer_xml, header_footer_rels)
+}
+
 /// Extract document XML, relationships, and media files from a DOCX archive.
 pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
     let cursor = std::io::Cursor::new(docx_bytes);
@@ -78,17 +141,7 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
 
     // 3. Extract all media files (word/media/*)
     let mut media_files = HashMap::new();
-    let media_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let file = archive.by_index(i).ok()?;
-            let name = file.name().to_string();
-            if name.starts_with("word/media/") {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
+    let media_names = collect_entry_names(&mut archive, |name| name.starts_with("word/media/"));
 
     for name in media_names {
         let mut file = archive.by_name(&name)?;
@@ -138,61 +191,8 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
     // 7. Extract theme fonts from word/theme/theme1.xml
     let (theme_minor_font, _theme_major_font) = extract_theme_fonts(&mut archive);
 
-    // 7. Extract header/footer XML files
-    let mut header_footer_xml = HashMap::new();
-    let mut header_footer_rels = HashMap::new();
-    let hf_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let file = archive.by_index(i).ok()?;
-            let name = file.name().to_string();
-            if (name.starts_with("word/header") || name.starts_with("word/footer"))
-                && name.ends_with(".xml")
-                && !name.contains("_rels")
-            {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    for name in &hf_names {
-        if let Ok(mut file) = archive.by_name(name) {
-            let mut xml = String::new();
-            if file.read_to_string(&mut xml).is_ok() {
-                let short = name.strip_prefix("word/").unwrap_or(name).to_string();
-                header_footer_xml.insert(short, xml);
-            }
-        }
-    }
-    // Extract rels for each header/footer (for images inside headers)
-    let hf_rel_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let file = archive.by_index(i).ok()?;
-            let name = file.name().to_string();
-            if name.starts_with("word/_rels/header") || name.starts_with("word/_rels/footer") {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    for name in &hf_rel_names {
-        if let Ok(mut file) = archive.by_name(name) {
-            let mut xml = String::new();
-            if file.read_to_string(&mut xml).is_ok() {
-                if let Ok(rels) = parse_relationships(&xml) {
-                    // Key by the header/footer filename (e.g., "header2.xml")
-                    let hf_name = name
-                        .strip_prefix("word/_rels/")
-                        .unwrap_or(name)
-                        .strip_suffix(".rels")
-                        .unwrap_or(name)
-                        .to_string();
-                    header_footer_rels.insert(hf_name, rels);
-                }
-            }
-        }
-    }
+    // 8. Extract header/footer XML files and their relationships
+    let (header_footer_xml, header_footer_rels) = extract_headers_footers(&mut archive);
 
     Ok(DocxContents {
         document_xml,
@@ -314,22 +314,191 @@ fn parse_relationships(xml: &str) -> Result<HashMap<String, String>, Error> {
     Ok(rels)
 }
 
+/// Accumulator for `parse_doc_defaults`.
+#[derive(Default)]
+struct DocDefaultsBuilder {
+    // Run defaults (from docDefaults/rPrDefault)
+    font_size: Option<crate::dimension::HalfPoints>,
+    font_family: Option<String>,
+    // Paragraph defaults (from docDefaults/pPrDefault)
+    spacing_after: Option<crate::dimension::Twips>,
+    spacing_before: Option<crate::dimension::Twips>,
+    spacing_line: Option<crate::dimension::Twips>,
+    spacing_line_rule: Option<crate::model::LineRule>,
+    // Table style defaults
+    cell_margins: Option<crate::model::CellMargins>,
+    table_cell_spacing: Option<crate::model::Spacing>,
+    table_borders: Option<crate::model::TableBorders>,
+}
+
+impl DocDefaultsBuilder {
+    /// Handle an empty element inside `rPrDefault`.
+    fn handle_rpr_element(&mut self, local: &[u8], e: &quick_xml::events::BytesStart<'_>) {
+        match local {
+            b"sz" => {
+                for attr in e.attributes().flatten() {
+                    if local_name(attr.key.as_ref()) == b"val" {
+                        let val = String::from_utf8_lossy(&attr.value);
+                        self.font_size = val
+                            .parse::<i64>()
+                            .ok()
+                            .map(crate::dimension::HalfPoints::new);
+                    }
+                }
+            }
+            b"rFonts" => {
+                for attr in e.attributes().flatten() {
+                    let key = local_name(attr.key.as_ref());
+                    if key == b"ascii" || key == b"hAnsi" {
+                        let val = String::from_utf8_lossy(&attr.value).into_owned();
+                        if self.font_family.is_none() && !val.is_empty() {
+                            self.font_family = Some(val);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle a spacing element inside `pPrDefault`.
+    fn handle_ppr_spacing(&mut self, e: &quick_xml::events::BytesStart<'_>) {
+        for attr in e.attributes().flatten() {
+            let key = local_name(attr.key.as_ref());
+            let val = String::from_utf8_lossy(&attr.value);
+            match key {
+                b"after" => {
+                    self.spacing_after =
+                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                b"before" => {
+                    self.spacing_before =
+                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                b"line" => {
+                    self.spacing_line =
+                        val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                b"lineRule" => {
+                    self.spacing_line_rule = match val.as_ref() {
+                        "auto" => Some(crate::model::LineRule::Auto),
+                        "exact" => Some(crate::model::LineRule::Exact),
+                        "atLeast" => Some(crate::model::LineRule::AtLeast),
+                        _ => None,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Handle a cell margin element inside `tblCellMar`.
+    fn handle_cell_margin(&mut self, local: &[u8], e: &quick_xml::events::BytesStart<'_>) {
+        let w_type_attr = e
+            .attributes()
+            .flatten()
+            .find(|a| local_name(a.key.as_ref()) == b"type");
+        let is_dxa = w_type_attr
+            .map(|a| a.value.as_ref() == b"dxa")
+            .unwrap_or(false);
+        if is_dxa {
+            let w_val: Option<crate::dimension::Twips> = e
+                .attributes()
+                .flatten()
+                .find(|a| local_name(a.key.as_ref()) == b"w")
+                .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
+                .map(crate::dimension::Twips::new);
+            if let Some(val) = w_val {
+                let m = self
+                    .cell_margins
+                    .get_or_insert(crate::model::CellMargins::default());
+                match local {
+                    b"top" => m.top = val,
+                    b"bottom" => m.bottom = val,
+                    b"left" | b"start" => m.left = val,
+                    b"right" | b"end" => m.right = val,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Handle a table style border element.
+    fn handle_table_border(&mut self, local: &[u8], e: &quick_xml::events::BytesStart<'_>) {
+        if let Ok(def) = super::xml::properties::parse_border_def(e) {
+            let b = self
+                .table_borders
+                .get_or_insert(crate::model::TableBorders::default());
+            match local {
+                b"top" => b.top = def,
+                b"bottom" => b.bottom = def,
+                b"left" | b"start" => b.left = def,
+                b"right" | b"end" => b.right = def,
+                b"insideH" => b.inside_h = def,
+                b"insideV" => b.inside_v = def,
+                _ => {}
+            }
+        }
+    }
+
+    /// Handle a table style paragraph spacing element.
+    fn handle_table_cell_spacing(&mut self, e: &quick_xml::events::BytesStart<'_>) {
+        let mut sp = crate::model::Spacing::default();
+        for attr in e.attributes().flatten() {
+            let key = local_name(attr.key.as_ref());
+            let val = String::from_utf8_lossy(&attr.value);
+            match key {
+                b"after" => {
+                    sp.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                b"before" => {
+                    sp.before = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                b"line" => {
+                    sp.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
+                }
+                _ => {}
+            }
+        }
+        self.table_cell_spacing = Some(sp);
+    }
+
+    fn finish(self) -> Option<DocDefaults> {
+        if self.font_size.is_some()
+            || self.font_family.is_some()
+            || self.spacing_after.is_some()
+            || self.spacing_before.is_some()
+            || self.spacing_line.is_some()
+            || self.cell_margins.is_some()
+            || self.table_cell_spacing.is_some()
+            || self.table_borders.is_some()
+        {
+            Some(DocDefaults {
+                font_size: self.font_size,
+                font_family: self.font_family,
+                spacing_after: self.spacing_after,
+                spacing_before: self.spacing_before,
+                spacing_line: self.spacing_line,
+                spacing_line_rule: self.spacing_line_rule,
+                cell_margins: self.cell_margins,
+                table_cell_spacing: self.table_cell_spacing,
+                table_borders: self.table_borders,
+                styles: crate::model::StyleMap::new(), // filled by caller
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// Parse `word/styles.xml` to extract document default font size, family, and spacing.
 fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
     let mut reader = Reader::from_str(xml);
+    let mut builder = DocDefaultsBuilder::default();
     let mut in_doc_defaults = false;
     let mut in_rpr_default = false;
     let mut in_ppr_default = false;
-    let mut font_size = None;
-    let mut font_family = None;
-    let mut spacing_after = None;
-    let mut spacing_before = None;
-    let mut spacing_line = None;
-    let mut spacing_line_rule = None;
-    let mut cell_margins: Option<crate::model::CellMargins> = None;
     let mut in_tbl_cell_mar = false;
-    let mut table_cell_spacing: Option<crate::model::Spacing> = None;
-    let mut table_borders: Option<crate::model::TableBorders> = None;
     let mut in_table_style = false;
     let mut in_table_style_ppr = false;
     let mut in_table_style_borders = false;
@@ -346,7 +515,6 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                     b"pPrDefault" if in_doc_defaults => in_ppr_default = true,
                     b"tblCellMar" => in_tbl_cell_mar = true,
                     b"style" => {
-                        // Check if this is a table style
                         for attr in e.attributes().flatten() {
                             if local_name(attr.key.as_ref()) == b"type"
                                 && attr.value.as_ref() == b"table"
@@ -355,12 +523,8 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                             }
                         }
                     }
-                    b"pPr" if in_table_style => {
-                        in_table_style_ppr = true;
-                    }
-                    b"tblBorders" if in_table_style => {
-                        in_table_style_borders = true;
-                    }
+                    b"pPr" if in_table_style => in_table_style_ppr = true,
+                    b"tblBorders" if in_table_style => in_table_style_borders = true,
                     _ => {}
                 }
             }
@@ -380,12 +544,8 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                         in_table_style = false;
                         in_table_style_ppr = false;
                     }
-                    b"pPr" if in_table_style => {
-                        in_table_style_ppr = false;
-                    }
-                    b"tblBorders" => {
-                        in_table_style_borders = false;
-                    }
+                    b"pPr" if in_table_style => in_table_style_ppr = false,
+                    b"tblBorders" => in_table_style_borders = false,
                     _ => {}
                 }
             }
@@ -393,125 +553,22 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
                 let name = e.name();
                 let local = local_name(name.as_ref());
                 if in_rpr_default {
-                    match local {
-                        b"sz" => {
-                            for attr in e.attributes().flatten() {
-                                if local_name(attr.key.as_ref()) == b"val" {
-                                    let val = String::from_utf8_lossy(&attr.value);
-                                    font_size = val
-                                        .parse::<i64>()
-                                        .ok()
-                                        .map(crate::dimension::HalfPoints::new);
-                                }
-                            }
-                        }
-                        b"rFonts" => {
-                            for attr in e.attributes().flatten() {
-                                let key = local_name(attr.key.as_ref());
-                                if key == b"ascii" || key == b"hAnsi" {
-                                    let val = String::from_utf8_lossy(&attr.value).into_owned();
-                                    if font_family.is_none() && !val.is_empty() {
-                                        font_family = Some(val);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    builder.handle_rpr_element(local, e);
                 }
                 if in_ppr_default && local == b"spacing" {
-                    for attr in e.attributes().flatten() {
-                        let key = local_name(attr.key.as_ref());
-                        let val = String::from_utf8_lossy(&attr.value);
-                        match key {
-                            b"after" => {
-                                spacing_after =
-                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            b"before" => {
-                                spacing_before =
-                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            b"line" => {
-                                spacing_line =
-                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            b"lineRule" => {
-                                spacing_line_rule = match val.as_ref() {
-                                    "auto" => Some(crate::model::LineRule::Auto),
-                                    "exact" => Some(crate::model::LineRule::Exact),
-                                    "atLeast" => Some(crate::model::LineRule::AtLeast),
-                                    _ => None,
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    builder.handle_ppr_spacing(e);
                 }
-                if in_tbl_cell_mar && cell_margins.is_none() {
-                    // Parse margin children (top/bottom/left/right)
-                    let w_type_attr = e
-                        .attributes()
-                        .flatten()
-                        .find(|a| local_name(a.key.as_ref()) == b"type");
-                    let is_dxa = w_type_attr
-                        .map(|a| a.value.as_ref() == b"dxa")
-                        .unwrap_or(false);
-                    if is_dxa {
-                        let w_val: Option<crate::dimension::Twips> = e
-                            .attributes()
-                            .flatten()
-                            .find(|a| local_name(a.key.as_ref()) == b"w")
-                            .and_then(|a| String::from_utf8_lossy(&a.value).parse::<i64>().ok())
-                            .map(crate::dimension::Twips::new);
-                        if let Some(val) = w_val {
-                            let m =
-                                cell_margins.get_or_insert(crate::model::CellMargins::default());
-                            match local {
-                                b"top" => m.top = val,
-                                b"bottom" => m.bottom = val,
-                                b"left" | b"start" => m.left = val,
-                                b"right" | b"end" => m.right = val,
-                                _ => {}
-                            }
-                        }
-                    }
+                if in_tbl_cell_mar && builder.cell_margins.is_none() {
+                    builder.handle_cell_margin(local, e);
                 }
-                if in_table_style_borders && table_borders.is_none() {
-                    if let Ok(def) = super::xml::properties::parse_border_def(e) {
-                        let b =
-                            table_borders.get_or_insert(crate::model::TableBorders::default());
-                        match local {
-                            b"top" => b.top = def,
-                            b"bottom" => b.bottom = def,
-                            b"left" | b"start" => b.left = def,
-                            b"right" | b"end" => b.right = def,
-                            b"insideH" => b.inside_h = def,
-                            b"insideV" => b.inside_v = def,
-                            _ => {}
-                        }
-                    }
+                if in_table_style_borders && builder.table_borders.is_none() {
+                    builder.handle_table_border(local, e);
                 }
-                if in_table_style_ppr && local == b"spacing" && table_cell_spacing.is_none() {
-                    let mut sp = crate::model::Spacing::default();
-                    for attr in e.attributes().flatten() {
-                        let key = local_name(attr.key.as_ref());
-                        let val = String::from_utf8_lossy(&attr.value);
-                        match key {
-                            b"after" => {
-                                sp.after = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            b"before" => {
-                                sp.before =
-                                    val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            b"line" => {
-                                sp.line = val.parse::<i64>().ok().map(crate::dimension::Twips::new)
-                            }
-                            _ => {}
-                        }
-                    }
-                    table_cell_spacing = Some(sp);
+                if in_table_style_ppr
+                    && local == b"spacing"
+                    && builder.table_cell_spacing.is_none()
+                {
+                    builder.handle_table_cell_spacing(e);
                 }
             }
             Err(_) => break,
@@ -519,30 +576,7 @@ fn parse_doc_defaults(xml: &str) -> Option<DocDefaults> {
         }
     }
 
-    if font_size.is_some()
-        || font_family.is_some()
-        || spacing_after.is_some()
-        || spacing_before.is_some()
-        || spacing_line.is_some()
-        || cell_margins.is_some()
-        || table_cell_spacing.is_some()
-        || table_borders.is_some()
-    {
-        Some(DocDefaults {
-            font_size,
-            font_family,
-            spacing_after,
-            spacing_before,
-            spacing_line,
-            spacing_line_rule,
-            cell_margins,
-            table_cell_spacing,
-            table_borders,
-            styles: crate::model::StyleMap::new(), // filled by caller
-        })
-    } else {
-        None
-    }
+    builder.finish()
 }
 
 /// Parse `word/settings.xml` to find `w:defaultTabStop` value.

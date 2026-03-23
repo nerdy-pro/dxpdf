@@ -111,6 +111,55 @@ pub struct FieldContext {
     pub num_pages: u32,
 }
 
+/// Compute the default line height using the document's default font.
+fn default_line_height(defaults: &DocDefaultsLayout, measurer: &TextMeasurer) -> Pt {
+    let default_size = Pt::from(defaults.font_size);
+    measurer
+        .font(&defaults.font_family, default_size, false, false)
+        .metrics()
+        .line_height
+}
+
+/// Build a `Fragment::Text` from a pre-measured text string and run properties.
+fn build_field_fragment(
+    text: String,
+    rp: &RunProperties,
+    defaults: &DocDefaultsLayout,
+    measurer: &TextMeasurer,
+) -> Fragment {
+    let font_family = rp
+        .font_family
+        .clone()
+        .unwrap_or_else(|| defaults.font_family.clone());
+    let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size));
+    let bold = rp.bold;
+    let italic = rp.italic;
+    let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
+    let f = measurer.font(&font_family, font_size, bold, italic);
+    let w = f.measure_width(&text);
+    let char_count = text.chars().count() as f32;
+    let measured_width = w + char_spacing_pt * char_count;
+    let fm = f.metrics();
+    Fragment::Text {
+        text,
+        font: FontProps {
+            font_family,
+            font_size,
+            bold,
+            italic,
+            underline: rp.underline,
+            char_spacing_pt,
+        },
+        color: rp.color,
+        shading: rp.shading,
+        measured_width,
+        measured_height: fm.line_height,
+        ascent: fm.ascent,
+        hyperlink_url: None,
+        baseline_offset: Pt::ZERO,
+    }
+}
+
 pub fn collect_fragments_with_fields(
     runs: &[Inline],
     constraints: &super::context::LayoutConstraints,
@@ -198,19 +247,11 @@ pub fn collect_fragments_with_fields(
                 });
             }
             Inline::Tab => {
-                let default_size = Pt::from(defaults.font_size);
-                let lh = measurer
-                    .font(&defaults.font_family, default_size, false, false)
-                    .metrics()
-                    .line_height;
+                let lh = default_line_height(defaults, measurer);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = Pt::from(defaults.font_size);
-                let lh = measurer
-                    .font(&defaults.font_family, default_size, false, false)
-                    .metrics()
-                    .line_height;
+                let lh = default_line_height(defaults, measurer);
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
             Inline::Image(_) => {}
@@ -220,40 +261,7 @@ pub fn collect_fragments_with_fields(
                     (FieldType::NumPages, Some(ctx)) => ctx.num_pages.to_string(),
                     _ => "?".to_string(),
                 };
-                let rp = &fc.properties;
-                let font_family = rp
-                    .font_family
-                    .clone()
-                    .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size));
-                let bold = rp.bold;
-                let italic = rp.italic;
-                let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
-                let f = measurer.font(&font_family, font_size, bold, italic);
-                let w = f.measure_width(&text);
-                let char_count = text.chars().count() as f32;
-                let measured_width = w + char_spacing_pt * char_count;
-                let fm = f.metrics();
-                let lh = fm.line_height;
-                let ascent = fm.ascent;
-                fragments.push(Fragment::Text {
-                    text,
-                    font: FontProps {
-                        font_family,
-                        font_size,
-                        bold,
-                        italic,
-                        underline: rp.underline,
-                        char_spacing_pt,
-                    },
-                    color: rp.color,
-                    shading: rp.shading,
-                    measured_width,
-                    measured_height: lh,
-                    ascent,
-                    hyperlink_url: None,
-                    baseline_offset: Pt::ZERO,
-                });
+                fragments.push(build_field_fragment(text, &fc.properties, defaults, measurer));
             }
         }
     }
