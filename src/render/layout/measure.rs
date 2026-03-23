@@ -31,34 +31,55 @@ pub struct DocDefaultsLayout {
 
 impl DocDefaultsLayout {
     pub fn from_document(doc: &Document, measurer: &TextMeasurer) -> Self {
-        let font_size = doc.default_font_size;
-        let font_family = Rc::clone(&doc.default_font_family);
+        let defs = &doc.defaults;
+        let font_size = defs.font_size;
+        let font_family = Rc::clone(&defs.font_family);
         let default_size_pt = Pt::from(font_size);
         let default_line_height = measurer
             .font(&font_family, default_size_pt, false, false)
             .metrics()
             .line_height;
+
+        // Resolve default header/footer from the first section that defines one.
+        let mut default_header = None;
+        let mut default_footer = None;
+        for sect in doc.section_properties() {
+            if default_header.is_none() {
+                default_header = sect.header.clone();
+            }
+            if default_footer.is_none() {
+                default_footer = sect.footer.clone();
+            }
+            if default_header.is_some() && default_footer.is_some() {
+                break;
+            }
+        }
+
         Self {
             font_size,
             font_family,
-            default_spacing: doc.default_spacing,
-            default_cell_margins: doc.default_cell_margins,
-            table_cell_spacing: doc.table_cell_spacing,
-            default_table_borders: doc.default_table_borders,
-            default_header: doc.default_header.clone(),
-            default_footer: doc.default_footer.clone(),
-            numbering: doc.numbering.clone(),
+            default_spacing: defs.spacing,
+            default_cell_margins: defs.cell_margins,
+            table_cell_spacing: defs.table_cell_spacing,
+            default_table_borders: defs.table_borders,
+            default_header,
+            default_footer,
+            numbering: defs.numbering.clone(),
             default_line_height,
         }
     }
 }
 
+/// A measured section: blocks with their layout config.
+pub struct MeasuredSection {
+    pub blocks: Vec<MeasuredBlock>,
+    pub(crate) config: LayoutConfig,
+}
+
 /// A document tree enriched with text metrics and decoded images.
 /// Produced by the measure step, consumed by the layout step.
 pub struct MeasuredDocument {
-    pub blocks: Vec<MeasuredBlock>,
-    /// Section configs derived from inline section breaks + final section.
-    pub(crate) section_configs: Vec<LayoutConfig>,
+    pub sections: Vec<MeasuredSection>,
     pub(crate) doc_defaults: DocDefaultsLayout,
     pub(crate) default_tab_stop: Pt,
     pub(crate) image_cache: ImageCache,
@@ -97,7 +118,6 @@ pub struct MeasuredParagraph {
     pub fragments: Vec<Fragment>,
     pub properties: ParagraphProperties,
     pub floats: Vec<FloatingImage>,
-    pub section_properties: Option<SectionProperties>,
     /// Resolved list label: (label_text, indent_left, indent_hanging) in Twips.
     pub list_label: Option<(String, crate::dimension::Twips, crate::dimension::Twips)>,
 }
@@ -140,41 +160,29 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
     let measurer = TextMeasurer::new(font_mgr.clone());
     let doc_defaults = DocDefaultsLayout::from_document(doc, &measurer);
     let image_cache = ImageCache::new(&doc.images);
-    let default_tab_stop = Pt::from(doc.default_tab_stop);
+    let default_tab_stop = Pt::from(doc.defaults.tab_stop);
 
-    // Build section configs from inline section breaks + final section
-    let mut section_configs: Vec<LayoutConfig> = Vec::new();
-    for block in &doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref sect) = p.section_properties {
-                section_configs.push(LayoutConfig::from_section(sect));
-            }
-        }
-    }
-    if let Some(ref sect) = doc.final_section {
-        section_configs.push(LayoutConfig::from_section(sect));
-    }
-
-    // Derive page constraints from the first section config (or defaults)
-    let initial_config = section_configs.first().copied().unwrap_or_default();
-    let mut constraints = LayoutConstraints::for_page(&initial_config);
-
-    // List counter state for numbering
+    // List counter state for numbering (shared across sections)
     let mut list_counters: std::collections::HashMap<(u32, u32), u32> =
         std::collections::HashMap::new();
 
-    let blocks = measure_blocks(
-        &doc.blocks,
-        &mut constraints,
-        &doc_defaults,
-        &measurer,
-        &image_cache,
-        &mut list_counters,
-    );
+    let mut sections = Vec::with_capacity(doc.sections.len());
+    for section in &doc.sections {
+        let config = LayoutConfig::from_section(&section.properties);
+        let mut constraints = LayoutConstraints::for_page(&config);
+        let blocks = measure_blocks(
+            &section.blocks,
+            &mut constraints,
+            &doc_defaults,
+            &measurer,
+            &image_cache,
+            &mut list_counters,
+        );
+        sections.push(MeasuredSection { blocks, config });
+    }
 
     MeasuredDocument {
-        blocks,
-        section_configs,
+        sections,
         doc_defaults,
         default_tab_stop,
         image_cache,
@@ -242,7 +250,6 @@ fn measure_paragraph(
         fragments,
         properties: para.properties.clone(),
         floats: para.floats.clone(),
-        section_properties: para.section_properties.clone(),
         list_label,
     }
 }

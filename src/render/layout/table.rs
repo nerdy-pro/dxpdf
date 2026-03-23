@@ -69,6 +69,138 @@ fn emit_border(
 // ============================================================
 
 impl Layouter<'_> {
+    /// Measure a single table row: compute cell positions and lay out cell content.
+    fn layout_table_row(
+        &self,
+        row: &super::measure::MeasuredTableRow,
+        table: &MeasuredTable,
+        col_widths: &[Pt],
+        page_x: Pt,
+        available_height: Pt,
+        doc_cell_margins: &CellMargins,
+    ) -> LayoutedRow {
+        let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
+        let row_height_limit = available_height;
+
+        let mut col_x_positions = Vec::with_capacity(row.cells.len());
+        let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
+        let mut grid_col_idx = 0;
+        for cell in &row.cells {
+            let x = page_x + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
+            let w = self.cell_width(grid_col_idx, cell, col_widths);
+            col_x_positions.push(x);
+            cell_widths_computed.push(w);
+            grid_col_idx += cell.grid_span.max(1) as usize;
+        }
+
+        let mut layouted_cells = Vec::with_capacity(row.cells.len());
+
+        for (col_idx, cell) in row.cells.iter().enumerate() {
+            let col_width = cell_widths_computed[col_idx];
+            let cell_x = col_x_positions[col_idx];
+            let margins = resolve_cell_margins(cell, &table.default_cell_margins, doc_cell_margins);
+            let pad_left = Pt::from(margins.left);
+            let pad_right = Pt::from(margins.right);
+            let pad_top = Pt::from(margins.top);
+            let pad_bottom = Pt::from(margins.bottom);
+            let cell_content_width = (col_width - pad_left - pad_right).max(Pt::new(1.0));
+
+            if cell.is_vmerge_continue() {
+                layouted_cells.push(LayoutedCell {
+                    commands: Vec::new(),
+                    content_height: Pt::ZERO,
+                    col_width,
+                });
+                continue;
+            }
+
+            let mut commands = Vec::new();
+            let mut cell_y = pad_top;
+
+            for block in &cell.blocks {
+                if let MeasuredBlock::Paragraph(p) = block {
+                    let spacing =
+                        self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
+                    cell_y += spacing.before_pt();
+
+                    // Floating images in cell
+                    for float in &p.floats {
+                        if !self.image_cache.contains(&float.rel_id) {
+                            continue;
+                        }
+                        let fw = float.size.width;
+                        let fh = float.size.height;
+                        let scale = f32::min(
+                            1.0,
+                            f32::min(
+                                cell_content_width / fw.max(Pt::new(1.0)),
+                                row_height_limit.max(Pt::new(1.0)) / fh.max(Pt::new(1.0)),
+                            ),
+                        );
+                        let img_w = fw * scale;
+                        let img_h = fh * scale;
+                        let img_x = cell_x + (col_width - img_w) / 2.0;
+                        let image = self.image_cache.get(&float.rel_id);
+                        commands.push(DrawCommand::Image {
+                            rect: PtRect::from_xywh(img_x, cell_y, img_w, img_h),
+                            image,
+                        });
+                        cell_y += img_h;
+                    }
+
+                    let fragments = &p.fragments;
+
+                    if fragments.is_empty() && p.floats.is_empty() {
+                        let natural = self.doc_defaults.default_line_height;
+                        cell_y += resolve_line_height(natural, spacing.line_spacing());
+                        cell_y += spacing.after_pt();
+                        continue;
+                    }
+                    if fragments.is_empty() {
+                        cell_y += spacing.after_pt();
+                        continue;
+                    }
+
+                    let measured = measure_lines(
+                        fragments,
+                        cell_x + pad_left,
+                        cell_content_width,
+                        Pt::ZERO, // no first-line indent in cells
+                        p.properties.alignment,
+                        spacing.line_spacing(),
+                        &p.properties.tab_stops,
+                        self.default_tab_stop_pt,
+                        self.image_cache,
+                        None,
+                    );
+
+                    for line in &measured.lines {
+                        for cmd in &line.commands {
+                            commands.push(cmd.offset_y(cell_y));
+                        }
+                    }
+                    cell_y += measured.total_height;
+                    cell_y += spacing.after_pt();
+                }
+            }
+
+            let effective_pad_bottom = pad_bottom.max(Pt::new(1.0));
+            let content_height = cell_y + effective_pad_bottom;
+
+            layouted_cells.push(LayoutedCell {
+                commands,
+                content_height,
+                col_width,
+            });
+        }
+
+        LayoutedRow {
+            cells: layouted_cells,
+            col_x_positions,
+            min_height,
+        }
+    }
+
     pub(super) fn layout_table(&mut self, table: &MeasuredTable, next_is_table: bool) {
         if table.rows.is_empty() {
             return;
@@ -93,131 +225,14 @@ impl Layouter<'_> {
             .rows
             .iter()
             .map(|row| {
-                let min_height = row.height.map(Pt::from).unwrap_or(Pt::ZERO);
-                let row_height_limit = available_height;
-
-                let mut col_x_positions = Vec::with_capacity(row.cells.len());
-                let mut cell_widths_computed = Vec::with_capacity(row.cells.len());
-                let mut grid_col_idx = 0;
-                for cell in &row.cells {
-                    let x = page_x + col_widths[..grid_col_idx].iter().copied().sum::<Pt>();
-                    let w = self.cell_width(grid_col_idx, cell, &col_widths);
-                    col_x_positions.push(x);
-                    cell_widths_computed.push(w);
-                    grid_col_idx += cell.grid_span.max(1) as usize;
-                }
-
-                let mut layouted_cells = Vec::with_capacity(row.cells.len());
-
-                for (col_idx, cell) in row.cells.iter().enumerate() {
-                    let col_width = cell_widths_computed[col_idx];
-                    let cell_x = col_x_positions[col_idx];
-                    let margins =
-                        resolve_cell_margins(cell, &table.default_cell_margins, &doc_cell_margins);
-                    let pad_left = Pt::from(margins.left);
-                    let pad_right = Pt::from(margins.right);
-                    let pad_top = Pt::from(margins.top);
-                    let pad_bottom = Pt::from(margins.bottom);
-                    let cell_content_width = (col_width - pad_left - pad_right).max(Pt::new(1.0));
-
-                    if cell.is_vmerge_continue() {
-                        layouted_cells.push(LayoutedCell {
-                            commands: Vec::new(),
-                            content_height: Pt::ZERO,
-                            col_width,
-                        });
-                        continue;
-                    }
-
-                    let mut commands = Vec::new();
-                    let mut cell_y = pad_top;
-
-                    for block in &cell.blocks {
-                        if let MeasuredBlock::Paragraph(p) = block {
-                            let spacing =
-                                self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
-                            cell_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
-
-                            // Floating images in cell
-                            for float in &p.floats {
-                                if !self.image_cache.contains(&float.rel_id) {
-                                    continue;
-                                }
-                                let fw = float.size.width;
-                                let fh = float.size.height;
-                                let scale = f32::min(
-                                    1.0,
-                                    f32::min(
-                                        cell_content_width / fw.max(Pt::new(1.0)),
-                                        row_height_limit.max(Pt::new(1.0)) / fh.max(Pt::new(1.0)),
-                                    ),
-                                );
-                                let img_w = fw * scale;
-                                let img_h = fh * scale;
-                                let img_x = cell_x + (col_width - img_w) / 2.0;
-                                let image = self.image_cache.get(&float.rel_id);
-                                commands.push(DrawCommand::Image {
-                                    rect: PtRect::from_xywh(img_x, cell_y, img_w, img_h),
-                                    image,
-                                });
-                                cell_y += img_h;
-                            }
-
-                            let fragments = &p.fragments;
-
-                            if fragments.is_empty() && p.floats.is_empty() {
-                                let natural = self.doc_defaults.default_line_height;
-                                cell_y += resolve_line_height(natural, spacing.line_spacing());
-                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
-                                continue;
-                            }
-                            if fragments.is_empty() {
-                                cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
-                                continue;
-                            }
-
-                            // Use shared measure_lines for fragment → command conversion
-                            let measured = measure_lines(
-                                fragments,
-                                cell_x + pad_left,
-                                cell_content_width,
-                                Pt::ZERO, // no first-line indent in cells
-                                p.properties.alignment,
-                                spacing.line_spacing(),
-                                &p.properties.tab_stops,
-                                self.default_tab_stop_pt,
-                                self.image_cache,
-                                None,
-                            );
-
-                            // Offset measured commands by cell_y and accumulate
-                            for line in &measured.lines {
-                                for cmd in &line.commands {
-                                    commands.push(cmd.offset_y(cell_y));
-                                }
-                            }
-                            cell_y += measured.total_height;
-                            cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
-                        }
-                    }
-
-                    // Ensure minimum bottom padding to account for font descender space
-                    // not captured by line height metrics.
-                    let effective_pad_bottom = pad_bottom.max(Pt::new(1.0));
-                    let content_height = cell_y + effective_pad_bottom;
-
-                    layouted_cells.push(LayoutedCell {
-                        commands,
-                        content_height,
-                        col_width,
-                    });
-                }
-
-                LayoutedRow {
-                    cells: layouted_cells,
-                    col_x_positions,
-                    min_height,
-                }
+                self.layout_table_row(
+                    row,
+                    table,
+                    &col_widths,
+                    page_x,
+                    available_height,
+                    &doc_cell_margins,
+                )
             })
             .collect();
 
@@ -383,12 +398,7 @@ impl Layouter<'_> {
 
         // After a table, Word applies the document-default paragraph after-spacing.
         if !next_is_table {
-            self.cursor_y += self
-                .doc_defaults
-                .default_spacing
-                .after
-                .map(Pt::from)
-                .unwrap_or(Pt::ZERO);
+            self.cursor_y += self.doc_defaults.default_spacing.after_pt();
         }
     }
 }

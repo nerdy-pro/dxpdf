@@ -128,7 +128,7 @@ impl<U: IntegerUnit> Dimension<U> {
         }
     }
 
-    pub const fn is_positive(self) -> bool {
+    pub const fn is_positive(&self) -> bool {
         self.value > 0
     }
 }

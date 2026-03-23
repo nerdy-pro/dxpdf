@@ -13,6 +13,16 @@ pub const MIN_TAB_WIDTH: Pt = Pt::new(12.0);
 /// Fallback tab advance when no stops and no default interval.
 pub const TAB_FALLBACK: Pt = Pt::new(36.0);
 
+/// Super/subscript font size as a fraction of the base size.
+/// Matches Word's default rendering (~58% of base).
+const VERT_ALIGN_SIZE_FACTOR: f32 = 0.58;
+
+/// Superscript baseline shift as a fraction of the base font size (negative = up).
+const SUPERSCRIPT_BASELINE_SHIFT: f32 = -0.33;
+
+/// Subscript baseline shift as a fraction of the base font size (positive = down).
+const SUBSCRIPT_BASELINE_SHIFT: f32 = 0.08;
+
 /// Underline offset below the text baseline.
 pub const UNDERLINE_Y_OFFSET: Pt = Pt::new(2.0);
 use super::DrawCommand;
@@ -101,6 +111,55 @@ pub struct FieldContext {
     pub num_pages: u32,
 }
 
+/// Compute the default line height using the document's default font.
+fn default_line_height(defaults: &DocDefaultsLayout, measurer: &TextMeasurer) -> Pt {
+    let default_size = Pt::from(defaults.font_size);
+    measurer
+        .font(&defaults.font_family, default_size, false, false)
+        .metrics()
+        .line_height
+}
+
+/// Build a `Fragment::Text` from a pre-measured text string and run properties.
+fn build_field_fragment(
+    text: String,
+    rp: &RunProperties,
+    defaults: &DocDefaultsLayout,
+    measurer: &TextMeasurer,
+) -> Fragment {
+    let font_family = rp
+        .font_family
+        .clone()
+        .unwrap_or_else(|| defaults.font_family.clone());
+    let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size));
+    let bold = rp.bold;
+    let italic = rp.italic;
+    let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
+    let f = measurer.font(&font_family, font_size, bold, italic);
+    let w = f.measure_width(&text);
+    let char_count = text.chars().count() as f32;
+    let measured_width = w + char_spacing_pt * char_count;
+    let fm = f.metrics();
+    Fragment::Text {
+        text,
+        font: FontProps {
+            font_family,
+            font_size,
+            bold,
+            italic,
+            underline: rp.underline,
+            char_spacing_pt,
+        },
+        color: rp.color,
+        shading: rp.shading,
+        measured_width,
+        measured_height: fm.line_height,
+        ascent: fm.ascent,
+        hyperlink_url: None,
+        baseline_offset: Pt::ZERO,
+    }
+}
+
 pub fn collect_fragments_with_fields(
     runs: &[Inline],
     constraints: &super::context::LayoutConstraints,
@@ -129,15 +188,13 @@ pub fn collect_fragments_with_fields(
                 // Super/subscript: reduce font size and compute baseline offset
                 let (font_size, baseline_offset) = match tr.properties.vert_align {
                     Some(VertAlign::Superscript) => {
-                        let reduced = base_font_size * 0.58;
-                        // Shift up by ~33% of the original line height
-                        let offset = -(base_font_size * 0.33);
+                        let reduced = base_font_size * VERT_ALIGN_SIZE_FACTOR;
+                        let offset = base_font_size * SUPERSCRIPT_BASELINE_SHIFT;
                         (reduced, offset)
                     }
                     Some(VertAlign::Subscript) => {
-                        let reduced = base_font_size * 0.58;
-                        // Shift down by ~8% of the original line height
-                        let offset = base_font_size * 0.08;
+                        let reduced = base_font_size * VERT_ALIGN_SIZE_FACTOR;
+                        let offset = base_font_size * SUBSCRIPT_BASELINE_SHIFT;
                         (reduced, offset)
                     }
                     None => (base_font_size, Pt::ZERO),
@@ -190,19 +247,11 @@ pub fn collect_fragments_with_fields(
                 });
             }
             Inline::Tab => {
-                let default_size = Pt::from(defaults.font_size);
-                let lh = measurer
-                    .font(&defaults.font_family, default_size, false, false)
-                    .metrics()
-                    .line_height;
+                let lh = default_line_height(defaults, measurer);
                 fragments.push(Fragment::Tab { line_height: lh });
             }
             Inline::LineBreak => {
-                let default_size = Pt::from(defaults.font_size);
-                let lh = measurer
-                    .font(&defaults.font_family, default_size, false, false)
-                    .metrics()
-                    .line_height;
+                let lh = default_line_height(defaults, measurer);
                 fragments.push(Fragment::LineBreak { line_height: lh });
             }
             Inline::Image(_) => {}
@@ -212,40 +261,12 @@ pub fn collect_fragments_with_fields(
                     (FieldType::NumPages, Some(ctx)) => ctx.num_pages.to_string(),
                     _ => "?".to_string(),
                 };
-                let rp = &fc.properties;
-                let font_family = rp
-                    .font_family
-                    .clone()
-                    .unwrap_or_else(|| defaults.font_family.clone());
-                let font_size = Pt::from(rp.font_size.unwrap_or(defaults.font_size));
-                let bold = rp.bold;
-                let italic = rp.italic;
-                let char_spacing_pt = rp.char_spacing.map(Pt::from).unwrap_or(Pt::ZERO);
-                let f = measurer.font(&font_family, font_size, bold, italic);
-                let w = f.measure_width(&text);
-                let char_count = text.chars().count() as f32;
-                let measured_width = w + char_spacing_pt * char_count;
-                let fm = f.metrics();
-                let lh = fm.line_height;
-                let ascent = fm.ascent;
-                fragments.push(Fragment::Text {
+                fragments.push(build_field_fragment(
                     text,
-                    font: FontProps {
-                        font_family,
-                        font_size,
-                        bold,
-                        italic,
-                        underline: rp.underline,
-                        char_spacing_pt,
-                    },
-                    color: rp.color,
-                    shading: rp.shading,
-                    measured_width,
-                    measured_height: lh,
-                    ascent,
-                    hyperlink_url: None,
-                    baseline_offset: Pt::ZERO,
-                });
+                    &fc.properties,
+                    defaults,
+                    measurer,
+                ));
             }
         }
     }
@@ -384,6 +405,7 @@ pub struct MeasuredLines {
 /// Measure paragraph fragments into lines with relative-positioned draw commands.
 ///
 /// All y-coordinates in the returned commands are relative to 0.0.
+#[allow(clippy::too_many_arguments)]
 pub fn measure_lines(
     fragments: &[Fragment],
     x_origin: Pt,
@@ -532,6 +554,7 @@ fn break_into_lines(
 /// `cursor_y` is the bottom of this line (relative to paragraph top).
 /// `line_height` is the height of this line.
 /// `available_width` is the width available for alignment calculations.
+#[allow(clippy::too_many_arguments)]
 fn paint_line(
     line_fragments: &[Fragment],
     x_start: Pt,

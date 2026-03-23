@@ -93,10 +93,6 @@ impl LayoutConstraints {
         self.stack.pop();
     }
 
-    pub fn depth(&self) -> usize {
-        self.stack.len()
-    }
-
     // -- Convenience push methods --
 
     /// Push full page constraints (sets all fields).
@@ -122,8 +118,8 @@ impl LayoutConstraints {
 
     /// Push narrowed constraints for a paragraph (indentation reduces width).
     pub fn push_paragraph(&mut self, indent: &Indentation) {
-        let left = indent.left.map(Pt::from).unwrap_or(Pt::ZERO);
-        let right = indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
+        let left = indent.left_pt();
+        let right = indent.right_pt();
         self.push(
             ConstraintFrame::new()
                 .x_origin(self.x_origin() + left)
@@ -224,14 +220,11 @@ mod tests {
         let config = test_config();
         let mut c = LayoutConstraints::for_page(&config);
         let page_x = c.x_origin();
-        assert_eq!(c.depth(), 1);
 
         c.push_cell(Pt::new(50.0), Pt::new(100.0), Pt::new(300.0));
-        assert_eq!(c.depth(), 2);
         assert_eq!(c.x_origin(), Pt::new(50.0));
 
         c.pop();
-        assert_eq!(c.depth(), 1);
         assert_eq!(c.x_origin(), page_x);
     }
 
@@ -240,12 +233,10 @@ mod tests {
         let config = test_config();
         let mut c = LayoutConstraints::for_page(&config);
         c.push_cell(Pt::new(50.0), Pt::new(100.0), Pt::new(300.0));
-        assert_eq!(c.depth(), 2);
 
         let mut new_config = config;
         new_config.margins.left = Pt::new(100.0);
         c.replace_page(&new_config);
-        assert_eq!(c.depth(), 1);
         assert_eq!(c.x_origin(), Pt::new(100.0));
     }
 
@@ -277,7 +268,6 @@ mod tests {
 
         // Table cell
         c.push_cell(Pt::new(80.0), Pt::new(200.0), Pt::new(600.0));
-        assert_eq!(c.depth(), 2);
 
         // Paragraph inside cell
         let indent = Indentation {
@@ -286,13 +276,10 @@ mod tests {
             first_line: None,
         };
         c.push_paragraph(&indent);
-        assert_eq!(c.depth(), 3);
         assert!(c.available_width() < Pt::new(200.0));
 
         c.pop(); // leave paragraph
-        assert_eq!(c.depth(), 2);
         c.pop(); // leave cell
-        assert_eq!(c.depth(), 1);
     }
 
     #[test]

@@ -10,79 +10,66 @@ pub fn handle_drawing_element(
     e: &quick_xml::events::BytesStart<'_>,
     state: &mut ParseState,
 ) -> Result<(), Error> {
-    if let ParseState::InDrawing {
-        ref mut rel_id,
-        ref mut width_emu,
-        ref mut height_emu,
-        ref mut is_anchor,
-        ref mut wrap_side,
-        ref mut in_position_h,
-        ref mut in_position_v,
-        ref mut reading_pos_offset,
-        ref mut reading_align,
-        ref mut reading_pct_pos,
-        ..
-    } = state
-    {
+    if let ParseState::InDrawing(ds) = state {
         match local {
             b"anchor" => {
-                *is_anchor = true;
+                ds.is_anchor = true;
             }
             b"inline" => {}
             b"extent" => {
                 if let Some(cx) = get_attr(e, b"cx")? {
-                    *width_emu = cx.parse::<i64>().ok().map(crate::dimension::Emu::new);
+                    ds.width_emu = cx.parse::<i64>().ok().map(crate::dimension::Emu::new);
                 }
                 if let Some(cy) = get_attr(e, b"cy")? {
-                    *height_emu = cy.parse::<i64>().ok().map(crate::dimension::Emu::new);
+                    ds.height_emu = cy.parse::<i64>().ok().map(crate::dimension::Emu::new);
                 }
             }
             b"blip" => {
                 if let Some(embed) = get_attr(e, b"embed")? {
-                    *rel_id = Some(RelId::from(embed));
+                    ds.rel_id = Some(RelId::from(embed));
                 }
             }
             b"positionH" => {
-                *in_position_h = true;
+                ds.in_position_h = true;
             }
             b"positionV" => {
-                *in_position_v = true;
+                ds.in_position_v = true;
             }
             b"posOffset" => {
-                if *in_position_h {
-                    *reading_pos_offset = Some('H');
-                } else if *in_position_v {
-                    *reading_pos_offset = Some('V');
+                if ds.in_position_h {
+                    ds.reading_pos_offset = Some('H');
+                } else if ds.in_position_v {
+                    ds.reading_pos_offset = Some('V');
                 }
             }
             b"align" => {
                 // wp:align contains text like "left", "right", "center"
-                if *in_position_h {
-                    *reading_align = Some('H');
-                } else if *in_position_v {
-                    *reading_align = Some('V');
+                if ds.in_position_h {
+                    ds.reading_align = Some('H');
+                } else if ds.in_position_v {
+                    ds.reading_align = Some('V');
                 }
             }
             b"pctPosHOffset" => {
-                if *in_position_h {
-                    *reading_pct_pos = Some('H');
+                if ds.in_position_h {
+                    ds.reading_pct_pos = Some('H');
                 }
             }
             b"pctPosVOffset" => {
-                if *in_position_v {
-                    *reading_pct_pos = Some('V');
+                if ds.in_position_v {
+                    ds.reading_pct_pos = Some('V');
                 }
             }
             b"wrapTight" | b"wrapSquare" | b"wrapThrough" => {
                 if let Some(val) = get_attr(e, b"wrapText")? {
-                    *wrap_side = match val.as_str() {
+                    ds.wrap_side = match val.as_str() {
                         "bothSides" => Some(WrapSide::BothSides),
                         "left" => Some(WrapSide::Left),
                         "right" => Some(WrapSide::Right),
                         _ => Some(WrapSide::BothSides),
                     };
                 } else {
-                    *wrap_side = Some(WrapSide::BothSides);
+                    ds.wrap_side = Some(WrapSide::BothSides);
                 }
             }
             b"wrapNone" => {}
@@ -94,42 +81,34 @@ pub fn handle_drawing_element(
 
 /// Handle End events inside a drawing subtree for position tracking.
 pub fn handle_drawing_end(local: &[u8], state: &mut ParseState) {
-    if let ParseState::InDrawing {
-        ref mut in_position_h,
-        ref mut in_position_v,
-        ref mut reading_pos_offset,
-        ref mut reading_align,
-        ref mut reading_pct_pos,
-        ..
-    } = state
-    {
+    if let ParseState::InDrawing(ds) = state {
         match local {
             b"positionH" => {
-                *in_position_h = false;
-                if *reading_pos_offset == Some('H') {
-                    *reading_pos_offset = None;
+                ds.in_position_h = false;
+                if ds.reading_pos_offset == Some('H') {
+                    ds.reading_pos_offset = None;
                 }
-                if *reading_pct_pos == Some('H') {
-                    *reading_pct_pos = None;
+                if ds.reading_pct_pos == Some('H') {
+                    ds.reading_pct_pos = None;
                 }
             }
             b"positionV" => {
-                *in_position_v = false;
-                if *reading_pos_offset == Some('V') {
-                    *reading_pos_offset = None;
+                ds.in_position_v = false;
+                if ds.reading_pos_offset == Some('V') {
+                    ds.reading_pos_offset = None;
                 }
-                if *reading_pct_pos == Some('V') {
-                    *reading_pct_pos = None;
+                if ds.reading_pct_pos == Some('V') {
+                    ds.reading_pct_pos = None;
                 }
             }
             b"posOffset" => {
-                *reading_pos_offset = None;
+                ds.reading_pos_offset = None;
             }
             b"pctPosHOffset" | b"pctPosVOffset" => {
-                *reading_pct_pos = None;
+                ds.reading_pct_pos = None;
             }
             b"align" => {
-                *reading_align = None;
+                ds.reading_align = None;
             }
             _ => {}
         }

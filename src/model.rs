@@ -21,6 +21,22 @@ pub struct ResolvedParagraphStyle {
     pub run_props: ResolvedRunStyle,
 }
 
+impl ResolvedParagraphStyle {
+    /// Fill in `None` fields from a base (parent) style.
+    pub fn merge_from(&mut self, base: &ResolvedParagraphStyle) {
+        if self.alignment.is_none() {
+            self.alignment = base.alignment;
+        }
+        if self.spacing.is_none() {
+            self.spacing = base.spacing;
+        }
+        if self.indentation.is_none() {
+            self.indentation = base.indentation;
+        }
+        self.run_props.merge_from(&base.run_props);
+    }
+}
+
 /// Resolved run (character) style properties.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ResolvedRunStyle {
@@ -30,6 +46,30 @@ pub struct ResolvedRunStyle {
     pub font_size: Option<HalfPoints>,
     pub font_family: Option<Rc<str>>,
     pub color: Option<Color>,
+}
+
+impl ResolvedRunStyle {
+    /// Fill in `None` fields from a base (parent) style.
+    pub fn merge_from(&mut self, base: &ResolvedRunStyle) {
+        if self.bold.is_none() {
+            self.bold = base.bold;
+        }
+        if self.italic.is_none() {
+            self.italic = base.italic;
+        }
+        if self.underline.is_none() {
+            self.underline = base.underline;
+        }
+        if self.font_size.is_none() {
+            self.font_size = base.font_size;
+        }
+        if self.font_family.is_none() {
+            self.font_family = base.font_family.clone();
+        }
+        if self.color.is_none() {
+            self.color = base.color;
+        }
+    }
 }
 
 /// Map of style IDs to resolved properties.
@@ -75,60 +115,63 @@ pub struct ListRef {
     pub level: u32,
 }
 
-/// Root of the document tree.
+/// A section: a group of blocks sharing the same page geometry and header/footer.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Document {
+pub struct Section {
+    pub properties: SectionProperties,
     pub blocks: Vec<Block>,
-    /// Final section properties (from `w:body/w:sectPr`).
-    pub final_section: Option<SectionProperties>,
+}
+
+/// Document-wide defaults from `word/styles.xml`, `word/settings.xml`, and theme.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentDefaults {
     /// Default tab stop interval.
-    pub default_tab_stop: Twips,
+    pub tab_stop: Twips,
     /// Default font size in half-points.
-    pub default_font_size: HalfPoints,
+    pub font_size: HalfPoints,
     /// Default font family.
-    pub default_font_family: Rc<str>,
+    pub font_family: Rc<str>,
     /// Default paragraph spacing.
-    pub default_spacing: Spacing,
+    pub spacing: Spacing,
     /// Default table cell margins.
-    pub default_cell_margins: CellMargins,
+    pub cell_margins: CellMargins,
     /// Default paragraph spacing inside table cells.
     pub table_cell_spacing: Spacing,
     /// Default table borders (from table style).
-    pub default_table_borders: TableBorders,
+    pub table_borders: TableBorders,
     /// Named paragraph/run styles resolved from `word/styles.xml`.
     pub styles: StyleMap,
     /// Numbering definitions from `word/numbering.xml`.
     pub numbering: NumberingMap,
-    /// Default header content (from first/final section).
-    pub default_header: Option<HeaderFooter>,
-    /// Default footer content (from first/final section).
-    pub default_footer: Option<HeaderFooter>,
-    /// Raw image bytes keyed by relationship ID.
-    pub images: ImageStore,
 }
 
-impl Default for Document {
+impl Default for DocumentDefaults {
     fn default() -> Self {
         Self {
-            blocks: Vec::new(),
-            final_section: None,
-            default_tab_stop: Self::DEFAULT_TAB_STOP,
-            default_font_size: Self::DEFAULT_FONT_SIZE,
-            default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
-            default_spacing: Spacing::default(),
-            default_cell_margins: CellMargins::default(),
+            tab_stop: Document::DEFAULT_TAB_STOP,
+            font_size: Document::DEFAULT_FONT_SIZE,
+            font_family: Rc::from(DEFAULT_FONT_FAMILY),
+            spacing: Spacing::default(),
+            cell_margins: CellMargins::default(),
             table_cell_spacing: Spacing {
                 after: Some(Twips::new(0)),
                 ..Default::default()
             },
-            default_table_borders: TableBorders::default(),
+            table_borders: TableBorders::default(),
             styles: StyleMap::new(),
             numbering: NumberingMap::new(),
-            default_header: None,
-            default_footer: None,
-            images: ImageStore::new(),
         }
     }
+}
+
+/// Root of the document tree.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Document {
+    pub sections: Vec<Section>,
+    /// Document-wide defaults (fonts, spacing, styles, numbering).
+    pub defaults: DocumentDefaults,
+    /// Raw image bytes keyed by relationship ID.
+    pub images: ImageStore,
 }
 
 impl Document {
@@ -139,14 +182,19 @@ impl Document {
     /// Default tab stop interval: 720 twips (0.5 inch).
     pub const DEFAULT_TAB_STOP: Twips = Twips::new(720);
 
+    /// Iterate over all section properties in document order.
+    pub fn section_properties(&self) -> impl Iterator<Item = &SectionProperties> {
+        self.sections.iter().map(|s| &s.properties)
+    }
+
     /// Collect all unique font families referenced in this document.
     pub fn font_families(&self) -> Vec<Rc<str>> {
         use std::collections::HashSet;
         let mut families = HashSet::new();
-        families.insert(self.default_font_family.clone());
+        families.insert(self.defaults.font_family.clone());
 
         // From styles
-        for style in self.styles.values() {
+        for style in self.defaults.styles.values() {
             if let Some(ref f) = style.run_props.font_family {
                 families.insert(f.clone());
             }
@@ -175,13 +223,14 @@ impl Document {
             }
         }
 
-        collect_from_blocks(&self.blocks, &mut families);
-
-        if let Some(ref hf) = self.default_header {
-            collect_from_blocks(&hf.blocks, &mut families);
-        }
-        if let Some(ref hf) = self.default_footer {
-            collect_from_blocks(&hf.blocks, &mut families);
+        for section in &self.sections {
+            collect_from_blocks(&section.blocks, &mut families);
+            if let Some(ref hf) = section.properties.header {
+                collect_from_blocks(&hf.blocks, &mut families);
+            }
+            if let Some(ref hf) = section.properties.footer {
+                collect_from_blocks(&hf.blocks, &mut families);
+            }
         }
 
         families.into_iter().collect()
@@ -218,7 +267,7 @@ pub struct HeaderFooter {
 }
 
 /// Section properties from `w:sectPr`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SectionProperties {
     pub page_size: Option<PageSize>,
     pub page_margins: Option<PageMargins>,
@@ -237,7 +286,6 @@ pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub runs: Vec<Inline>,
     pub floats: Vec<FloatingImage>,
-    pub section_properties: Option<SectionProperties>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -327,6 +375,20 @@ pub struct Indentation {
     pub left: Option<Twips>,
     pub right: Option<Twips>,
     pub first_line: Option<Twips>,
+}
+
+impl Indentation {
+    pub fn left_pt(&self) -> Pt {
+        self.left.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    pub fn right_pt(&self) -> Pt {
+        self.right.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    pub fn first_line_pt(&self) -> Pt {
+        self.first_line.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
 }
 
 /// A type-safe wrapper for OOXML relationship IDs (e.g., "rId5").
@@ -530,16 +592,6 @@ impl BorderDef {
     /// Not defined by OOXML spec; matches Microsoft Word's behavior.
     pub const DEFAULT_SIZE: EighthPoints = EighthPoints::new(4);
 
-    /// Create a single-style border with given size (eighths of a point) and color.
-    pub fn single(size: i64, color: Color) -> Self {
-        Self {
-            style: BorderStyle::Single,
-            size: EighthPoints::new(size),
-            color,
-            space: Pt::ZERO,
-        }
-    }
-
     /// Returns true if this border should be drawn.
     pub fn is_visible(&self) -> bool {
         self.style != BorderStyle::None && self.size.is_positive()
@@ -614,12 +666,6 @@ pub struct TableCell {
     pub shading: Option<Color>,
 }
 
-impl TableCell {
-    pub fn is_vmerge_continue(&self) -> bool {
-        self.vertical_merge == Some(VerticalMerge::Continue)
-    }
-}
-
 impl Color {
     pub fn from_hex(hex: &str) -> Option<Self> {
         if hex.len() != 6 {
@@ -633,6 +679,16 @@ impl Color {
 }
 
 impl Spacing {
+    /// Spacing before in points, defaulting to zero.
+    pub fn before_pt(&self) -> Pt {
+        self.before.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
+    /// Spacing after in points, defaulting to zero.
+    pub fn after_pt(&self) -> Pt {
+        self.after.map(Pt::from).unwrap_or(Pt::ZERO)
+    }
+
     /// Line spacing semantic value.
     /// For `Auto`: multiplier (1.0 = single spacing).
     /// For `Exact`/`AtLeast`: value in points.
@@ -707,8 +763,8 @@ mod tests {
             line: Some(Twips::new(360)),
             ..Default::default()
         };
-        assert_eq!(f32::from(s.before.map(Pt::from).unwrap_or(Pt::ZERO)), 12.0);
-        assert_eq!(f32::from(s.after.map(Pt::from).unwrap_or(Pt::ZERO)), 6.0);
+        assert_eq!(f32::from(s.before_pt()), 12.0);
+        assert_eq!(f32::from(s.after_pt()), 6.0);
         assert_eq!(f32::from(s.line_pt()), 18.0);
     }
 

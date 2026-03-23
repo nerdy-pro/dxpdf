@@ -8,11 +8,6 @@ use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::Color;
 
 /// Render laid-out pages to a PDF byte buffer.
-pub fn render_to_pdf(pages: &[LayoutedPage]) -> Result<Vec<u8>, Error> {
-    render_to_pdf_with_font_mgr(pages, &FontMgr::new())
-}
-
-/// Render laid-out pages to a PDF byte buffer, reusing an existing FontMgr.
 pub fn render_to_pdf_with_font_mgr(
     pages: &[LayoutedPage],
     font_mgr: &FontMgr,
@@ -87,6 +82,7 @@ fn render_page(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
     canvas: &skia_safe::Canvas,
     font_mgr: &FontMgr,

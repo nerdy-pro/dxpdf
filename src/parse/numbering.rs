@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use super::archive::{attr_val, local_name};
+use super::xml::helpers::{get_attr_lossy as attr_val, local_name};
 
 pub(super) fn parse_numbering(xml: &str) -> crate::model::NumberingMap {
     use crate::model::{NumberFormat, NumberingDef, NumberingLevel};

@@ -1,31 +1,40 @@
-#![allow(
-    clippy::too_many_arguments,
-    clippy::collapsible_if,
-    clippy::collapsible_match
-)]
+#![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
-pub mod dimension;
-pub mod error;
-pub mod geometry;
-pub mod model;
-pub mod parse;
-pub mod render;
+pub(crate) mod dimension;
+pub(crate) mod error;
+pub(crate) mod geometry;
+pub(crate) mod model;
+pub(crate) mod parse;
+pub(crate) mod render;
 
 pub use error::Error;
 
 /// Convert raw DOCX bytes into PDF bytes.
 pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
-    let document = parse::parse(docx_bytes)?;
-    convert_document(&document)
-}
+    use std::time::Instant;
 
-/// Convert a parsed `Document` into PDF bytes.
-pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
+    let t0 = Instant::now();
+    let document = parse::parse(docx_bytes)?;
+    log::debug!("Parse:  {:?}", t0.elapsed());
+
+    let t1 = Instant::now();
     let font_mgr = skia_safe::FontMgr::new();
     render::fonts::preload_fonts(&font_mgr, &document.font_families());
-    let measured = render::layout::measure::measure(document, &font_mgr);
+    log::debug!("Fonts:  {:?}", t1.elapsed());
+
+    let t2 = Instant::now();
+    let measured = render::layout::measure::measure(&document, &font_mgr);
     let pages = render::layout::layout(&measured, &font_mgr);
-    render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)
+    log::debug!("Layout: {:?}", t2.elapsed());
+
+    let t3 = Instant::now();
+    let pdf_bytes = render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)?;
+    log::debug!("Paint:  {:?}", t3.elapsed());
+
+    log::debug!("Total:  {:?}", t0.elapsed());
+    log::info!("Pages: {} | Size: {} bytes", pages.len(), pdf_bytes.len());
+
+    Ok(pdf_bytes)
 }
 
 // --- Python bindings (enabled with `python` feature) ---

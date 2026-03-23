@@ -44,7 +44,10 @@ const TINY_PNG: &[u8] = &[
 
 fn make_doc(blocks: Vec<Block>) -> Document {
     Document {
-        blocks,
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks,
+        }],
         ..Document::default()
     }
 }
@@ -58,7 +61,6 @@ fn simple_paragraph(text: &str) -> Block {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))
 }
 
@@ -72,7 +74,6 @@ fn make_cell(text: &str) -> TableCell {
                 hyperlink_url: None,
             })],
             floats: Vec::new(),
-            section_properties: None,
         }))],
         width: None,
         grid_span: 1,
@@ -146,7 +147,6 @@ fn layout_page_break() {
                 hyperlink_url: None,
             })],
             floats: Vec::new(),
-            section_properties: None,
         })));
     }
     let doc = make_doc(blocks);
@@ -171,7 +171,6 @@ fn layout_centered_text() {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
@@ -449,44 +448,45 @@ fn extract_rects(pages: &[LayoutedPage]) -> Vec<(f32, f32, f32, f32, Color)> {
 #[test]
 fn spacing_before_after_affects_position() {
     let doc = Document {
-        blocks: vec![
-            Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties {
-                    spacing: Some(Spacing {
-                        before: Some(tw(200)),
-                        after: Some(tw(200)),
-                        line: None,
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![
+                Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties {
+                        spacing: Some(Spacing {
+                            before: Some(tw(200)),
+                            after: Some(tw(200)),
+                            line: None,
+                            ..Default::default()
+                        }),
                         ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "First".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            })),
-            Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties {
-                    spacing: Some(Spacing {
-                        before: Some(tw(100)),
-                        after: None,
-                        line: None,
+                    },
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "First".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                })),
+                Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties {
+                        spacing: Some(Spacing {
+                            before: Some(tw(100)),
+                            after: None,
+                            line: None,
+                            ..Default::default()
+                        }),
                         ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "Second".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            })),
-        ],
+                    },
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "Second".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                })),
+            ],
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -509,26 +509,28 @@ fn spacing_before_after_affects_position() {
 #[test]
 fn left_indentation_shifts_text_right() {
     let doc = Document {
-        blocks: vec![
-            simple_paragraph("NoIndent"),
-            Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties {
-                    indentation: Some(Indentation {
-                        left: Some(tw(720)), // 36pt
-                        right: None,
-                        first_line: None,
-                    }),
-                    ..Default::default()
-                },
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "Indented".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            })),
-        ],
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![
+                simple_paragraph("NoIndent"),
+                Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties {
+                        indentation: Some(Indentation {
+                            left: Some(tw(720)), // 36pt
+                            right: None,
+                            first_line: None,
+                        }),
+                        ..Default::default()
+                    },
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "Indented".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                })),
+            ],
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -548,43 +550,46 @@ fn left_indentation_shifts_text_right() {
 #[test]
 fn section_break_changes_page_dimensions() {
     let doc = Document {
-        blocks: vec![
-            Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "Portrait".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: Some(SectionProperties {
+        sections: vec![
+            Section {
+                properties: SectionProperties {
                     page_size: Some(PageSize::new(tw(12240), tw(15840))),
                     page_margins: None,
                     header: None,
                     footer: None,
                     header_rel_id: None,
                     footer_rel_id: None,
-                }),
-            })),
-            Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "Landscape".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            })),
+                },
+                blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "Portrait".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                }))],
+            },
+            Section {
+                properties: SectionProperties {
+                    page_size: Some(PageSize::new(tw(15840), tw(12240))),
+                    page_margins: None,
+                    header: None,
+                    footer: None,
+                    header_rel_id: None,
+                    footer_rel_id: None,
+                },
+                blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "Landscape".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                }))],
+            },
         ],
-        final_section: Some(SectionProperties {
-            page_size: Some(PageSize::new(tw(15840), tw(12240))),
-            page_margins: None,
-            header: None,
-            footer: None,
-            header_rel_id: None,
-            footer_rel_id: None,
-        }),
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -610,10 +615,13 @@ fn adjacent_tables_no_gap() {
         borders: None,
     };
     let doc = Document {
-        blocks: vec![
-            Block::Table(Box::new(mk_table("T1"))),
-            Block::Table(Box::new(mk_table("T2"))),
-        ],
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![
+                Block::Table(Box::new(mk_table("T1"))),
+                Block::Table(Box::new(mk_table("T2"))),
+            ],
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -698,7 +706,6 @@ fn line_break_forces_new_line() {
             }),
         ],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -737,7 +744,6 @@ fn paragraph_shading_excludes_spacing() {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let rects = extract_rects(&pages);
@@ -819,7 +825,6 @@ fn right_alignment() {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -1398,11 +1403,17 @@ fn vmerge_multiple_columns() {
 #[test]
 fn spacing_defaults_applied_when_paragraph_has_none() {
     let doc = Document {
-        blocks: vec![simple_paragraph("Test")],
-        default_spacing: Spacing {
-            before: Some(tw(100)), // 5pt
-            after: Some(tw(200)),  // 10pt
-            line: None,
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![simple_paragraph("Test")],
+        }],
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                before: Some(tw(100)), // 5pt
+                after: Some(tw(200)),  // 10pt
+                line: None,
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Document::default()
@@ -1419,28 +1430,33 @@ fn spacing_defaults_applied_when_paragraph_has_none() {
 #[test]
 fn direct_spacing_overrides_defaults() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Box::new(Paragraph {
-            properties: ParagraphProperties {
-                spacing: Some(Spacing {
-                    before: Some(tw(400)), // 20pt
-                    after: None,
-                    line: None,
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                properties: ParagraphProperties {
+                    spacing: Some(Spacing {
+                        before: Some(tw(400)), // 20pt
+                        after: None,
+                        line: None,
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
+                },
+                runs: vec![Inline::TextRun(TextRun {
+                    text: "Test".into(),
+                    properties: RunProperties::default(),
+                    hyperlink_url: None,
+                })],
+                floats: Vec::new(),
+            }))],
+        }],
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                before: Some(tw(100)),
+                after: Some(tw(200)),
+                line: None,
                 ..Default::default()
             },
-            runs: vec![Inline::TextRun(TextRun {
-                text: "Test".into(),
-                properties: RunProperties::default(),
-                hyperlink_url: None,
-            })],
-            floats: Vec::new(),
-            section_properties: None,
-        }))],
-        default_spacing: Spacing {
-            before: Some(tw(100)),
-            after: Some(tw(200)),
-            line: None,
             ..Default::default()
         },
         ..Document::default()
@@ -1479,7 +1495,6 @@ fn paragraph_shading_split_across_pages() {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     })));
     let doc = make_doc(blocks);
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -1672,7 +1687,6 @@ fn empty_paragraph_still_has_height() {
             properties: ParagraphProperties::default(),
             runs: vec![],
             floats: Vec::new(),
-            section_properties: None,
         })),
         simple_paragraph("After"),
     ]);
@@ -1714,7 +1728,6 @@ fn first_line_indent_shifts_first_line_only() {
             }),
         ],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -1733,37 +1746,42 @@ fn first_line_indent_shifts_first_line_only() {
 #[test]
 fn bullet_list_renders_label() {
     let doc = Document {
-        blocks: vec![Block::Paragraph(Box::new(Paragraph {
-            properties: ParagraphProperties {
-                list_ref: Some(ListRef {
-                    num_id: 1,
-                    level: 0,
-                }),
-                ..Default::default()
-            },
-            runs: vec![Inline::TextRun(TextRun {
-                text: "Item".into(),
-                properties: RunProperties::default(),
-                hyperlink_url: None,
-            })],
-            floats: Vec::new(),
-            section_properties: None,
-        }))],
-        numbering: {
-            let mut map = std::collections::HashMap::new();
-            map.insert(
-                1,
-                NumberingDef {
-                    levels: vec![NumberingLevel {
-                        format: NumberFormat::Bullet("\u{2022}".to_string()),
-                        level_text: "%1".to_string(),
-                        start: 1,
-                        indent_left: tw(720),
-                        indent_hanging: tw(360),
-                    }],
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                properties: ParagraphProperties {
+                    list_ref: Some(ListRef {
+                        num_id: 1,
+                        level: 0,
+                    }),
+                    ..Default::default()
                 },
-            );
-            map
+                runs: vec![Inline::TextRun(TextRun {
+                    text: "Item".into(),
+                    properties: RunProperties::default(),
+                    hyperlink_url: None,
+                })],
+                floats: Vec::new(),
+            }))],
+        }],
+        defaults: DocumentDefaults {
+            numbering: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    1,
+                    NumberingDef {
+                        levels: vec![NumberingLevel {
+                            format: NumberFormat::Bullet("\u{2022}".to_string()),
+                            level_text: "%1".to_string(),
+                            start: 1,
+                            indent_left: tw(720),
+                            indent_hanging: tw(360),
+                        }],
+                    },
+                );
+                map
+            },
+            ..Default::default()
         },
         ..Document::default()
     };
@@ -1794,26 +1812,31 @@ fn decimal_list_increments_counter() {
                 hyperlink_url: None,
             })],
             floats: Vec::new(),
-            section_properties: None,
         })));
     }
     let doc = Document {
-        blocks,
-        numbering: {
-            let mut map = std::collections::HashMap::new();
-            map.insert(
-                1,
-                NumberingDef {
-                    levels: vec![NumberingLevel {
-                        format: NumberFormat::Decimal,
-                        level_text: "%1.".to_string(),
-                        start: 1,
-                        indent_left: tw(720),
-                        indent_hanging: tw(360),
-                    }],
-                },
-            );
-            map
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks,
+        }],
+        defaults: DocumentDefaults {
+            numbering: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    1,
+                    NumberingDef {
+                        levels: vec![NumberingLevel {
+                            format: NumberFormat::Decimal,
+                            level_text: "%1.".to_string(),
+                            start: 1,
+                            indent_left: tw(720),
+                            indent_hanging: tw(360),
+                        }],
+                    },
+                );
+                map
+            },
+            ..Default::default()
         },
         ..Document::default()
     };
@@ -1857,7 +1880,6 @@ fn float_adjustment_shifts_text() {
             hyperlink_url: None,
         })],
         floats: vec![float_img],
-        section_properties: None,
     }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -1882,19 +1904,23 @@ fn header_renders_on_each_page() {
         blocks.push(simple_paragraph(&format!("Line {i}")));
     }
     let doc = Document {
-        blocks,
-        default_header: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "HEADER".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
-        }),
+        sections: vec![Section {
+            properties: SectionProperties {
+                header: Some(HeaderFooter {
+                    blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                        properties: ParagraphProperties::default(),
+                        runs: vec![Inline::TextRun(TextRun {
+                            text: "HEADER".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        })],
+                        floats: Vec::new(),
+                    }))],
+                }),
+                ..Default::default()
+            },
+            blocks,
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -1912,19 +1938,23 @@ fn header_renders_on_each_page() {
 #[test]
 fn footer_renders_at_bottom() {
     let doc = Document {
-        blocks: vec![simple_paragraph("Body")],
-        default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "FOOTER".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
-        }),
+        sections: vec![Section {
+            properties: SectionProperties {
+                footer: Some(HeaderFooter {
+                    blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                        properties: ParagraphProperties::default(),
+                        runs: vec![Inline::TextRun(TextRun {
+                            text: "FOOTER".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        })],
+                        floats: Vec::new(),
+                    }))],
+                }),
+                ..Default::default()
+            },
+            blocks: vec![simple_paragraph("Body")],
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -1980,9 +2010,15 @@ fn after_table_spacing_uses_doc_default() {
         borders: None,
     };
     let doc = Document {
-        blocks: vec![Block::Table(Box::new(table)), simple_paragraph("After")],
-        default_spacing: Spacing {
-            after: Some(tw(200)),
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![Block::Table(Box::new(table)), simple_paragraph("After")],
+        }],
+        defaults: DocumentDefaults {
+            spacing: Spacing {
+                after: Some(tw(200)),
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Document::default()
@@ -2000,7 +2036,10 @@ fn after_table_spacing_uses_doc_default() {
         borders: None,
     };
     let doc_no_sp = Document {
-        blocks: vec![Block::Table(Box::new(table2)), simple_paragraph("After")],
+        sections: vec![Section {
+            properties: SectionProperties::default(),
+            blocks: vec![Block::Table(Box::new(table2)), simple_paragraph("After")],
+        }],
         ..Document::default()
     };
     let pages_without = measure_and_layout(&doc_no_sp, &test_font_mgr());
@@ -2062,7 +2101,6 @@ fn pct_pos_offset_positions_float_by_page_percentage() {
             hyperlink_url: None,
         })],
         floats: vec![float_img],
-        section_properties: None,
     }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -2093,7 +2131,6 @@ fn pct_pos_none_uses_regular_offset() {
             hyperlink_url: None,
         })],
         floats: vec![float_img],
-        section_properties: None,
     }))]);
     doc.images.insert("rId1".to_string(), TINY_PNG.to_vec());
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -2134,7 +2171,6 @@ fn hyperlink_produces_link_annotation() {
             hyperlink_url: Some("https://example.com".to_string()),
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let links = extract_link_annotations(&pages);
@@ -2162,7 +2198,12 @@ fn paragraph_bottom_border_renders_line() {
         properties: ParagraphProperties {
             paragraph_borders: Some(ParagraphBorders {
                 top: None,
-                bottom: Some(BorderDef::single(4, Color::BLACK)),
+                bottom: Some(BorderDef {
+                    style: BorderStyle::Single,
+                    size: crate::dimension::EighthPoints::new(4),
+                    color: Color::BLACK,
+                    space: crate::dimension::Pt::ZERO,
+                }),
                 left: None,
                 right: None,
             }),
@@ -2174,7 +2215,6 @@ fn paragraph_bottom_border_renders_line() {
             hyperlink_url: None,
         })],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let lines = extract_lines(&pages);
@@ -2200,34 +2240,38 @@ fn page_field_renders_page_number_in_footer() {
         blocks.push(simple_paragraph(&format!("Line {i}")));
     }
     let doc = Document {
-        blocks,
-        default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![
-                    Inline::TextRun(TextRun {
-                        text: "Page ".into(),
-                        properties: RunProperties::default(),
-                        hyperlink_url: None,
-                    }),
-                    Inline::Field(FieldCode {
-                        field_type: FieldType::Page,
-                        properties: RunProperties::default(),
-                    }),
-                    Inline::TextRun(TextRun {
-                        text: " of ".into(),
-                        properties: RunProperties::default(),
-                        hyperlink_url: None,
-                    }),
-                    Inline::Field(FieldCode {
-                        field_type: FieldType::NumPages,
-                        properties: RunProperties::default(),
-                    }),
-                ],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
-        }),
+        sections: vec![Section {
+            properties: SectionProperties {
+                footer: Some(HeaderFooter {
+                    blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                        properties: ParagraphProperties::default(),
+                        runs: vec![
+                            Inline::TextRun(TextRun {
+                                text: "Page ".into(),
+                                properties: RunProperties::default(),
+                                hyperlink_url: None,
+                            }),
+                            Inline::Field(FieldCode {
+                                field_type: FieldType::Page,
+                                properties: RunProperties::default(),
+                            }),
+                            Inline::TextRun(TextRun {
+                                text: " of ".into(),
+                                properties: RunProperties::default(),
+                                hyperlink_url: None,
+                            }),
+                            Inline::Field(FieldCode {
+                                field_type: FieldType::NumPages,
+                                properties: RunProperties::default(),
+                            }),
+                        ],
+                        floats: Vec::new(),
+                    }))],
+                }),
+                ..Default::default()
+            },
+            blocks,
+        }],
         ..Document::default()
     };
     let pages = measure_and_layout(&doc, &test_font_mgr());
@@ -2278,7 +2322,6 @@ fn superscript_reduces_font_size_and_shifts_up() {
             }),
         ],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);
@@ -2312,7 +2355,6 @@ fn subscript_shifts_down() {
             }),
         ],
         floats: Vec::new(),
-        section_properties: None,
     }))]);
     let pages = measure_and_layout(&doc, &test_font_mgr());
     let texts = extract_texts(&pages);

@@ -1,6 +1,6 @@
 mod drawing;
-mod helpers;
-mod properties;
+pub(crate) mod helpers;
+pub(crate) mod properties;
 mod section;
 
 use std::collections::{HashMap, HashSet};
@@ -23,12 +23,6 @@ fn warn_once(warned: &mut HashSet<&'static str>, key: &'static str, msg: &str) {
     }
 }
 
-/// Parse the `word/document.xml` content into a `Document`.
-pub fn parse_document_xml(xml: &str) -> Result<Document, Error> {
-    let empty = HashMap::new();
-    parse_document_xml_with_rels(xml, &empty)
-}
-
 /// Parse document XML with relationship data for hyperlink resolution.
 pub fn parse_document_xml_with_rels(
     xml: &str,
@@ -48,27 +42,24 @@ pub fn parse_document_xml_with_rels(
         }
     }
 
+    // Finalize the last section from remaining blocks + final section properties.
+    let final_props = ctx.final_section.take().unwrap_or_default();
+    ctx.finalize_section(final_props);
+
     Ok(Document {
-        blocks: ctx.blocks,
-        final_section: ctx.final_section,
+        sections: ctx.sections,
         ..Document::default()
     })
-}
-
-/// Parse a header or footer XML file into a list of blocks.
-/// Header/footer XML has the same structure as document body
-/// but with `w:hdr` or `w:ftr` as the root element.
-pub fn parse_header_footer_xml(xml: &str) -> Result<HeaderFooter, Error> {
-    let empty = HashMap::new();
-    parse_header_footer_xml_with_rels(xml, &empty)
 }
 
 pub fn parse_header_footer_xml_with_rels(
     xml: &str,
     rels: &HashMap<String, String>,
 ) -> Result<HeaderFooter, Error> {
-    let doc = parse_document_xml_with_rels(xml, rels)?;
-    Ok(HeaderFooter { blocks: doc.blocks })
+    let mut doc = parse_document_xml_with_rels(xml, rels)?;
+    // Header/footer XML never has section breaks — extract all blocks.
+    let blocks = doc.sections.drain(..).flat_map(|s| s.blocks).collect();
+    Ok(HeaderFooter { blocks })
 }
 
 // ============================================================
@@ -76,9 +67,13 @@ pub fn parse_header_footer_xml_with_rels(
 // ============================================================
 
 struct ParserContext {
-    blocks: Vec<Block>,
+    /// Completed sections.
+    sections: Vec<Section>,
+    /// Blocks accumulating for the current (not yet finalized) section.
+    current_blocks: Vec<Block>,
     stack: Vec<ParseState>,
     state: ParseState,
+    /// Section properties for the final section (from `w:body/w:sectPr`).
     final_section: Option<SectionProperties>,
     warned: HashSet<&'static str>,
     /// Field code state machine: tracks begin→instrText→separate→cached→end sequence.
@@ -90,7 +85,8 @@ struct ParserContext {
 impl ParserContext {
     fn new() -> Self {
         Self {
-            blocks: Vec::new(),
+            sections: Vec::new(),
+            current_blocks: Vec::new(),
             stack: Vec::new(),
             state: ParseState::Idle,
             final_section: None,
@@ -99,6 +95,13 @@ impl ParserContext {
             field_suppressing: false,
             field_props: RunProperties::default(),
         }
+    }
+
+    /// Finalize the current section: move accumulated blocks into a new Section
+    /// with the given properties, and start a new empty block accumulator.
+    fn finalize_section(&mut self, properties: SectionProperties) {
+        let blocks = std::mem::take(&mut self.current_blocks);
+        self.sections.push(Section { properties, blocks });
     }
 
     fn handle_start(
@@ -214,32 +217,14 @@ impl ParserContext {
             {
                 self.stack
                     .push(std::mem::replace(&mut self.state, ParseState::Idle));
-                self.state = ParseState::InDrawing {
-                    depth: 1,
-                    rel_id: None,
-                    width_emu: None,
-                    height_emu: None,
-                    is_anchor: false,
-                    pos_h_emu: None,
-                    pos_v_emu: None,
-                    align_h: None,
-                    align_v: None,
-                    reading_align: None,
-                    wrap_side: None,
-                    reading_pos_offset: None,
-                    in_position_h: false,
-                    in_position_v: false,
-                    pct_pos_h: None,
-                    pct_pos_v: None,
-                    reading_pct_pos: None,
-                };
+                self.state = ParseState::InDrawing(DrawingState::new());
             }
             _ if matches!(self.state, ParseState::InSectionProperties { .. }) => {
                 handle_section_element(local, e, &mut self.state)?;
             }
-            _ if matches!(self.state, ParseState::InDrawing { .. }) => {
-                if let ParseState::InDrawing { ref mut depth, .. } = self.state {
-                    *depth += 1;
+            _ if matches!(self.state, ParseState::InDrawing(..)) => {
+                if let ParseState::InDrawing(ref mut ds) = self.state {
+                    ds.depth += 1;
                 }
                 handle_drawing_element(local, e, &mut self.state)?;
             }
@@ -319,6 +304,35 @@ impl ParserContext {
         Ok(())
     }
 
+    /// Flush any accumulated run text into the parent paragraph and push an inline element.
+    fn flush_run_and_push_inline(&mut self, inline: Inline) {
+        if let ParseState::InRun {
+            ref props,
+            ref mut text,
+            ..
+        } = self.state
+        {
+            let flushed_text = std::mem::take(text);
+            if let Some(para_state) = self
+                .stack
+                .iter_mut()
+                .rev()
+                .find(|s| matches!(s, ParseState::InParagraph { .. }))
+            {
+                if let ParseState::InParagraph { ref mut runs, .. } = para_state {
+                    if !flushed_text.is_empty() {
+                        runs.push(Inline::TextRun(TextRun {
+                            text: flushed_text,
+                            properties: props.clone(),
+                            hyperlink_url: None,
+                        }));
+                    }
+                    runs.push(inline);
+                }
+            }
+        }
+    }
+
     fn handle_empty(
         &mut self,
         e: &BytesStart<'_>,
@@ -332,42 +346,17 @@ impl ParserContext {
                 properties: ParagraphProperties::default(),
                 runs: Vec::new(),
                 floats: Vec::new(),
-                section_properties: None,
             }));
-            push_block(&mut self.state, &mut self.blocks, paragraph);
+            push_block(&mut self.state, &mut self.current_blocks, paragraph);
         } else if (local == b"br" || local == b"tab")
             && matches!(self.state, ParseState::InRun { .. })
         {
-            if let ParseState::InRun {
-                ref props,
-                ref mut text,
-                ..
-            } = self.state
-            {
-                let flushed_text = std::mem::take(text);
-                let inline_to_push = if local == b"br" {
-                    Inline::LineBreak
-                } else {
-                    Inline::Tab
-                };
-                if let Some(para_state) = self
-                    .stack
-                    .iter_mut()
-                    .rev()
-                    .find(|s| matches!(s, ParseState::InParagraph { .. }))
-                {
-                    if let ParseState::InParagraph { ref mut runs, .. } = para_state {
-                        if !flushed_text.is_empty() {
-                            runs.push(Inline::TextRun(TextRun {
-                                text: flushed_text,
-                                properties: props.clone(),
-                                hyperlink_url: None,
-                            }));
-                        }
-                        runs.push(inline_to_push);
-                    }
-                }
-            }
+            let inline = if local == b"br" {
+                Inline::LineBreak
+            } else {
+                Inline::Tab
+            };
+            self.flush_run_and_push_inline(inline);
         } else if local == b"fldChar" {
             handle_fld_char(
                 e,
@@ -377,7 +366,7 @@ impl ParserContext {
                 &mut self.field_suppressing,
                 &mut self.field_props,
             )?;
-        } else if matches!(self.state, ParseState::InDrawing { .. }) {
+        } else if matches!(self.state, ParseState::InDrawing(..)) {
             handle_drawing_element(local, e, &mut self.state)?;
         } else if matches!(self.state, ParseState::InSectionProperties { .. }) {
             handle_section_element(local, e, &mut self.state)?;
@@ -407,43 +396,31 @@ impl ParserContext {
 
         if let ParseState::InText { ref mut text, .. } = self.state {
             text.push_str(&e.unescape()?);
-        } else if let ParseState::InDrawing {
-            ref reading_pos_offset,
-            ref reading_align,
-            ref reading_pct_pos,
-            ref mut pos_h_emu,
-            ref mut pos_v_emu,
-            ref mut align_h,
-            ref mut align_v,
-            ref mut pct_pos_h,
-            ref mut pct_pos_v,
-            ..
-        } = self.state
-        {
-            if let Some(axis) = reading_align {
+        } else if let ParseState::InDrawing(ref mut ds) = self.state {
+            if let Some(axis) = ds.reading_align {
                 let val_str = e.unescape().unwrap_or_default();
                 let val = val_str.trim().to_string();
                 match axis {
-                    'H' => *align_h = Some(val),
-                    'V' => *align_v = Some(val),
+                    'H' => ds.align_h = Some(val),
+                    'V' => ds.align_v = Some(val),
                     _ => {}
                 }
-            } else if let Some(axis) = reading_pct_pos {
+            } else if let Some(axis) = ds.reading_pct_pos {
                 let val_str = e.unescape().unwrap_or_default();
                 if let Ok(val) = val_str.trim().parse::<i32>() {
                     match axis {
-                        'H' => *pct_pos_h = Some(val),
-                        'V' => *pct_pos_v = Some(val),
+                        'H' => ds.pct_pos_h = Some(val),
+                        'V' => ds.pct_pos_v = Some(val),
                         _ => {}
                     }
                 }
-            } else if let Some(axis) = reading_pos_offset {
+            } else if let Some(axis) = ds.reading_pos_offset {
                 let val_str = e.unescape().unwrap_or_default();
                 if let Ok(val) = val_str.trim().parse::<i64>() {
                     let emu = crate::dimension::Emu::new(val);
                     match axis {
-                        'H' => *pos_h_emu = Some(emu),
-                        'V' => *pos_v_emu = Some(emu),
+                        'H' => ds.pos_h_emu = Some(emu),
+                        'V' => ds.pos_v_emu = Some(emu),
                         _ => {}
                     }
                 }
@@ -475,9 +452,12 @@ impl ParserContext {
                     properties: props,
                     runs,
                     floats,
-                    section_properties: section_props,
                 }));
-                push_block(&mut self.state, &mut self.blocks, paragraph);
+                push_block(&mut self.state, &mut self.current_blocks, paragraph);
+                // A paragraph with section properties marks the end of a section.
+                if let Some(sp) = section_props {
+                    self.finalize_section(sp);
+                }
             }
             b"pBdr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
                 if let ParseState::InParagraphProperties {
@@ -569,7 +549,7 @@ impl ParserContext {
                         cell_spacing: None,
                         borders,
                     }));
-                    push_block(&mut self.state, &mut self.blocks, table);
+                    push_block(&mut self.state, &mut self.current_blocks, table);
                 }
             }
             b"tr" if matches!(self.state, ParseState::InTableRow { .. }) => {
@@ -608,43 +588,29 @@ impl ParserContext {
                     }
                 }
             }
-            b"drawing" if matches!(self.state, ParseState::InDrawing { .. }) => {
+            b"drawing" if matches!(self.state, ParseState::InDrawing(..)) => {
                 let old = std::mem::replace(&mut self.state, ParseState::Idle);
-                if let ParseState::InDrawing {
-                    rel_id,
-                    width_emu,
-                    height_emu,
-                    is_anchor,
-                    pos_h_emu,
-                    pos_v_emu,
-                    align_h,
-                    align_v,
-                    wrap_side,
-                    pct_pos_h,
-                    pct_pos_v,
-                    ..
-                } = old
-                {
+                if let ParseState::InDrawing(ds) = old {
                     self.state = self.stack.pop().unwrap_or(ParseState::Idle);
-                    if let Some(rid) = rel_id {
+                    if let Some(rid) = ds.rel_id {
                         use crate::dimension::{Emu, Pt};
                         let zero = Emu::new(0);
-                        let w = Pt::from(width_emu.unwrap_or(zero));
-                        let h = Pt::from(height_emu.unwrap_or(zero));
+                        let w = Pt::from(ds.width_emu.unwrap_or(zero));
+                        let h = Pt::from(ds.height_emu.unwrap_or(zero));
 
-                        if is_anchor {
+                        if ds.is_anchor {
                             let float = FloatingImage {
                                 rel_id: rid,
                                 size: crate::geometry::PtSize::new(w, h),
                                 offset: crate::geometry::PtOffset::new(
-                                    Pt::from(pos_h_emu.unwrap_or(zero)),
-                                    Pt::from(pos_v_emu.unwrap_or(zero)),
+                                    Pt::from(ds.pos_h_emu.unwrap_or(zero)),
+                                    Pt::from(ds.pos_v_emu.unwrap_or(zero)),
                                 ),
-                                align_h,
-                                align_v,
-                                wrap_side: wrap_side.unwrap_or(WrapSide::BothSides),
-                                pct_pos_h,
-                                pct_pos_v,
+                                align_h: ds.align_h,
+                                align_v: ds.align_v,
+                                wrap_side: ds.wrap_side.unwrap_or(WrapSide::BothSides),
+                                pct_pos_h: ds.pct_pos_h,
+                                pct_pos_v: ds.pct_pos_v,
                             };
                             push_float(&mut self.state, &mut self.stack, float);
                         } else {
@@ -676,10 +642,10 @@ impl ParserContext {
                     }
                 }
             }
-            _ if matches!(self.state, ParseState::InDrawing { .. }) => {
+            _ if matches!(self.state, ParseState::InDrawing(..)) => {
                 handle_drawing_end(local, &mut self.state);
-                if let ParseState::InDrawing { ref mut depth, .. } = self.state {
-                    *depth -= 1;
+                if let ParseState::InDrawing(ref mut ds) = self.state {
+                    ds.depth -= 1;
                 }
             }
             b"tblCellMar" | b"tcMar" => set_in_cell_mar(&mut self.state, false),
@@ -745,29 +711,56 @@ enum ParseState {
         in_borders: bool,
         shading: Option<Color>,
     },
-    InDrawing {
-        depth: u32,
-        rel_id: Option<RelId>,
-        width_emu: Option<crate::dimension::Emu>,
-        height_emu: Option<crate::dimension::Emu>,
-        is_anchor: bool,
-        pos_h_emu: Option<crate::dimension::Emu>,
-        pos_v_emu: Option<crate::dimension::Emu>,
-        align_h: Option<String>,
-        align_v: Option<String>,
-        /// Tracks whether we're reading text for posOffset ('H'/'V') or align ('h'/'v').
-        reading_align: Option<char>,
-        wrap_side: Option<WrapSide>,
-        reading_pos_offset: Option<char>,
-        in_position_h: bool,
-        in_position_v: bool,
-        /// wp14:pctPosHOffset value (percentage × 1000).
-        pct_pos_h: Option<i32>,
-        /// wp14:pctPosVOffset value (percentage × 1000).
-        pct_pos_v: Option<i32>,
-        /// Tracks whether reading text for pctPosHOffset ('H') or pctPosVOffset ('V').
-        reading_pct_pos: Option<char>,
-    },
+    InDrawing(DrawingState),
+}
+
+/// Mutable state accumulated while parsing a `w:drawing` subtree.
+struct DrawingState {
+    depth: u32,
+    rel_id: Option<RelId>,
+    width_emu: Option<crate::dimension::Emu>,
+    height_emu: Option<crate::dimension::Emu>,
+    is_anchor: bool,
+    pos_h_emu: Option<crate::dimension::Emu>,
+    pos_v_emu: Option<crate::dimension::Emu>,
+    align_h: Option<String>,
+    align_v: Option<String>,
+    /// Tracks whether we're reading text for alignment ('H'/'V').
+    reading_align: Option<char>,
+    wrap_side: Option<WrapSide>,
+    reading_pos_offset: Option<char>,
+    in_position_h: bool,
+    in_position_v: bool,
+    /// wp14:pctPosHOffset value (percentage × 1000).
+    pct_pos_h: Option<i32>,
+    /// wp14:pctPosVOffset value (percentage × 1000).
+    pct_pos_v: Option<i32>,
+    /// Tracks whether reading text for pctPosHOffset ('H') or pctPosVOffset ('V').
+    reading_pct_pos: Option<char>,
+}
+
+impl DrawingState {
+    fn new() -> Self {
+        Self {
+            depth: 1,
+            rel_id: None,
+            width_emu: None,
+            height_emu: None,
+            is_anchor: false,
+            pos_h_emu: None,
+            pos_v_emu: None,
+            align_h: None,
+            align_v: None,
+            reading_align: None,
+            wrap_side: None,
+            reading_pos_offset: None,
+            in_position_h: false,
+            in_position_v: false,
+            pct_pos_h: None,
+            pct_pos_v: None,
+            reading_pct_pos: None,
+        }
+    }
 }
 
 #[cfg(test)]

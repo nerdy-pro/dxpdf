@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::error::Error;
-use crate::model::{
-    Block, Document, HeaderFooter, ImageStore, Inline, SectionProperties, Spacing, StyleMap,
-};
+use crate::model::{Block, Document, HeaderFooter, ImageStore, Inline, Spacing, StyleMap};
 
 /// Build an image store mapping relationship IDs to raw image bytes.
 /// Body images use the document relationships; header/footer images use their own rels
@@ -48,67 +46,69 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     let contents = archive::extract_docx_contents(docx_bytes)?;
     let mut document =
         xml::parse_document_xml_with_rels(&contents.document_xml, &contents.relationships)?;
+    let defs = &mut document.defaults;
     if let Some(dts) = contents.default_tab_stop {
-        document.default_tab_stop = dts;
+        defs.tab_stop = dts;
     }
     // Apply theme font as default (can be overridden by docDefaults)
     if let Some(ref tf) = contents.theme_minor_font {
-        document.default_font_family = Rc::from(tf.as_str());
+        defs.font_family = Rc::from(tf.as_str());
     }
     if let Some(dd) = &contents.doc_defaults {
         if let Some(fs) = dd.font_size {
-            document.default_font_size = fs;
+            defs.font_size = fs;
         }
         if let Some(ref ff) = dd.font_family {
-            document.default_font_family = Rc::from(ff.as_str());
+            defs.font_family = Rc::from(ff.as_str());
         }
         if let Some(sa) = dd.spacing_after {
-            document.default_spacing.after = Some(sa);
+            defs.spacing.after = Some(sa);
         }
         if let Some(sb) = dd.spacing_before {
-            document.default_spacing.before = Some(sb);
+            defs.spacing.before = Some(sb);
         }
         if let Some(sl) = dd.spacing_line {
-            document.default_spacing.line = Some(sl);
+            defs.spacing.line = Some(sl);
         }
-
         if let Some(slr) = dd.spacing_line_rule {
-            document.default_spacing.line_rule = slr;
+            defs.spacing.line_rule = slr;
         }
         if let Some(cm) = dd.cell_margins {
-            document.default_cell_margins = cm;
+            defs.cell_margins = cm;
         }
         if let Some(tcs) = dd.table_cell_spacing {
-            document.table_cell_spacing = tcs;
+            defs.table_cell_spacing = tcs;
         }
         if let Some(tb) = dd.table_borders {
-            document.default_table_borders = tb;
+            defs.table_borders = tb;
         }
         if !dd.styles.is_empty() {
-            document.styles = dd.styles.clone();
+            defs.styles = dd.styles.clone();
         }
     }
     if !contents.numbering.is_empty() {
-        document.numbering = contents.numbering.clone();
+        defs.numbering = contents.numbering.clone();
     }
 
     // Build the image store from relationships + media files
     document.images = build_image_store(
         &contents.relationships,
         &contents.media_files,
-        &contents.header_footer_rels,
+        &contents.header_footer.rels,
     );
 
     // Apply named styles to paragraphs and runs
-    let styles = document.styles.clone();
-    apply_styles(&mut document.blocks, &styles);
+    let styles = document.defaults.styles.clone();
+    for section in &mut document.sections {
+        apply_styles(&mut section.blocks, &styles);
+    }
 
     // Resolve headers/footers on sections
     resolve_headers_footers(
         &mut document,
         &contents.relationships,
-        &contents.header_footer_xml,
-        &contents.header_footer_rels,
+        &contents.header_footer.xml,
+        &contents.header_footer.rels,
     );
 
     Ok(document)
@@ -121,20 +121,8 @@ fn resolve_headers_footers(
     hf_xml: &HashMap<String, String>,
     hf_rels: &HashMap<String, HashMap<String, String>>,
 ) {
-    // Resolve headers/footers on section properties (both mid-document and final)
-    let mut all_sections: Vec<&mut SectionProperties> = Vec::new();
-    for block in &mut doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref mut sect) = p.section_properties {
-                all_sections.push(sect);
-            }
-        }
-    }
-    if let Some(ref mut sect) = doc.final_section {
-        all_sections.push(sect);
-    }
-
-    for sect in &mut all_sections {
+    for section in &mut doc.sections {
+        let sect = &mut section.properties;
         if let Some(rid) = sect.header_rel_id.take() {
             if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels) {
                 sect.header = Some(hf);
@@ -146,28 +134,6 @@ fn resolve_headers_footers(
                 sect.footer = Some(hf);
             }
             sect.footer_rel_id = Some(rid);
-        }
-    }
-
-    // Set document defaults from the first section that has header/footer
-    for block in &doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref sect) = p.section_properties {
-                if doc.default_header.is_none() {
-                    doc.default_header = sect.header.clone();
-                }
-                if doc.default_footer.is_none() {
-                    doc.default_footer = sect.footer.clone();
-                }
-            }
-        }
-    }
-    if let Some(ref sect) = doc.final_section {
-        if doc.default_header.is_none() {
-            doc.default_header = sect.header.clone();
-        }
-        if doc.default_footer.is_none() {
-            doc.default_footer = sect.footer.clone();
         }
     }
 }
