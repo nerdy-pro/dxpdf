@@ -656,7 +656,6 @@ impl Spacing {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
