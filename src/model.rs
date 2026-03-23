@@ -656,11 +656,6 @@ impl Spacing {
     }
 }
 
-// Re-export for backward compatibility
-#[deprecated(since = "0.1.5", note = "Use Pt::from(Emu::new(value)) instead")]
-pub fn emu_to_pt(emu: u64) -> f32 {
-    emu as f32 / 914_400.0 * 72.0
-}
 
 #[cfg(test)]
 mod tests {
@@ -699,9 +694,10 @@ mod tests {
 
     #[test]
     fn emu_to_pt_conversion() {
-        let pt = emu_to_pt(914400);
+        use crate::dimension::{Emu, Pt};
+        let pt = f32::from(Pt::from(Emu::new(914400)));
         assert!((pt - 72.0).abs() < 0.01);
-        assert_eq!(emu_to_pt(0), 0.0);
+        assert_eq!(f32::from(Pt::from(Emu::new(0))), 0.0);
     }
 
     #[test]
