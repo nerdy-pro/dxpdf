@@ -50,7 +50,7 @@ impl Rsid {
 
 /// Revision tracking IDs attached to an element.
 /// Each field records which editing session performed that type of change.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct RevisionIds {
     /// Session that added this element.
     pub r: Option<Rsid>,
@@ -61,7 +61,7 @@ pub struct RevisionIds {
 }
 
 /// Revision tracking IDs specific to paragraphs.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ParagraphRevisionIds {
     /// Session that added this paragraph.
     pub r: Option<Rsid>,
@@ -76,7 +76,7 @@ pub struct ParagraphRevisionIds {
 }
 
 /// Revision tracking IDs specific to table rows.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TableRowRevisionIds {
     /// Session that added this row.
     pub r: Option<Rsid>,
@@ -89,7 +89,7 @@ pub struct TableRowRevisionIds {
 }
 
 /// Revision tracking IDs specific to section properties.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SectionRevisionIds {
     /// Session that added this section.
     pub r: Option<Rsid>,
@@ -282,7 +282,7 @@ pub struct NumberingInstance {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DocumentSettings {
     /// Default tab stop interval (OOXML default: 720 twips = 0.5 inch).
     pub default_tab_stop: Dimension<Twips>,
@@ -294,45 +294,18 @@ pub struct DocumentSettings {
     pub rsids: Vec<Rsid>,
 }
 
-impl Default for DocumentSettings {
-    fn default() -> Self {
-        Self {
-            default_tab_stop: Dimension::new(720),
-            even_and_odd_headers: false,
-            rsid_root: None,
-            rsids: Vec::new(),
-        }
-    }
-}
-
 // ── Section ──────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SectionProperties {
-    pub page_size: PageSize,
-    pub page_margins: PageMargins,
-    pub columns: Columns,
+    pub page_size: Option<PageSize>,
+    pub page_margins: Option<PageMargins>,
+    pub columns: Option<Columns>,
     pub header_refs: SectionHeaderFooterRefs,
     pub footer_refs: SectionHeaderFooterRefs,
-    /// If true, the first page uses distinct header/footer.
-    pub title_page: bool,
-    pub section_type: SectionType,
+    pub title_page: Option<bool>,
+    pub section_type: Option<SectionType>,
     pub rsids: SectionRevisionIds,
-}
-
-impl Default for SectionProperties {
-    fn default() -> Self {
-        Self {
-            page_size: PageSize::default(),
-            page_margins: PageMargins::default(),
-            columns: Columns::default(),
-            header_refs: SectionHeaderFooterRefs::default(),
-            footer_refs: SectionHeaderFooterRefs::default(),
-            title_page: false,
-            section_type: SectionType::NextPage,
-            rsids: SectionRevisionIds::default(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -346,69 +319,33 @@ pub enum SectionType {
 
 #[derive(Clone, Debug)]
 pub struct PageSize {
-    pub width: Dimension<Twips>,
-    pub height: Dimension<Twips>,
-    pub orientation: PageOrientation,
+    pub width: Option<Dimension<Twips>>,
+    pub height: Option<Dimension<Twips>>,
+    pub orientation: Option<PageOrientation>,
 }
 
-impl Default for PageSize {
-    fn default() -> Self {
-        // US Letter
-        Self {
-            width: Dimension::new(12240),  // 8.5 inches
-            height: Dimension::new(15840), // 11 inches
-            orientation: PageOrientation::Portrait,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageOrientation {
-    #[default]
     Portrait,
     Landscape,
 }
 
 #[derive(Clone, Debug)]
 pub struct PageMargins {
-    pub top: Dimension<Twips>,
-    pub right: Dimension<Twips>,
-    pub bottom: Dimension<Twips>,
-    pub left: Dimension<Twips>,
-    pub header: Dimension<Twips>,
-    pub footer: Dimension<Twips>,
-    pub gutter: Dimension<Twips>,
-}
-
-impl Default for PageMargins {
-    fn default() -> Self {
-        Self {
-            top: Dimension::new(1440), // 1 inch
-            right: Dimension::new(1440),
-            bottom: Dimension::new(1440),
-            left: Dimension::new(1440),
-            header: Dimension::new(720), // 0.5 inch
-            footer: Dimension::new(720),
-            gutter: Dimension::ZERO,
-        }
-    }
+    pub top: Option<Dimension<Twips>>,
+    pub right: Option<Dimension<Twips>>,
+    pub bottom: Option<Dimension<Twips>>,
+    pub left: Option<Dimension<Twips>>,
+    pub header: Option<Dimension<Twips>>,
+    pub footer: Option<Dimension<Twips>>,
+    pub gutter: Option<Dimension<Twips>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Columns {
-    pub count: u32,
-    pub space: Dimension<Twips>,
-    pub equal_width: bool,
-}
-
-impl Default for Columns {
-    fn default() -> Self {
-        Self {
-            count: 1,
-            space: Dimension::new(720),
-            equal_width: true,
-        }
-    }
+    pub count: Option<u32>,
+    pub space: Option<Dimension<Twips>>,
+    pub equal_width: Option<bool>,
 }
 
 /// Header/footer references for a section, by position type.
@@ -486,9 +423,8 @@ impl OutlineLevel {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alignment {
-    #[default]
     Start,
     Center,
     End,
@@ -497,7 +433,7 @@ pub enum Alignment {
     Thai,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Indentation {
     pub start: Option<Dimension<Twips>>,
     pub end: Option<Dimension<Twips>>,
@@ -507,16 +443,15 @@ pub struct Indentation {
 
 /// First-line indent: either hanging (negative) or first-line (positive).
 /// These are mutually exclusive in OOXML.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FirstLineIndent {
-    #[default]
     None,
     FirstLine(Dimension<Twips>),
     Hanging(Dimension<Twips>),
 }
 
 /// Paragraph spacing — only fields explicitly present in the XML are `Some`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct ParagraphSpacing {
     pub before: Option<Dimension<Twips>>,
     pub after: Option<Dimension<Twips>>,
@@ -569,9 +504,8 @@ pub struct TabStop {
     pub leader: TabLeader,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabAlignment {
-    #[default]
     Left,
     Center,
     Right,
@@ -580,9 +514,8 @@ pub enum TabAlignment {
     Clear,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabLeader {
-    #[default]
     None,
     Dot,
     Hyphen,
@@ -610,9 +543,8 @@ pub struct Border {
     pub color: Color,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BorderStyle {
-    #[default]
     None,
     Single,
     Thick,
@@ -650,9 +582,8 @@ pub struct Shading {
     pub color: Color,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShadingPattern {
-    #[default]
     Clear,
     Solid,
     HorzStripe,
@@ -720,17 +651,15 @@ pub struct TextRun {
     pub rsids: RevisionIds,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BreakKind {
-    #[default]
     TextWrapping,
     /// Clears left, right, or both float areas.
     Clear(BreakClear),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BreakClear {
-    #[default]
     None,
     Left,
     Right,
@@ -747,7 +676,7 @@ pub struct Symbol {
 // ── Run Properties ───────────────────────────────────────────────────────────
 
 /// Run properties — only fields explicitly present in the XML are `Some`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct RunProperties {
     pub fonts: FontSet,
     pub font_size: Option<Dimension<HalfPoints>>,
@@ -774,7 +703,7 @@ pub struct RunProperties {
 }
 
 /// Font family names for each script category.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct FontSet {
     pub ascii: Option<String>,
     pub high_ansi: Option<String>,
@@ -782,9 +711,8 @@ pub struct FontSet {
     pub complex_script: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnderlineStyle {
-    #[default]
     None,
     Single,
     Words,
@@ -805,17 +733,15 @@ pub enum UnderlineStyle {
     WavyDouble,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StrikeStyle {
-    #[default]
     None,
     Single,
     Double,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerticalAlign {
-    #[default]
     Baseline,
     Superscript,
     Subscript,
@@ -978,37 +904,21 @@ pub struct Table {
     pub rows: Vec<TableRow>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TableProperties {
-    pub alignment: Alignment,
-    pub width: TableMeasure,
-    pub layout: TableLayout,
+    pub alignment: Option<Alignment>,
+    pub width: Option<TableMeasure>,
+    pub layout: Option<TableLayout>,
     pub indent: Option<TableMeasure>,
     pub borders: Option<TableBorders>,
     pub cell_margins: Option<EdgeInsets<Twips>>,
     pub cell_spacing: Option<TableMeasure>,
-    pub look: TableLook,
-}
-
-impl Default for TableProperties {
-    fn default() -> Self {
-        Self {
-            alignment: Alignment::Start,
-            width: TableMeasure::Auto,
-            layout: TableLayout::Auto,
-            indent: None,
-            borders: None,
-            cell_margins: None,
-            cell_spacing: None,
-            look: TableLook::default(),
-        }
-    }
+    pub look: Option<TableLook>,
 }
 
 /// A dimension for table/cell widths — may be auto, fixed, or percentage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TableMeasure {
-    #[default]
     Auto,
     Twips(Dimension<Twips>),
     /// Percentage in 50ths of a percent (OOXML `pct` type).
@@ -1017,9 +927,8 @@ pub enum TableMeasure {
     Nil,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TableLayout {
-    #[default]
     Auto,
     Fixed,
 }
@@ -1049,9 +958,8 @@ pub struct TableRowHeight {
     pub rule: HeightRule,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeightRule {
-    #[default]
     Auto,
     Exact,
     AtLeast,
@@ -1088,18 +996,16 @@ pub enum VerticalMerge {
     Continue,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellVerticalAlign {
-    #[default]
     Top,
     Center,
     Bottom,
     Both,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextDirection {
-    #[default]
     LeftToRightTopToBottom,
     TopToBottomRightToLeft,
     BottomToTopLeftToRight,

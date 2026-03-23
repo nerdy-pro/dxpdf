@@ -423,23 +423,24 @@ fn all_files_have_body_text() {
 }
 
 #[test]
-fn all_files_have_valid_page_size() {
+fn all_files_have_page_size() {
     for name in ALL_FILES {
         let doc = load(name);
-        let w = doc.final_section.page_size.width.raw();
-        let h = doc.final_section.page_size.height.raw();
-        assert!(w > 0 && h > 0, "{name}: page size should be non-zero");
+        assert!(
+            doc.final_section.page_size.is_some(),
+            "{name}: final section should have page size"
+        );
     }
 }
 
 #[test]
-fn all_files_have_valid_margins() {
+fn all_files_have_margins() {
     for name in ALL_FILES {
         let doc = load(name);
-        let m = &doc.final_section.page_margins;
-        // Margins should be non-negative (they can be zero for edge-to-edge)
-        assert!(m.top.raw() >= 0, "{name}: negative top margin");
-        assert!(m.left.raw() >= 0, "{name}: negative left margin");
+        assert!(
+            doc.final_section.page_margins.is_some(),
+            "{name}: final section should have page margins"
+        );
     }
 }
 

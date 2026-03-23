@@ -61,19 +61,18 @@ fn dump(name: &str, doc: &Document) {
     // Section
     let s = &doc.final_section;
     println!("║ Final section:");
-    println!(
-        "║   page: {}×{} twips ({:?})",
-        s.page_size.width.raw(),
-        s.page_size.height.raw(),
-        s.page_size.orientation
-    );
-    println!(
-        "║   margins: top={} right={} bottom={} left={} twips",
-        s.page_margins.top.raw(),
-        s.page_margins.right.raw(),
-        s.page_margins.bottom.raw(),
-        s.page_margins.left.raw()
-    );
+    if let Some(ref ps) = s.page_size {
+        println!(
+            "║   page: {:?}×{:?} twips ({:?})",
+            ps.width, ps.height, ps.orientation
+        );
+    }
+    if let Some(ref pm) = s.page_margins {
+        println!(
+            "║   margins: top={:?} right={:?} bottom={:?} left={:?} twips",
+            pm.top, pm.right, pm.bottom, pm.left
+        );
+    }
 
     // Body stats
     let (paras, tables, images, hyperlinks, fields, tabs, breaks) = count_body(&doc.body);

@@ -306,7 +306,7 @@ pub fn parse_table_properties(
                             Some(parse_edge_insets_twips(reader, buf, b"tblCellMar")?);
                     }
                     b"tblLook" => {
-                        props.look = parse_table_look(e)?;
+                        props.look = Some(parse_table_look(e)?);
                     }
                     _ => xml::warn_unsupported_element("tblPr", &local),
                 }
@@ -319,18 +319,22 @@ pub fn parse_table_properties(
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = parse_alignment(&val);
+                            props.alignment = Some(parse_alignment(&val));
                         }
                     }
                     b"tblW" => {
-                        props.width = parse_table_measure(e)?;
+                        props.width = Some(parse_table_measure(e)?);
                     }
                     b"tblLayout" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.layout = match val.as_str() {
+                            props.layout = Some(match val.as_str() {
                                 "fixed" => TableLayout::Fixed,
-                                _ => TableLayout::Auto,
-                            };
+                                "autofit" | "auto" => TableLayout::Auto,
+                                other => {
+                                    warn!("unknown table layout: {other}");
+                                    TableLayout::Auto
+                                }
+                            });
                         }
                     }
                     b"tblInd" => {
@@ -340,7 +344,7 @@ pub fn parse_table_properties(
                         props.cell_spacing = Some(parse_table_measure(e)?);
                     }
                     b"tblLook" => {
-                        props.look = parse_table_look(e)?;
+                        props.look = Some(parse_table_look(e)?);
                     }
                     _ => xml::warn_unsupported_element("tblPr", &local),
                 }
@@ -490,51 +494,38 @@ pub fn parse_section_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pgSz" => {
-                        if let Some(w) = xml::optional_attr_i64(e, b"w")? {
-                            props.page_size.width = Dimension::new(w);
-                        }
-                        if let Some(h) = xml::optional_attr_i64(e, b"h")? {
-                            props.page_size.height = Dimension::new(h);
-                        }
-                        if let Some(orient) = xml::optional_attr(e, b"orient")? {
-                            props.page_size.orientation = match orient.as_str() {
-                                "landscape" => PageOrientation::Landscape,
-                                _ => PageOrientation::Portrait,
-                            };
-                        }
+                        props.page_size = Some(PageSize {
+                            width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
+                            height: xml::optional_attr_i64(e, b"h")?.map(Dimension::new),
+                            orientation: xml::optional_attr(e, b"orient")?.map(|s| {
+                                match s.as_str() {
+                                    "landscape" => PageOrientation::Landscape,
+                                    "portrait" => PageOrientation::Portrait,
+                                    other => {
+                                        warn!("unknown page orientation: {other}");
+                                        PageOrientation::Portrait
+                                    }
+                                }
+                            }),
+                        });
                     }
                     b"pgMar" => {
-                        if let Some(v) = xml::optional_attr_i64(e, b"top")? {
-                            props.page_margins.top = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"right")? {
-                            props.page_margins.right = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"bottom")? {
-                            props.page_margins.bottom = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"left")? {
-                            props.page_margins.left = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"header")? {
-                            props.page_margins.header = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"footer")? {
-                            props.page_margins.footer = Dimension::new(v);
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"gutter")? {
-                            props.page_margins.gutter = Dimension::new(v);
-                        }
+                        props.page_margins = Some(PageMargins {
+                            top: xml::optional_attr_i64(e, b"top")?.map(Dimension::new),
+                            right: xml::optional_attr_i64(e, b"right")?.map(Dimension::new),
+                            bottom: xml::optional_attr_i64(e, b"bottom")?.map(Dimension::new),
+                            left: xml::optional_attr_i64(e, b"left")?.map(Dimension::new),
+                            header: xml::optional_attr_i64(e, b"header")?.map(Dimension::new),
+                            footer: xml::optional_attr_i64(e, b"footer")?.map(Dimension::new),
+                            gutter: xml::optional_attr_i64(e, b"gutter")?.map(Dimension::new),
+                        });
                     }
                     b"cols" => {
-                        if let Some(v) = xml::optional_attr_u32(e, b"num")? {
-                            props.columns.count = v;
-                        }
-                        if let Some(v) = xml::optional_attr_i64(e, b"space")? {
-                            props.columns.space = Dimension::new(v);
-                        }
-                        props.columns.equal_width =
-                            xml::optional_attr_bool(e, b"equalWidth")?.unwrap_or(true);
+                        props.columns = Some(Columns {
+                            count: xml::optional_attr_u32(e, b"num")?,
+                            space: xml::optional_attr_i64(e, b"space")?.map(Dimension::new),
+                            equal_width: xml::optional_attr_bool(e, b"equalWidth")?,
+                        });
                     }
                     b"headerReference" => {
                         if let Some(r_id) = xml::optional_attr(e, b"id")? {
@@ -559,11 +550,12 @@ pub fn parse_section_properties(
                         }
                     }
                     b"titlePg" => {
-                        props.title_page = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                        props.title_page =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"type" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.section_type = parse_section_type(&val);
+                            props.section_type = Some(parse_section_type(&val));
                         }
                     }
                     _ => xml::warn_unsupported_element("sectPr", &local),
