@@ -115,12 +115,17 @@ pub struct ListRef {
     pub level: u32,
 }
 
+/// A section: a group of blocks sharing the same page geometry and header/footer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    pub properties: SectionProperties,
+    pub blocks: Vec<Block>,
+}
+
 /// Root of the document tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
-    pub blocks: Vec<Block>,
-    /// Final section properties (from `w:body/w:sectPr`).
-    pub final_section: Option<SectionProperties>,
+    pub sections: Vec<Section>,
     /// Default tab stop interval.
     pub default_tab_stop: Twips,
     /// Default font size in half-points.
@@ -146,8 +151,7 @@ pub struct Document {
 impl Default for Document {
     fn default() -> Self {
         Self {
-            blocks: Vec::new(),
-            final_section: None,
+            sections: Vec::new(),
             default_tab_stop: Self::DEFAULT_TAB_STOP,
             default_font_size: Self::DEFAULT_FONT_SIZE,
             default_font_family: Rc::from(DEFAULT_FONT_FAMILY),
@@ -173,19 +177,14 @@ impl Document {
     /// Default tab stop interval: 720 twips (0.5 inch).
     pub const DEFAULT_TAB_STOP: Twips = Twips::new(720);
 
-    /// Iterate over all section properties in document order
-    /// (inline section breaks first, then the final section).
-    pub fn sections(&self) -> impl Iterator<Item = &SectionProperties> {
-        self.blocks
-            .iter()
-            .filter_map(|b| {
-                if let Block::Paragraph(p) = b {
-                    p.section_properties.as_ref()
-                } else {
-                    None
-                }
-            })
-            .chain(self.final_section.as_ref())
+    /// Iterate over all section properties in document order.
+    pub fn section_properties(&self) -> impl Iterator<Item = &SectionProperties> {
+        self.sections.iter().map(|s| &s.properties)
+    }
+
+    /// Iterate over all blocks across all sections.
+    pub fn all_blocks(&self) -> impl Iterator<Item = &Block> {
+        self.sections.iter().flat_map(|s| &s.blocks)
     }
 
     /// Collect all unique font families referenced in this document.
@@ -224,14 +223,12 @@ impl Document {
             }
         }
 
-        collect_from_blocks(&self.blocks, &mut families);
-
-        // Collect from section headers/footers
-        for sect in self.sections() {
-            if let Some(ref hf) = sect.header {
+        for section in &self.sections {
+            collect_from_blocks(&section.blocks, &mut families);
+            if let Some(ref hf) = section.properties.header {
                 collect_from_blocks(&hf.blocks, &mut families);
             }
-            if let Some(ref hf) = sect.footer {
+            if let Some(ref hf) = section.properties.footer {
                 collect_from_blocks(&hf.blocks, &mut families);
             }
         }
@@ -289,7 +286,6 @@ pub struct Paragraph {
     pub properties: ParagraphProperties,
     pub runs: Vec<Inline>,
     pub floats: Vec<FloatingImage>,
-    pub section_properties: Option<SectionProperties>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

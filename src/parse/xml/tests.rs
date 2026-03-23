@@ -14,15 +14,15 @@ fn wrap_body(content: &str) -> String {
 fn parse_empty_document() {
     let xml = wrap_body("");
     let doc = parse_document_xml(&xml).unwrap();
-    assert!(doc.blocks.is_empty());
+    assert!(doc.sections.iter().all(|s| s.blocks.is_empty()));
 }
 
 #[test]
 fn parse_single_paragraph() {
     let xml = wrap_body(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
     let doc = parse_document_xml(&xml).unwrap();
-    assert_eq!(doc.blocks.len(), 1);
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    assert_eq!(doc.sections[0].blocks.len(), 1);
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.runs.len(), 1);
@@ -37,7 +37,7 @@ fn parse_bold_italic() {
     let xml =
         wrap_body(r#"<w:p><w:r><w:rPr><w:b/><w:i/></w:rPr><w:t>Bold Italic</w:t></w:r></w:p>"#);
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::TextRun(tr) = &p.runs[0] else {
@@ -54,7 +54,7 @@ fn parse_font_size_and_color() {
         r#"<w:p><w:r><w:rPr><w:sz w:val="28"/><w:color w:val="FF0000"/></w:rPr><w:t>Red 14pt</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::TextRun(tr) = &p.runs[0] else {
@@ -74,7 +74,7 @@ fn parse_alignment() {
         r#"<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>Centered</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.properties.alignment, Some(Alignment::Center));
@@ -89,7 +89,7 @@ fn parse_spacing_and_indentation() {
             </w:pPr><w:r><w:t>Indented</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let spacing = p.properties.spacing.unwrap();
@@ -116,8 +116,8 @@ fn parse_table() {
             </w:tbl>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    assert_eq!(doc.blocks.len(), 1);
-    let Block::Table(table) = &doc.blocks[0] else {
+    assert_eq!(doc.sections[0].blocks.len(), 1);
+    let Block::Table(table) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(table.rows.len(), 2);
@@ -140,7 +140,7 @@ fn parse_multiple_runs() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.runs.len(), 2);
@@ -162,7 +162,7 @@ fn parse_font_family() {
         r#"<w:p><w:r><w:rPr><w:rFonts w:ascii="Arial"/></w:rPr><w:t>Arial text</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::TextRun(tr) = &p.runs[0] else {
@@ -190,7 +190,7 @@ fn parse_inline_image() {
             </w:drawing></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::Image(img) = &p.runs[0] else {
@@ -224,7 +224,7 @@ fn parse_image_with_text() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.runs.len(), 3);
@@ -249,23 +249,34 @@ fn parse_section_properties() {
             </w:sectPr>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    assert_eq!(doc.blocks.len(), 2);
-    let Block::Paragraph(p1) = &doc.blocks[0] else {
+    assert_eq!(doc.sections.len(), 2);
+
+    // Section 1: contains "Section 1" paragraph, with the inline sectPr properties
+    assert_eq!(doc.sections[0].blocks.len(), 1);
+    let Block::Paragraph(p1) = &doc.sections[0].blocks[0] else {
         panic!()
     };
-    let sect1 = p1.section_properties.as_ref().unwrap();
+    let Inline::TextRun(tr1) = &p1.runs[0] else {
+        panic!()
+    };
+    assert_eq!(tr1.text, "Section 1");
+    let sect1 = &doc.sections[0].properties;
     assert_eq!(sect1.page_size.unwrap().width, Twips::new(11906));
     assert_eq!(sect1.page_size.unwrap().height, Twips::new(16838));
     assert_eq!(sect1.page_margins.unwrap().top, Twips::new(720));
 
-    let Block::Paragraph(p2) = &doc.blocks[1] else {
+    // Section 2: contains "Section 2" paragraph, with the final body sectPr properties
+    assert_eq!(doc.sections[1].blocks.len(), 1);
+    let Block::Paragraph(p2) = &doc.sections[1].blocks[0] else {
         panic!()
     };
-    assert!(p2.section_properties.is_none());
-
-    let final_sect = doc.final_section.as_ref().unwrap();
-    assert_eq!(final_sect.page_size.unwrap().width, Twips::new(16838));
-    assert_eq!(final_sect.page_margins.unwrap().top, Twips::new(1440));
+    let Inline::TextRun(tr2) = &p2.runs[0] else {
+        panic!()
+    };
+    assert_eq!(tr2.text, "Section 2");
+    let sect2 = &doc.sections[1].properties;
+    assert_eq!(sect2.page_size.unwrap().width, Twips::new(16838));
+    assert_eq!(sect2.page_margins.unwrap().top, Twips::new(1440));
 }
 
 #[test]
@@ -280,7 +291,7 @@ fn parse_tab_stops() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.properties.tab_stops.len(), 3);
@@ -319,7 +330,7 @@ fn parse_floating_image_with_pct_pos_offset() {
             </w:drawing></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.floats.len(), 1);
@@ -357,7 +368,7 @@ fn parse_floating_image_without_pct_pos_has_none() {
             </w:drawing></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let float = &p.floats[0];
@@ -385,7 +396,7 @@ fn parse_hyperlink_resolves_url() {
     let mut rels = std::collections::HashMap::new();
     rels.insert("rId6".to_string(), "https://example.com".to_string());
     let doc = parse_document_xml_with_rels(&xml, &rels).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.runs.len(), 1);
@@ -403,7 +414,7 @@ fn parse_vert_align_superscript() {
         r#"<w:p><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>2</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::TextRun(tr) = &p.runs[0] else {
@@ -419,7 +430,7 @@ fn parse_paragraph_bottom_border() {
                 <w:r><w:t>Bordered</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let borders = p
@@ -437,7 +448,7 @@ fn parse_vert_align_subscript() {
         r#"<w:p><w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>2</w:t></w:r></w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     let Inline::TextRun(tr) = &p.runs[0] else {
@@ -459,7 +470,7 @@ fn parse_page_field_code() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     // Should have "Page " text and a PAGE field
@@ -484,7 +495,7 @@ fn parse_numpages_field_code() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert!(
@@ -508,7 +519,7 @@ fn parse_unknown_field_uses_cached_value() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     // Unknown fields should render the cached value as plain text
@@ -531,7 +542,7 @@ fn parse_hyperlink_without_rel_id_keeps_text() {
             </w:p>"#,
     );
     let doc = parse_document_xml(&xml).unwrap();
-    let Block::Paragraph(p) = &doc.blocks[0] else {
+    let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
         panic!()
     };
     assert_eq!(p.runs.len(), 1);

@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::error::Error;
-use crate::model::{
-    Block, Document, HeaderFooter, ImageStore, Inline, SectionProperties, Spacing, StyleMap,
-};
+use crate::model::{Block, Document, HeaderFooter, ImageStore, Inline, Spacing, StyleMap};
 
 /// Build an image store mapping relationship IDs to raw image bytes.
 /// Body images use the document relationships; header/footer images use their own rels
@@ -101,7 +99,9 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
 
     // Apply named styles to paragraphs and runs
     let styles = document.styles.clone();
-    apply_styles(&mut document.blocks, &styles);
+    for section in &mut document.sections {
+        apply_styles(&mut section.blocks, &styles);
+    }
 
     // Resolve headers/footers on sections
     resolve_headers_footers(
@@ -121,20 +121,8 @@ fn resolve_headers_footers(
     hf_xml: &HashMap<String, String>,
     hf_rels: &HashMap<String, HashMap<String, String>>,
 ) {
-    // Resolve headers/footers on section properties (both mid-document and final)
-    let mut all_sections: Vec<&mut SectionProperties> = Vec::new();
-    for block in &mut doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref mut sect) = p.section_properties {
-                all_sections.push(sect);
-            }
-        }
-    }
-    if let Some(ref mut sect) = doc.final_section {
-        all_sections.push(sect);
-    }
-
-    for sect in &mut all_sections {
+    for section in &mut doc.sections {
+        let sect = &mut section.properties;
         if let Some(rid) = sect.header_rel_id.take() {
             if let Some(hf) = resolve_hf(&rid, rels, hf_xml, hf_rels) {
                 sect.header = Some(hf);

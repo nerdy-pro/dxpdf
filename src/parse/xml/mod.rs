@@ -48,9 +48,12 @@ pub fn parse_document_xml_with_rels(
         }
     }
 
+    // Finalize the last section from remaining blocks + final section properties.
+    let final_props = ctx.final_section.take().unwrap_or_default();
+    ctx.finalize_section(final_props);
+
     Ok(Document {
-        blocks: ctx.blocks,
-        final_section: ctx.final_section,
+        sections: ctx.sections,
         ..Document::default()
     })
 }
@@ -67,8 +70,10 @@ pub fn parse_header_footer_xml_with_rels(
     xml: &str,
     rels: &HashMap<String, String>,
 ) -> Result<HeaderFooter, Error> {
-    let doc = parse_document_xml_with_rels(xml, rels)?;
-    Ok(HeaderFooter { blocks: doc.blocks })
+    let mut doc = parse_document_xml_with_rels(xml, rels)?;
+    // Header/footer XML never has section breaks — extract all blocks.
+    let blocks = doc.sections.drain(..).flat_map(|s| s.blocks).collect();
+    Ok(HeaderFooter { blocks })
 }
 
 // ============================================================
@@ -76,9 +81,13 @@ pub fn parse_header_footer_xml_with_rels(
 // ============================================================
 
 struct ParserContext {
-    blocks: Vec<Block>,
+    /// Completed sections.
+    sections: Vec<Section>,
+    /// Blocks accumulating for the current (not yet finalized) section.
+    current_blocks: Vec<Block>,
     stack: Vec<ParseState>,
     state: ParseState,
+    /// Section properties for the final section (from `w:body/w:sectPr`).
     final_section: Option<SectionProperties>,
     warned: HashSet<&'static str>,
     /// Field code state machine: tracks begin→instrText→separate→cached→end sequence.
@@ -90,7 +99,8 @@ struct ParserContext {
 impl ParserContext {
     fn new() -> Self {
         Self {
-            blocks: Vec::new(),
+            sections: Vec::new(),
+            current_blocks: Vec::new(),
             stack: Vec::new(),
             state: ParseState::Idle,
             final_section: None,
@@ -99,6 +109,13 @@ impl ParserContext {
             field_suppressing: false,
             field_props: RunProperties::default(),
         }
+    }
+
+    /// Finalize the current section: move accumulated blocks into a new Section
+    /// with the given properties, and start a new empty block accumulator.
+    fn finalize_section(&mut self, properties: SectionProperties) {
+        let blocks = std::mem::take(&mut self.current_blocks);
+        self.sections.push(Section { properties, blocks });
     }
 
     fn handle_start(
@@ -343,9 +360,8 @@ impl ParserContext {
                 properties: ParagraphProperties::default(),
                 runs: Vec::new(),
                 floats: Vec::new(),
-                section_properties: None,
             }));
-            push_block(&mut self.state, &mut self.blocks, paragraph);
+            push_block(&mut self.state, &mut self.current_blocks, paragraph);
         } else if (local == b"br" || local == b"tab")
             && matches!(self.state, ParseState::InRun { .. })
         {
@@ -450,9 +466,12 @@ impl ParserContext {
                     properties: props,
                     runs,
                     floats,
-                    section_properties: section_props,
                 }));
-                push_block(&mut self.state, &mut self.blocks, paragraph);
+                push_block(&mut self.state, &mut self.current_blocks, paragraph);
+                // A paragraph with section properties marks the end of a section.
+                if let Some(sp) = section_props {
+                    self.finalize_section(sp);
+                }
             }
             b"pBdr" if matches!(self.state, ParseState::InParagraphProperties { .. }) => {
                 if let ParseState::InParagraphProperties {
@@ -544,7 +563,7 @@ impl ParserContext {
                         cell_spacing: None,
                         borders,
                     }));
-                    push_block(&mut self.state, &mut self.blocks, table);
+                    push_block(&mut self.state, &mut self.current_blocks, table);
                 }
             }
             b"tr" if matches!(self.state, ParseState::InTableRow { .. }) => {

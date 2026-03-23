@@ -55,8 +55,8 @@ fn simple_docx(body_content: &str) -> Vec<u8> {
 fn parse_simple_docx() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
     let doc = dxpdf::parse::parse(&docx).unwrap();
-    assert_eq!(doc.blocks.len(), 1);
-    match &doc.blocks[0] {
+    assert_eq!(doc.sections[0].blocks.len(), 1);
+    match &doc.sections[0].blocks[0] {
         dxpdf::model::Block::Paragraph(p) => {
             assert_eq!(p.runs.len(), 1);
             match &p.runs[0] {

@@ -71,8 +71,7 @@ fn model_type_aliases() {
 fn document_default_and_fields() {
     let doc = dxpdf::model::Document::default();
 
-    let _: &Vec<dxpdf::model::Block> = &doc.blocks;
-    let _: &Option<dxpdf::model::SectionProperties> = &doc.final_section;
+    let _: &Vec<dxpdf::model::Section> = &doc.sections;
     let _: dxpdf::dimension::Twips = doc.default_tab_stop;
     let _: dxpdf::dimension::HalfPoints = doc.default_font_size;
     let _: &Rc<str> = &doc.default_font_family;
@@ -91,6 +90,31 @@ fn document_font_families_method() {
     let _: Vec<Rc<str>> = doc.font_families();
 }
 
+#[test]
+fn document_all_blocks_method() {
+    let doc = dxpdf::model::Document::default();
+    let blocks: Vec<&dxpdf::model::Block> = doc.all_blocks().collect();
+    assert!(blocks.is_empty());
+}
+
+#[test]
+fn document_section_properties_method() {
+    let doc = dxpdf::model::Document::default();
+    let props: Vec<&dxpdf::model::SectionProperties> = doc.section_properties().collect();
+    assert!(props.is_empty());
+}
+
+#[test]
+fn section_struct_fields() {
+    use dxpdf::model::*;
+    let s = Section {
+        properties: SectionProperties::default(),
+        blocks: vec![],
+    };
+    let _: &SectionProperties = &s.properties;
+    let _: &Vec<Block> = &s.blocks;
+}
+
 // ---------------------------------------------------------------------------
 // model module — Block & Paragraph
 // ---------------------------------------------------------------------------
@@ -103,7 +127,6 @@ fn block_variants() {
         properties: ParagraphProperties::default(),
         runs: vec![],
         floats: vec![],
-        section_properties: None,
     };
     let _ = Block::Paragraph(Box::new(p));
 
@@ -124,12 +147,10 @@ fn paragraph_fields() {
         properties: ParagraphProperties::default(),
         runs: vec![],
         floats: vec![],
-        section_properties: None,
     };
     let _: &ParagraphProperties = &p.properties;
     let _: &Vec<Inline> = &p.runs;
     let _: &Vec<FloatingImage> = &p.floats;
-    let _: &Option<SectionProperties> = &p.section_properties;
 }
 
 #[test]

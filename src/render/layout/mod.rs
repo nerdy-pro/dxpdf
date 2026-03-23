@@ -161,17 +161,10 @@ pub fn layout(
     font_mgr: &skia_safe::FontMgr,
 ) -> Vec<LayoutedPage> {
     let initial_config = measured
-        .section_configs
+        .sections
         .first()
-        .copied()
+        .map(|s| s.config)
         .unwrap_or_default();
-    let mut next_configs = measured
-        .section_configs
-        .iter()
-        .skip(1)
-        .copied()
-        .collect::<Vec<_>>();
-    next_configs.reverse();
 
     let default_tab_stop_pt = measured.default_tab_stop;
     let mut effective_config = initial_config;
@@ -200,18 +193,28 @@ pub fn layout(
 
     let mut layouter = Layouter::new(
         &effective_config,
-        next_configs,
         default_tab_stop_pt,
         &measured.doc_defaults,
         &measured.image_cache,
     );
 
-    let blocks = &measured.blocks;
-    for (i, block) in blocks.iter().enumerate() {
-        let next_is_table = blocks
-            .get(i + 1)
-            .is_some_and(|b| matches!(b, measure::MeasuredBlock::Table(_)));
-        layouter.layout_block(block, next_is_table);
+    for (sect_idx, section) in measured.sections.iter().enumerate() {
+        // Section break between sections (not before the first)
+        if sect_idx > 0 {
+            layouter.new_page();
+            layouter.config = section.config;
+            layouter.current_page.page_size = section.config.page_size;
+            layouter.cursor_y = section.config.margins.top;
+            layouter.constraints.replace_page(&section.config);
+        }
+
+        let blocks = &section.blocks;
+        for (i, block) in blocks.iter().enumerate() {
+            let next_is_table = blocks
+                .get(i + 1)
+                .is_some_and(|b| matches!(b, measure::MeasuredBlock::Table(_)));
+            layouter.layout_block(block, next_is_table);
+        }
     }
 
     let mut pages = layouter.finish();
@@ -304,7 +307,6 @@ struct Layouter<'a> {
     current_page: LayoutedPage,
     cursor_y: Pt,
     active_floats: Vec<ActiveFloat>,
-    next_section_configs: Vec<LayoutConfig>,
     default_tab_stop_pt: Pt,
     doc_defaults: &'a DocDefaultsLayout,
     /// Whether the previous paragraph had a bottom border (to suppress duplicate top borders).
@@ -315,7 +317,6 @@ struct Layouter<'a> {
 impl<'a> Layouter<'a> {
     fn new(
         config: &LayoutConfig,
-        next_section_configs: Vec<LayoutConfig>,
         default_tab_stop_pt: Pt,
         doc_defaults: &'a DocDefaultsLayout,
         image_cache: &'a ImageCache,
@@ -330,7 +331,6 @@ impl<'a> Layouter<'a> {
             },
             cursor_y: config.margins.top,
             active_floats: Vec::new(),
-            next_section_configs,
             default_tab_stop_pt,
             doc_defaults,
             prev_para_had_bottom_border: false,
@@ -353,16 +353,6 @@ impl<'a> Layouter<'a> {
         self.pages.push(page);
         self.cursor_y = self.config.margins.top;
         self.active_floats.clear();
-    }
-
-    fn section_break(&mut self) {
-        self.new_page();
-        if let Some(next_config) = self.next_section_configs.pop() {
-            self.config = next_config;
-            self.current_page.page_size = self.config.page_size;
-            self.cursor_y = self.config.margins.top;
-            self.constraints.replace_page(&self.config);
-        }
     }
 
     fn resolve_spacing(&self, para_spacing: Option<Spacing>) -> Spacing {
@@ -404,11 +394,7 @@ impl<'a> Layouter<'a> {
         self.prune_floats();
         match block {
             measure::MeasuredBlock::Paragraph(p) => {
-                let has_section_break = p.section_properties.is_some();
                 self.layout_paragraph(p);
-                if has_section_break {
-                    self.section_break();
-                }
             }
             measure::MeasuredBlock::Table(t) => {
                 self.prev_para_had_bottom_border = false;
