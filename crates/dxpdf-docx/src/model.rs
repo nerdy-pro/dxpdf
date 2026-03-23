@@ -729,6 +729,8 @@ pub struct RunProperties {
     pub all_caps: bool,
     pub small_caps: bool,
     pub vanish: bool,
+    /// §17.3.2.21: suppress spell/grammar checking for this run.
+    pub no_proof: bool,
     pub rtl: bool,
     pub emboss: bool,
     pub imprint: bool,
@@ -754,6 +756,7 @@ impl Default for RunProperties {
             all_caps: false,
             small_caps: false,
             vanish: false,
+            no_proof: false,
             rtl: false,
             emboss: false,
             imprint: false,

@@ -247,6 +247,9 @@ pub fn parse_run_properties(
                     b"vanish" => {
                         props.vanish = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                     }
+                    b"noProof" => {
+                        props.no_proof = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
+                    }
                     b"rtl" => {
                         props.rtl = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
                     }

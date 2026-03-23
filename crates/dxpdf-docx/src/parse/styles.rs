@@ -368,6 +368,9 @@ fn merge_run_properties(base: &mut RunProperties, overlay: &RunProperties) {
     if overlay.vanish != defaults.vanish {
         base.vanish = overlay.vanish;
     }
+    if overlay.no_proof != defaults.no_proof {
+        base.no_proof = overlay.no_proof;
+    }
     if overlay.rtl != defaults.rtl {
         base.rtl = overlay.rtl;
     }

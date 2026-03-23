@@ -1022,6 +1022,9 @@ fn merge_direct_run(base: &mut RunProperties, direct: &RunProperties) {
     if direct.vanish {
         base.vanish = true;
     }
+    if direct.no_proof {
+        base.no_proof = true;
+    }
     if direct.rtl {
         base.rtl = true;
     }
