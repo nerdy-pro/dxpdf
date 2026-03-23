@@ -276,7 +276,7 @@ impl DrawCommand {
 
     /// Shift y-coordinates in place by `dy`.
     /// `Line` is not shifted — table borders use absolute coordinates.
-    fn shift_y(&mut self, dy: Pt) {
+    pub(super) fn shift_y(&mut self, dy: Pt) {
         match self {
             DrawCommand::Text {
                 ref mut position, ..
