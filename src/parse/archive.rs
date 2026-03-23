@@ -29,6 +29,15 @@ pub struct DocDefaults {
     pub styles: crate::model::StyleMap,
 }
 
+/// Header and footer XML content extracted from the archive.
+#[derive(Debug, Default)]
+pub struct HeaderFooterContents {
+    /// Header/footer XML contents keyed by filename (e.g., "header1.xml").
+    pub xml: HashMap<String, String>,
+    /// Per-header/footer relationships (filename -> rId -> media target).
+    pub rels: HashMap<String, HashMap<String, String>>,
+}
+
 /// Everything extracted from the DOCX ZIP archive needed for conversion.
 #[derive(Debug)]
 pub struct DocxContents {
@@ -41,10 +50,8 @@ pub struct DocxContents {
     pub default_tab_stop: Option<crate::dimension::Twips>,
     /// Document-wide default run properties from `word/styles.xml`.
     pub doc_defaults: Option<DocDefaults>,
-    /// Header/footer XML contents keyed by relationship ID.
-    pub header_footer_xml: HashMap<String, String>,
-    /// Header/footer relationships (rId -> media targets).
-    pub header_footer_rels: HashMap<String, HashMap<String, String>>,
+    /// Header/footer content and relationships.
+    pub header_footer: HeaderFooterContents,
     /// Minor (body) font name from theme (e.g., "Calibri").
     pub theme_minor_font: Option<String>,
     /// Numbering definitions from `word/numbering.xml`.
@@ -72,12 +79,8 @@ fn collect_entry_names(
 /// Extract header/footer XML content and their relationships from the archive.
 fn extract_headers_footers(
     archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
-) -> (
-    HashMap<String, String>,
-    HashMap<String, HashMap<String, String>>,
-) {
-    let mut header_footer_xml = HashMap::new();
-    let mut header_footer_rels = HashMap::new();
+) -> HeaderFooterContents {
+    let mut result = HeaderFooterContents::default();
 
     let hf_names = collect_entry_names(archive, |name| {
         (name.starts_with("word/header") || name.starts_with("word/footer"))
@@ -89,7 +92,7 @@ fn extract_headers_footers(
             let mut xml = String::new();
             if file.read_to_string(&mut xml).is_ok() {
                 let short = name.strip_prefix("word/").unwrap_or(name).to_string();
-                header_footer_xml.insert(short, xml);
+                result.xml.insert(short, xml);
             }
         }
     }
@@ -108,13 +111,13 @@ fn extract_headers_footers(
                         .strip_suffix(".rels")
                         .unwrap_or(name)
                         .to_string();
-                    header_footer_rels.insert(hf_name, rels);
+                    result.rels.insert(hf_name, rels);
                 }
             }
         }
     }
 
-    (header_footer_xml, header_footer_rels)
+    result
 }
 
 /// Extract document XML, relationships, and media files from a DOCX archive.
@@ -195,14 +198,13 @@ pub fn extract_docx_contents(docx_bytes: &[u8]) -> Result<DocxContents, Error> {
     let (theme_minor_font, _theme_major_font) = extract_theme_fonts(&mut archive);
 
     // 8. Extract header/footer XML files and their relationships
-    let (header_footer_xml, header_footer_rels) = extract_headers_footers(&mut archive);
+    let header_footer = extract_headers_footers(&mut archive);
 
     Ok(DocxContents {
         document_xml,
         relationships,
         media_files,
-        header_footer_xml,
-        header_footer_rels,
+        header_footer,
         default_tab_stop,
         doc_defaults,
         theme_minor_font,

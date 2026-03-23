@@ -96,7 +96,7 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     document.images = build_image_store(
         &contents.relationships,
         &contents.media_files,
-        &contents.header_footer_rels,
+        &contents.header_footer.rels,
     );
 
     // Apply named styles to paragraphs and runs
@@ -107,8 +107,8 @@ pub fn parse(docx_bytes: &[u8]) -> Result<Document, Error> {
     resolve_headers_footers(
         &mut document,
         &contents.relationships,
-        &contents.header_footer_xml,
-        &contents.header_footer_rels,
+        &contents.header_footer.xml,
+        &contents.header_footer.rels,
     );
 
     Ok(document)
