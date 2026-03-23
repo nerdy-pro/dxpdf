@@ -109,7 +109,7 @@ fn parse_paragraph(
 ) -> Result<(Paragraph, Option<SectionProperties>)> {
     let mut para_props = ParagraphProperties::default();
     let mut mark_run_props: Option<RunProperties> = None;
-    let mut style_id: Option<String> = None;
+    let mut style_id: Option<StyleId> = None;
     let mut section_props: Option<SectionProperties> = None;
     let mut content = Vec::new();
 
@@ -223,7 +223,7 @@ fn parse_run(
     run_rsids: RevisionIds,
 ) -> Result<()> {
     let mut run_props = RunProperties::default();
-    let mut char_style_id: Option<String> = None;
+    let mut char_style_id: Option<StyleId> = None;
     let mut texts = Vec::new();
     let mut pending_inlines: Vec<Inline> = Vec::new();
 
@@ -320,7 +320,7 @@ fn parse_run(
 
 fn flush_text(
     texts: &mut Vec<String>,
-    style_id: &Option<String>,
+    style_id: &Option<StyleId>,
     props: &RunProperties,
     rsids: &RevisionIds,
     content: &mut Vec<Inline>,

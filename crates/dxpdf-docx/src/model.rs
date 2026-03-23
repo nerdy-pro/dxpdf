@@ -32,6 +32,17 @@ impl NoteId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BookmarkId(pub(crate) i64);
 
+/// A style ID (e.g., "Heading1", "Normal") — reference into `Document.styles`.
+/// Per §17.7.4.17, this is the `w:styleId` attribute value.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StyleId(pub(crate) String);
+
+impl StyleId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Revision Save ID — identifies which editing session produced a change.
 /// Stored as a 32-bit value parsed from an 8-digit hex string (e.g., "00A2B3C4").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -220,7 +231,7 @@ pub struct StyleSheet {
     /// Document-level default run properties (from `w:docDefaults/w:rPrDefault`).
     pub doc_defaults_run: RunProperties,
     /// All style definitions keyed by style ID.
-    pub styles: HashMap<String, Style>,
+    pub styles: HashMap<StyleId, Style>,
 }
 
 /// A single style definition.
@@ -229,7 +240,7 @@ pub struct Style {
     pub name: Option<String>,
     pub style_type: StyleType,
     /// Parent style ID. Properties not specified here should be inherited from this style.
-    pub based_on: Option<String>,
+    pub based_on: Option<StyleId>,
     pub is_default: bool,
     pub paragraph_properties: Option<ParagraphProperties>,
     pub run_properties: Option<RunProperties>,
@@ -371,7 +382,7 @@ pub enum Block {
 #[derive(Clone, Debug)]
 pub struct Paragraph {
     /// Style ID reference (e.g., "Heading1"). Resolve via `Document.styles`.
-    pub style_id: Option<String>,
+    pub style_id: Option<StyleId>,
     pub properties: ParagraphProperties,
     /// Run properties specified on the paragraph mark (w:rPr inside w:pPr).
     pub mark_run_properties: Option<RunProperties>,
@@ -645,7 +656,7 @@ pub enum Inline {
 #[derive(Clone, Debug)]
 pub struct TextRun {
     /// Character style ID reference (e.g., "Hyperlink"). Resolve via `Document.styles`.
-    pub style_id: Option<String>,
+    pub style_id: Option<StyleId>,
     pub properties: RunProperties,
     pub text: String,
     pub rsids: RevisionIds,

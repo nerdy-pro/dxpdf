@@ -75,7 +75,7 @@ fn parse_style(
     start: &quick_xml::events::BytesStart<'_>,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<Option<(String, Style)>> {
+) -> Result<Option<(StyleId, Style)>> {
     let style_type = match xml::optional_attr(start, b"type")?.as_deref() {
         Some("paragraph") | None => StyleType::Paragraph,
         Some("character") => StyleType::Character,
@@ -89,7 +89,7 @@ fn parse_style(
     };
 
     let id = match xml::optional_attr(start, b"styleId")? {
-        Some(id) => id,
+        Some(id) => StyleId(id),
         None => {
             xml::skip_to_end(reader, buf, b"style")?;
             return Ok(None);
@@ -99,7 +99,7 @@ fn parse_style(
     let is_default = xml::optional_attr_bool(start, b"default")?.unwrap_or(false);
 
     let mut name: Option<String> = None;
-    let mut based_on: Option<String> = None;
+    let mut based_on: Option<StyleId> = None;
     let mut ppr: Option<ParagraphProperties> = None;
     let mut rpr: Option<RunProperties> = None;
     let mut tbl_pr: Option<TableProperties> = None;
@@ -133,7 +133,7 @@ fn parse_style(
             Event::Empty(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 if local.as_slice() == b"basedOn" {
-                    based_on = xml::optional_attr(e, b"val")?;
+                    based_on = xml::optional_attr(e, b"val")?.map(StyleId);
                 } else if local.as_slice() == b"name" {
                     name = xml::optional_attr(e, b"val")?;
                 }

@@ -18,7 +18,7 @@ use crate::xml;
 /// Parsed result of a `w:pPr` element.
 pub struct ParsedParagraphProperties {
     pub properties: ParagraphProperties,
-    pub style_id: Option<String>,
+    pub style_id: Option<StyleId>,
     pub run_properties: Option<RunProperties>,
     /// Per §17.6.18, a `w:sectPr` child of `w:pPr` means this paragraph
     /// is the last paragraph of a section. The section break occurs after
@@ -32,7 +32,7 @@ pub fn parse_paragraph_properties(
     buf: &mut Vec<u8>,
 ) -> Result<ParsedParagraphProperties> {
     let mut props = ParagraphProperties::default();
-    let mut style_id: Option<String> = None;
+    let mut style_id: Option<StyleId> = None;
     let mut run_props: Option<RunProperties> = None;
     let mut sect_props: Option<SectionProperties> = None;
 
@@ -42,7 +42,7 @@ pub fn parse_paragraph_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?;
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
                     }
                     b"ind" => {
                         props.indentation = Some(parse_indentation(e)?);
@@ -92,7 +92,7 @@ pub fn parse_paragraph_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?;
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
                     }
                     b"ind" => {
                         props.indentation = Some(parse_indentation(e)?);
@@ -166,9 +166,9 @@ pub fn parse_paragraph_properties(
 pub fn parse_run_properties(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<(RunProperties, Option<String>)> {
+) -> Result<(RunProperties, Option<StyleId>)> {
     let mut props = RunProperties::default();
-    let mut style_id: Option<String> = None;
+    let mut style_id: Option<StyleId> = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -176,7 +176,7 @@ pub fn parse_run_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"rStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?;
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
                     }
                     b"rFonts" => {
                         props.fonts = parse_font_set(e)?;
@@ -286,9 +286,9 @@ pub fn parse_run_properties(
 pub fn parse_table_properties(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<(TableProperties, Option<String>)> {
+) -> Result<(TableProperties, Option<StyleId>)> {
     let mut props = TableProperties::default();
-    let mut style_id: Option<String> = None;
+    let mut style_id: Option<StyleId> = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -296,7 +296,7 @@ pub fn parse_table_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?;
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
                     }
                     b"tblBorders" => {
                         props.borders = Some(parse_table_borders(reader, buf)?);
@@ -315,7 +315,7 @@ pub fn parse_table_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?;
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
