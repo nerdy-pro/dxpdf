@@ -7,7 +7,7 @@ use crate::dimension::Pt;
 use crate::model::*;
 
 use super::context::LayoutConstraints;
-use super::fragment::{collect_fragments, DocDefaultsLayout, Fragment};
+use super::fragment::{collect_fragments_with_fields, DocDefaultsLayout, Fragment};
 use super::measurer::TextMeasurer;
 use super::ImageCache;
 use super::LayoutConfig;
@@ -21,8 +21,6 @@ pub struct MeasuredDocument {
     pub(crate) doc_defaults: DocDefaultsLayout,
     pub(crate) default_tab_stop: Pt,
     pub(crate) image_cache: ImageCache,
-    pub header: Option<Vec<MeasuredBlock>>,
-    pub footer: Option<Vec<MeasuredBlock>>,
 }
 
 /// A measured block-level element.
@@ -111,36 +109,12 @@ pub fn measure(doc: &Document, font_mgr: &skia_safe::FontMgr) -> MeasuredDocumen
         &mut list_counters,
     );
 
-    let header = doc.default_header.as_ref().map(|hf| {
-        measure_blocks(
-            &hf.blocks,
-            &page_constraints,
-            &doc_defaults,
-            &measurer,
-            &image_cache,
-            &mut list_counters,
-        )
-    });
-
-    let footer = doc.default_footer.as_ref().map(|hf| {
-        measure_blocks(
-            &hf.blocks,
-            &page_constraints,
-            &doc_defaults,
-            &measurer,
-            &image_cache,
-            &mut list_counters,
-        )
-    });
-
     MeasuredDocument {
         blocks,
         section_configs,
         doc_defaults,
         default_tab_stop,
         image_cache,
-        header,
-        footer,
     }
 }
 
@@ -183,12 +157,13 @@ fn measure_paragraph(
     image_cache: &ImageCache,
     list_counters: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> MeasuredParagraph {
-    let fragments = collect_fragments(
+    let fragments = collect_fragments_with_fields(
         &para.runs,
         constraints.available_width,
         constraints.available_height,
         doc_defaults,
         measurer,
+        None,
         image_cache,
     );
 
@@ -344,7 +319,7 @@ fn resolve_list_label(
                 .entry((list_ref.num_id, list_ref.level))
                 .or_insert(level.start.saturating_sub(1));
             *counter += 1;
-            let roman = super::header_footer::to_roman(*counter);
+            let roman = to_roman(*counter);
             let roman = if matches!(level.format, NumberFormat::LowerRoman) {
                 roman.to_lowercase()
             } else {
@@ -355,4 +330,30 @@ fn resolve_list_label(
     };
 
     Some((label, level.indent_left, level.indent_hanging))
+}
+
+pub(super) fn to_roman(mut n: u32) -> String {
+    let table = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut result = String::new();
+    for &(value, numeral) in &table {
+        while n >= value {
+            result.push_str(numeral);
+            n -= value;
+        }
+    }
+    result
 }

@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::dimension::{EighthPoints, HalfPoints, Pt, Twips};
 use crate::geometry::{PtOffset, PtSize, TwipsEdgeInsets, TwipsSize};
-use crate::units::DEFAULT_FONT_FAMILY;
+/// Default font family when nothing is specified.
+pub const DEFAULT_FONT_FAMILY: &str = "Helvetica";
 
 use std::collections::HashMap;
 
@@ -656,7 +657,10 @@ impl Spacing {
 }
 
 // Re-export for backward compatibility
-pub use crate::units::emu_to_pt;
+#[deprecated(since = "0.1.5", note = "Use Pt::from(Emu::new(value)) instead")]
+pub fn emu_to_pt(emu: u64) -> f32 {
+    emu as f32 / 914_400.0 * 72.0
+}
 
 #[cfg(test)]
 mod tests {

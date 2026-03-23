@@ -181,29 +181,3 @@ pub(super) fn layout_header_footer_blocks(
     max_y = max_y.max(cursor_y);
     (commands, max_y)
 }
-
-pub(super) fn to_roman(mut n: u32) -> String {
-    let table = [
-        (1000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
-    ];
-    let mut result = String::new();
-    for &(value, numeral) in &table {
-        while n >= value {
-            result.push_str(numeral);
-            n -= value;
-        }
-    }
-    result
-}

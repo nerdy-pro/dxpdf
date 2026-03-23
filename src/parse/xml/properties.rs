@@ -1,11 +1,14 @@
 use log::warn;
 
+use super::helpers::{get_attr, is_val_false};
 use crate::dimension::EighthPoints;
 use crate::error::Error;
 use crate::model::*;
-use crate::units::{UNDERLINE_NONE, WIDTH_TYPE_DXA};
 
-use super::helpers::{get_attr, is_val_false};
+/// OOXML underline value for "no underline".
+const UNDERLINE_NONE: &str = "none";
+/// OOXML width type for twips.
+const WIDTH_TYPE_DXA: &str = "dxa";
 use super::ParseState;
 
 /// Parse a border element like `<w:top w:val="single" w:sz="4" w:color="auto"/>`.

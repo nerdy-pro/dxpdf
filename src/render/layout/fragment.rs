@@ -1,12 +1,20 @@
 use std::rc::Rc;
 
+use super::measurer::TextMeasurer;
 use super::ImageCache;
 use crate::dimension::{HalfPoints, Pt};
 use crate::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
-use crate::units::{MIN_TAB_WIDTH, TAB_FALLBACK, UNDERLINE_Y_OFFSET};
 
-use super::measurer::TextMeasurer;
+/// Minimum tab fragment width for line fitting.
+/// Prevents tabs from collapsing to zero width during line breaking.
+pub const MIN_TAB_WIDTH: Pt = Pt::new(12.0);
+
+/// Fallback tab advance when no stops and no default interval.
+pub const TAB_FALLBACK: Pt = Pt::new(36.0);
+
+/// Underline offset below the text baseline.
+pub const UNDERLINE_Y_OFFSET: Pt = Pt::new(2.0);
 use super::DrawCommand;
 
 /// Document-level defaults for layout.
@@ -122,25 +130,6 @@ pub fn underline_width(font_size: Pt, bold: bool) -> Pt {
 pub struct FieldContext {
     pub page_number: u32,
     pub num_pages: u32,
-}
-
-pub fn collect_fragments(
-    runs: &[Inline],
-    content_width: Pt,
-    content_height: Pt,
-    defaults: &DocDefaultsLayout,
-    measurer: &TextMeasurer,
-    image_cache: &ImageCache,
-) -> Vec<Fragment> {
-    collect_fragments_with_fields(
-        runs,
-        content_width,
-        content_height,
-        defaults,
-        measurer,
-        None,
-        image_cache,
-    )
 }
 
 pub fn collect_fragments_with_fields(

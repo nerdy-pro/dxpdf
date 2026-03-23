@@ -6,8 +6,8 @@ use skia_safe::FontMgr;
 use super::fragment::{
     find_next_tab_stop, fit_fragments, measure_lines, resolve_line_height, Fragment,
 };
-use super::header_footer::to_roman;
 use super::measure;
+use super::measure::to_roman;
 use super::ImageCache;
 use super::*;
 use crate::dimension::{Pt, Twips};

@@ -14,8 +14,12 @@ use std::rc::Rc;
 use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::model::*;
-use crate::units::FLOAT_TEXT_GAP;
 use fragment::DocDefaultsLayout;
+
+/// Gap between a floating image and adjacent text.
+/// Workaround: OOXML specifies this per-image via wp:distL/distR attributes,
+/// which we don't parse yet.
+const FLOAT_TEXT_GAP: Pt = Pt::new(4.0);
 
 /// US Letter page width in points (8.5 inches).
 const US_LETTER_WIDTH_PT: Pt = Pt::new(612.0);

@@ -44,24 +44,12 @@ fn error_is_std_error() {
 }
 
 // ---------------------------------------------------------------------------
-// units module — constants
+// model module — DEFAULT_FONT_FAMILY constant
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unit_constants() {
-    let _: &str = dxpdf::units::DEFAULT_FONT_FAMILY;
-    let _: &str = dxpdf::units::WIDTH_TYPE_DXA;
-    let _: &str = dxpdf::units::UNDERLINE_NONE;
-
-    let _: dxpdf::dimension::Pt = dxpdf::units::FLOAT_TEXT_GAP;
-    let _: dxpdf::dimension::Pt = dxpdf::units::MIN_TAB_WIDTH;
-    let _: dxpdf::dimension::Pt = dxpdf::units::TAB_FALLBACK;
-    let _: dxpdf::dimension::Pt = dxpdf::units::UNDERLINE_Y_OFFSET;
-}
-
-#[test]
-fn unit_legacy_emu_to_pt() {
-    let _: fn(u64) -> f32 = dxpdf::units::emu_to_pt;
+fn model_default_font_family_constant() {
+    let _: &str = dxpdf::model::DEFAULT_FONT_FAMILY;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,14 +1,12 @@
 use std::rc::Rc;
 
-use crate::dimension::Pt;
-use crate::geometry::{PtLineSegment, PtOffset, PtRect};
-use crate::model::*;
-use crate::units::UNDERLINE_Y_OFFSET;
-
 use super::context::LayoutConstraints;
 use super::fragment::*;
 use super::measure::MeasuredParagraph;
 use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
+use crate::dimension::Pt;
+use crate::geometry::{PtLineSegment, PtOffset, PtRect};
+use crate::model::*;
 
 impl Layouter<'_> {
     pub(super) fn layout_paragraph(&mut self, para: &MeasuredParagraph) {
