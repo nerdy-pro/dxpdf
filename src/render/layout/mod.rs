@@ -1,5 +1,6 @@
 mod fragment;
 mod header_footer;
+pub mod measure;
 mod measurer;
 mod paragraph;
 mod table;
@@ -88,7 +89,7 @@ impl Default for LayoutConfig {
 impl LayoutConfig {
     /// Build a layout config from section properties, using US Letter defaults
     /// for any values not specified.
-    fn from_section(sect: &SectionProperties) -> Self {
+    pub(crate) fn from_section(sect: &SectionProperties) -> Self {
         let mut cfg = Self::default();
         apply_section_to_config(&mut cfg, sect);
         cfg
@@ -146,34 +147,34 @@ pub struct LayoutedPage {
     pub page_size: PtSize,
 }
 
-/// Perform layout on a document, producing positioned draw commands per page.
+/// Perform layout on a pre-measured document, producing positioned draw commands per page.
 ///
 /// Page dimensions and margins are derived from the document's section properties,
 /// falling back to US Letter with 1-inch margins when not specified.
-pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage> {
-    // Build per-section configs from inline section breaks + final section.
-    let mut section_configs: Vec<LayoutConfig> = Vec::new();
-    for block in &doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref sect) = p.section_properties {
-                section_configs.push(LayoutConfig::from_section(sect));
-            }
-        }
-    }
-    if let Some(ref sect) = doc.final_section {
-        section_configs.push(LayoutConfig::from_section(sect));
-    }
-
-    let initial_config = section_configs.first().copied().unwrap_or_default();
-    let mut next_configs = section_configs.into_iter().skip(1).collect::<Vec<_>>();
+pub fn layout(
+    measured: &measure::MeasuredDocument,
+    font_mgr: &skia_safe::FontMgr,
+) -> Vec<LayoutedPage> {
+    let initial_config = measured
+        .section_configs
+        .first()
+        .copied()
+        .unwrap_or_default();
+    let mut next_configs = measured
+        .section_configs
+        .iter()
+        .skip(1)
+        .copied()
+        .collect::<Vec<_>>();
     next_configs.reverse();
 
-    let default_tab_stop_pt = Pt::from(doc.default_tab_stop);
-    let doc_defaults = DocDefaultsLayout::from_document(doc);
-    let image_cache = ImageCache::new(&doc.images);
+    let default_tab_stop_pt = measured.default_tab_stop;
     let mut effective_config = initial_config;
-    if let Some(ref header) = doc.default_header {
-        let pre_measurer = measurer::TextMeasurer::new(font_mgr.clone());
+
+    // Pre-measure header height using a TextMeasurer (headers contain field codes
+    // that require per-page context, so they remain unmeasured in MeasuredDocument).
+    let hf_measurer = measurer::TextMeasurer::new(font_mgr.clone());
+    if let Some(ref header) = measured.doc_defaults.default_header {
         let (_, header_bottom) = header_footer::layout_header_footer_blocks(
             &header.blocks,
             initial_config.margins.left,
@@ -183,11 +184,11 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
             initial_config.page_size.height,
             initial_config.page_size.width,
             initial_config.page_size.height,
-            &doc_defaults,
-            &pre_measurer,
+            &measured.doc_defaults,
+            &hf_measurer,
             default_tab_stop_pt,
             None,
-            &image_cache,
+            &measured.image_cache,
         );
         if header_bottom > effective_config.margins.top {
             effective_config.margins.top = header_bottom;
@@ -198,30 +199,28 @@ pub fn layout(doc: &Document, font_mgr: &skia_safe::FontMgr) -> Vec<LayoutedPage
         &effective_config,
         next_configs,
         default_tab_stop_pt,
-        doc_defaults,
-        font_mgr.clone(),
-        image_cache,
+        &measured.doc_defaults,
+        &measured.image_cache,
     );
 
-    let blocks = &doc.blocks;
+    let blocks = &measured.blocks;
     for (i, block) in blocks.iter().enumerate() {
         let next_is_table = blocks
             .get(i + 1)
-            .is_some_and(|b| matches!(b, Block::Table(_)));
+            .is_some_and(|b| matches!(b, measure::MeasuredBlock::Table(_)));
         layouter.layout_block(block, next_is_table);
     }
 
-    let (mut pages, image_cache) = layouter.finish();
+    let mut pages = layouter.finish();
 
     // Render headers and footers on each page
-    let hf_defaults = DocDefaultsLayout::from_document(doc);
     header_footer::render_headers_footers(
         &mut pages,
-        &hf_defaults,
+        &measured.doc_defaults,
         default_tab_stop_pt,
         &initial_config,
         font_mgr,
-        &image_cache,
+        &measured.image_cache,
     );
 
     pages
@@ -313,7 +312,7 @@ struct ActiveFloat {
     width: Pt,
 }
 
-struct Layouter {
+struct Layouter<'a> {
     config: LayoutConfig,
     pages: Vec<LayoutedPage>,
     current_page: LayoutedPage,
@@ -321,25 +320,20 @@ struct Layouter {
     active_floats: Vec<ActiveFloat>,
     next_section_configs: Vec<LayoutConfig>,
     default_tab_stop_pt: Pt,
-    doc_defaults: DocDefaultsLayout,
-    measurer: TextMeasurer,
-    /// Counters for numbered lists: (numId, level) -> current count.
-    list_counters: std::collections::HashMap<(u32, u32), u32>,
+    doc_defaults: &'a DocDefaultsLayout,
     /// Whether the previous paragraph had a bottom border (to suppress duplicate top borders).
     prev_para_had_bottom_border: bool,
-    image_cache: ImageCache,
+    image_cache: &'a ImageCache,
 }
 
-impl Layouter {
+impl<'a> Layouter<'a> {
     fn new(
         config: &LayoutConfig,
         next_section_configs: Vec<LayoutConfig>,
         default_tab_stop_pt: Pt,
-        doc_defaults: DocDefaultsLayout,
-        font_mgr: skia_safe::FontMgr,
-        image_cache: ImageCache,
+        doc_defaults: &'a DocDefaultsLayout,
+        image_cache: &'a ImageCache,
     ) -> Self {
-        let measurer = TextMeasurer::new(font_mgr);
         Self {
             config: *config,
             pages: Vec::new(),
@@ -352,8 +346,6 @@ impl Layouter {
             next_section_configs,
             default_tab_stop_pt,
             doc_defaults,
-            measurer,
-            list_counters: std::collections::HashMap::new(),
             prev_para_had_bottom_border: false,
             image_cache,
         }
@@ -439,7 +431,12 @@ impl Layouter {
     }
 
     /// Get the width of a table cell, accounting for grid_span.
-    fn cell_width(&self, grid_col_idx: usize, cell: &TableCell, col_widths: &[Pt]) -> Pt {
+    fn cell_width(
+        &self,
+        grid_col_idx: usize,
+        cell: &measure::MeasuredTableCell,
+        col_widths: &[Pt],
+    ) -> Pt {
         if !col_widths.is_empty() {
             let span = cell.grid_span.max(1) as usize;
             return (grid_col_idx..grid_col_idx + span)
@@ -449,84 +446,28 @@ impl Layouter {
         cell.width.map(Pt::from).unwrap_or(Pt::new(72.0))
     }
 
-    /// Resolve list label text and indentation for a paragraph with a list reference.
-    /// Returns (label_text, indent_left in twips, indent_hanging in twips).
-    fn resolve_list_label(
-        &mut self,
-        list_ref: &ListRef,
-    ) -> Option<(String, crate::dimension::Twips, crate::dimension::Twips)> {
-        let def = self.doc_defaults.numbering.get(&list_ref.num_id)?;
-        let level = def.levels.get(list_ref.level as usize)?;
-
-        let label = match &level.format {
-            NumberFormat::Bullet(ch) => ch.clone(),
-            NumberFormat::Decimal => {
-                let counter = self
-                    .list_counters
-                    .entry((list_ref.num_id, list_ref.level))
-                    .or_insert(level.start.saturating_sub(1));
-                *counter += 1;
-                level.level_text.replace("%1", &counter.to_string())
-            }
-            NumberFormat::LowerLetter => {
-                let counter = self
-                    .list_counters
-                    .entry((list_ref.num_id, list_ref.level))
-                    .or_insert(level.start.saturating_sub(1));
-                *counter += 1;
-                let ch = (b'a' + ((*counter - 1) % 26) as u8) as char;
-                level.level_text.replace("%1", &ch.to_string())
-            }
-            NumberFormat::UpperLetter => {
-                let counter = self
-                    .list_counters
-                    .entry((list_ref.num_id, list_ref.level))
-                    .or_insert(level.start.saturating_sub(1));
-                *counter += 1;
-                let ch = (b'A' + ((*counter - 1) % 26) as u8) as char;
-                level.level_text.replace("%1", &ch.to_string())
-            }
-            NumberFormat::LowerRoman | NumberFormat::UpperRoman => {
-                let counter = self
-                    .list_counters
-                    .entry((list_ref.num_id, list_ref.level))
-                    .or_insert(level.start.saturating_sub(1));
-                *counter += 1;
-                // Simple roman numeral conversion
-                let roman = header_footer::to_roman(*counter);
-                let roman = if matches!(level.format, NumberFormat::LowerRoman) {
-                    roman.to_lowercase()
-                } else {
-                    roman
-                };
-                level.level_text.replace("%1", &roman)
-            }
-        };
-
-        Some((label, level.indent_left, level.indent_hanging))
-    }
-
     fn prune_floats(&mut self) {
         self.active_floats.retain(|f| self.cursor_y < f.page_y_end);
     }
 
-    fn layout_block(&mut self, block: &Block, next_is_table: bool) {
+    fn layout_block(&mut self, block: &measure::MeasuredBlock, next_is_table: bool) {
         self.prune_floats();
         match block {
-            Block::Paragraph(p) => {
+            measure::MeasuredBlock::Paragraph(p) => {
+                let has_section_break = p.section_properties.is_some();
                 self.layout_paragraph(p);
-                if p.section_properties.is_some() {
+                if has_section_break {
                     self.section_break();
                 }
             }
-            Block::Table(t) => {
+            measure::MeasuredBlock::Table(t) => {
                 self.prev_para_had_bottom_border = false;
                 self.layout_table(t, next_is_table);
             }
         }
     }
 
-    fn finish(mut self) -> (Vec<LayoutedPage>, ImageCache) {
+    fn finish(mut self) -> Vec<LayoutedPage> {
         if !self.current_page.commands.is_empty() {
             self.pages.push(self.current_page);
         }
@@ -536,7 +477,7 @@ impl Layouter {
                 page_size: self.config.page_size,
             });
         }
-        (self.pages, self.image_cache)
+        self.pages
     }
 }
 

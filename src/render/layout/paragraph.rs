@@ -6,19 +6,16 @@ use crate::model::*;
 use crate::units::UNDERLINE_Y_OFFSET;
 
 use super::fragment::*;
+use super::measure::MeasuredParagraph;
 use super::{offset_command, ActiveFloat, DrawCommand, Layouter};
 
-impl Layouter {
-    pub(super) fn layout_paragraph(&mut self, para: &Paragraph) {
+impl Layouter<'_> {
+    pub(super) fn layout_paragraph(&mut self, para: &MeasuredParagraph) {
         let spacing = self.resolve_spacing(para.properties.spacing);
         let mut indent = para.properties.indentation.unwrap_or_default();
 
-        // Resolve list label and override indentation
-        let list_label = para
-            .properties
-            .list_ref
-            .as_ref()
-            .and_then(|lr| self.resolve_list_label(lr));
+        // Use pre-resolved list label from the measure step
+        let list_label = para.list_label.clone();
 
         self.cursor_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
 
@@ -60,14 +57,9 @@ impl Layouter {
             });
         }
 
-        if para.runs.is_empty() && para.floats.is_empty() {
+        if para.fragments.is_empty() && para.floats.is_empty() {
             let top = self.cursor_y;
-            let default_size = Pt::from(self.doc_defaults.font_size);
-            let natural_height = self
-                .measurer
-                .font(&self.doc_defaults.font_family, default_size, false, false)
-                .metrics()
-                .line_height;
+            let natural_height = self.doc_defaults.default_line_height;
             let line_h = resolve_line_height(natural_height, spacing.line_spacing());
             // Paint borders before advancing — top border sits at paragraph start
             self.paint_paragraph_borders(&para.properties.paragraph_borders, top, top + line_h);
@@ -76,7 +68,7 @@ impl Layouter {
             return;
         }
 
-        if para.runs.is_empty() {
+        if para.fragments.is_empty() {
             self.prev_para_had_bottom_border = false;
             self.cursor_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
             return;
@@ -101,22 +93,14 @@ impl Layouter {
         let base_content_width = self.config.content_width()
             - indent.left.map(Pt::from).unwrap_or(Pt::ZERO)
             - indent.right.map(Pt::from).unwrap_or(Pt::ZERO);
-        let content_height = self.config.content_height();
-        let fragments = collect_fragments(
-            &para.runs,
-            base_content_width,
-            content_height,
-            &self.doc_defaults,
-            &self.measurer,
-            &self.image_cache,
-        );
+        let fragments = &para.fragments;
         let base_x = self.config.margins.left + indent.left.map(Pt::from).unwrap_or(Pt::ZERO);
 
         // ============================
         // PASS 1: MEASURE — produce lines with relative y-coordinates
         // ============================
         let measured = self.measure_paragraph_lines(
-            &fragments,
+            fragments,
             base_x,
             base_content_width,
             indent.first_line.map(Pt::from).unwrap_or(Pt::ZERO),

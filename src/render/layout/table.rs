@@ -3,6 +3,7 @@ use crate::geometry::{PtLineSegment, PtOffset, PtRect};
 use crate::model::*;
 
 use super::fragment::*;
+use super::measure::{MeasuredBlock, MeasuredTable, MeasuredTableCell};
 use super::{offset_command, DrawCommand, Layouter};
 
 // ============================================================
@@ -10,15 +11,15 @@ use super::{offset_command, DrawCommand, Layouter};
 // ============================================================
 
 /// Result of measuring a single cell's content.
-struct MeasuredCell {
+struct LayoutedCell {
     commands: Vec<DrawCommand>,
     content_height: Pt,
     col_width: Pt,
 }
 
 /// Result of measuring all cells in a row.
-struct MeasuredRow {
-    cells: Vec<MeasuredCell>,
+struct LayoutedRow {
+    cells: Vec<LayoutedCell>,
     col_x_positions: Vec<Pt>,
     min_height: Pt,
 }
@@ -35,7 +36,7 @@ struct VmergeSpan {
 // ============================================================
 
 fn resolve_cell_margins(
-    cell: &TableCell,
+    cell: &MeasuredTableCell,
     table_default: &Option<CellMargins>,
     doc_default: &CellMargins,
 ) -> CellMargins {
@@ -67,8 +68,8 @@ fn emit_border(
 // Main entry point
 // ============================================================
 
-impl Layouter {
-    pub(super) fn layout_table(&mut self, table: &Table, next_is_table: bool) {
+impl Layouter<'_> {
+    pub(super) fn layout_table(&mut self, table: &MeasuredTable, next_is_table: bool) {
         if table.rows.is_empty() {
             return;
         }
@@ -99,7 +100,7 @@ impl Layouter {
         // ============================
         // PASS 1: MEASURE all cells
         // ============================
-        let measured_rows: Vec<MeasuredRow> = table
+        let layouted_rows: Vec<LayoutedRow> = table
             .rows
             .iter()
             .map(|row| {
@@ -118,7 +119,7 @@ impl Layouter {
                     grid_col_idx += cell.grid_span.max(1) as usize;
                 }
 
-                let mut measured_cells = Vec::with_capacity(row.cells.len());
+                let mut layouted_cells = Vec::with_capacity(row.cells.len());
 
                 for (col_idx, cell) in row.cells.iter().enumerate() {
                     let col_width = cell_widths_computed[col_idx];
@@ -132,7 +133,7 @@ impl Layouter {
                     let cell_content_width = (col_width - pad_left - pad_right).max(Pt::new(1.0));
 
                     if cell.is_vmerge_continue() {
-                        measured_cells.push(MeasuredCell {
+                        layouted_cells.push(LayoutedCell {
                             commands: Vec::new(),
                             content_height: Pt::ZERO,
                             col_width,
@@ -144,7 +145,7 @@ impl Layouter {
                     let mut cell_y = pad_top;
 
                     for block in &cell.blocks {
-                        if let Block::Paragraph(p) = block {
+                        if let MeasuredBlock::Paragraph(p) = block {
                             let spacing =
                                 self.resolve_cell_spacing(p.properties.spacing, table.cell_spacing);
                             cell_y += spacing.before.map(Pt::from).unwrap_or(Pt::ZERO);
@@ -174,27 +175,10 @@ impl Layouter {
                                 cell_y += img_h;
                             }
 
-                            let fragments = collect_fragments(
-                                &p.runs,
-                                cell_content_width,
-                                self.config.content_height(),
-                                &self.doc_defaults,
-                                &self.measurer,
-                                &self.image_cache,
-                            );
+                            let fragments = &p.fragments;
 
                             if fragments.is_empty() && p.floats.is_empty() {
-                                let default_size = Pt::from(self.doc_defaults.font_size);
-                                let natural = self
-                                    .measurer
-                                    .font(
-                                        &self.doc_defaults.font_family,
-                                        default_size,
-                                        false,
-                                        false,
-                                    )
-                                    .metrics()
-                                    .line_height;
+                                let natural = self.doc_defaults.default_line_height;
                                 cell_y += resolve_line_height(natural, spacing.line_spacing());
                                 cell_y += spacing.after.map(Pt::from).unwrap_or(Pt::ZERO);
                                 continue;
@@ -206,7 +190,7 @@ impl Layouter {
 
                             // Use shared measure_lines for fragment → command conversion
                             let measured = measure_lines(
-                                &fragments,
+                                fragments,
                                 cell_x + pad_left,
                                 cell_content_width,
                                 Pt::ZERO, // no first-line indent in cells
@@ -214,7 +198,7 @@ impl Layouter {
                                 spacing.line_spacing(),
                                 &p.properties.tab_stops,
                                 self.default_tab_stop_pt,
-                                &self.image_cache,
+                                self.image_cache,
                             );
 
                             // Offset measured commands by cell_y and accumulate
@@ -233,15 +217,15 @@ impl Layouter {
                     let effective_pad_bottom = pad_bottom.max(Pt::new(1.0));
                     let content_height = cell_y + effective_pad_bottom;
 
-                    measured_cells.push(MeasuredCell {
+                    layouted_cells.push(LayoutedCell {
                         commands,
                         content_height,
                         col_width,
                     });
                 }
 
-                MeasuredRow {
-                    cells: measured_cells,
+                LayoutedRow {
+                    cells: layouted_cells,
                     col_x_positions,
                     min_height,
                 }
@@ -262,7 +246,7 @@ impl Layouter {
                             r.cells.get(col_idx).is_some_and(|c| c.is_vmerge_continue())
                         })
                         .count();
-                    let content_height = measured_rows[row_idx].cells[col_idx].content_height;
+                    let content_height = layouted_rows[row_idx].cells[col_idx].content_height;
                     vmerge_spans.push(VmergeSpan {
                         total_height: content_height,
                         start_row: row_idx,
@@ -273,7 +257,7 @@ impl Layouter {
         }
 
         // Compute base row heights from non-merged cells only.
-        let mut row_heights: Vec<Pt> = measured_rows
+        let mut row_heights: Vec<Pt> = layouted_rows
             .iter()
             .enumerate()
             .map(|(row_idx, mr)| {
@@ -311,7 +295,7 @@ impl Layouter {
             .unwrap_or(self.doc_defaults.default_table_borders);
         let num_rows = table.rows.len();
 
-        for (row_idx, (mrow, row)) in measured_rows.iter().zip(table.rows.iter()).enumerate() {
+        for (row_idx, (mrow, row)) in layouted_rows.iter().zip(table.rows.iter()).enumerate() {
             let row_height = row_heights[row_idx];
 
             if self.cursor_y + row_height > self.content_bottom() {

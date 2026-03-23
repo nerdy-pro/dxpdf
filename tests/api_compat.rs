@@ -796,13 +796,12 @@ fn draw_command_variants() {
 
 #[test]
 fn layout_function_exists() {
-    // Verify layout function is accessible (we don't call it since it needs a FontMgr).
+    // Verify layout + measure functions are accessible.
     use dxpdf::render::layout::layout;
+    use dxpdf::render::layout::measure::{measure, MeasuredDocument};
+    let _ = measure as fn(&dxpdf::model::Document, &skia_safe::FontMgr) -> MeasuredDocument;
     let _ = layout
-        as fn(
-            &dxpdf::model::Document,
-            &skia_safe::FontMgr,
-        ) -> Vec<dxpdf::render::layout::LayoutedPage>;
+        as fn(&MeasuredDocument, &skia_safe::FontMgr) -> Vec<dxpdf::render::layout::LayoutedPage>;
 }
 
 // ---------------------------------------------------------------------------

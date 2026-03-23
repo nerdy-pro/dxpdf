@@ -24,7 +24,8 @@ pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
 pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
     let font_mgr = skia_safe::FontMgr::new();
     render::fonts::preload_fonts(&font_mgr, &document.font_families());
-    let pages = render::layout::layout(document, &font_mgr);
+    let measured = render::layout::measure::measure(document, &font_mgr);
+    let pages = render::layout::layout(&measured, &font_mgr);
     render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)
 }
 

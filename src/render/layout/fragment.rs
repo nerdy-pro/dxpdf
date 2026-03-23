@@ -20,13 +20,22 @@ pub struct DocDefaultsLayout {
     pub default_header: Option<HeaderFooter>,
     pub default_footer: Option<HeaderFooter>,
     pub numbering: NumberingMap,
+    /// Pre-computed line height of an empty paragraph using the default font.
+    pub default_line_height: Pt,
 }
 
 impl DocDefaultsLayout {
-    pub fn from_document(doc: &crate::model::Document) -> Self {
+    pub fn from_document(doc: &crate::model::Document, measurer: &TextMeasurer) -> Self {
+        let font_size = doc.default_font_size;
+        let font_family = Rc::clone(&doc.default_font_family);
+        let default_size_pt = Pt::from(font_size);
+        let default_line_height = measurer
+            .font(&font_family, default_size_pt, false, false)
+            .metrics()
+            .line_height;
         Self {
-            font_size: doc.default_font_size,
-            font_family: Rc::clone(&doc.default_font_family),
+            font_size,
+            font_family,
             default_spacing: doc.default_spacing,
             default_cell_margins: doc.default_cell_margins,
             table_cell_spacing: doc.table_cell_spacing,
@@ -34,6 +43,7 @@ impl DocDefaultsLayout {
             default_header: doc.default_header.clone(),
             default_footer: doc.default_footer.clone(),
             numbering: doc.numbering.clone(),
+            default_line_height,
         }
     }
 }
