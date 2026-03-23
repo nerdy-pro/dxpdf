@@ -139,10 +139,6 @@ pub struct Document {
     pub styles: StyleMap,
     /// Numbering definitions from `word/numbering.xml`.
     pub numbering: NumberingMap,
-    /// Default header content (from first/final section).
-    pub default_header: Option<HeaderFooter>,
-    /// Default footer content (from first/final section).
-    pub default_footer: Option<HeaderFooter>,
     /// Raw image bytes keyed by relationship ID.
     pub images: ImageStore,
 }
@@ -164,8 +160,6 @@ impl Default for Document {
             default_table_borders: TableBorders::default(),
             styles: StyleMap::new(),
             numbering: NumberingMap::new(),
-            default_header: None,
-            default_footer: None,
             images: ImageStore::new(),
         }
     }
@@ -178,6 +172,21 @@ impl Document {
 
     /// Default tab stop interval: 720 twips (0.5 inch).
     pub const DEFAULT_TAB_STOP: Twips = Twips::new(720);
+
+    /// Iterate over all section properties in document order
+    /// (inline section breaks first, then the final section).
+    pub fn sections(&self) -> impl Iterator<Item = &SectionProperties> {
+        self.blocks
+            .iter()
+            .filter_map(|b| {
+                if let Block::Paragraph(p) = b {
+                    p.section_properties.as_ref()
+                } else {
+                    None
+                }
+            })
+            .chain(self.final_section.as_ref())
+    }
 
     /// Collect all unique font families referenced in this document.
     pub fn font_families(&self) -> Vec<Rc<str>> {
@@ -217,11 +226,14 @@ impl Document {
 
         collect_from_blocks(&self.blocks, &mut families);
 
-        if let Some(ref hf) = self.default_header {
-            collect_from_blocks(&hf.blocks, &mut families);
-        }
-        if let Some(ref hf) = self.default_footer {
-            collect_from_blocks(&hf.blocks, &mut families);
+        // Collect from section headers/footers
+        for sect in self.sections() {
+            if let Some(ref hf) = sect.header {
+                collect_from_blocks(&hf.blocks, &mut families);
+            }
+            if let Some(ref hf) = sect.footer {
+                collect_from_blocks(&hf.blocks, &mut families);
+            }
         }
 
         families.into_iter().collect()
@@ -258,7 +270,7 @@ pub struct HeaderFooter {
 }
 
 /// Section properties from `w:sectPr`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SectionProperties {
     pub page_size: Option<PageSize>,
     pub page_margins: Option<PageMargins>,

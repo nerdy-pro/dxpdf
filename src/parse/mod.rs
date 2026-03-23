@@ -148,28 +148,6 @@ fn resolve_headers_footers(
             sect.footer_rel_id = Some(rid);
         }
     }
-
-    // Set document defaults from the first section that has header/footer
-    for block in &doc.blocks {
-        if let Block::Paragraph(p) = block {
-            if let Some(ref sect) = p.section_properties {
-                if doc.default_header.is_none() {
-                    doc.default_header = sect.header.clone();
-                }
-                if doc.default_footer.is_none() {
-                    doc.default_footer = sect.footer.clone();
-                }
-            }
-        }
-    }
-    if let Some(ref sect) = doc.final_section {
-        if doc.default_header.is_none() {
-            doc.default_header = sect.header.clone();
-        }
-        if doc.default_footer.is_none() {
-            doc.default_footer = sect.footer.clone();
-        }
-    }
 }
 
 /// Resolve a single header or footer from its relationship ID.

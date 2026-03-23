@@ -82,8 +82,6 @@ fn document_default_and_fields() {
     let _: &dxpdf::model::TableBorders = &doc.default_table_borders;
     let _: &dxpdf::model::StyleMap = &doc.styles;
     let _: &dxpdf::model::NumberingMap = &doc.numbering;
-    let _: &Option<dxpdf::model::HeaderFooter> = &doc.default_header;
-    let _: &Option<dxpdf::model::HeaderFooter> = &doc.default_footer;
     let _: &dxpdf::model::ImageStore = &doc.images;
 }
 

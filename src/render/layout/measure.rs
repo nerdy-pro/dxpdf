@@ -38,6 +38,22 @@ impl DocDefaultsLayout {
             .font(&font_family, default_size_pt, false, false)
             .metrics()
             .line_height;
+
+        // Resolve default header/footer from the first section that defines one.
+        let mut default_header = None;
+        let mut default_footer = None;
+        for sect in doc.sections() {
+            if default_header.is_none() {
+                default_header = sect.header.clone();
+            }
+            if default_footer.is_none() {
+                default_footer = sect.footer.clone();
+            }
+            if default_header.is_some() && default_footer.is_some() {
+                break;
+            }
+        }
+
         Self {
             font_size,
             font_family,
@@ -45,8 +61,8 @@ impl DocDefaultsLayout {
             default_cell_margins: doc.default_cell_margins,
             table_cell_spacing: doc.table_cell_spacing,
             default_table_borders: doc.default_table_borders,
-            default_header: doc.default_header.clone(),
-            default_footer: doc.default_footer.clone(),
+            default_header,
+            default_footer,
             numbering: doc.numbering.clone(),
             default_line_height,
         }

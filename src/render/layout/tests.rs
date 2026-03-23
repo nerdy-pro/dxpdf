@@ -1883,17 +1883,20 @@ fn header_renders_on_each_page() {
     }
     let doc = Document {
         blocks,
-        default_header: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "HEADER".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
+        final_section: Some(SectionProperties {
+            header: Some(HeaderFooter {
+                blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "HEADER".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                    section_properties: None,
+                }))],
+            }),
+            ..Default::default()
         }),
         ..Document::default()
     };
@@ -1913,17 +1916,20 @@ fn header_renders_on_each_page() {
 fn footer_renders_at_bottom() {
     let doc = Document {
         blocks: vec![simple_paragraph("Body")],
-        default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![Inline::TextRun(TextRun {
-                    text: "FOOTER".into(),
-                    properties: RunProperties::default(),
-                    hyperlink_url: None,
-                })],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
+        final_section: Some(SectionProperties {
+            footer: Some(HeaderFooter {
+                blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![Inline::TextRun(TextRun {
+                        text: "FOOTER".into(),
+                        properties: RunProperties::default(),
+                        hyperlink_url: None,
+                    })],
+                    floats: Vec::new(),
+                    section_properties: None,
+                }))],
+            }),
+            ..Default::default()
         }),
         ..Document::default()
     };
@@ -2201,32 +2207,35 @@ fn page_field_renders_page_number_in_footer() {
     }
     let doc = Document {
         blocks,
-        default_footer: Some(HeaderFooter {
-            blocks: vec![Block::Paragraph(Box::new(Paragraph {
-                properties: ParagraphProperties::default(),
-                runs: vec![
-                    Inline::TextRun(TextRun {
-                        text: "Page ".into(),
-                        properties: RunProperties::default(),
-                        hyperlink_url: None,
-                    }),
-                    Inline::Field(FieldCode {
-                        field_type: FieldType::Page,
-                        properties: RunProperties::default(),
-                    }),
-                    Inline::TextRun(TextRun {
-                        text: " of ".into(),
-                        properties: RunProperties::default(),
-                        hyperlink_url: None,
-                    }),
-                    Inline::Field(FieldCode {
-                        field_type: FieldType::NumPages,
-                        properties: RunProperties::default(),
-                    }),
-                ],
-                floats: Vec::new(),
-                section_properties: None,
-            }))],
+        final_section: Some(SectionProperties {
+            footer: Some(HeaderFooter {
+                blocks: vec![Block::Paragraph(Box::new(Paragraph {
+                    properties: ParagraphProperties::default(),
+                    runs: vec![
+                        Inline::TextRun(TextRun {
+                            text: "Page ".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        }),
+                        Inline::Field(FieldCode {
+                            field_type: FieldType::Page,
+                            properties: RunProperties::default(),
+                        }),
+                        Inline::TextRun(TextRun {
+                            text: " of ".into(),
+                            properties: RunProperties::default(),
+                            hyperlink_url: None,
+                        }),
+                        Inline::Field(FieldCode {
+                            field_type: FieldType::NumPages,
+                            properties: RunProperties::default(),
+                        }),
+                    ],
+                    floats: Vec::new(),
+                    section_properties: None,
+                }))],
+            }),
+            ..Default::default()
         }),
         ..Document::default()
     };
