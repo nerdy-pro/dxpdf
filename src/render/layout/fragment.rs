@@ -400,6 +400,7 @@ pub struct MeasuredLines {
 /// Measure paragraph fragments into lines with relative-positioned draw commands.
 ///
 /// All y-coordinates in the returned commands are relative to 0.0.
+#[allow(clippy::too_many_arguments)]
 pub fn measure_lines(
     fragments: &[Fragment],
     x_origin: Pt,
@@ -548,6 +549,7 @@ fn break_into_lines(
 /// `cursor_y` is the bottom of this line (relative to paragraph top).
 /// `line_height` is the height of this line.
 /// `available_width` is the width available for alignment calculations.
+#[allow(clippy::too_many_arguments)]
 fn paint_line(
     line_fragments: &[Fragment],
     x_start: Pt,

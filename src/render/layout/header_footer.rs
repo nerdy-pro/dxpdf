@@ -67,6 +67,7 @@ pub(super) fn render_headers_footers(
 
 /// Layout header/footer blocks at a fixed position.
 /// Returns (draw_commands, max_y_extent).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn layout_header_footer_blocks(
     blocks: &[Block],
     constraints: &LayoutConstraints,

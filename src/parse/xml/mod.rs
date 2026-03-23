@@ -301,6 +301,35 @@ impl ParserContext {
         Ok(())
     }
 
+    /// Flush any accumulated run text into the parent paragraph and push an inline element.
+    fn flush_run_and_push_inline(&mut self, inline: Inline) {
+        if let ParseState::InRun {
+            ref props,
+            ref mut text,
+            ..
+        } = self.state
+        {
+            let flushed_text = std::mem::take(text);
+            if let Some(para_state) = self
+                .stack
+                .iter_mut()
+                .rev()
+                .find(|s| matches!(s, ParseState::InParagraph { .. }))
+            {
+                if let ParseState::InParagraph { ref mut runs, .. } = para_state {
+                    if !flushed_text.is_empty() {
+                        runs.push(Inline::TextRun(TextRun {
+                            text: flushed_text,
+                            properties: props.clone(),
+                            hyperlink_url: None,
+                        }));
+                    }
+                    runs.push(inline);
+                }
+            }
+        }
+    }
+
     fn handle_empty(
         &mut self,
         e: &BytesStart<'_>,
@@ -320,36 +349,12 @@ impl ParserContext {
         } else if (local == b"br" || local == b"tab")
             && matches!(self.state, ParseState::InRun { .. })
         {
-            if let ParseState::InRun {
-                ref props,
-                ref mut text,
-                ..
-            } = self.state
-            {
-                let flushed_text = std::mem::take(text);
-                let inline_to_push = if local == b"br" {
-                    Inline::LineBreak
-                } else {
-                    Inline::Tab
-                };
-                if let Some(para_state) = self
-                    .stack
-                    .iter_mut()
-                    .rev()
-                    .find(|s| matches!(s, ParseState::InParagraph { .. }))
-                {
-                    if let ParseState::InParagraph { ref mut runs, .. } = para_state {
-                        if !flushed_text.is_empty() {
-                            runs.push(Inline::TextRun(TextRun {
-                                text: flushed_text,
-                                properties: props.clone(),
-                                hyperlink_url: None,
-                            }));
-                        }
-                        runs.push(inline_to_push);
-                    }
-                }
-            }
+            let inline = if local == b"br" {
+                Inline::LineBreak
+            } else {
+                Inline::Tab
+            };
+            self.flush_run_and_push_inline(inline);
         } else if local == b"fldChar" {
             handle_fld_char(
                 e,

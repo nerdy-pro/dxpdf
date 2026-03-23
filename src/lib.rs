@@ -1,8 +1,4 @@
-#![allow(
-    clippy::too_many_arguments,
-    clippy::collapsible_if,
-    clippy::collapsible_match
-)]
+#![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
 pub mod dimension;
 pub mod error;

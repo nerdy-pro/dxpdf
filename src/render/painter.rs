@@ -87,6 +87,7 @@ fn render_page(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
     canvas: &skia_safe::Canvas,
     font_mgr: &FontMgr,
