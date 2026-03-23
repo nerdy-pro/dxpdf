@@ -1,10 +1,16 @@
 #![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
+#[doc(hidden)]
 pub mod dimension;
+#[doc(hidden)]
 pub mod error;
+#[doc(hidden)]
 pub mod geometry;
+#[doc(hidden)]
 pub mod model;
+#[doc(hidden)]
 pub mod parse;
+#[doc(hidden)]
 pub mod render;
 
 pub use error::Error;
@@ -12,14 +18,9 @@ pub use error::Error;
 /// Convert raw DOCX bytes into PDF bytes.
 pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let document = parse::parse(docx_bytes)?;
-    convert_document(&document)
-}
-
-/// Convert a parsed `Document` into PDF bytes.
-pub fn convert_document(document: &model::Document) -> Result<Vec<u8>, Error> {
     let font_mgr = skia_safe::FontMgr::new();
     render::fonts::preload_fonts(&font_mgr, &document.font_families());
-    let measured = render::layout::measure::measure(document, &font_mgr);
+    let measured = render::layout::measure::measure(&document, &font_mgr);
     let pages = render::layout::layout(&measured, &font_mgr);
     render::painter::render_to_pdf_with_font_mgr(&pages, &font_mgr)
 }
