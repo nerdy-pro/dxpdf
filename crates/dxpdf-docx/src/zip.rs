@@ -46,6 +46,12 @@ impl PackageContents {
         self.get_part(path)
             .ok_or_else(|| ParseError::MissingPart(path.to_string()))
     }
+
+    /// Remove and return the owned bytes for a part. Avoids cloning.
+    pub fn take_part(&mut self, path: &str) -> Option<Vec<u8>> {
+        let normalized = normalize_path(path);
+        self.parts.remove(&normalized)
+    }
 }
 
 fn normalize_path(path: &str) -> String {

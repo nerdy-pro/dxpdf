@@ -17,7 +17,7 @@ use crate::zip::{self, PackageContents, RelationshipType, Relationships};
 /// Parse a DOCX file from raw bytes into a fully resolved `Document`.
 pub fn parse(data: &[u8]) -> Result<Document> {
     // Phase 1: Unzip
-    let package = PackageContents::from_bytes(data)?;
+    let mut package = PackageContents::from_bytes(data)?;
 
     // Phase 1b: Find main document part via package-level rels
     let pkg_rels_data = package.require_part("_rels/.rels")?;
@@ -93,8 +93,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
     let mut media = HashMap::new();
     for rel in doc_rels.filter_by_type(&RelationshipType::Image) {
         let media_path = zip::resolve_target(doc_dir, &rel.target);
-        if let Some(data) = package.get_part(&media_path) {
-            media.insert(RelId(rel.id.clone()), data.to_vec());
+        if let Some(data) = package.take_part(&media_path) {
+            media.insert(RelId(rel.id.clone()), data);
         }
     }
 
@@ -133,8 +133,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
             // Also extract any images from header rels
             for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                 let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
-                if let Some(img_data) = package.get_part(&img_path) {
-                    media.insert(RelId(img_rel.id.clone()), img_data.to_vec());
+                if let Some(img_data) = package.take_part(&img_path) {
+                    media.insert(RelId(img_rel.id.clone()), img_data);
                 }
             }
         }
@@ -159,8 +159,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
 
             for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                 let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
-                if let Some(img_data) = package.get_part(&img_path) {
-                    media.insert(RelId(img_rel.id.clone()), img_data.to_vec());
+                if let Some(img_data) = package.take_part(&img_path) {
+                    media.insert(RelId(img_rel.id.clone()), img_data);
                 }
             }
         }
