@@ -1061,6 +1061,71 @@ pub struct TableProperties {
     pub cell_margins: Option<EdgeInsets<Twips>>,
     pub cell_spacing: Option<TableMeasure>,
     pub look: Option<TableLook>,
+    /// §17.4.68: number of rows in each row band for conditional formatting.
+    pub style_row_band_size: Option<u32>,
+    /// §17.4.67: number of columns in each column band for conditional formatting.
+    pub style_col_band_size: Option<u32>,
+    /// §17.4.58: floating table positioning properties.
+    pub positioning: Option<TablePositioning>,
+    /// §17.4.56: whether this floating table can overlap other floating tables.
+    pub overlap: Option<TableOverlap>,
+}
+
+/// §17.4.58: floating table positioning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TablePositioning {
+    pub left_from_text: Option<Dimension<Twips>>,
+    pub right_from_text: Option<Dimension<Twips>>,
+    pub top_from_text: Option<Dimension<Twips>>,
+    pub bottom_from_text: Option<Dimension<Twips>>,
+    /// §17.18.106: vertical anchor (text, margin, page).
+    pub vert_anchor: Option<TableAnchor>,
+    /// §17.18.106: horizontal anchor (text, margin, page).
+    pub horz_anchor: Option<TableAnchor>,
+    /// §17.18.108: horizontal alignment relative to anchor.
+    pub x_align: Option<TableXAlign>,
+    /// §17.18.109: vertical alignment relative to anchor.
+    pub y_align: Option<TableYAlign>,
+    /// Absolute horizontal offset from anchor.
+    pub x: Option<Dimension<Twips>>,
+    /// Absolute vertical offset from anchor.
+    pub y: Option<Dimension<Twips>>,
+}
+
+/// §17.18.106 ST_VAnchor — vertical/horizontal anchor for table positioning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableAnchor {
+    Text,
+    Margin,
+    Page,
+}
+
+/// §17.18.108 ST_XAlign — horizontal alignment for floating table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableXAlign {
+    Left,
+    Center,
+    Right,
+    Inside,
+    Outside,
+}
+
+/// §17.18.109 ST_YAlign — vertical alignment for floating table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableYAlign {
+    Top,
+    Center,
+    Bottom,
+    Inside,
+    Outside,
+    Inline,
+}
+
+/// §17.4.56 ST_TblOverlap — floating table overlap behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableOverlap {
+    Overlap,
+    Never,
 }
 
 /// A dimension for table/cell widths — may be auto, fixed, or percentage.

@@ -334,6 +334,20 @@ pub fn parse_table_properties(
                     b"tblLook" => {
                         props.look = Some(parse_table_look(e)?);
                     }
+                    b"tblStyleRowBandSize" => {
+                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblStyleColBandSize" => {
+                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblpPr" => {
+                        props.positioning = Some(parse_table_positioning(e)?);
+                    }
+                    b"tblOverlap" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            props.overlap = Some(parse_table_overlap(&val)?);
+                        }
+                    }
                     _ => xml::warn_unsupported_element("tblPr", &local),
                 }
             }
@@ -368,6 +382,20 @@ pub fn parse_table_properties(
                     }
                     b"tblLook" => {
                         props.look = Some(parse_table_look(e)?);
+                    }
+                    b"tblStyleRowBandSize" => {
+                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblStyleColBandSize" => {
+                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblpPr" => {
+                        props.positioning = Some(parse_table_positioning(e)?);
+                    }
+                    b"tblOverlap" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            props.overlap = Some(parse_table_overlap(&val)?);
+                        }
                     }
                     _ => xml::warn_unsupported_element("tblPr", &local),
                 }
@@ -1214,4 +1242,58 @@ fn parse_cnf_style(e: &BytesStart<'_>) -> Result<CnfStyle> {
         last_row_first_column: xml::optional_attr_bool(e, b"lastRowFirstColumn")?,
         last_row_last_column: xml::optional_attr_bool(e, b"lastRowLastColumn")?,
     })
+}
+
+/// §17.4.58: parse `w:tblpPr` attributes.
+fn parse_table_positioning(e: &BytesStart<'_>) -> Result<TablePositioning> {
+    Ok(TablePositioning {
+        left_from_text: xml::optional_attr_i64(e, b"leftFromText")?.map(Dimension::new),
+        right_from_text: xml::optional_attr_i64(e, b"rightFromText")?.map(Dimension::new),
+        top_from_text: xml::optional_attr_i64(e, b"topFromText")?.map(Dimension::new),
+        bottom_from_text: xml::optional_attr_i64(e, b"bottomFromText")?.map(Dimension::new),
+        vert_anchor: match xml::optional_attr(e, b"vertAnchor")?.as_deref() {
+            Some("text") => Some(TableAnchor::Text),
+            Some("margin") => Some(TableAnchor::Margin),
+            Some("page") => Some(TableAnchor::Page),
+            Some(other) => return Err(invalid_value("tblpPr/vertAnchor", other)),
+            None => None,
+        },
+        horz_anchor: match xml::optional_attr(e, b"horzAnchor")?.as_deref() {
+            Some("text") => Some(TableAnchor::Text),
+            Some("margin") => Some(TableAnchor::Margin),
+            Some("page") => Some(TableAnchor::Page),
+            Some(other) => return Err(invalid_value("tblpPr/horzAnchor", other)),
+            None => None,
+        },
+        x_align: match xml::optional_attr(e, b"tblpXSpec")?.as_deref() {
+            Some("left") => Some(TableXAlign::Left),
+            Some("center") => Some(TableXAlign::Center),
+            Some("right") => Some(TableXAlign::Right),
+            Some("inside") => Some(TableXAlign::Inside),
+            Some("outside") => Some(TableXAlign::Outside),
+            Some(other) => return Err(invalid_value("tblpPr/tblpXSpec", other)),
+            None => None,
+        },
+        y_align: match xml::optional_attr(e, b"tblpYSpec")?.as_deref() {
+            Some("top") => Some(TableYAlign::Top),
+            Some("center") => Some(TableYAlign::Center),
+            Some("bottom") => Some(TableYAlign::Bottom),
+            Some("inside") => Some(TableYAlign::Inside),
+            Some("outside") => Some(TableYAlign::Outside),
+            Some("inline") => Some(TableYAlign::Inline),
+            Some(other) => return Err(invalid_value("tblpPr/tblpYSpec", other)),
+            None => None,
+        },
+        x: xml::optional_attr_i64(e, b"tblpX")?.map(Dimension::new),
+        y: xml::optional_attr_i64(e, b"tblpY")?.map(Dimension::new),
+    })
+}
+
+/// §17.4.56 ST_TblOverlap
+fn parse_table_overlap(val: &str) -> Result<TableOverlap> {
+    match val {
+        "overlap" => Ok(TableOverlap::Overlap),
+        "never" => Ok(TableOverlap::Never),
+        other => Err(invalid_value("tblOverlap/val", other)),
+    }
 }
