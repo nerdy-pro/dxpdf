@@ -40,37 +40,68 @@ pub fn required_attr(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<String> 
     })
 }
 
-/// Get an optional attribute value as a string.
-pub fn optional_attr(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<String>> {
+/// Find an attribute by local name and return its raw value bytes.
+/// The returned `Cow` is typically `Owned` since events are `into_owned()`.
+fn find_attr<'a>(
+    elem: &'a BytesStart<'a>,
+    attr_name: &[u8],
+) -> Result<Option<std::borrow::Cow<'a, [u8]>>> {
     for attr in elem.attributes().with_checks(false) {
         let attr = attr?;
         if local_name(attr.key.as_ref()) == attr_name {
-            return Ok(Some(String::from_utf8_lossy(&attr.value).into_owned()));
+            return Ok(Some(attr.value));
         }
     }
     Ok(None)
 }
 
-/// Get an optional attribute parsed as i64.
+/// Get an optional attribute value as a string (allocates).
+pub fn optional_attr(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<String>> {
+    match find_attr(elem, attr_name)? {
+        Some(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+        None => Ok(None),
+    }
+}
+
+/// Get an optional attribute parsed as i64 (avoids String allocation).
 pub fn optional_attr_i64(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<i64>> {
-    match optional_attr(elem, attr_name)? {
-        Some(s) => Ok(Some(s.parse::<i64>()?)),
+    match find_attr(elem, attr_name)? {
+        Some(bytes) => {
+            let s = std::str::from_utf8(&bytes).map_err(|e| {
+                ParseError::InvalidAttributeValue {
+                    attr: String::from_utf8_lossy(attr_name).into_owned(),
+                    value: String::from_utf8_lossy(&bytes).into_owned(),
+                    reason: e.to_string(),
+                }
+            })?;
+            Ok(Some(s.parse::<i64>()?))
+        }
         None => Ok(None),
     }
 }
 
-/// Get an optional attribute parsed as u32.
+/// Get an optional attribute parsed as u32 (avoids String allocation).
 pub fn optional_attr_u32(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<u32>> {
-    match optional_attr(elem, attr_name)? {
-        Some(s) => Ok(Some(s.parse::<u32>()?)),
+    match find_attr(elem, attr_name)? {
+        Some(bytes) => {
+            let s = std::str::from_utf8(&bytes).map_err(|e| {
+                ParseError::InvalidAttributeValue {
+                    attr: String::from_utf8_lossy(attr_name).into_owned(),
+                    value: String::from_utf8_lossy(&bytes).into_owned(),
+                    reason: e.to_string(),
+                }
+            })?;
+            Ok(Some(s.parse::<u32>()?))
+        }
         None => Ok(None),
     }
 }
 
-/// Get an optional boolean attribute. Treats "1", "true", "on" as true.
+/// Get an optional boolean attribute (avoids String allocation).
+/// Treats "1", "true", "on" as true.
 pub fn optional_attr_bool(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<bool>> {
-    match optional_attr(elem, attr_name)? {
-        Some(s) => Ok(Some(parse_bool(&s))),
+    match find_attr(elem, attr_name)? {
+        Some(bytes) => Ok(Some(matches!(bytes.as_ref(), b"1" | b"true" | b"on"))),
         None => Ok(None),
     }
 }
@@ -80,13 +111,16 @@ pub fn parse_bool(s: &str) -> bool {
     matches!(s, "1" | "true" | "on")
 }
 
-/// Parse an optional rsid attribute from an element.
+/// Parse an optional rsid attribute from an element (avoids String allocation).
 pub fn optional_rsid(
     elem: &BytesStart<'_>,
     attr_name: &[u8],
 ) -> Result<Option<crate::model::RevisionSaveId>> {
-    match optional_attr(elem, attr_name)? {
-        Some(s) => Ok(crate::model::RevisionSaveId::from_hex(&s)),
+    match find_attr(elem, attr_name)? {
+        Some(bytes) => {
+            let s = std::str::from_utf8(&bytes).unwrap_or("");
+            Ok(crate::model::RevisionSaveId::from_hex(s))
+        }
         None => Ok(None),
     }
 }
