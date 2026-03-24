@@ -278,6 +278,17 @@ pub struct ThemeFontScheme {
     pub latin: String,
     pub east_asian: String,
     pub complex_script: String,
+    /// §20.1.4.1.16: per-script font overrides.
+    pub script_fonts: Vec<ThemeScriptFont>,
+}
+
+/// §20.1.4.1.16: a per-script font mapping in a theme font scheme.
+#[derive(Clone, Debug)]
+pub struct ThemeScriptFont {
+    /// BCP 47 / ISO 15924 script tag (e.g., "Jpan", "Hans", "Arab").
+    pub script: String,
+    /// Typeface name for this script.
+    pub typeface: String,
 }
 
 // ── Document ─────────────────────────────────────────────────────────────────
