@@ -340,12 +340,12 @@ fn flush_text(
     }
     let combined: String = texts.drain(..).collect();
     if !combined.is_empty() {
-        content.push(Inline::TextRun(TextRun {
+        content.push(Inline::TextRun(Box::new(TextRun {
             style_id: style_id.clone(),
             properties: props.clone(),
             text: combined,
             rsids: *rsids,
-        }));
+        })));
     }
 }
 

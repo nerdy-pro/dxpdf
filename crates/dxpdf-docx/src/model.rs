@@ -510,6 +510,60 @@ pub struct ParagraphProperties {
     pub text_alignment: Option<TextAlignment>,
     /// §17.3.1.8: table conditional formatting applied to this paragraph.
     pub cnf_style: Option<CnfStyle>,
+    /// §17.3.1.11: text frame (legacy positioned text region).
+    pub frame_properties: Option<FrameProperties>,
+}
+
+/// §17.3.1.11: text frame properties — legacy floating positioned text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameProperties {
+    /// §17.18.16 ST_DropCap: drop cap type.
+    pub drop_cap: Option<DropCap>,
+    /// Number of lines the drop cap spans.
+    pub lines: Option<u32>,
+    /// Frame width in twips.
+    pub width: Option<Dimension<Twips>>,
+    /// Frame height in twips.
+    pub height: Option<Dimension<Twips>>,
+    /// §17.18.37 ST_HeightRule: how to interpret the height value.
+    pub height_rule: Option<HeightRule>,
+    /// Horizontal distance from surrounding text in twips.
+    pub h_space: Option<Dimension<Twips>>,
+    /// Vertical distance from surrounding text in twips.
+    pub v_space: Option<Dimension<Twips>>,
+    /// §17.18.104 ST_Wrap: text wrapping mode.
+    pub wrap: Option<FrameWrap>,
+    /// §17.18.35 ST_HAnchor: horizontal anchor.
+    pub h_anchor: Option<TableAnchor>,
+    /// §17.18.106 ST_VAnchor: vertical anchor.
+    pub v_anchor: Option<TableAnchor>,
+    /// Absolute horizontal position in twips.
+    pub x: Option<Dimension<Twips>>,
+    /// §17.18.108 ST_XAlign: horizontal alignment.
+    pub x_align: Option<TableXAlign>,
+    /// Absolute vertical position in twips.
+    pub y: Option<Dimension<Twips>>,
+    /// §17.18.109 ST_YAlign: vertical alignment.
+    pub y_align: Option<TableYAlign>,
+}
+
+/// §17.18.16 ST_DropCap
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropCap {
+    None,
+    Drop,
+    Margin,
+}
+
+/// §17.18.104 ST_Wrap — text wrapping for frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameWrap {
+    Auto,
+    NotBeside,
+    Around,
+    Tight,
+    Through,
+    None,
 }
 
 /// §17.3.1.8: conditional formatting bit flags indicating which table style
@@ -771,7 +825,7 @@ pub enum ShadingPattern {
 
 #[derive(Clone, Debug)]
 pub enum Inline {
-    TextRun(TextRun),
+    TextRun(Box<TextRun>),
     Tab,
     LineBreak(BreakKind),
     ColumnBreak,

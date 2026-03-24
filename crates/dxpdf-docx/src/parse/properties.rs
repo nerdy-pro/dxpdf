@@ -142,8 +142,7 @@ pub fn parse_paragraph_properties(
                         props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"wordWrap" => {
-                        props.word_wrap =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.word_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"textAlignment" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -152,6 +151,9 @@ pub fn parse_paragraph_properties(
                     }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
+                    }
+                    b"framePr" => {
+                        props.frame_properties = Some(parse_frame_properties(e)?);
                     }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
@@ -1309,4 +1311,74 @@ fn parse_table_overlap(val: &str) -> Result<TableOverlap> {
         "never" => Ok(TableOverlap::Never),
         other => Err(invalid_value("tblOverlap/val", other)),
     }
+}
+
+/// §17.3.1.11: parse `w:framePr` attributes.
+fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
+    Ok(FrameProperties {
+        drop_cap: match xml::optional_attr(e, b"dropCap")?.as_deref() {
+            Some("none") => Some(DropCap::None),
+            Some("drop") => Some(DropCap::Drop),
+            Some("margin") => Some(DropCap::Margin),
+            Some(other) => return Err(invalid_value("framePr/dropCap", other)),
+            None => None,
+        },
+        lines: xml::optional_attr_u32(e, b"lines")?,
+        width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
+        height: xml::optional_attr_i64(e, b"h")?.map(Dimension::new),
+        height_rule: match xml::optional_attr(e, b"hRule")?.as_deref() {
+            Some("auto") => Some(HeightRule::Auto),
+            Some("exact") => Some(HeightRule::Exact),
+            Some("atLeast") => Some(HeightRule::AtLeast),
+            Some(other) => return Err(invalid_value("framePr/hRule", other)),
+            None => None,
+        },
+        h_space: xml::optional_attr_i64(e, b"hSpace")?.map(Dimension::new),
+        v_space: xml::optional_attr_i64(e, b"vSpace")?.map(Dimension::new),
+        wrap: match xml::optional_attr(e, b"wrap")?.as_deref() {
+            Some("auto") => Some(FrameWrap::Auto),
+            Some("notBeside") => Some(FrameWrap::NotBeside),
+            Some("around") => Some(FrameWrap::Around),
+            Some("tight") => Some(FrameWrap::Tight),
+            Some("through") => Some(FrameWrap::Through),
+            Some("none") => Some(FrameWrap::None),
+            Some(other) => return Err(invalid_value("framePr/wrap", other)),
+            None => None,
+        },
+        h_anchor: match xml::optional_attr(e, b"hAnchor")?.as_deref() {
+            Some("text") => Some(TableAnchor::Text),
+            Some("margin") => Some(TableAnchor::Margin),
+            Some("page") => Some(TableAnchor::Page),
+            Some(other) => return Err(invalid_value("framePr/hAnchor", other)),
+            None => None,
+        },
+        v_anchor: match xml::optional_attr(e, b"vAnchor")?.as_deref() {
+            Some("text") => Some(TableAnchor::Text),
+            Some("margin") => Some(TableAnchor::Margin),
+            Some("page") => Some(TableAnchor::Page),
+            Some(other) => return Err(invalid_value("framePr/vAnchor", other)),
+            None => None,
+        },
+        x: xml::optional_attr_i64(e, b"x")?.map(Dimension::new),
+        x_align: match xml::optional_attr(e, b"xAlign")?.as_deref() {
+            Some("left") => Some(TableXAlign::Left),
+            Some("center") => Some(TableXAlign::Center),
+            Some("right") => Some(TableXAlign::Right),
+            Some("inside") => Some(TableXAlign::Inside),
+            Some("outside") => Some(TableXAlign::Outside),
+            Some(other) => return Err(invalid_value("framePr/xAlign", other)),
+            None => None,
+        },
+        y: xml::optional_attr_i64(e, b"y")?.map(Dimension::new),
+        y_align: match xml::optional_attr(e, b"yAlign")?.as_deref() {
+            Some("top") => Some(TableYAlign::Top),
+            Some("center") => Some(TableYAlign::Center),
+            Some("bottom") => Some(TableYAlign::Bottom),
+            Some("inside") => Some(TableYAlign::Inside),
+            Some("outside") => Some(TableYAlign::Outside),
+            Some("inline") => Some(TableYAlign::Inline),
+            Some(other) => return Err(invalid_value("framePr/yAlign", other)),
+            None => None,
+        },
+    })
 }
