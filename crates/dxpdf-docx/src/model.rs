@@ -503,6 +503,8 @@ pub struct ParagraphProperties {
     /// §17.3.1.9: suppress spacing when adjacent paragraph has same style.
     pub contextual_spacing: Option<bool>,
     pub bidi: Option<bool>,
+    /// §17.3.1.45: allow line breaking between any characters for East Asian text.
+    pub word_wrap: Option<bool>,
     pub outline_level: Option<OutlineLevel>,
     /// §17.3.1.39: vertical alignment of text on each line (ST_TextAlignment).
     pub text_alignment: Option<TextAlignment>,

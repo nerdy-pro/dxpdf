@@ -141,6 +141,10 @@ pub fn parse_paragraph_properties(
                     b"bidi" => {
                         props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"wordWrap" => {
+                        props.word_wrap =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
                     b"textAlignment" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             props.text_alignment = Some(parse_text_alignment(&val)?);
