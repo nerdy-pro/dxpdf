@@ -69,26 +69,50 @@ pub struct Relationship {
     pub target_mode: TargetMode,
 }
 
-/// Known OOXML relationship types.
+/// Known OOXML relationship types (§7.1, §11.3, §15.2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RelationshipType {
+    /// §11.3.10: main document part.
     OfficeDocument,
+    /// §11.3.11: style definitions.
     Styles,
+    /// §11.3.7: numbering definitions.
     Numbering,
+    /// §11.3.9: document settings.
     Settings,
+    /// §11.3.5: font table.
     FontTable,
+    /// §14.2.7: theme.
     Theme,
+    /// §11.3.6: header part.
     Header,
+    /// §11.3.4: footer part.
     Footer,
+    /// §11.3.3: footnotes part.
     Footnotes,
+    /// §11.3.2: endnotes part.
     Endnotes,
+    /// §15.2.14: image.
     Image,
+    /// §15.3.6: hyperlink.
     Hyperlink,
+    /// §11.3.1: comments part.
     Comments,
+    /// §15.2.12.1: core (Dublin Core) properties.
     CoreProperties,
+    /// §15.2.12.3: extended (application) properties.
     ExtendedProperties,
+    /// §15.2.12.2: custom properties.
+    CustomProperties,
+    /// §15.2.1.1: custom XML data.
     CustomXml,
-    /// Any relationship type we don't specifically handle.
+    /// §11.3.12: web settings.
+    WebSettings,
+    /// MS Office extension: styles with effects (Office 2007+).
+    StylesWithEffects,
+    /// §11.3.8: glossary/building blocks document.
+    GlossaryDocument,
+    /// Any relationship type not listed above.
     Unknown(String),
 }
 
@@ -121,12 +145,21 @@ impl RelationshipType {
             Self::Hyperlink
         } else if uri.ends_with("/comments") {
             Self::Comments
-        } else if uri.ends_with("/core-properties") || uri.ends_with("/metadata/core-properties") {
+        } else if uri.ends_with("/core-properties") || uri.ends_with("/metadata/core-properties")
+        {
             Self::CoreProperties
         } else if uri.ends_with("/extended-properties") {
             Self::ExtendedProperties
+        } else if uri.ends_with("/custom-properties") {
+            Self::CustomProperties
         } else if uri.ends_with("/customXml") {
             Self::CustomXml
+        } else if uri.ends_with("/webSettings") {
+            Self::WebSettings
+        } else if uri.ends_with("/stylesWithEffects") {
+            Self::StylesWithEffects
+        } else if uri.ends_with("/glossaryDocument") {
+            Self::GlossaryDocument
         } else {
             warn!("unknown relationship type: {}", uri);
             Self::Unknown(uri.to_string())
