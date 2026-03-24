@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::model::*;
 use crate::xml;
 
-use super::properties;
+use super::{body, properties};
 
 /// Parse `word/numbering.xml`. Enters `<w:numbering>`, parses until `</w:numbering>`.
 pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
@@ -34,13 +34,23 @@ pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
                     b"abstractNum" => {
                         if let Some(id) = xml::optional_attr_i64(e, b"abstractNumId")? {
                             let levels = parse_abstract_num(&mut reader, &mut buf)?;
-                            defs.abstract_nums.insert(id, AbstractNumbering { levels });
+                            defs.abstract_nums
+                                .insert(AbstractNumId::new(id), AbstractNumbering { levels });
                         }
                     }
                     b"num" => {
                         if let Some(num_id) = xml::optional_attr_i64(e, b"numId")? {
                             let instance = parse_num_instance(&mut reader, &mut buf)?;
-                            defs.numbering_instances.insert(num_id, instance);
+                            defs.numbering_instances
+                                .insert(NumId::new(num_id), instance);
+                        }
+                    }
+                    b"numPicBullet" => {
+                        if let Some(id) = xml::optional_attr_i64(e, b"numPicBulletId")? {
+                            let bullet_id = NumPicBulletId::new(id);
+                            let pic_bullet =
+                                parse_num_pic_bullet(bullet_id, &mut reader, &mut buf)?;
+                            defs.pic_bullets.insert(bullet_id, pic_bullet);
                         }
                     }
                     _ => xml::warn_unsupported_element("numbering", &local),
@@ -88,6 +98,7 @@ fn parse_level(
     let mut justification: Option<Alignment> = None;
     let mut indentation: Option<Indentation> = None;
     let mut run_properties: Option<RunProperties> = None;
+    let mut lvl_pic_bullet_id: Option<NumPicBulletId> = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -126,6 +137,10 @@ fn parse_level(
                             justification = Some(properties::parse_alignment(&val)?);
                         }
                     }
+                    b"lvlPicBulletId" => {
+                        lvl_pic_bullet_id =
+                            xml::optional_attr_i64(e, b"val")?.map(NumPicBulletId::new);
+                    }
                     _ => xml::warn_unsupported_element("numbering-level", &local),
                 }
             }
@@ -143,11 +158,12 @@ fn parse_level(
         justification,
         indentation,
         run_properties,
+        lvl_pic_bullet_id,
     })
 }
 
 fn parse_num_instance(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NumberingInstance> {
-    let mut abstract_num_id: i64 = 0;
+    let mut abstract_num_id = AbstractNumId::new(0);
     let mut overrides = Vec::new();
 
     loop {
@@ -164,7 +180,7 @@ fn parse_num_instance(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<N
             }
             Event::Empty(ref e) if xml::local_name(e.name().as_ref()) == b"abstractNumId" => {
                 if let Some(val) = xml::optional_attr_i64(e, b"val")? {
-                    abstract_num_id = val;
+                    abstract_num_id = AbstractNumId::new(val);
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"num" => break,
@@ -198,6 +214,37 @@ fn parse_lvl_override(
     }
 
     Ok(result)
+}
+
+/// §17.9.21: parse `w:numPicBullet` — picture bullet definition.
+fn parse_num_pic_bullet(
+    id: NumPicBulletId,
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<NumPicBullet> {
+    let mut pict = None;
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"pict" => {
+                        pict = Some(body::parse_pict(reader, buf)?);
+                    }
+                    _ => {
+                        xml::warn_unsupported_element("numPicBullet", &local);
+                        xml::skip_to_end(reader, buf, &local)?;
+                    }
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numPicBullet" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"numPicBullet")),
+            _ => {}
+        }
+    }
+
+    Ok(NumPicBullet { id, pict })
 }
 
 /// §17.18.59 ST_NumberFormat

@@ -89,7 +89,7 @@ pub fn parse_inline_image(
         effect_extent,
         doc_properties: doc_props,
         graphic_frame_locks,
-        picture,
+        graphic: picture,
         placement: ImagePlacement::Inline { distance },
     }))
 }
@@ -199,12 +199,12 @@ fn parse_cnv_graphic_frame_pr(
 
 // ── a:graphic / a:graphicData (§20.1.2.2.16, §20.1.2.2.17) ────────────────
 
-/// Parse `a:graphic` → `a:graphicData` → `pic:pic`.
+/// Parse `a:graphic` → `a:graphicData` → content.
 fn parse_graphic(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<Option<Picture>> {
-    let mut picture = None;
+) -> Result<Option<GraphicContent>> {
+    let mut content = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -212,7 +212,7 @@ fn parse_graphic(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"graphicData" => {
-                        picture = parse_graphic_data(reader, buf)?;
+                        content = parse_graphic_data(reader, buf)?;
                     }
                     _ => {
                         xml::warn_unsupported_element("graphic", &local);
@@ -226,15 +226,15 @@ fn parse_graphic(
         }
     }
 
-    Ok(picture)
+    Ok(content)
 }
 
-/// Parse `a:graphicData` children. Dispatches on `uri` attribute.
+/// Parse `a:graphicData` children. Dispatches based on content type.
 fn parse_graphic_data(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
-) -> Result<Option<Picture>> {
-    let mut picture = None;
+) -> Result<Option<GraphicContent>> {
+    let mut content = None;
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -242,7 +242,13 @@ fn parse_graphic_data(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pic" => {
-                        picture = Some(parse_picture(reader, buf)?);
+                        content =
+                            Some(GraphicContent::Picture(parse_picture(reader, buf)?));
+                    }
+                    b"wsp" => {
+                        content = Some(GraphicContent::WordProcessingShape(
+                            parse_word_processing_shape(reader, buf)?,
+                        ));
                     }
                     _ => {
                         xml::warn_unsupported_element("graphicData", &local);
@@ -256,7 +262,195 @@ fn parse_graphic_data(
         }
     }
 
-    Ok(picture)
+    Ok(content)
+}
+
+// ── wps:wsp (§14.5) ────────────────────────────────────────────────────────
+
+/// Parse `wps:wsp` — Word Processing Shape.
+fn parse_word_processing_shape(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<WordProcessingShape> {
+    let mut cnv_pr = None;
+    let mut shape_properties = None;
+    let mut body_pr = None;
+    let mut txbx_content = Vec::new();
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"cNvPr" => {
+                        cnv_pr = Some(parse_cnv_pr(e, reader, buf)?);
+                    }
+                    b"spPr" => {
+                        shape_properties =
+                            Some(parse_shape_properties(e, reader, buf)?);
+                    }
+                    b"bodyPr" => {
+                        body_pr = Some(parse_body_properties(e, reader, buf)?);
+                    }
+                    b"txbx" => {
+                        txbx_content = parse_wsp_txbx(reader, buf)?;
+                    }
+                    _ => {
+                        xml::warn_unsupported_element("wsp", &local);
+                        xml::skip_to_end(reader, buf, &local)?;
+                    }
+                }
+            }
+            Event::Empty(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"cNvPr" => {
+                        cnv_pr = Some(parse_cnv_pr_attrs(e)?);
+                    }
+                    b"cNvSpPr" | b"cNvCnPr" => {} // non-visual shape props — attrs only
+                    b"bodyPr" => {
+                        body_pr = Some(parse_body_properties_attrs(e)?);
+                    }
+                    _ => xml::warn_unsupported_element("wsp", &local),
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"wsp" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"wsp")),
+            _ => {}
+        }
+    }
+
+    Ok(WordProcessingShape {
+        cnv_pr,
+        shape_properties,
+        body_pr,
+        txbx_content,
+    })
+}
+
+/// Parse `wps:txbx` — contains `w:txbxContent`.
+fn parse_wsp_txbx(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<Block>> {
+    let mut blocks = Vec::new();
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"txbxContent" => {
+                        let (content, _) =
+                            crate::parse::body::parse_block_content_public(reader, buf, b"txbxContent")?;
+                        blocks = content;
+                    }
+                    _ => {
+                        xml::warn_unsupported_element("txbx", &local);
+                        xml::skip_to_end(reader, buf, &local)?;
+                    }
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"txbx" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"txbx")),
+            _ => {}
+        }
+    }
+
+    Ok(blocks)
+}
+
+/// §20.1.2.1.1: parse `a:bodyPr` attributes only.
+fn parse_body_properties_attrs(e: &BytesStart<'_>) -> Result<BodyProperties> {
+    Ok(BodyProperties {
+        rotation: xml::optional_attr_i64(e, b"rot")?.map(Dimension::new),
+        vert: xml::optional_attr(e, b"vert")?
+            .map(|s| parse_text_vertical_type(&s))
+            .transpose()?,
+        wrap: xml::optional_attr(e, b"wrap")?
+            .map(|s| parse_text_wrapping_type(&s))
+            .transpose()?,
+        left_inset: xml::optional_attr_i64(e, b"lIns")?.map(Dimension::new),
+        top_inset: xml::optional_attr_i64(e, b"tIns")?.map(Dimension::new),
+        right_inset: xml::optional_attr_i64(e, b"rIns")?.map(Dimension::new),
+        bottom_inset: xml::optional_attr_i64(e, b"bIns")?.map(Dimension::new),
+        anchor: xml::optional_attr(e, b"anchor")?
+            .map(|s| parse_text_anchoring_type(&s))
+            .transpose()?,
+        auto_fit: None,
+    })
+}
+
+/// §20.1.10.82 ST_TextVerticalType.
+fn parse_text_vertical_type(val: &str) -> Result<TextVerticalType> {
+    match val {
+        "horz" => Ok(TextVerticalType::Horz),
+        "vert" => Ok(TextVerticalType::Vert),
+        "vert270" => Ok(TextVerticalType::Vert270),
+        "wordArtVert" => Ok(TextVerticalType::WordArtVert),
+        "eaVert" => Ok(TextVerticalType::EaVert),
+        "mongolianVert" => Ok(TextVerticalType::MongolianVert),
+        "wordArtVertRtl" => Ok(TextVerticalType::WordArtVertRtl),
+        other => Err(ParseError::InvalidAttributeValue {
+            attr: "vert".into(),
+            value: other.into(),
+            reason: "expected value per §20.1.10.82 ST_TextVerticalType".into(),
+        }),
+    }
+}
+
+/// §20.1.10.85 ST_TextWrappingType.
+fn parse_text_wrapping_type(val: &str) -> Result<TextWrappingType> {
+    match val {
+        "none" => Ok(TextWrappingType::None),
+        "square" => Ok(TextWrappingType::Square),
+        other => Err(ParseError::InvalidAttributeValue {
+            attr: "wrap".into(),
+            value: other.into(),
+            reason: "expected none or square per §20.1.10.85 ST_TextWrappingType".into(),
+        }),
+    }
+}
+
+/// §20.1.10.59 ST_TextAnchoringType.
+fn parse_text_anchoring_type(val: &str) -> Result<TextAnchoringType> {
+    match val {
+        "t" => Ok(TextAnchoringType::Top),
+        "ctr" => Ok(TextAnchoringType::Center),
+        "b" => Ok(TextAnchoringType::Bottom),
+        "just" => Ok(TextAnchoringType::Justified),
+        "dist" => Ok(TextAnchoringType::Distributed),
+        other => Err(ParseError::InvalidAttributeValue {
+            attr: "anchor".into(),
+            value: other.into(),
+            reason: "expected value per §20.1.10.59 ST_TextAnchoringType".into(),
+        }),
+    }
+}
+
+/// §20.1.2.1.1: parse `a:bodyPr` with children.
+fn parse_body_properties(
+    e: &BytesStart<'_>,
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<BodyProperties> {
+    let mut bp = parse_body_properties_attrs(e)?;
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Empty(ref e) | Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"noAutofit" => bp.auto_fit = Some(TextAutoFit::NoAutoFit),
+                    b"normAutofit" => bp.auto_fit = Some(TextAutoFit::NormalAutoFit),
+                    b"spAutoFit" => bp.auto_fit = Some(TextAutoFit::SpAutoFit),
+                    _ => {} // skip prstTxWarp, scene3d, etc.
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"bodyPr" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"bodyPr")),
+            _ => {}
+        }
+    }
+
+    Ok(bp)
 }
 
 // ── pic:pic (§19.3.1.37) ───────────────────────────────────────────────────
@@ -1298,7 +1492,7 @@ pub fn parse_anchor_image(
         effect_extent,
         doc_properties,
         graphic_frame_locks,
-        picture,
+        graphic: picture,
         placement: ImagePlacement::Anchor(AnchorProperties {
             distance,
             simple_pos,

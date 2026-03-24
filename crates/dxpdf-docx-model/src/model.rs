@@ -70,6 +70,48 @@ impl StyleId {
     }
 }
 
+/// §17.9.1: abstract numbering definition ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AbstractNumId(i64);
+
+impl AbstractNumId {
+    pub fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
+
+/// §17.9.19: numbering instance ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NumId(i64);
+
+impl NumId {
+    pub fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
+
+/// §17.9.21: picture bullet ID. References between `w:numPicBullet` and `w:lvlPicBulletId`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NumPicBulletId(i64);
+
+impl NumPicBulletId {
+    pub fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
+
 /// VML shape identifier (e.g., "_x0000_t202"). Used as a `v:shapetype` `id`
 /// and referenced by `v:shape` `type` (with a leading `#` prefix).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -362,9 +404,20 @@ pub enum StyleType {
 #[derive(Clone, Debug, Default)]
 pub struct NumberingDefinitions {
     /// Abstract numbering definitions keyed by abstract numbering ID.
-    pub abstract_nums: HashMap<i64, AbstractNumbering>,
+    pub abstract_nums: HashMap<AbstractNumId, AbstractNumbering>,
     /// Numbering instances keyed by numbering ID.
-    pub numbering_instances: HashMap<i64, NumberingInstance>,
+    pub numbering_instances: HashMap<NumId, NumberingInstance>,
+    /// §17.9.21: picture bullet definitions keyed by numPicBulletId.
+    pub pic_bullets: HashMap<NumPicBulletId, NumPicBullet>,
+}
+
+/// §17.9.21: a picture bullet definition.
+#[derive(Clone, Debug)]
+pub struct NumPicBullet {
+    /// §17.9.21 @numPicBulletId: unique identifier.
+    pub id: NumPicBulletId,
+    /// §17.3.3.19: VML picture content.
+    pub pict: Option<Pict>,
 }
 
 /// An abstract numbering definition.
@@ -384,12 +437,14 @@ pub struct NumberingLevelDefinition {
     pub justification: Option<Alignment>,
     pub indentation: Option<Indentation>,
     pub run_properties: Option<RunProperties>,
+    /// §17.9.10: reference to a picture bullet definition.
+    pub lvl_pic_bullet_id: Option<NumPicBulletId>,
 }
 
 /// A numbering instance — maps to an abstract numbering, with optional level overrides.
 #[derive(Clone, Debug)]
 pub struct NumberingInstance {
-    pub abstract_num_id: i64,
+    pub abstract_num_id: AbstractNumId,
     pub level_overrides: Vec<NumberingLevelDefinition>,
 }
 
@@ -577,6 +632,10 @@ pub struct ParagraphProperties {
     pub cnf_style: Option<CnfStyle>,
     /// §17.3.1.11: text frame (legacy positioned text region).
     pub frame_properties: Option<FrameProperties>,
+    /// §17.3.1.2: auto-space East Asian text with Latin text.
+    pub auto_space_de: Option<bool>,
+    /// §17.3.1.3: auto-space East Asian text with numbers.
+    pub auto_space_dn: Option<bool>,
 }
 
 /// §17.3.1.11: text frame properties — legacy floating positioned text.
@@ -1011,6 +1070,8 @@ pub struct RunProperties {
     pub position: Option<Dimension<HalfPoints>>,
     /// §17.3.2.20: proofing languages per script category (BCP 47 tags).
     pub lang: Option<Lang>,
+    /// §17.3.2.4: border around run content.
+    pub border: Option<Border>,
 }
 
 /// §17.3.2.20: proofing language specification per script category.
@@ -1102,8 +1163,8 @@ pub struct Image {
     pub doc_properties: DocProperties,
     /// §20.4.2.4: graphic frame locking properties.
     pub graphic_frame_locks: Option<GraphicFrameLocks>,
-    /// §19.3.1.37: picture content (a:graphic > a:graphicData > pic:pic).
-    pub picture: Option<Picture>,
+    /// Graphic content from a:graphic > a:graphicData.
+    pub graphic: Option<GraphicContent>,
     /// Inline or anchor placement.
     pub placement: ImagePlacement,
 }
@@ -1144,6 +1205,92 @@ pub struct GraphicFrameLocks {
     pub no_move: Option<bool>,
     pub no_resize: Option<bool>,
     pub no_select: Option<bool>,
+}
+
+/// Content type inside a:graphicData.
+#[derive(Clone, Debug)]
+pub enum GraphicContent {
+    /// §19.3.1.37: picture.
+    Picture(Picture),
+    /// §14.5 wps:wsp: Word Processing Shape.
+    WordProcessingShape(WordProcessingShape),
+}
+
+/// §14.5 wps:wsp — a Word Processing Shape.
+/// Contains shape properties and optional text body.
+#[derive(Clone, Debug)]
+pub struct WordProcessingShape {
+    /// §20.1.2.2.8: non-visual drawing properties.
+    pub cnv_pr: Option<DocProperties>,
+    /// §20.1.2.2.35: shape properties.
+    pub shape_properties: Option<ShapeProperties>,
+    /// §20.1.2.1.1: body properties (text layout within the shape).
+    pub body_pr: Option<BodyProperties>,
+    /// §17.17.1: text content inside the shape.
+    pub txbx_content: Vec<Block>,
+}
+
+/// §20.1.2.1.1 CT_TextBodyProperties — text body properties inside a shape.
+#[derive(Clone, Debug)]
+pub struct BodyProperties {
+    /// Rotation of the text body in 60,000ths of a degree.
+    pub rotation: Option<Dimension<SixtieThousandthDeg>>,
+    /// §20.1.10.82 ST_TextVerticalType: vertical text mode.
+    pub vert: Option<TextVerticalType>,
+    /// §20.1.10.85 ST_TextWrappingType: text wrapping within the shape.
+    pub wrap: Option<TextWrappingType>,
+    /// Left inset in EMU.
+    pub left_inset: Option<Dimension<Emu>>,
+    /// Top inset in EMU.
+    pub top_inset: Option<Dimension<Emu>>,
+    /// Right inset in EMU.
+    pub right_inset: Option<Dimension<Emu>>,
+    /// Bottom inset in EMU.
+    pub bottom_inset: Option<Dimension<Emu>>,
+    /// §20.1.10.59 ST_TextAnchoringType: vertical anchor.
+    pub anchor: Option<TextAnchoringType>,
+    /// Auto-fit mode.
+    pub auto_fit: Option<TextAutoFit>,
+}
+
+/// §20.1.10.82 ST_TextVerticalType.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextVerticalType {
+    Horz,
+    Vert,
+    Vert270,
+    WordArtVert,
+    EaVert,
+    MongolianVert,
+    WordArtVertRtl,
+}
+
+/// §20.1.10.85 ST_TextWrappingType.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextWrappingType {
+    None,
+    Square,
+}
+
+/// §20.1.10.59 ST_TextAnchoringType.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAnchoringType {
+    Top,
+    Center,
+    Bottom,
+    Justified,
+    Distributed,
+}
+
+/// Text auto-fit mode for shape text bodies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAutoFit {
+    /// §20.1.2.1.16: no auto-fit.
+    NoAutoFit,
+    /// §20.1.2.1.18: shrink text to fit.
+    NormalAutoFit,
+    /// §20.1.2.1.20: resize shape to fit text.
+    SpAutoFit,
 }
 
 /// §19.3.1.37 pic:pic — a picture element.
@@ -1887,6 +2034,36 @@ pub struct VmlShape {
     pub vml_path: Option<VmlPath>,
     /// VML §14.1.2.22: text box child element.
     pub text_box: Option<VmlTextBox>,
+    /// VML §14.1.2.23: text wrapping around shape.
+    pub wrap: Option<VmlWrap>,
+}
+
+/// VML §14.1.2.23: text wrapping element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VmlWrap {
+    /// Wrapping type.
+    pub wrap_type: Option<VmlWrapType>,
+    /// Which side(s) text wraps on.
+    pub side: Option<VmlWrapSide>,
+}
+
+/// VML §14.1.2.23: wrap type values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VmlWrapType {
+    TopAndBottom,
+    Square,
+    None,
+    Tight,
+    Through,
+}
+
+/// VML §14.1.2.23: wrap side values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VmlWrapSide {
+    Both,
+    Left,
+    Right,
+    Largest,
 }
 
 /// VML style — parsed CSS2 properties from the `style` attribute (§14.1.2.19).
@@ -2473,6 +2650,10 @@ pub struct TableRowProperties {
     pub justification: Option<Alignment>,
     /// §17.3.1.8: table conditional formatting applied to this row.
     pub cnf_style: Option<CnfStyle>,
+    /// §17.4.14: number of grid columns in the trailing grid units after the last cell.
+    pub grid_after: Option<u32>,
+    /// §17.4.87: preferred width of the trailing space after the last cell.
+    pub w_after: Option<TableMeasure>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

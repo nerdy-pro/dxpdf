@@ -155,6 +155,14 @@ pub fn parse_paragraph_properties(
                     b"framePr" => {
                         props.frame_properties = Some(parse_frame_properties(e)?);
                     }
+                    b"autoSpaceDE" => {
+                        props.auto_space_de =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
+                    b"autoSpaceDN" => {
+                        props.auto_space_dn =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
@@ -308,6 +316,9 @@ pub fn parse_run_properties(
                     }
                     b"shadow" => {
                         props.shadow = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
+                    b"bdr" => {
+                        props.border = Some(parse_border(e)?);
                     }
                     _ => xml::warn_unsupported_element("rPr", &local),
                 }
@@ -463,6 +474,12 @@ pub fn parse_table_row_properties(
                     }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
+                    }
+                    b"gridAfter" => {
+                        props.grid_after = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"wAfter" => {
+                        props.w_after = Some(parse_table_measure(e)?);
                     }
                     _ => xml::warn_unsupported_element("trPr", &local),
                 }

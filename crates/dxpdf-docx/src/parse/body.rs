@@ -218,6 +218,15 @@ pub fn parse_table_public(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Resu
     parse_table(reader, buf)
 }
 
+/// Public wrapper for cross-module use (drawing.rs, numbering.rs).
+pub fn parse_block_content_public(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    end_tag: &[u8],
+) -> Result<(Vec<Block>, SectionProperties)> {
+    parse_block_content(reader, buf, end_tag)
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 fn parse_run(
@@ -494,7 +503,7 @@ fn parse_field_instruction(raw: &str) -> FieldInstruction {
 // ── VML / Pict ──────────────────────────────────────────────────────────────
 
 /// §17.3.3.19: parse `w:pict` — VML picture container.
-fn parse_pict(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pict> {
+pub fn parse_pict(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pict> {
     let mut shape_type = None;
     let mut shapes = Vec::new();
 
@@ -614,6 +623,7 @@ fn parse_vml_shape_from_attrs(e: &BytesStart<'_>) -> Result<VmlShape> {
         stroke: None,
         vml_path: None,
         text_box: None,
+        wrap: None,
     })
 }
 
@@ -633,6 +643,7 @@ fn parse_vml_shape(
         stroke: None,
         vml_path: None,
         text_box: None,
+        wrap: None,
     };
 
     loop {
@@ -642,6 +653,10 @@ fn parse_vml_shape(
                 match local.as_slice() {
                     b"textbox" => {
                         shape.text_box = Some(parse_vml_textbox(e, reader, buf)?);
+                    }
+                    b"wrap" => {
+                        shape.wrap = Some(parse_vml_wrap(e)?);
+                        xml::skip_to_end(reader, buf, b"wrap")?;
                     }
                     _ => {
                         xml::warn_unsupported_element("shape", &local);
@@ -654,6 +669,7 @@ fn parse_vml_shape(
                 match local.as_slice() {
                     b"stroke" => shape.stroke = Some(parse_vml_stroke_attrs(e)?),
                     b"path" => shape.vml_path = Some(parse_vml_path_attrs(e)?),
+                    b"wrap" => shape.wrap = Some(parse_vml_wrap(e)?),
                     _ => xml::warn_unsupported_element("shape", &local),
                 }
             }
@@ -755,7 +771,7 @@ fn parse_vml_formula(eqn: &str) -> Option<VmlFormula> {
     let operation = match parts[0] {
         "val" => VmlFormulaOp::Val,
         "sum" => VmlFormulaOp::Sum,
-        "product" => VmlFormulaOp::Product,
+        "prod" => VmlFormulaOp::Product,
         "mid" => VmlFormulaOp::Mid,
         "abs" => VmlFormulaOp::Abs,
         "min" => VmlFormulaOp::Min,
@@ -1257,6 +1273,40 @@ fn parse_vml_textbox_inset(s: Option<String>) -> Option<VmlTextBoxInset> {
         right: parts.get(2).and_then(|v| parse_vml_length(v)),
         bottom: parts.get(3).and_then(|v| parse_vml_length(v)),
     })
+}
+
+/// VML §14.1.2.23: parse `v:wrap` attributes.
+fn parse_vml_wrap(e: &BytesStart<'_>) -> Result<VmlWrap> {
+    let wrap_type = match xml::optional_attr(e, b"type")?.as_deref() {
+        Some("topAndBottom") => Some(VmlWrapType::TopAndBottom),
+        Some("square") => Some(VmlWrapType::Square),
+        Some("none") => Some(VmlWrapType::None),
+        Some("tight") => Some(VmlWrapType::Tight),
+        Some("through") => Some(VmlWrapType::Through),
+        Some(other) => {
+            return Err(crate::error::ParseError::InvalidAttributeValue {
+                attr: "type".into(),
+                value: other.into(),
+                reason: "expected value per VML §14.1.2.23".into(),
+            });
+        }
+        None => None,
+    };
+    let side = match xml::optional_attr(e, b"side")?.as_deref() {
+        Some("both") => Some(VmlWrapSide::Both),
+        Some("left") => Some(VmlWrapSide::Left),
+        Some("right") => Some(VmlWrapSide::Right),
+        Some("largest") => Some(VmlWrapSide::Largest),
+        Some(other) => {
+            return Err(crate::error::ParseError::InvalidAttributeValue {
+                attr: "side".into(),
+                value: other.into(),
+                reason: "expected value per VML §14.1.2.23".into(),
+            });
+        }
+        None => None,
+    };
+    Ok(VmlWrap { wrap_type, side })
 }
 
 /// Parse a VML boolean attribute ("t"/"f" or "true"/"false").
