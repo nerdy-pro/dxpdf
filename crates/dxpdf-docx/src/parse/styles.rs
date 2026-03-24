@@ -11,6 +11,7 @@ use crate::xml;
 use super::properties;
 
 /// Parse `word/styles.xml` into a raw `StyleSheet`.
+/// Parse `word/styles.xml`. Enters `<w:styles>`, parses until `</w:styles>`.
 pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
@@ -18,6 +19,16 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
 
     let mut sheet = StyleSheet::default();
 
+    // Find <w:styles> root element.
+    loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"styles" => break,
+            Event::Eof => return Ok(sheet),
+            _ => {}
+        }
+    }
+
+    // Parse content scoped to </w:styles>.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
@@ -34,7 +45,8 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
                     _ => xml::warn_unsupported_element("styles", &local),
                 }
             }
-            Event::Eof => break,
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"styles" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"styles")),
             _ => {}
         }
     }
@@ -42,6 +54,9 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
     Ok(sheet)
 }
 
+/// Parse `w:docDefaults`. Scoped to `</w:docDefaults>`.
+/// Children are §17.7.5.5 `w:rPrDefault` and §17.7.5.3 `w:pPrDefault`,
+/// each containing the actual `w:rPr` / `w:pPr`.
 fn parse_doc_defaults(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
@@ -52,19 +67,57 @@ fn parse_doc_defaults(
             Event::Start(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
-                    b"rPr" => {
-                        let (parsed, _) = properties::parse_run_properties(reader, buf)?;
-                        sheet.doc_defaults_run = parsed;
+                    b"rPrDefault" => {
+                        parse_rpr_default(reader, buf, sheet)?;
                     }
-                    b"pPr" => {
-                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
-                        sheet.doc_defaults_paragraph = parsed.properties;
+                    b"pPrDefault" => {
+                        parse_ppr_default(reader, buf, sheet)?;
                     }
                     _ => xml::warn_unsupported_element("docDefaults", &local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"docDefaults" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"docDefaults")),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// §17.7.5.5: parse `w:rPrDefault` — contains `w:rPr`. Scoped to `</w:rPrDefault>`.
+fn parse_rpr_default(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    sheet: &mut StyleSheet,
+) -> Result<()> {
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"rPr" => {
+                let (parsed, _) = properties::parse_run_properties(reader, buf)?;
+                sheet.doc_defaults_run = parsed;
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rPrDefault" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"rPrDefault")),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// §17.7.5.3: parse `w:pPrDefault` — contains `w:pPr`. Scoped to `</w:pPrDefault>`.
+fn parse_ppr_default(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    sheet: &mut StyleSheet,
+) -> Result<()> {
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"pPr" => {
+                let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                sheet.doc_defaults_paragraph = parsed.properties;
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pPrDefault" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"pPrDefault")),
             _ => {}
         }
     }
@@ -142,7 +195,7 @@ fn parse_style(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"style" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"style")),
             _ => {}
         }
     }
@@ -228,7 +281,7 @@ fn parse_table_style_override(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblStylePr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tblStylePr")),
             _ => {}
         }
     }

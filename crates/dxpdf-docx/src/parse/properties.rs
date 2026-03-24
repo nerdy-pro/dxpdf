@@ -159,7 +159,7 @@ pub fn parse_paragraph_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"pPr")),
             _ => {}
         }
     }
@@ -295,7 +295,7 @@ pub fn parse_run_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"rPr")),
             _ => {}
         }
     }
@@ -370,7 +370,7 @@ pub fn parse_table_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tblPr")),
             _ => {}
         }
     }
@@ -419,7 +419,7 @@ pub fn parse_table_row_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"trPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"trPr")),
             _ => {}
         }
     }
@@ -487,7 +487,7 @@ pub fn parse_table_cell_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tcPr")),
             _ => {}
         }
     }
@@ -590,8 +590,10 @@ pub fn parse_section_properties(
                         };
                         props.doc_grid = Some(DocGrid {
                             grid_type,
-                            line_pitch: xml::optional_attr_i64(e, b"linePitch")?.map(Dimension::new),
-                            char_space: xml::optional_attr_i64(e, b"charSpace")?.map(Dimension::new),
+                            line_pitch: xml::optional_attr_i64(e, b"linePitch")?
+                                .map(Dimension::new),
+                            char_space: xml::optional_attr_i64(e, b"charSpace")?
+                                .map(Dimension::new),
                         });
                     }
                     b"titlePg" => {
@@ -607,7 +609,7 @@ pub fn parse_section_properties(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"sectPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"sectPr")),
             _ => {}
         }
     }
@@ -697,7 +699,7 @@ fn parse_numbering_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<N
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numPr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"numPr")),
             _ => {}
         }
     }
@@ -740,7 +742,7 @@ fn parse_tabs(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<TabSt
                 });
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tabs" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tabs")),
             _ => {}
         }
     }
@@ -775,7 +777,7 @@ fn parse_paragraph_borders(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pBdr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"pBdr")),
             _ => {}
         }
     }
@@ -1015,7 +1017,7 @@ fn parse_column_definitions(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"cols" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"cols")),
             _ => {}
         }
     }
@@ -1060,7 +1062,7 @@ fn parse_table_borders(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblBorders" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tblBorders")),
             _ => {}
         }
     }
@@ -1101,7 +1103,7 @@ fn parse_table_cell_borders(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcBorders" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tcBorders")),
             _ => {}
         }
     }
@@ -1130,7 +1132,7 @@ fn parse_edge_insets_twips(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"container")),
             _ => {}
         }
     }

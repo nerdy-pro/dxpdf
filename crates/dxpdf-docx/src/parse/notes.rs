@@ -13,6 +13,7 @@ use crate::xml;
 use super::body;
 
 /// Parse footnotes.xml or endnotes.xml into a map of note ID → blocks.
+/// `note_tag` is "footnote" or "endnote"; root element is "footnotes" or "endnotes".
 pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Block>>> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
@@ -20,7 +21,19 @@ pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Bl
     let mut notes = HashMap::new();
 
     let note_tag_bytes = note_tag.as_bytes();
+    let root_tag = format!("{note_tag}s");
+    let root_tag_bytes = root_tag.as_bytes();
 
+    // Find root element (<w:footnotes> or <w:endnotes>).
+    loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == root_tag_bytes => break,
+            Event::Eof => return Ok(notes),
+            _ => {}
+        }
+    }
+
+    // Parse scoped to root.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) if xml::local_name(e.name().as_ref()) == note_tag_bytes => {
@@ -33,7 +46,8 @@ pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Bl
                     xml::skip_to_end(&mut reader, &mut buf, note_tag_bytes)?;
                 }
             }
-            Event::Eof => break,
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == root_tag_bytes => break,
+            Event::Eof => return Err(xml::unexpected_eof(root_tag_bytes)),
             _ => {}
         }
     }
@@ -73,7 +87,7 @@ fn parse_note_content(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"container")),
             _ => {}
         }
     }

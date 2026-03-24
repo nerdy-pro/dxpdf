@@ -14,83 +14,86 @@ use crate::xml;
 
 use super::properties;
 
-/// Parse a body-level XML part (header, footer, footnotes, etc.) into blocks.
+/// Parse a body-level XML part (header, footer) into blocks.
+/// Finds the root element (§17.10.1 `w:hdr`, §17.10.3 `w:ftr`, etc.),
+/// then parses block content scoped to that element.
 pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
-    let mut blocks = Vec::new();
 
+    // Find the root element and remember its local name.
+    let root_tag = loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) => {
+                break xml::local_name(e.name().as_ref()).to_vec();
+            }
+            Event::Eof => return Ok(Vec::new()),
+            _ => {}
+        }
+    };
+
+    // Parse block content scoped to the root element.
+    let (blocks, _) = parse_block_content(&mut reader, &mut buf, &root_tag)?;
+    Ok(blocks)
+}
+
+/// Parse `w:document > w:body`, returning blocks and final section properties.
+/// Scoped: enters `<w:document>`, then `<w:body>`, breaks on `</w:body>`.
+pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
+    let mut reader = Reader::from_reader(data);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    // Find <w:body> inside <w:document>.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"body" => break,
+            Event::Eof => return Ok((Vec::new(), SectionProperties::default())),
+            _ => {}
+        }
+    }
+
+    // Parse block content scoped to <w:body>.
+    parse_block_content(&mut reader, &mut buf, b"body")
+}
+
+/// Parse blocks until `</end_tag>`. Returns blocks and the final `w:sectPr`
+/// (if one appears as a direct child — per §17.6.17 the last sectPr in body).
+fn parse_block_content(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    end_tag: &[u8],
+) -> Result<(Vec<Block>, SectionProperties)> {
+    let mut blocks = Vec::new();
+    let mut final_section = SectionProperties::default();
+
+    loop {
+        match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"p" => {
                         let rsids = parse_paragraph_rsids(e)?;
-                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, rsids)?;
+                        let (para, sect) = parse_paragraph(reader, buf, rsids)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" => {
-                        blocks.push(Block::Table(Box::new(parse_table(&mut reader, &mut buf)?)));
+                        blocks.push(Block::Table(Box::new(parse_table(reader, buf)?)));
                     }
                     b"sectPr" => {
                         let sect_rsids = properties::parse_section_rsids(e)?;
-                        let mut sect = properties::parse_section_properties(&mut reader, &mut buf)?;
-                        sect.rsids = sect_rsids;
-                        blocks.push(Block::SectionBreak(Box::new(sect)));
-                    }
-                    _ => xml::warn_unsupported_element("body", &local),
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-
-    Ok(blocks)
-}
-
-/// Parse `w:body`, returning blocks and final section properties.
-pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut blocks = Vec::new();
-    let mut final_section = SectionProperties::default();
-    let mut in_body = false;
-
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
-                    b"body" => in_body = true,
-                    b"p" if in_body => {
-                        let rsids = parse_paragraph_rsids(e)?;
-                        let (para, sect) = parse_paragraph(&mut reader, &mut buf, rsids)?;
-                        blocks.push(Block::Paragraph(Box::new(para)));
-                        if let Some(sp) = sect {
-                            blocks.push(Block::SectionBreak(Box::new(sp)));
-                        }
-                    }
-                    b"tbl" if in_body => {
-                        blocks.push(Block::Table(Box::new(parse_table(&mut reader, &mut buf)?)));
-                    }
-                    b"sectPr" if in_body => {
-                        let sect_rsids = properties::parse_section_rsids(e)?;
-                        final_section =
-                            properties::parse_section_properties(&mut reader, &mut buf)?;
+                        final_section = properties::parse_section_properties(reader, buf)?;
                         final_section.rsids = sect_rsids;
                     }
                     _ => xml::warn_unsupported_element("body", &local),
                 }
             }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"body" => break,
-            Event::Eof => break,
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"container")),
             _ => {}
         }
     }
@@ -182,7 +185,7 @@ fn parse_paragraph(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"p" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"p")),
             _ => {}
         }
     }
@@ -314,7 +317,7 @@ fn parse_run(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"r" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"r")),
             _ => {}
         }
     }
@@ -373,7 +376,7 @@ fn parse_hyperlink_content(
                 parse_run(reader, buf, &mut inline_content, r_rsids)?;
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"hyperlink" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"hyperlink")),
             _ => {}
         }
     }
@@ -400,7 +403,7 @@ fn parse_simple_field_content(
                 parse_run(reader, buf, &mut field_content, r_rsids)?;
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"fldSimple" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"fldSimple")),
             _ => {}
         }
     }
@@ -445,7 +448,7 @@ fn parse_drawing(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"drawing" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"drawing")),
             _ => {}
         }
     }
@@ -478,7 +481,7 @@ fn parse_inline_image(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<O
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"inline" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"inline")),
             _ => {}
         }
     }
@@ -579,7 +582,7 @@ fn parse_anchor_image(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"anchor" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"anchor")),
             _ => {}
         }
     }
@@ -635,7 +638,7 @@ fn parse_anchor_position(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"container")),
             _ => {}
         }
     }
@@ -724,7 +727,7 @@ fn parse_table(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Table> {
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tbl" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tbl")),
             _ => {}
         }
     }
@@ -750,7 +753,7 @@ fn parse_table_grid(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec
                 });
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblGrid" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tblGrid")),
             _ => {}
         }
     }
@@ -781,7 +784,7 @@ fn parse_table_row(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tr" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tr")),
             _ => {}
         }
     }
@@ -820,7 +823,7 @@ fn parse_table_cell(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Tab
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tc" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"tc")),
             _ => {}
         }
     }

@@ -9,13 +9,23 @@ use crate::xml;
 
 use super::properties;
 
-/// Parse `word/numbering.xml` into raw `NumberingDefinitions`.
+/// Parse `word/numbering.xml`. Enters `<w:numbering>`, parses until `</w:numbering>`.
 pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut defs = NumberingDefinitions::default();
 
+    // Find <w:numbering> root element.
+    loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"numbering" => break,
+            Event::Eof => return Ok(defs),
+            _ => {}
+        }
+    }
+
+    // Parse content scoped to </w:numbering>.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
@@ -36,7 +46,8 @@ pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
                     _ => xml::warn_unsupported_element("numbering", &local),
                 }
             }
-            Event::Eof => break,
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numbering" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"numbering")),
             _ => {}
         }
     }
@@ -58,7 +69,7 @@ fn parse_abstract_num(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"abstractNum" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"abstractNum")),
             _ => {}
         }
     }
@@ -119,7 +130,7 @@ fn parse_level(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"lvl" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"lvl")),
             _ => {}
         }
     }
@@ -157,7 +168,7 @@ fn parse_num_instance(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<N
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"num" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"num")),
             _ => {}
         }
     }
@@ -181,7 +192,7 @@ fn parse_lvl_override(
                 result = Some(parse_level(reader, buf, ilvl)?);
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"lvlOverride" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"lvlOverride")),
             _ => {}
         }
     }

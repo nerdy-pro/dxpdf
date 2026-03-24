@@ -39,6 +39,9 @@ pub enum ParseError {
 
     #[error("circular style inheritance involving: {0}")]
     CircularStyleInheritance(String),
+
+    #[error("unexpected end of XML inside <{0}>")]
+    UnexpectedEof(String),
 }
 
 pub type Result<T> = std::result::Result<T, ParseError>;

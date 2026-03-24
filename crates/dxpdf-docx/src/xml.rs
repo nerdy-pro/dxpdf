@@ -99,6 +99,11 @@ pub fn parse_hex_color(s: &str) -> Option<u32> {
     u32::from_str_radix(s, 16).ok()
 }
 
+/// Return an `UnexpectedEof` error for a given element name.
+pub fn unexpected_eof(element: &[u8]) -> crate::error::ParseError {
+    crate::error::ParseError::UnexpectedEof(String::from_utf8_lossy(element).into_owned())
+}
+
 /// Read all text content until the end of the current element.
 pub fn read_text_content(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<String> {
     let mut text = String::new();

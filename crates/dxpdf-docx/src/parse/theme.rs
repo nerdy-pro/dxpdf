@@ -19,6 +19,16 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
     let mut in_minor_font = false;
     let mut current_color_name: Option<String> = None;
 
+    // Find <a:theme> root element.
+    loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"theme" => break,
+            Event::Eof => return Ok(theme),
+            _ => {}
+        }
+    }
+
+    // Parse scoped to </a:theme>.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
@@ -107,6 +117,7 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
             Event::End(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
+                    b"theme" => break,
                     b"clrScheme" => in_color_scheme = false,
                     b"majorFont" => in_major_font = false,
                     b"minorFont" => in_minor_font = false,
@@ -117,7 +128,7 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
                     _ => {}
                 }
             }
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"theme")),
             _ => {}
         }
     }

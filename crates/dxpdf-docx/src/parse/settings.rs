@@ -9,12 +9,23 @@ use crate::error::Result;
 use crate::model::{DocumentSettings, RevisionSaveId};
 use crate::xml;
 
+/// Parse `word/settings.xml`. Enters `<w:settings>`, parses until `</w:settings>`.
 pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
     let mut reader = Reader::from_reader(data);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut settings = DocumentSettings::default();
 
+    // Find <w:settings> root element.
+    loop {
+        match xml::next_event(&mut reader, &mut buf)? {
+            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"settings" => break,
+            Event::Eof => return Ok(settings),
+            _ => {}
+        }
+    }
+
+    // Parse content scoped to </w:settings>.
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
@@ -38,7 +49,7 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
                     _ => {}
                 }
             }
-            Event::Eof => break,
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"settings" => break,
             _ => {}
         }
     }
@@ -77,7 +88,7 @@ fn parse_rsids(
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rsids" => break,
-            Event::Eof => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"rsids")),
             _ => {}
         }
     }

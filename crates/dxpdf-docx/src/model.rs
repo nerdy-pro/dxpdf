@@ -732,7 +732,10 @@ pub enum Inline {
     EndnoteRef(NoteId),
     Hyperlink(Hyperlink),
     Field(Field),
-    BookmarkStart { id: BookmarkId, name: String },
+    BookmarkStart {
+        id: BookmarkId,
+        name: String,
+    },
     BookmarkEnd(BookmarkId),
     Symbol(Symbol),
 }
