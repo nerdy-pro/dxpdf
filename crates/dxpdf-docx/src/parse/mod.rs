@@ -90,7 +90,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
     for rel in doc_rels.filter_by_type(&RelationshipType::Image) {
         let media_path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.take_part(&media_path) {
-            media.insert(RelId(rel.id.clone()), data);
+            media.insert(RelId::new(rel.id.clone()), data);
         }
     }
 
@@ -106,7 +106,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.get_part(&path) {
             let blocks = body::parse_blocks(data)?;
-            headers.insert(RelId(rel.id.clone()), blocks);
+            headers.insert(RelId::new(rel.id.clone()), blocks);
 
             // Extract images from header rels
             let hf_rels_path = zip::rels_path_for(&path);
@@ -115,7 +115,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
                 for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                     let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
                     if let Some(img_data) = package.take_part(&img_path) {
-                        media.insert(RelId(img_rel.id.clone()), img_data);
+                        media.insert(RelId::new(img_rel.id.clone()), img_data);
                     }
                 }
             }
@@ -126,7 +126,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.get_part(&path) {
             let blocks = body::parse_blocks(data)?;
-            footers.insert(RelId(rel.id.clone()), blocks);
+            footers.insert(RelId::new(rel.id.clone()), blocks);
 
             let hf_rels_path = zip::rels_path_for(&path);
             if let Some(rd) = package.get_part(&hf_rels_path) {
@@ -134,7 +134,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
                 for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                     let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
                     if let Some(img_data) = package.take_part(&img_path) {
-                        media.insert(RelId(img_rel.id.clone()), img_data);
+                        media.insert(RelId::new(img_rel.id.clone()), img_data);
                     }
                 }
             }

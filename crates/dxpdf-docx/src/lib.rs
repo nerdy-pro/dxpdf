@@ -12,10 +12,17 @@
 //! println!("{} blocks in body", doc.body.len());
 //! ```
 
-pub mod dimension;
+pub mod dimension {
+    pub use dxpdf_docx_model::dimension::*;
+}
+pub mod geometry {
+    pub use dxpdf_docx_model::geometry::*;
+}
+pub mod model {
+    pub use dxpdf_docx_model::model::*;
+}
+
 pub mod error;
-pub mod geometry;
-pub mod model;
 pub mod parse;
 pub mod xml;
 pub mod zip;

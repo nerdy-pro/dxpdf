@@ -384,12 +384,17 @@ name = "dxpdf-docx"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "dxpdf-docx-model",
  "env_logger",
  "log",
  "quick-xml",
  "thiserror",
  "zip",
 ]
+
+[[package]]
+name = "dxpdf-docx-model"
+version = "0.1.0"
 
 [[package]]
 name = "dxpdf-model"

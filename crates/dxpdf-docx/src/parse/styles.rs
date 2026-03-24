@@ -145,7 +145,7 @@ fn parse_style(
     };
 
     let id = match xml::optional_attr(start, b"styleId")? {
-        Some(id) => StyleId(id),
+        Some(id) => StyleId::new(id),
         None => {
             xml::skip_to_end(reader, buf, b"style")?;
             return Ok(None);
@@ -192,7 +192,7 @@ fn parse_style(
             Event::Empty(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 if local.as_slice() == b"basedOn" {
-                    based_on = xml::optional_attr(e, b"val")?.map(StyleId);
+                    based_on = xml::optional_attr(e, b"val")?.map(StyleId::new);
                 } else if local.as_slice() == b"name" {
                     name = xml::optional_attr(e, b"val")?;
                 }

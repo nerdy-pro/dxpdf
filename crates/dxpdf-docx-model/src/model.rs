@@ -12,9 +12,13 @@ use crate::geometry::{EdgeInsets, Size};
 
 /// A relationship ID (e.g., "rId1") — opaque, interned from the .rels files.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RelId(pub(crate) String);
+pub struct RelId(String);
 
 impl RelId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -22,9 +26,13 @@ impl RelId {
 
 /// Footnote or endnote numeric ID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct NoteId(pub(crate) i64);
+pub struct NoteId(i64);
 
 impl NoteId {
+    pub fn new(id: i64) -> Self {
+        Self(id)
+    }
+
     pub fn value(self) -> i64 {
         self.0
     }
@@ -32,14 +40,28 @@ impl NoteId {
 
 /// A bookmark ID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BookmarkId(pub(crate) i64);
+pub struct BookmarkId(i64);
+
+impl BookmarkId {
+    pub fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
 
 /// A style ID (e.g., "Heading1", "Normal") — reference into `Document.styles`.
 /// Per §17.7.4.17, this is the `w:styleId` attribute value.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct StyleId(pub(crate) String);
+pub struct StyleId(String);
 
 impl StyleId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -48,7 +70,7 @@ impl StyleId {
 /// Revision Save ID — identifies which editing session produced a change.
 /// Stored as a 32-bit value parsed from an 8-digit hex string (e.g., "00A2B3C4").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RevisionSaveId(pub(crate) u32);
+pub struct RevisionSaveId(u32);
 
 impl RevisionSaveId {
     pub fn value(self) -> u32 {

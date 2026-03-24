@@ -49,7 +49,7 @@ pub fn parse_paragraph_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
                     b"ind" => {
                         props.indentation = Some(parse_indentation(e)?);
@@ -99,7 +99,7 @@ pub fn parse_paragraph_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
                     b"ind" => {
                         props.indentation = Some(parse_indentation(e)?);
@@ -201,7 +201,7 @@ pub fn parse_run_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"rStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
                     b"rFonts" => {
                         props.fonts = parse_font_set(e)?;
@@ -337,7 +337,7 @@ pub fn parse_table_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
                     b"tblBorders" => {
                         props.borders = Some(parse_table_borders(reader, buf)?);
@@ -370,7 +370,7 @@ pub fn parse_table_properties(
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId);
+                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -612,7 +612,7 @@ pub fn parse_section_properties(
                     b"headerReference" => {
                         if let Some(r_id) = xml::optional_attr(e, b"id")? {
                             let hf_type = xml::optional_attr(e, b"type")?;
-                            let rel = RelId(r_id);
+                            let rel = RelId::new(r_id);
                             match hf_type.as_deref() {
                                 Some("first") => props.header_refs.first = Some(rel),
                                 Some("even") => props.header_refs.even = Some(rel),
@@ -623,7 +623,7 @@ pub fn parse_section_properties(
                     b"footerReference" => {
                         if let Some(r_id) = xml::optional_attr(e, b"id")? {
                             let hf_type = xml::optional_attr(e, b"type")?;
-                            let rel = RelId(r_id);
+                            let rel = RelId::new(r_id);
                             match hf_type.as_deref() {
                                 Some("first") => props.footer_refs.first = Some(rel),
                                 Some("even") => props.footer_refs.even = Some(rel),

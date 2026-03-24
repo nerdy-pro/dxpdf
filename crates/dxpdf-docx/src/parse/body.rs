@@ -144,14 +144,14 @@ fn parse_paragraph(
                             xml::optional_attr(e, b"name")?,
                         ) {
                             content.push(Inline::BookmarkStart {
-                                id: BookmarkId(id),
+                                id: BookmarkId::new(id),
                                 name,
                             });
                         }
                     }
                     b"bookmarkEnd" => {
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            content.push(Inline::BookmarkEnd(BookmarkId(id)));
+                            content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
                         }
                     }
                     b"fldSimple" => {
@@ -171,14 +171,14 @@ fn parse_paragraph(
                             xml::optional_attr(e, b"name")?,
                         ) {
                             content.push(Inline::BookmarkStart {
-                                id: BookmarkId(id),
+                                id: BookmarkId::new(id),
                                 name,
                             });
                         }
                     }
                     b"bookmarkEnd" => {
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            content.push(Inline::BookmarkEnd(BookmarkId(id)));
+                            content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
                         }
                     }
                     _ => xml::warn_unsupported_element("paragraph", &local),
@@ -309,13 +309,13 @@ fn parse_run(
                     b"footnoteReference" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            pending_inlines.push(Inline::FootnoteRef(NoteId(id)));
+                            pending_inlines.push(Inline::FootnoteRef(NoteId::new(id)));
                         }
                     }
                     b"endnoteReference" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            pending_inlines.push(Inline::EndnoteRef(NoteId(id)));
+                            pending_inlines.push(Inline::EndnoteRef(NoteId::new(id)));
                         }
                     }
                     b"separator" => {
@@ -399,7 +399,7 @@ fn parse_hyperlink_content(
     buf: &mut Vec<u8>,
 ) -> Result<Hyperlink> {
     let target = if let Some(id) = r_id {
-        HyperlinkTarget::External(RelId(id))
+        HyperlinkTarget::External(RelId::new(id))
     } else if let Some(anchor) = anchor {
         HyperlinkTarget::Internal { anchor }
     } else {
@@ -528,7 +528,7 @@ fn parse_inline_image(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<O
     }
 
     Ok(rel_id.map(|id| Image {
-        rel_id: RelId(id),
+        rel_id: RelId::new(id),
         extent,
         placement: ImagePlacement::Inline,
         description,
@@ -629,7 +629,7 @@ fn parse_anchor_image(
     }
 
     Ok(rel_id.map(|id| Image {
-        rel_id: RelId(id),
+        rel_id: RelId::new(id),
         extent,
         placement: ImagePlacement::Anchor(AnchorProperties {
             horizontal_position: h_pos,

@@ -41,7 +41,7 @@ pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Bl
 
                 if let Some(note_id) = id {
                     let blocks = parse_note_content(&mut reader, &mut buf, note_tag_bytes)?;
-                    notes.insert(NoteId(note_id), blocks);
+                    notes.insert(NoteId::new(note_id), blocks);
                 } else {
                     xml::skip_to_end(&mut reader, &mut buf, note_tag_bytes)?;
                 }
