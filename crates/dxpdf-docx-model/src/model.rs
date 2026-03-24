@@ -1542,31 +1542,51 @@ pub enum PenAlignment {
     Inset,
 }
 
+/// §20.4.2.3 CT_Anchor — anchor/floating drawing properties.
 #[derive(Clone, Copy, Debug)]
 pub struct AnchorProperties {
+    /// §20.4.2.3: distance from surrounding text.
+    pub distance: EdgeInsets<Emu>,
+    /// §20.4.2.13: simple positioning point.
+    pub simple_pos: Option<Offset<Emu>>,
+    /// §20.4.2.3 @simplePos: whether to use simplePos coordinates.
+    pub use_simple_pos: Option<bool>,
+    /// §20.4.2.10: horizontal position.
     pub horizontal_position: AnchorPosition,
+    /// §20.4.2.11: vertical position.
     pub vertical_position: AnchorPosition,
+    /// Text wrapping mode.
     pub wrap: TextWrap,
+    /// §20.4.2.3 @behindDoc: behind document text.
     pub behind_text: bool,
+    /// §20.4.2.3 @locked: anchor is locked to position.
     pub lock_anchor: bool,
+    /// §20.4.2.3 @allowOverlap: can overlap other anchored objects.
     pub allow_overlap: bool,
+    /// §20.4.2.3 @relativeHeight: z-ordering value.
     pub relative_height: u32,
+    /// §20.4.2.3 @layoutInCell: allow layout inside table cell.
+    pub layout_in_cell: Option<bool>,
+    /// §20.4.2.3 @hidden: whether the anchor is hidden.
+    pub hidden: Option<bool>,
 }
 
+/// §20.4.2.10 / §20.4.2.11: anchor position (offset or alignment).
 #[derive(Clone, Copy, Debug)]
 pub enum AnchorPosition {
-    /// Offset from the anchor base.
+    /// §20.4.2.12: position by EMU offset from relativeFrom.
     Offset {
-        relative_from: Option<AnchorRelativeFrom>,
+        relative_from: AnchorRelativeFrom,
         offset: Dimension<Emu>,
     },
-    /// Aligned to an edge of the relative area.
+    /// §20.4.2.1: position by alignment within relativeFrom.
     Align {
-        relative_from: Option<AnchorRelativeFrom>,
+        relative_from: AnchorRelativeFrom,
         alignment: AnchorAlignment,
     },
 }
 
+/// §20.4.3.4 ST_RelFromH / §20.4.3.5 ST_RelFromV — relative-from values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnchorRelativeFrom {
     Page,
@@ -1583,6 +1603,7 @@ pub enum AnchorRelativeFrom {
     RightMargin,
 }
 
+/// §20.4.3.1 ST_AlignH / §20.4.3.2 ST_AlignV — alignment values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnchorAlignment {
     Left,
@@ -1594,21 +1615,40 @@ pub enum AnchorAlignment {
     Bottom,
 }
 
+/// Text wrapping mode for anchored drawings.
 #[derive(Clone, Copy, Debug)]
 pub enum TextWrap {
-    /// No wrapping — text does not flow around the image.
+    /// §20.4.2.15: no wrapping.
     None,
-    /// Wrap on both sides.
-    Square { distance: EdgeInsets<Emu> },
-    /// Wrap tightly along the shape outline.
-    Tight { distance: EdgeInsets<Emu> },
-    /// Text appears above and below only.
+    /// §20.4.2.17: square wrapping.
+    Square {
+        distance: EdgeInsets<Emu>,
+        wrap_text: WrapText,
+    },
+    /// §20.4.2.16: tight wrapping.
+    Tight {
+        distance: EdgeInsets<Emu>,
+        wrap_text: WrapText,
+    },
+    /// §20.4.2.18: text above and below only.
     TopAndBottom {
         distance_top: Dimension<Emu>,
         distance_bottom: Dimension<Emu>,
     },
-    /// Behind text or in front of text — no wrapping displacement.
-    Through { distance: EdgeInsets<Emu> },
+    /// §20.4.2.14: through wrapping.
+    Through {
+        distance: EdgeInsets<Emu>,
+        wrap_text: WrapText,
+    },
+}
+
+/// §20.4.3.7 ST_WrapText — which sides text wraps on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WrapText {
+    BothSides,
+    Left,
+    Right,
+    Largest,
 }
 
 // ── Hyperlink ────────────────────────────────────────────────────────────────
