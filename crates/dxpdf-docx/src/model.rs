@@ -280,6 +280,8 @@ pub struct NumberingLevelDefinition {
     pub format: Option<NumberFormat>,
     pub level_text: String,
     pub start: Option<u32>,
+    /// §17.9.7: justification of the numbering symbol (uses ST_Jc).
+    pub justification: Option<Alignment>,
     pub indentation: Option<Indentation>,
     pub run_properties: Option<RunProperties>,
 }

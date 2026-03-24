@@ -74,6 +74,7 @@ fn parse_level(
     let mut format: Option<NumberFormat> = None;
     let mut level_text = String::new();
     let mut start: Option<u32> = None;
+    let mut justification: Option<Alignment> = None;
     let mut indentation: Option<Indentation> = None;
     let mut run_properties: Option<RunProperties> = None;
 
@@ -109,6 +110,11 @@ fn parse_level(
                     b"start" => {
                         start = xml::optional_attr_u32(e, b"val")?;
                     }
+                    b"lvlJc" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            justification = Some(properties::parse_alignment(&val)?);
+                        }
+                    }
                     _ => xml::warn_unsupported_element("numbering-level", &local),
                 }
             }
@@ -123,6 +129,7 @@ fn parse_level(
         format,
         level_text,
         start,
+        justification,
         indentation,
         run_properties,
     })
