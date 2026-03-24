@@ -254,6 +254,9 @@ fn parse_run(
             Event::Empty(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
+                    b"rPr" => {
+                        // Empty rPr — no child elements, no properties to parse.
+                    }
                     b"tab" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         pending_inlines.push(Inline::Tab);
