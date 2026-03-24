@@ -398,6 +398,11 @@ pub fn parse_table_row_properties(
                         props.cant_split =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"jc" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            props.justification = Some(parse_alignment(&val)?);
+                        }
+                    }
                     _ => xml::warn_unsupported_element("trPr", &local),
                 }
             }

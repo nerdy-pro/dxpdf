@@ -954,6 +954,8 @@ pub struct TableRowProperties {
     pub height: Option<TableRowHeight>,
     pub is_header: Option<bool>,
     pub cant_split: Option<bool>,
+    /// §17.4.29: alignment of the row with respect to text margins (uses ST_Jc).
+    pub justification: Option<Alignment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
