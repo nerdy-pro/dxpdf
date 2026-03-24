@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use crate::dimension::{Dimension, EighthPoints, Emu, HalfPoints, ThousandthPercent, Twips};
+use crate::dimension::{
+    Dimension, EighthPoints, Emu, FractionPoints, HalfPoints, ThousandthPercent, Twips,
+};
 use crate::geometry::{EdgeInsets, Size};
 
 // ── Identifiers ──────────────────────────────────────────────────────────────
@@ -314,11 +316,33 @@ pub struct SectionProperties {
     pub page_size: Option<PageSize>,
     pub page_margins: Option<PageMargins>,
     pub columns: Option<Columns>,
+    /// §17.6.5: document grid for East Asian typography and line pitch.
+    pub doc_grid: Option<DocGrid>,
     pub header_refs: SectionHeaderFooterRefs,
     pub footer_refs: SectionHeaderFooterRefs,
     pub title_page: Option<bool>,
     pub section_type: Option<SectionType>,
     pub rsids: SectionRevisionIds,
+}
+
+/// §17.6.5: document grid — controls character and line pitch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DocGrid {
+    /// §17.18.14 ST_DocGrid: type of grid.
+    pub grid_type: Option<DocGridType>,
+    /// Distance between lines in twips.
+    pub line_pitch: Option<Dimension<Twips>>,
+    /// Additional character pitch in 4096ths of a point.
+    pub char_space: Option<Dimension<FractionPoints>>,
+}
+
+/// §17.18.14 ST_DocGrid
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DocGridType {
+    Default,
+    Lines,
+    LinesAndChars,
+    SnapToChars,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -559,6 +559,21 @@ pub fn parse_section_properties(
                             }
                         }
                     }
+                    b"docGrid" => {
+                        let grid_type = match xml::optional_attr(e, b"type")?.as_deref() {
+                            Some("default") => Some(DocGridType::Default),
+                            Some("lines") => Some(DocGridType::Lines),
+                            Some("linesAndChars") => Some(DocGridType::LinesAndChars),
+                            Some("snapToChars") => Some(DocGridType::SnapToChars),
+                            Some(other) => return Err(invalid_value("docGrid/type", other)),
+                            None => None,
+                        };
+                        props.doc_grid = Some(DocGrid {
+                            grid_type,
+                            line_pitch: xml::optional_attr_i64(e, b"linePitch")?.map(Dimension::new),
+                            char_space: xml::optional_attr_i64(e, b"charSpace")?.map(Dimension::new),
+                        });
+                    }
                     b"titlePg" => {
                         props.title_page =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));

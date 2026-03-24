@@ -106,6 +106,13 @@ impl Unit for EighthPoints {
     const NAME: &'static str = "ep";
 }
 
+/// 1/4096th of a point — used for document grid character spacing (§17.6.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FractionPoints;
+impl Unit for FractionPoints {
+    const NAME: &'static str = "fp4096";
+}
+
 /// Percentage in 1/1000th of a percent (OOXML ST_DecimalNumberOrPercent).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ThousandthPercent;
