@@ -844,6 +844,10 @@ pub enum Inline {
     },
     BookmarkEnd(BookmarkId),
     Symbol(Symbol),
+    /// §17.11.23: footnote/endnote separator line.
+    Separator,
+    /// §17.11.3: continuation separator for notes spanning pages.
+    ContinuationSeparator,
 }
 
 #[derive(Clone, Debug)]

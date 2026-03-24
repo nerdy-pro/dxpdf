@@ -313,6 +313,14 @@ fn parse_run(
                             pending_inlines.push(Inline::EndnoteRef(NoteId(id)));
                         }
                     }
+                    b"separator" => {
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        pending_inlines.push(Inline::Separator);
+                    }
+                    b"continuationSeparator" => {
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        pending_inlines.push(Inline::ContinuationSeparator);
+                    }
                     _ => xml::warn_unsupported_element("run", &local),
                 }
             }
