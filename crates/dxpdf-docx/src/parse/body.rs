@@ -245,6 +245,11 @@ fn parse_run(
                         let text = xml::read_text_content(reader, buf)?;
                         texts.push(text);
                     }
+                    b"instrText" => {
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        let text = xml::read_text_content(reader, buf)?;
+                        pending_inlines.push(Inline::InstrText(text));
+                    }
                     b"drawing" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(img) = parse_drawing(reader, buf)? {
@@ -320,6 +325,34 @@ fn parse_run(
                     b"continuationSeparator" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         pending_inlines.push(Inline::ContinuationSeparator);
+                    }
+                    b"fldChar" => {
+                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        let field_char_type = match xml::optional_attr(e, b"fldCharType")?
+                            .as_deref()
+                        {
+                            Some("begin") => FieldCharType::Begin,
+                            Some("separate") => FieldCharType::Separate,
+                            Some("end") => FieldCharType::End,
+                            Some(other) => {
+                                return Err(crate::error::ParseError::InvalidAttributeValue {
+                                    attr: "fldChar/fldCharType".into(),
+                                    value: other.into(),
+                                    reason: "expected begin, separate, or end per §17.18.29".into(),
+                                });
+                            }
+                            None => {
+                                return Err(crate::error::ParseError::MissingAttribute {
+                                    element: "fldChar".into(),
+                                    attr: "fldCharType".into(),
+                                });
+                            }
+                        };
+                        pending_inlines.push(Inline::FieldChar(FieldChar {
+                            field_char_type,
+                            dirty: xml::optional_attr_bool(e, b"dirty")?,
+                            fld_lock: xml::optional_attr_bool(e, b"fldLock")?,
+                        }));
                     }
                     _ => xml::warn_unsupported_element("run", &local),
                 }

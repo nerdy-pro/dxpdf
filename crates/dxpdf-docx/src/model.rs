@@ -873,6 +873,29 @@ pub enum Inline {
     Separator,
     /// §17.11.3: continuation separator for notes spanning pages.
     ContinuationSeparator,
+    /// §17.16.18: complex field character (begin/separate/end marker).
+    FieldChar(FieldChar),
+    /// §17.16.23: field instruction text (appears between begin and separate).
+    InstrText(String),
+}
+
+/// §17.16.18: complex field character marker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FieldChar {
+    /// §17.18.29 ST_FldCharType: begin, separate, or end.
+    pub field_char_type: FieldCharType,
+    /// Field result needs recalculation.
+    pub dirty: Option<bool>,
+    /// Field is locked from updates.
+    pub fld_lock: Option<bool>,
+}
+
+/// §17.18.29 ST_FldCharType
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldCharType {
+    Begin,
+    Separate,
+    End,
 }
 
 #[derive(Clone, Debug)]
