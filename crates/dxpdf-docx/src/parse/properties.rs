@@ -264,6 +264,13 @@ pub fn parse_run_properties(
                         props.web_hidden =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"lang" => {
+                        props.lang = Some(Lang {
+                            val: xml::optional_attr(e, b"val")?,
+                            east_asia: xml::optional_attr(e, b"eastAsia")?,
+                            bidi: xml::optional_attr(e, b"bidi")?,
+                        });
+                    }
                     b"rtl" => {
                         props.rtl = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }

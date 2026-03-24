@@ -753,6 +753,19 @@ pub struct RunProperties {
     pub imprint: Option<bool>,
     pub outline: Option<bool>,
     pub shadow: Option<bool>,
+    /// §17.3.2.20: proofing languages per script category (BCP 47 tags).
+    pub lang: Option<Lang>,
+}
+
+/// §17.3.2.20: proofing language specification per script category.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lang {
+    /// Language for Latin text (e.g., "en-US").
+    pub val: Option<String>,
+    /// Language for East Asian text (e.g., "zh-CN").
+    pub east_asia: Option<String>,
+    /// Language for complex script text (e.g., "ar-SA").
+    pub bidi: Option<String>,
 }
 
 /// Font family names for each script category.
