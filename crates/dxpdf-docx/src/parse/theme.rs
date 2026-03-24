@@ -6,7 +6,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::error::Result;
-use crate::model::{Theme, ThemeColorScheme, ThemeFontScheme, ThemeScriptFont};
+use crate::model::{ScriptTag, Theme, ThemeColorScheme, ThemeFontScheme, ThemeScriptFont};
 use crate::xml;
 
 pub fn parse_theme(data: &[u8]) -> Result<Theme> {
@@ -284,11 +284,12 @@ fn parse_font_collection(
                             })?;
                     }
                     b"font" => {
-                        let script = xml::optional_attr(e, b"script")?
+                        let script_str = xml::optional_attr(e, b"script")?
                             .ok_or_else(|| crate::error::ParseError::MissingAttribute {
                                 element: "a:font".into(),
                                 attr: "script".into(),
                             })?;
+                        let script = parse_script_tag(&script_str);
                         let typeface = xml::optional_attr(e, b"typeface")?
                             .ok_or_else(|| crate::error::ParseError::MissingAttribute {
                                 element: "a:font".into(),
@@ -306,4 +307,67 @@ fn parse_font_collection(
     }
 
     Ok(scheme)
+}
+
+/// Parse an ISO 15924 script code into a `ScriptTag`.
+fn parse_script_tag(s: &str) -> ScriptTag {
+    match s {
+        "Arab" => ScriptTag::Arab,
+        "Armn" => ScriptTag::Armn,
+        "Beng" => ScriptTag::Beng,
+        "Bopo" => ScriptTag::Bopo,
+        "Bugi" => ScriptTag::Bugi,
+        "Cans" => ScriptTag::Cans,
+        "Cher" => ScriptTag::Cher,
+        "Deva" => ScriptTag::Deva,
+        "Ethi" => ScriptTag::Ethi,
+        "Geor" => ScriptTag::Geor,
+        "Gujr" => ScriptTag::Gujr,
+        "Guru" => ScriptTag::Guru,
+        "Hang" => ScriptTag::Hang,
+        "Hans" => ScriptTag::Hans,
+        "Hant" => ScriptTag::Hant,
+        "Hebr" => ScriptTag::Hebr,
+        "Java" => ScriptTag::Java,
+        "Jpan" => ScriptTag::Jpan,
+        "Khmr" => ScriptTag::Khmr,
+        "Knda" => ScriptTag::Knda,
+        "Laoo" => ScriptTag::Laoo,
+        "Lisu" => ScriptTag::Lisu,
+        "Mlym" => ScriptTag::Mlym,
+        "Mong" => ScriptTag::Mong,
+        "Mymr" => ScriptTag::Mymr,
+        "Nkoo" => ScriptTag::Nkoo,
+        "Olck" => ScriptTag::Olck,
+        "Orya" => ScriptTag::Orya,
+        "Osma" => ScriptTag::Osma,
+        "Phag" => ScriptTag::Phag,
+        "Sinh" => ScriptTag::Sinh,
+        "Sora" => ScriptTag::Sora,
+        "Syre" => ScriptTag::Syre,
+        "Syrj" => ScriptTag::Syrj,
+        "Syrn" => ScriptTag::Syrn,
+        "Syrc" => ScriptTag::Syrc,
+        "Tale" => ScriptTag::Tale,
+        "Talu" => ScriptTag::Talu,
+        "Taml" => ScriptTag::Taml,
+        "Telu" => ScriptTag::Telu,
+        "Tfng" => ScriptTag::Tfng,
+        "Thaa" => ScriptTag::Thaa,
+        "Thai" => ScriptTag::Thai,
+        "Tibt" => ScriptTag::Tibt,
+        "Uigh" => ScriptTag::Uigh,
+        "Viet" => ScriptTag::Viet,
+        "Yiii" => ScriptTag::Yiii,
+        other => {
+            log::warn!("theme: unrecognized script tag {:?}", other);
+            // Pack up to 4 ASCII bytes into a u32.
+            let bytes = other.as_bytes();
+            let mut packed = 0u32;
+            for (i, &b) in bytes.iter().take(4).enumerate() {
+                packed |= (b as u32) << (i * 8);
+            }
+            ScriptTag::Other(packed)
+        }
+    }
 }

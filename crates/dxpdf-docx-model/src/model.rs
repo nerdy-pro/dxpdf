@@ -285,10 +285,64 @@ pub struct ThemeFontScheme {
 /// §20.1.4.1.16: a per-script font mapping in a theme font scheme.
 #[derive(Clone, Debug)]
 pub struct ThemeScriptFont {
-    /// BCP 47 / ISO 15924 script tag (e.g., "Jpan", "Hans", "Arab").
-    pub script: String,
+    /// ISO 15924 script code.
+    pub script: ScriptTag,
     /// Typeface name for this script.
     pub typeface: String,
+}
+
+/// ISO 15924 script codes used in OOXML theme font schemes (§20.1.4.1.16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ScriptTag {
+    Arab,
+    Armn,
+    Beng,
+    Bopo,
+    Bugi,
+    Cans,
+    Cher,
+    Deva,
+    Ethi,
+    Geor,
+    Gujr,
+    Guru,
+    Hang,
+    Hans,
+    Hant,
+    Hebr,
+    Java,
+    Jpan,
+    Khmr,
+    Knda,
+    Laoo,
+    Lisu,
+    Mlym,
+    Mong,
+    Mymr,
+    Nkoo,
+    Olck,
+    Orya,
+    Osma,
+    Phag,
+    Sinh,
+    Sora,
+    Syre,
+    Syrj,
+    Syrn,
+    Syrc,
+    Tale,
+    Talu,
+    Taml,
+    Telu,
+    Tfng,
+    Thaa,
+    Thai,
+    Tibt,
+    Uigh,
+    Viet,
+    Yiii,
+    /// Unrecognized script code — preserved as-is.
+    Other(u32),
 }
 
 // ── Document ─────────────────────────────────────────────────────────────────
