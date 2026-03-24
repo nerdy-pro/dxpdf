@@ -396,12 +396,13 @@ fn parse_run(
         }
     }
 
-    flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+    flush_text_owned(&mut texts, char_style_id, run_props, &run_rsids, content);
     content.extend(pending_inlines);
 
     Ok(())
 }
 
+/// Flush accumulated text into a `TextRun`, cloning properties (mid-run flush).
 fn flush_text(
     texts: &mut Vec<String>,
     style_id: &Option<StyleId>,
@@ -417,6 +418,28 @@ fn flush_text(
         content.push(Inline::TextRun(Box::new(TextRun {
             style_id: style_id.clone(),
             properties: props.clone(),
+            text: combined,
+            rsids: *rsids,
+        })));
+    }
+}
+
+/// Flush accumulated text into a `TextRun`, taking ownership of properties (end-of-run flush).
+fn flush_text_owned(
+    texts: &mut Vec<String>,
+    style_id: Option<StyleId>,
+    props: RunProperties,
+    rsids: &RevisionIds,
+    content: &mut Vec<Inline>,
+) {
+    if texts.is_empty() {
+        return;
+    }
+    let combined: String = texts.drain(..).collect();
+    if !combined.is_empty() {
+        content.push(Inline::TextRun(Box::new(TextRun {
+            style_id,
+            properties: props,
             text: combined,
             rsids: *rsids,
         })));
