@@ -142,6 +142,9 @@ pub fn parse_paragraph_properties(
                             props.text_alignment = Some(parse_text_alignment(&val)?);
                         }
                     }
+                    b"cnfStyle" => {
+                        props.cnf_style = Some(parse_cnf_style(e)?);
+                    }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
@@ -415,6 +418,9 @@ pub fn parse_table_row_properties(
                             props.justification = Some(parse_alignment(&val)?);
                         }
                     }
+                    b"cnfStyle" => {
+                        props.cnf_style = Some(parse_cnf_style(e)?);
+                    }
                     _ => xml::warn_unsupported_element("trPr", &local),
                 }
             }
@@ -482,6 +488,9 @@ pub fn parse_table_cell_properties(
                     }
                     b"noWrap" => {
                         props.no_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
+                    b"cnfStyle" => {
+                        props.cnf_style = Some(parse_cnf_style(e)?);
                     }
                     _ => xml::warn_unsupported_element("tcPr", &local),
                 }
@@ -1186,4 +1195,23 @@ fn parse_text_alignment(val: &str) -> Result<TextAlignment> {
         "bottom" => Ok(TextAlignment::Bottom),
         other => Err(invalid_value("textAlignment/val", other)),
     }
+}
+
+/// §17.3.1.8: parse `w:cnfStyle` element attributes.
+fn parse_cnf_style(e: &BytesStart<'_>) -> Result<CnfStyle> {
+    Ok(CnfStyle {
+        val: xml::optional_attr(e, b"val")?,
+        first_row: xml::optional_attr_bool(e, b"firstRow")?,
+        last_row: xml::optional_attr_bool(e, b"lastRow")?,
+        first_column: xml::optional_attr_bool(e, b"firstColumn")?,
+        last_column: xml::optional_attr_bool(e, b"lastColumn")?,
+        odd_v_band: xml::optional_attr_bool(e, b"oddVBand")?,
+        even_v_band: xml::optional_attr_bool(e, b"evenVBand")?,
+        odd_h_band: xml::optional_attr_bool(e, b"oddHBand")?,
+        even_h_band: xml::optional_attr_bool(e, b"evenHBand")?,
+        first_row_first_column: xml::optional_attr_bool(e, b"firstRowFirstColumn")?,
+        first_row_last_column: xml::optional_attr_bool(e, b"firstRowLastColumn")?,
+        last_row_first_column: xml::optional_attr_bool(e, b"lastRowFirstColumn")?,
+        last_row_last_column: xml::optional_attr_bool(e, b"lastRowLastColumn")?,
+    })
 }

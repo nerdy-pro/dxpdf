@@ -478,6 +478,28 @@ pub struct ParagraphProperties {
     pub outline_level: Option<OutlineLevel>,
     /// §17.3.1.39: vertical alignment of text on each line (ST_TextAlignment).
     pub text_alignment: Option<TextAlignment>,
+    /// §17.3.1.8: table conditional formatting applied to this paragraph.
+    pub cnf_style: Option<CnfStyle>,
+}
+
+/// §17.3.1.8: conditional formatting bit flags indicating which table style
+/// regions apply to an element (paragraph, row, or cell).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CnfStyle {
+    /// Legacy 12-character binary string (e.g., "101000000000").
+    pub val: Option<String>,
+    pub first_row: Option<bool>,
+    pub last_row: Option<bool>,
+    pub first_column: Option<bool>,
+    pub last_column: Option<bool>,
+    pub odd_v_band: Option<bool>,
+    pub even_v_band: Option<bool>,
+    pub odd_h_band: Option<bool>,
+    pub even_h_band: Option<bool>,
+    pub first_row_first_column: Option<bool>,
+    pub first_row_last_column: Option<bool>,
+    pub last_row_first_column: Option<bool>,
+    pub last_row_last_column: Option<bool>,
 }
 
 /// §17.18.91 ST_TextAlignment — vertical alignment of characters on a line.
@@ -1044,13 +1066,15 @@ pub struct TableRow {
     pub rsids: TableRowRevisionIds,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TableRowProperties {
     pub height: Option<TableRowHeight>,
     pub is_header: Option<bool>,
     pub cant_split: Option<bool>,
     /// §17.4.29: alignment of the row with respect to text margins (uses ST_Jc).
     pub justification: Option<Alignment>,
+    /// §17.3.1.8: table conditional formatting applied to this row.
+    pub cnf_style: Option<CnfStyle>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1073,7 +1097,7 @@ pub struct TableCell {
 }
 
 /// Table cell properties — only fields explicitly present in the XML are `Some`.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TableCellProperties {
     pub width: Option<TableMeasure>,
     pub borders: Option<TableCellBorders>,
@@ -1086,6 +1110,8 @@ pub struct TableCellProperties {
     pub grid_span: Option<u32>,
     pub text_direction: Option<TextDirection>,
     pub no_wrap: Option<bool>,
+    /// §17.3.1.8: table conditional formatting applied to this cell.
+    pub cnf_style: Option<CnfStyle>,
 }
 
 /// Vertical merge state from `w:vMerge` attribute.
