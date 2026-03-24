@@ -14,7 +14,7 @@ use crate::geometry::{EdgeInsets, Size};
 use crate::model::*;
 use crate::xml;
 
-use super::properties;
+use super::{drawing, properties};
 
 /// Parse a body-level XML part (header, footer) into blocks.
 /// Finds the root element (§17.10.1 `w:hdr`, §17.10.3 `w:ftr`, etc.),
@@ -255,7 +255,7 @@ fn parse_run(
                     b"drawing" => {
                         flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(img) = parse_drawing(reader, buf)? {
-                            pending_inlines.push(Inline::Image(img));
+                            pending_inlines.push(Inline::Image(Box::new(img)));
                         }
                     }
                     b"pict" => {
@@ -1552,7 +1552,7 @@ fn parse_run_inline_content(
                 match local.as_slice() {
                     b"drawing" => {
                         if let Some(img) = parse_drawing(reader, buf)? {
-                            content.push(Inline::Image(img));
+                            content.push(Inline::Image(Box::new(img)));
                         }
                     }
                     b"pict" => {
@@ -1584,7 +1584,7 @@ fn parse_drawing(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
                     b"inline" => {
-                        image = parse_inline_image(reader, buf)?;
+                        image = drawing::parse_inline_image(e, reader, buf)?;
                     }
                     b"anchor" => {
                         let behind_text =
@@ -1615,44 +1615,6 @@ fn parse_drawing(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option
     Ok(image)
 }
 
-fn parse_inline_image(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option<Image>> {
-    let mut extent = Size::ZERO;
-    let mut rel_id: Option<String> = None;
-    let mut description: Option<String> = None;
-
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) | Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
-                    b"extent" => {
-                        let cx = xml::optional_attr_i64(e, b"cx")?.unwrap_or(0);
-                        let cy = xml::optional_attr_i64(e, b"cy")?.unwrap_or(0);
-                        extent = Size::new(Dimension::new(cx), Dimension::new(cy));
-                    }
-                    b"docPr" => {
-                        description = xml::optional_attr(e, b"descr")?;
-                    }
-                    b"blip" => {
-                        rel_id = xml::optional_attr(e, b"embed")?;
-                    }
-                    _ => xml::warn_unsupported_element("inline-image", &local),
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"inline" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"inline")),
-            _ => {}
-        }
-    }
-
-    Ok(rel_id.map(|id| Image {
-        rel_id: RelId::new(id),
-        extent,
-        placement: ImagePlacement::Inline,
-        description,
-    }))
-}
-
 fn parse_anchor_image(
     behind_text: bool,
     lock_anchor: bool,
@@ -1662,8 +1624,10 @@ fn parse_anchor_image(
     buf: &mut Vec<u8>,
 ) -> Result<Option<Image>> {
     let mut extent = Size::ZERO;
-    let mut rel_id: Option<String> = None;
-    let mut description: Option<String> = None;
+    let mut effect_extent = None;
+    let mut doc_properties = None;
+    let graphic_frame_locks = None;
+    let picture = None;
     let mut h_pos = AnchorPosition::Offset {
         relative_from: None,
         offset: Dimension::ZERO,
@@ -1714,10 +1678,28 @@ fn parse_anchor_image(
                             distance_bottom: Dimension::new(db),
                         };
                     }
-                    b"blip" => {
-                        rel_id = xml::optional_attr(e, b"embed")?;
+                    b"docPr" => {
+                        doc_properties = Some(DocProperties {
+                            id: xml::optional_attr_u32(e, b"id")?.unwrap_or(0),
+                            name: xml::optional_attr(e, b"name")?.unwrap_or_default(),
+                            description: xml::optional_attr(e, b"descr")?,
+                            hidden: xml::optional_attr_bool(e, b"hidden")?,
+                            title: xml::optional_attr(e, b"title")?,
+                        });
+                        xml::skip_to_end(reader, buf, b"docPr")?;
                     }
-                    _ => xml::warn_unsupported_element("anchor-image", &local),
+                    b"cNvGraphicFramePr" => {
+                        xml::skip_to_end(reader, buf, b"cNvGraphicFramePr")?;
+                    }
+                    b"graphic" => {
+                        // Reuse the shared graphic parser from drawing module.
+                        // For now, skip — anchor graphic parsing will be unified later.
+                        xml::skip_to_end(reader, buf, b"graphic")?;
+                    }
+                    _ => {
+                        xml::warn_unsupported_element("anchor-image", &local);
+                        xml::skip_to_end(reader, buf, &local)?;
+                    }
                 }
             }
             Event::Empty(ref e) => {
@@ -1728,14 +1710,31 @@ fn parse_anchor_image(
                         let cy = xml::optional_attr_i64(e, b"cy")?.unwrap_or(0);
                         extent = Size::new(Dimension::new(cx), Dimension::new(cy));
                     }
+                    b"effectExtent" => {
+                        let l = xml::optional_attr_i64(e, b"l")?.unwrap_or(0);
+                        let t = xml::optional_attr_i64(e, b"t")?.unwrap_or(0);
+                        let r = xml::optional_attr_i64(e, b"r")?.unwrap_or(0);
+                        let b = xml::optional_attr_i64(e, b"b")?.unwrap_or(0);
+                        effect_extent = Some(EdgeInsets::new(
+                            Dimension::new(t),
+                            Dimension::new(r),
+                            Dimension::new(b),
+                            Dimension::new(l),
+                        ));
+                    }
                     b"docPr" => {
-                        description = xml::optional_attr(e, b"descr")?;
+                        doc_properties = Some(DocProperties {
+                            id: xml::optional_attr_u32(e, b"id")?.unwrap_or(0),
+                            name: xml::optional_attr(e, b"name")?.unwrap_or_default(),
+                            description: xml::optional_attr(e, b"descr")?,
+                            hidden: xml::optional_attr_bool(e, b"hidden")?,
+                            title: xml::optional_attr(e, b"title")?,
+                        });
                     }
-                    b"blip" => {
-                        rel_id = xml::optional_attr(e, b"embed")?;
-                    }
-                    b"wrapNone" => {
-                        wrap = TextWrap::None;
+                    b"simplePos" | b"wrapNone" => {
+                        if local.as_slice() == b"wrapNone" {
+                            wrap = TextWrap::None;
+                        }
                     }
                     _ => xml::warn_unsupported_element("anchor-image", &local),
                 }
@@ -1746,9 +1745,20 @@ fn parse_anchor_image(
         }
     }
 
-    Ok(rel_id.map(|id| Image {
-        rel_id: RelId::new(id),
+    let doc_properties = doc_properties.unwrap_or(DocProperties {
+        id: 0,
+        name: String::new(),
+        description: None,
+        hidden: None,
+        title: None,
+    });
+
+    Ok(Some(Image {
         extent,
+        effect_extent,
+        doc_properties,
+        graphic_frame_locks,
+        picture,
         placement: ImagePlacement::Anchor(AnchorProperties {
             horizontal_position: h_pos,
             vertical_position: v_pos,
@@ -1758,7 +1768,6 @@ fn parse_anchor_image(
             allow_overlap,
             relative_height,
         }),
-        description,
     }))
 }
 

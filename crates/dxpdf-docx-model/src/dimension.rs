@@ -120,6 +120,14 @@ impl Unit for ThousandthPercent {
     const NAME: &'static str = "‰%";
 }
 
+/// DrawingML angle in 60,000ths of a degree (§20.1.10.3 ST_Angle).
+/// 0 = no rotation, 5400000 = 90° clockwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SixtieThousandthDeg;
+impl Unit for SixtieThousandthDeg {
+    const NAME: &'static str = "∠60k";
+}
+
 // --- Conversions ---
 
 impl Dimension<Twips> {

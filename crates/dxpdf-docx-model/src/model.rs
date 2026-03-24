@@ -6,9 +6,10 @@ use std::collections::HashMap;
 use dxpdf_field::FieldInstruction;
 
 use crate::dimension::{
-    Dimension, EighthPoints, Emu, FractionPoints, HalfPoints, ThousandthPercent, Twips,
+    Dimension, EighthPoints, Emu, FractionPoints, HalfPoints, SixtieThousandthDeg,
+    ThousandthPercent, Twips,
 };
-use crate::geometry::{EdgeInsets, Size};
+use crate::geometry::{EdgeInsets, Offset, Size};
 
 // ── Identifiers ──────────────────────────────────────────────────────────────
 
@@ -897,7 +898,7 @@ pub enum Inline {
     /// §17.3.3.13: position where the previous application rendered a page break.
     /// This is a rendering hint, not a content break.
     LastRenderedPageBreak,
-    Image(Image),
+    Image(Box<Image>),
     FootnoteRef(NoteId),
     EndnoteRef(NoteId),
     Hyperlink(Hyperlink),
@@ -1089,23 +1090,456 @@ pub enum HighlightColor {
     Yellow,
 }
 
-// ── Image ────────────────────────────────────────────────────────────────────
+// ── Image / Drawing ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct Image {
-    pub rel_id: RelId,
+    /// §20.4.2.7: drawing extent.
     pub extent: Size<Emu>,
+    /// §20.4.2.6: additional extent for effects.
+    pub effect_extent: Option<EdgeInsets<Emu>>,
+    /// §20.1.2.2.8: non-visual drawing properties (wp:docPr).
+    pub doc_properties: DocProperties,
+    /// §20.4.2.4: graphic frame locking properties.
+    pub graphic_frame_locks: Option<GraphicFrameLocks>,
+    /// §19.3.1.37: picture content (a:graphic > a:graphicData > pic:pic).
+    pub picture: Option<Picture>,
+    /// Inline or anchor placement.
     pub placement: ImagePlacement,
-    pub description: Option<String>,
 }
 
 /// How the image is placed in the document flow.
 #[derive(Clone, Debug)]
 pub enum ImagePlacement {
-    /// Inline with text — no wrapping.
-    Inline,
-    /// Floating/anchored with text wrapping.
+    /// §20.4.2.8: inline with text — no wrapping.
+    Inline {
+        /// Distance from surrounding text.
+        distance: EdgeInsets<Emu>,
+    },
+    /// §20.4.2.3: floating/anchored with text wrapping.
     Anchor(AnchorProperties),
+}
+
+/// §20.1.2.2.8 CT_NonVisualDrawingProps — shared by wp:docPr and pic:cNvPr.
+#[derive(Clone, Debug)]
+pub struct DocProperties {
+    /// Unique identifier.
+    pub id: u32,
+    /// Element name.
+    pub name: String,
+    /// Alternative text description.
+    pub description: Option<String>,
+    /// Whether the element is hidden.
+    pub hidden: Option<bool>,
+    /// Title (Office 2010+).
+    pub title: Option<String>,
+}
+
+/// §20.1.2.2.19 CT_GraphicalObjectFrameLocking.
+#[derive(Clone, Copy, Debug)]
+pub struct GraphicFrameLocks {
+    pub no_change_aspect: Option<bool>,
+    pub no_drilldown: Option<bool>,
+    pub no_grp: Option<bool>,
+    pub no_move: Option<bool>,
+    pub no_resize: Option<bool>,
+    pub no_select: Option<bool>,
+}
+
+/// §19.3.1.37 pic:pic — a picture element.
+#[derive(Clone, Debug)]
+pub struct Picture {
+    /// §19.3.1.32: non-visual picture properties.
+    pub nv_pic_pr: NvPicProperties,
+    /// §20.1.8.14: blip fill (picture data + crop + fill mode).
+    pub blip_fill: BlipFill,
+    /// §20.1.2.2.35: shape properties (transform, geometry, outline).
+    pub shape_properties: Option<ShapeProperties>,
+}
+
+/// §19.3.1.32 pic:nvPicPr — non-visual picture properties.
+#[derive(Clone, Debug)]
+pub struct NvPicProperties {
+    /// §20.1.2.2.8 pic:cNvPr.
+    pub cnv_pr: DocProperties,
+    /// §19.3.1.4 pic:cNvPicPr.
+    pub cnv_pic_pr: Option<CnvPicProperties>,
+}
+
+/// §19.3.1.4 pic:cNvPicPr — non-visual picture drawing properties.
+#[derive(Clone, Debug)]
+pub struct CnvPicProperties {
+    pub prefer_relative_resize: Option<bool>,
+    /// §20.1.2.2.31: picture locking.
+    pub pic_locks: Option<PicLocks>,
+}
+
+/// §20.1.2.2.31 a:picLocks — picture locking constraints.
+#[derive(Clone, Copy, Debug)]
+pub struct PicLocks {
+    pub no_change_aspect: Option<bool>,
+    pub no_crop: Option<bool>,
+    pub no_resize: Option<bool>,
+    pub no_move: Option<bool>,
+    pub no_rot: Option<bool>,
+    pub no_select: Option<bool>,
+    pub no_edit_points: Option<bool>,
+    pub no_adjust_handles: Option<bool>,
+    pub no_change_arrowheads: Option<bool>,
+    pub no_change_shape_type: Option<bool>,
+    pub no_grp: Option<bool>,
+}
+
+/// §20.1.8.14 pic:blipFill — picture fill properties.
+#[derive(Clone, Debug)]
+pub struct BlipFill {
+    pub rotate_with_shape: Option<bool>,
+    pub dpi: Option<u32>,
+    /// §20.1.8.13: blip reference.
+    pub blip: Option<Blip>,
+    /// §20.1.10.48: source rectangle (crop).
+    pub src_rect: Option<RelativeRect>,
+    /// §20.1.8.56: stretch fill mode.
+    pub stretch: Option<StretchFill>,
+}
+
+/// §20.1.8.13 a:blip — reference to image data.
+#[derive(Clone, Debug)]
+pub struct Blip {
+    /// r:embed — relationship ID for embedded image.
+    pub embed: Option<RelId>,
+    /// r:link — relationship ID for linked (external) image.
+    pub link: Option<RelId>,
+    /// §20.1.10.7: compression state.
+    pub compression: Option<BlipCompression>,
+}
+
+/// §20.1.10.7 ST_BlipCompression.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlipCompression {
+    Email,
+    Hqprint,
+    None,
+    Print,
+    Screen,
+}
+
+/// §20.1.10.48 CT_RelativeRect — relative rectangle (thousandths of percent).
+/// Used for a:srcRect and a:fillRect.
+#[derive(Clone, Copy, Debug)]
+pub struct RelativeRect {
+    pub left: Option<Dimension<ThousandthPercent>>,
+    pub top: Option<Dimension<ThousandthPercent>>,
+    pub right: Option<Dimension<ThousandthPercent>>,
+    pub bottom: Option<Dimension<ThousandthPercent>>,
+}
+
+/// §20.1.8.56 a:stretch — stretch fill mode.
+#[derive(Clone, Copy, Debug)]
+pub struct StretchFill {
+    /// §20.1.10.48: fill rectangle.
+    pub fill_rect: Option<RelativeRect>,
+}
+
+/// §20.1.2.2.35 CT_ShapeProperties — shape visual properties.
+#[derive(Clone, Debug)]
+pub struct ShapeProperties {
+    /// §20.1.10.10: black-and-white mode.
+    pub bw_mode: Option<BlackWhiteMode>,
+    /// §20.1.7.6: 2D transform.
+    pub transform: Option<Transform2D>,
+    /// §20.1.9.18: preset geometry.
+    pub preset_geometry: Option<PresetGeometryDef>,
+    /// Fill type (noFill, solidFill, etc.).
+    pub fill: Option<DrawingFill>,
+    /// §20.1.2.2.24: outline/line properties.
+    pub outline: Option<Outline>,
+}
+
+/// §20.1.7.6 CT_Transform2D — 2D transform.
+#[derive(Clone, Copy, Debug)]
+pub struct Transform2D {
+    /// Rotation in 60,000ths of a degree (§20.1.10.3).
+    pub rotation: Option<Dimension<SixtieThousandthDeg>>,
+    pub flip_h: Option<bool>,
+    pub flip_v: Option<bool>,
+    /// §20.1.7.4: offset (x, y).
+    pub offset: Option<Offset<Emu>>,
+    /// §20.1.7.3: extent (cx, cy).
+    pub extent: Option<Size<Emu>>,
+}
+
+/// §20.1.9.18 CT_PresetGeometry2D — preset shape geometry.
+#[derive(Clone, Debug)]
+pub struct PresetGeometryDef {
+    /// §20.1.10.56: preset shape type.
+    pub preset: PresetShapeType,
+    /// §20.1.9.5: adjustment values.
+    pub adjust_values: Vec<GeomGuide>,
+}
+
+/// §20.1.9.11 CT_GeomGuide — geometry guide (named formula).
+#[derive(Clone, Debug)]
+pub struct GeomGuide {
+    pub name: String,
+    pub formula: String,
+}
+
+/// §20.1.10.56 ST_ShapeType — preset shape types (subset).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PresetShapeType {
+    Rect,
+    RoundRect,
+    Ellipse,
+    Triangle,
+    RtTriangle,
+    Diamond,
+    Parallelogram,
+    Trapezoid,
+    Pentagon,
+    Hexagon,
+    Octagon,
+    Star4,
+    Star5,
+    Star6,
+    Star8,
+    Star10,
+    Star12,
+    Star16,
+    Star24,
+    Star32,
+    Line,
+    Plus,
+    Can,
+    Cube,
+    Donut,
+    NoSmoking,
+    BlockArc,
+    Heart,
+    Sun,
+    Moon,
+    SmileyFace,
+    LightningBolt,
+    Cloud,
+    Arc,
+    Plaque,
+    Frame,
+    Bevel,
+    FoldedCorner,
+    Chevron,
+    HomePlate,
+    Ribbon,
+    Ribbon2,
+    Pie,
+    PieWedge,
+    Chord,
+    Teardrop,
+    Arrow,
+    LeftArrow,
+    RightArrow,
+    UpArrow,
+    DownArrow,
+    LeftRightArrow,
+    UpDownArrow,
+    QuadArrow,
+    BentArrow,
+    UturnArrow,
+    CircularArrow,
+    CurvedRightArrow,
+    CurvedLeftArrow,
+    CurvedUpArrow,
+    CurvedDownArrow,
+    StripedRightArrow,
+    NotchedRightArrow,
+    BentUpArrow,
+    LeftUpArrow,
+    LeftRightUpArrow,
+    LeftArrowCallout,
+    RightArrowCallout,
+    UpArrowCallout,
+    DownArrowCallout,
+    LeftRightArrowCallout,
+    UpDownArrowCallout,
+    QuadArrowCallout,
+    SwooshArrow,
+    LeftCircularArrow,
+    LeftRightCircularArrow,
+    Callout1,
+    Callout2,
+    Callout3,
+    AccentCallout1,
+    AccentCallout2,
+    AccentCallout3,
+    BorderCallout1,
+    BorderCallout2,
+    BorderCallout3,
+    AccentBorderCallout1,
+    AccentBorderCallout2,
+    AccentBorderCallout3,
+    WedgeRectCallout,
+    WedgeRoundRectCallout,
+    WedgeEllipseCallout,
+    CloudCallout,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
+    BracketPair,
+    BracePair,
+    StraightConnector1,
+    BentConnector2,
+    BentConnector3,
+    BentConnector4,
+    BentConnector5,
+    CurvedConnector2,
+    CurvedConnector3,
+    CurvedConnector4,
+    CurvedConnector5,
+    FlowChartProcess,
+    FlowChartDecision,
+    FlowChartInputOutput,
+    FlowChartPredefinedProcess,
+    FlowChartInternalStorage,
+    FlowChartDocument,
+    FlowChartMultidocument,
+    FlowChartTerminator,
+    FlowChartPreparation,
+    FlowChartManualInput,
+    FlowChartManualOperation,
+    FlowChartConnector,
+    FlowChartPunchedCard,
+    FlowChartPunchedTape,
+    FlowChartSummingJunction,
+    FlowChartOr,
+    FlowChartCollate,
+    FlowChartSort,
+    FlowChartExtract,
+    FlowChartMerge,
+    FlowChartOfflineStorage,
+    FlowChartOnlineStorage,
+    FlowChartMagneticTape,
+    FlowChartMagneticDisk,
+    FlowChartMagneticDrum,
+    FlowChartDisplay,
+    FlowChartDelay,
+    FlowChartAlternateProcess,
+    FlowChartOffpageConnector,
+    ActionButtonBlank,
+    ActionButtonHome,
+    ActionButtonHelp,
+    ActionButtonInformation,
+    ActionButtonForwardNext,
+    ActionButtonBackPrevious,
+    ActionButtonEnd,
+    ActionButtonBeginning,
+    ActionButtonReturn,
+    ActionButtonDocument,
+    ActionButtonSound,
+    ActionButtonMovie,
+    IrregularSeal1,
+    IrregularSeal2,
+    Wave,
+    DoubleWave,
+    EllipseRibbon,
+    EllipseRibbon2,
+    VerticalScroll,
+    HorizontalScroll,
+    LeftRightRibbon,
+    Gear6,
+    Gear9,
+    Funnel,
+    MathPlus,
+    MathMinus,
+    MathMultiply,
+    MathDivide,
+    MathEqual,
+    MathNotEqual,
+    CornerTabs,
+    SquareTabs,
+    PlaqueTabs,
+    ChartX,
+    ChartStar,
+    ChartPlus,
+    HalfFrame,
+    Corner,
+    DiagStripe,
+    NonIsoscelesTrapezoid,
+    Heptagon,
+    Decagon,
+    Dodecagon,
+    Round1Rect,
+    Round2SameRect,
+    Round2DiagRect,
+    SnipRoundRect,
+    Snip1Rect,
+    Snip2SameRect,
+    Snip2DiagRect,
+    /// Unrecognized shape type — preserved as raw string.
+    Other(String),
+}
+
+/// §20.1.10.10 ST_BlackWhiteMode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlackWhiteMode {
+    Auto,
+    Black,
+    BlackGray,
+    BlackWhite,
+    Clr,
+    Gray,
+    GrayWhite,
+    Hidden,
+    InvGray,
+    LtGray,
+    White,
+}
+
+/// Drawing fill type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DrawingFill {
+    /// §20.1.8.44: no fill.
+    NoFill,
+    // SolidFill, GradFill, etc. — extend as needed.
+}
+
+/// §20.1.2.2.24 CT_LineProperties — outline/line properties.
+#[derive(Clone, Debug)]
+pub struct Outline {
+    /// Line width in EMUs.
+    pub width: Option<Dimension<Emu>>,
+    /// §20.1.10.31: line cap style.
+    pub cap: Option<LineCap>,
+    /// §20.1.10.15: compound line type.
+    pub compound: Option<CompoundLine>,
+    /// §20.1.10.39: pen alignment.
+    pub alignment: Option<PenAlignment>,
+    /// Line fill.
+    pub fill: Option<DrawingFill>,
+}
+
+/// §20.1.10.31 ST_LineCap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineCap {
+    Flat,
+    Round,
+    Square,
+}
+
+/// §20.1.10.15 ST_CompoundLine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompoundLine {
+    Single,
+    Double,
+    ThickThin,
+    ThinThick,
+    Triple,
+}
+
+/// §20.1.10.39 ST_PenAlignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PenAlignment {
+    Center,
+    Inset,
 }
 
 #[derive(Clone, Copy, Debug)]

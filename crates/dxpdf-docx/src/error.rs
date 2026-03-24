@@ -24,6 +24,9 @@ pub enum ParseError {
     #[error("missing required attribute '{attr}' on element '{element}'")]
     MissingAttribute { element: String, attr: String },
 
+    #[error("missing required child element '{child}' in '{parent}'")]
+    MissingElement { parent: String, child: String },
+
     #[error("invalid attribute value '{value}' for '{attr}': {reason}")]
     InvalidAttributeValue {
         attr: String,

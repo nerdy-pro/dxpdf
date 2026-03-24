@@ -1,6 +1,7 @@
 //! DOCX parsing — all submodules that parse specific parts of the OOXML package.
 
 pub mod body;
+pub mod drawing;
 pub mod notes;
 pub mod numbering;
 pub mod properties;
