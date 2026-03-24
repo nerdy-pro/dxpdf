@@ -502,7 +502,9 @@ pub fn parse_section_properties(
     let mut props = SectionProperties::default();
 
     loop {
-        match xml::next_event(reader, buf)? {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
             Event::Empty(ref e) | Event::Start(ref e) => {
                 let local = xml::local_name(e.name().as_ref()).to_vec();
                 match local.as_slice() {
@@ -531,10 +533,16 @@ pub fn parse_section_properties(
                         });
                     }
                     b"cols" => {
+                        let columns = if is_start {
+                            parse_column_definitions(reader, buf)?
+                        } else {
+                            Vec::new()
+                        };
                         props.columns = Some(Columns {
                             count: xml::optional_attr_u32(e, b"num")?,
                             space: xml::optional_attr_i64(e, b"space")?.map(Dimension::new),
                             equal_width: xml::optional_attr_bool(e, b"equalWidth")?,
+                            columns,
                         });
                     }
                     b"headerReference" => {
@@ -971,6 +979,36 @@ fn parse_table_measure(e: &BytesStart<'_>) -> Result<TableMeasure> {
         Some("auto") | None => Ok(TableMeasure::Auto),
         Some(other) => Err(invalid_value("type", other)),
     }
+}
+
+/// §17.6.3: parse `w:col` children inside `w:cols`.
+fn parse_column_definitions(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<Vec<ColumnDefinition>> {
+    let mut cols = Vec::new();
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Empty(ref e) | Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"col" => {
+                        cols.push(ColumnDefinition {
+                            width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
+                            space: xml::optional_attr_i64(e, b"space")?.map(Dimension::new),
+                        });
+                    }
+                    _ => xml::warn_unsupported_element("cols", &local),
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"cols" => break,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    Ok(cols)
 }
 
 fn parse_table_look(e: &BytesStart<'_>) -> Result<TableLook> {

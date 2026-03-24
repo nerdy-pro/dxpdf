@@ -378,11 +378,22 @@ pub struct PageMargins {
     pub gutter: Option<Dimension<Twips>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Columns {
     pub count: Option<u32>,
     pub space: Option<Dimension<Twips>>,
     pub equal_width: Option<bool>,
+    /// §17.6.3: individual column definitions. Empty when `equal_width` is true/absent.
+    pub columns: Vec<ColumnDefinition>,
+}
+
+/// §17.6.3: a single column definition within a multi-column section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnDefinition {
+    /// Column width in twips.
+    pub width: Option<Dimension<Twips>>,
+    /// Spacing after this column in twips.
+    pub space: Option<Dimension<Twips>>,
 }
 
 /// Header/footer references for a section, by position type.
