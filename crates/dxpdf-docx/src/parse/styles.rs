@@ -42,6 +42,9 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
                             sheet.styles.insert(id, style);
                         }
                     }
+                    b"latentStyles" => {
+                        sheet.latent_styles = Some(parse_latent_styles(e, &mut reader, &mut buf)?);
+                    }
                     _ => xml::warn_unsupported_element("styles", &local),
                 }
             }
@@ -294,4 +297,47 @@ fn parse_table_style_override(
         table_row_properties: tr_pr,
         table_cell_properties: tc_pr,
     }))
+}
+
+/// §17.7.4.5: parse `w:latentStyles`. Scoped to `</w:latentStyles>`.
+fn parse_latent_styles(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<LatentStyles> {
+    let mut exceptions = Vec::new();
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Empty(ref e) | Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"lsdException" => {
+                        exceptions.push(LatentStyleException {
+                            name: xml::optional_attr(e, b"name")?,
+                            locked: xml::optional_attr_bool(e, b"locked")?,
+                            ui_priority: xml::optional_attr_u32(e, b"uiPriority")?,
+                            semi_hidden: xml::optional_attr_bool(e, b"semiHidden")?,
+                            unhide_when_used: xml::optional_attr_bool(e, b"unhideWhenUsed")?,
+                            q_format: xml::optional_attr_bool(e, b"qFormat")?,
+                        });
+                    }
+                    _ => xml::warn_unsupported_element("latentStyles", &local),
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"latentStyles" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"latentStyles")),
+            _ => {}
+        }
+    }
+
+    Ok(LatentStyles {
+        default_locked_state: xml::optional_attr_bool(start, b"defLockedState")?,
+        default_ui_priority: xml::optional_attr_u32(start, b"defUIPriority")?,
+        default_semi_hidden: xml::optional_attr_bool(start, b"defSemiHidden")?,
+        default_unhide_when_used: xml::optional_attr_bool(start, b"defUnhideWhenUsed")?,
+        default_q_format: xml::optional_attr_bool(start, b"defQFormat")?,
+        count: xml::optional_attr_u32(start, b"count")?,
+        exceptions,
+    })
 }

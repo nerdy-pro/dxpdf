@@ -234,6 +234,32 @@ pub struct StyleSheet {
     pub doc_defaults_run: RunProperties,
     /// All style definitions keyed by style ID.
     pub styles: HashMap<StyleId, Style>,
+    /// §17.7.4.5: default properties for styles not explicitly defined.
+    pub latent_styles: Option<LatentStyles>,
+}
+
+/// §17.7.4.5: default properties for latent (not explicitly defined) styles.
+#[derive(Clone, Debug)]
+pub struct LatentStyles {
+    pub default_locked_state: Option<bool>,
+    pub default_ui_priority: Option<u32>,
+    pub default_semi_hidden: Option<bool>,
+    pub default_unhide_when_used: Option<bool>,
+    pub default_q_format: Option<bool>,
+    pub count: Option<u32>,
+    /// §17.7.4.8: per-style exceptions to the defaults.
+    pub exceptions: Vec<LatentStyleException>,
+}
+
+/// §17.7.4.8: exception to latent style defaults for a specific style name.
+#[derive(Clone, Debug)]
+pub struct LatentStyleException {
+    pub name: Option<String>,
+    pub locked: Option<bool>,
+    pub ui_priority: Option<u32>,
+    pub semi_hidden: Option<bool>,
+    pub unhide_when_used: Option<bool>,
+    pub q_format: Option<bool>,
 }
 
 /// A single style definition.
