@@ -9,6 +9,7 @@ use quick_xml::Reader;
 use log::warn;
 
 use crate::error::{ParseError, Result};
+use crate::model::RelId;
 use crate::xml;
 
 /// The contents of a DOCX package, extracted from the ZIP archive.
@@ -63,7 +64,7 @@ fn normalize_path(path: &str) -> String {
 /// A parsed relationship from a .rels file.
 #[derive(Clone, Debug)]
 pub struct Relationship {
-    pub id: String,
+    pub id: RelId,
     pub rel_type: RelationshipType,
     pub target: String,
     pub target_mode: TargetMode,
@@ -193,7 +194,7 @@ impl Relationships {
                 Event::Empty(ref e) | Event::Start(ref e)
                     if xml::local_name(e.name().as_ref()) == b"Relationship" =>
                 {
-                    let id = xml::required_attr(e, b"Id")?;
+                    let id = RelId::new(xml::required_attr(e, b"Id")?);
                     let rel_type_uri = xml::required_attr(e, b"Type")?;
                     let target = xml::required_attr(e, b"Target")?;
                     let target_mode = match xml::optional_attr(e, b"TargetMode")? {
@@ -231,7 +232,7 @@ impl Relationships {
 
     /// Look up a relationship by its ID.
     pub fn find_by_id(&self, id: &str) -> Option<&Relationship> {
-        self.rels.iter().find(|r| r.id == id)
+        self.rels.iter().find(|r| r.id.as_str() == id)
     }
 
     /// Get all relationships.
