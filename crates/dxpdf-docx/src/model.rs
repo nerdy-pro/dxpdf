@@ -380,7 +380,32 @@ pub struct SectionProperties {
     pub footer_refs: SectionHeaderFooterRefs,
     pub title_page: Option<bool>,
     pub section_type: Option<SectionType>,
+    /// §17.6.12: page numbering settings for this section.
+    pub page_number_type: Option<PageNumberType>,
     pub rsids: SectionRevisionIds,
+}
+
+/// §17.6.12: page numbering settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageNumberType {
+    /// §17.18.59 ST_NumberFormat: page number format.
+    pub format: Option<NumberFormat>,
+    /// Starting page number (overrides sequential).
+    pub start: Option<u32>,
+    /// Heading style level for chapter numbering (1-indexed).
+    pub chap_style: Option<u32>,
+    /// §17.18.6 ST_ChapSep: separator between chapter and page number.
+    pub chap_sep: Option<ChapterSeparator>,
+}
+
+/// §17.18.6 ST_ChapSep — separator between chapter number and page number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChapterSeparator {
+    Hyphen,
+    Period,
+    Colon,
+    EmDash,
+    EnDash,
 }
 
 /// §17.6.5: document grid — controls character and line pitch.

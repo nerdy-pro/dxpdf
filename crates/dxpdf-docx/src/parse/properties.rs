@@ -652,6 +652,9 @@ pub fn parse_section_properties(
                         props.title_page =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"pgNumType" => {
+                        props.page_number_type = Some(parse_page_number_type(e)?);
+                    }
                     b"type" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             props.section_type = Some(parse_section_type(&val)?);
@@ -1378,6 +1381,36 @@ fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
             Some("outside") => Some(TableYAlign::Outside),
             Some("inline") => Some(TableYAlign::Inline),
             Some(other) => return Err(invalid_value("framePr/yAlign", other)),
+            None => None,
+        },
+    })
+}
+
+/// §17.6.12: parse `w:pgNumType` attributes.
+fn parse_page_number_type(e: &BytesStart<'_>) -> Result<PageNumberType> {
+    Ok(PageNumberType {
+        format: match xml::optional_attr(e, b"fmt")?.as_deref() {
+            Some("decimal") => Some(NumberFormat::Decimal),
+            Some("upperRoman") => Some(NumberFormat::UpperRoman),
+            Some("lowerRoman") => Some(NumberFormat::LowerRoman),
+            Some("upperLetter") => Some(NumberFormat::UpperLetter),
+            Some("lowerLetter") => Some(NumberFormat::LowerLetter),
+            Some("ordinal") => Some(NumberFormat::Ordinal),
+            Some("cardinalText") => Some(NumberFormat::CardinalText),
+            Some("ordinalText") => Some(NumberFormat::OrdinalText),
+            Some("none") => Some(NumberFormat::None),
+            Some(other) => return Err(invalid_value("pgNumType/fmt", other)),
+            None => None,
+        },
+        start: xml::optional_attr_u32(e, b"start")?,
+        chap_style: xml::optional_attr_u32(e, b"chapStyle")?,
+        chap_sep: match xml::optional_attr(e, b"chapSep")?.as_deref() {
+            Some("hyphen") => Some(ChapterSeparator::Hyphen),
+            Some("period") => Some(ChapterSeparator::Period),
+            Some("colon") => Some(ChapterSeparator::Colon),
+            Some("emDash") => Some(ChapterSeparator::EmDash),
+            Some("enDash") => Some(ChapterSeparator::EnDash),
+            Some(other) => return Err(invalid_value("pgNumType/chapSep", other)),
             None => None,
         },
     })
