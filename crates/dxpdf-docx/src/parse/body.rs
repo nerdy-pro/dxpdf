@@ -6,6 +6,8 @@
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
+use dxpdf_field::FieldInstruction;
+
 use crate::dimension::{Dimension, Emu};
 use crate::error::Result;
 use crate::geometry::{EdgeInsets, Size};
@@ -156,7 +158,7 @@ fn parse_paragraph(
                     }
                     b"fldSimple" => {
                         let instr = xml::optional_attr(e, b"instr")?.unwrap_or_default();
-                        let field = parse_simple_field_content(instr, reader, buf)?;
+                        let field = parse_simple_field_content(&instr, reader, buf)?;
                         content.push(Inline::Field(field));
                     }
                     _ => xml::warn_unsupported_element("paragraph", &local),
@@ -431,7 +433,7 @@ fn parse_hyperlink_content(
 // ── Field ────────────────────────────────────────────────────────────────────
 
 fn parse_simple_field_content(
-    instruction: String,
+    instruction: &str,
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
 ) -> Result<Field> {
@@ -449,10 +451,27 @@ fn parse_simple_field_content(
         }
     }
 
+    let parsed = parse_field_instruction(instruction);
+
     Ok(Field {
-        instruction,
+        instruction: parsed,
         content: field_content,
     })
+}
+
+/// Parse a raw field instruction string into a typed `FieldInstruction`.
+/// Falls back to `FieldInstruction::Unknown` on parse errors.
+fn parse_field_instruction(raw: &str) -> FieldInstruction {
+    match dxpdf_field::parse(raw) {
+        Ok(instr) => instr,
+        Err(e) => {
+            log::warn!("failed to parse field instruction {:?}: {}", raw, e);
+            FieldInstruction::Unknown {
+                field_type: String::new(),
+                raw: raw.to_owned(),
+            }
+        }
+    }
 }
 
 // ── Drawing / Image ──────────────────────────────────────────────────────────

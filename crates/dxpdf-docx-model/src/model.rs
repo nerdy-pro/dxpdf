@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+use dxpdf_field::FieldInstruction;
+
 use crate::dimension::{
     Dimension, EighthPoints, Emu, FractionPoints, HalfPoints, ThousandthPercent, Twips,
 };
@@ -1169,11 +1171,11 @@ pub enum HyperlinkTarget {
 
 // ── Field ────────────────────────────────────────────────────────────────────
 
-/// A simple field (w:fldSimple). Stores the raw instruction string.
+/// A simple field (w:fldSimple). Stores the parsed field instruction.
 #[derive(Clone, Debug)]
 pub struct Field {
-    /// Raw field instruction string (e.g., " PAGE ", " NUMPAGES ", " TOC \\o ").
-    pub instruction: String,
+    /// Parsed field instruction (e.g., `FieldInstruction::Page`, `FieldInstruction::Toc { .. }`).
+    pub instruction: FieldInstruction,
     pub content: Vec<Inline>,
 }
 

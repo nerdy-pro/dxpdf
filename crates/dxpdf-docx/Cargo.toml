@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 dxpdf-docx-model = { path = "../dxpdf-docx-model" }
+dxpdf-field = { path = "../dxpdf-field" }
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 thiserror = "2"
