@@ -103,6 +103,7 @@ fn parse_style(
     let mut ppr: Option<ParagraphProperties> = None;
     let mut rpr: Option<RunProperties> = None;
     let mut tbl_pr: Option<TableProperties> = None;
+    let mut overrides: Vec<TableStyleOverride> = Vec::new();
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -112,9 +113,6 @@ fn parse_style(
                     b"pPr" => {
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         ppr = Some(parsed.properties);
-                        // If rPr was inside pPr, it's the paragraph mark's run properties.
-                        // For style definitions, we store it as the style's rPr if no
-                        // standalone rPr follows.
                         if rpr.is_none() {
                             rpr = parsed.run_properties;
                         }
@@ -126,6 +124,11 @@ fn parse_style(
                     b"tblPr" => {
                         let (parsed, _) = properties::parse_table_properties(reader, buf)?;
                         tbl_pr = Some(parsed);
+                    }
+                    b"tblStylePr" => {
+                        if let Some(ovr) = parse_table_style_override(e, reader, buf)? {
+                            overrides.push(ovr);
+                        }
                     }
                     _ => xml::warn_unsupported_element("style", &local),
                 }
@@ -154,6 +157,88 @@ fn parse_style(
             paragraph_properties: ppr,
             run_properties: rpr,
             table_properties: tbl_pr,
+            table_style_overrides: overrides,
         },
     )))
+}
+
+/// §17.7.6.6: parse a `w:tblStylePr` element.
+fn parse_table_style_override(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+) -> Result<Option<TableStyleOverride>> {
+    let override_type = match xml::optional_attr(start, b"type")?.as_deref() {
+        Some("firstRow") => TableStyleOverrideType::FirstRow,
+        Some("lastRow") => TableStyleOverrideType::LastRow,
+        Some("firstCol") => TableStyleOverrideType::FirstCol,
+        Some("lastCol") => TableStyleOverrideType::LastCol,
+        Some("band1Vert") => TableStyleOverrideType::Band1Vert,
+        Some("band2Vert") => TableStyleOverrideType::Band2Vert,
+        Some("band1Horz") => TableStyleOverrideType::Band1Horz,
+        Some("band2Horz") => TableStyleOverrideType::Band2Horz,
+        Some("neCell") => TableStyleOverrideType::NeCell,
+        Some("nwCell") => TableStyleOverrideType::NwCell,
+        Some("seCell") => TableStyleOverrideType::SeCell,
+        Some("swCell") => TableStyleOverrideType::SwCell,
+        Some("wholeTable") => TableStyleOverrideType::WholeTable,
+        Some(other) => {
+            return Err(crate::error::ParseError::InvalidAttributeValue {
+                attr: "tblStylePr/type".into(),
+                value: other.into(),
+                reason: "unsupported value per OOXML spec §17.18.89".into(),
+            });
+        }
+        None => {
+            xml::skip_to_end(reader, buf, b"tblStylePr")?;
+            return Ok(None);
+        }
+    };
+
+    let mut ppr: Option<ParagraphProperties> = None;
+    let mut rpr: Option<RunProperties> = None;
+    let mut tbl_pr: Option<TableProperties> = None;
+    let mut tr_pr: Option<TableRowProperties> = None;
+    let mut tc_pr: Option<TableCellProperties> = None;
+
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) => {
+                let local = xml::local_name(e.name().as_ref()).to_vec();
+                match local.as_slice() {
+                    b"pPr" => {
+                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
+                        ppr = Some(parsed.properties);
+                    }
+                    b"rPr" => {
+                        let (parsed, _) = properties::parse_run_properties(reader, buf)?;
+                        rpr = Some(parsed);
+                    }
+                    b"tblPr" => {
+                        let (parsed, _) = properties::parse_table_properties(reader, buf)?;
+                        tbl_pr = Some(parsed);
+                    }
+                    b"trPr" => {
+                        tr_pr = Some(properties::parse_table_row_properties(reader, buf)?);
+                    }
+                    b"tcPr" => {
+                        tc_pr = Some(properties::parse_table_cell_properties(reader, buf)?);
+                    }
+                    _ => xml::warn_unsupported_element("tblStylePr", &local),
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblStylePr" => break,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    Ok(Some(TableStyleOverride {
+        override_type,
+        paragraph_properties: ppr,
+        run_properties: rpr,
+        table_properties: tbl_pr,
+        table_row_properties: tr_pr,
+        table_cell_properties: tc_pr,
+    }))
 }

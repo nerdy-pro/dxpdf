@@ -247,6 +247,38 @@ pub struct Style {
     pub paragraph_properties: Option<ParagraphProperties>,
     pub run_properties: Option<RunProperties>,
     pub table_properties: Option<TableProperties>,
+    /// §17.7.6.6: conditional formatting overrides for table regions.
+    pub table_style_overrides: Vec<TableStyleOverride>,
+}
+
+/// §17.7.6.6: formatting override for a specific table region.
+#[derive(Clone, Debug)]
+pub struct TableStyleOverride {
+    /// Which region this override applies to.
+    pub override_type: TableStyleOverrideType,
+    pub paragraph_properties: Option<ParagraphProperties>,
+    pub run_properties: Option<RunProperties>,
+    pub table_properties: Option<TableProperties>,
+    pub table_row_properties: Option<TableRowProperties>,
+    pub table_cell_properties: Option<TableCellProperties>,
+}
+
+/// §17.18.89 ST_TblStyleOverrideType — table region for conditional formatting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableStyleOverrideType {
+    FirstRow,
+    LastRow,
+    FirstCol,
+    LastCol,
+    Band1Vert,
+    Band2Vert,
+    Band1Horz,
+    Band2Horz,
+    NeCell,
+    NwCell,
+    SeCell,
+    SwCell,
+    WholeTable,
 }
 
 /// The type of a style definition (§17.7.4.17).
