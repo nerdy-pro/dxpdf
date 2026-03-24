@@ -848,6 +848,9 @@ pub struct RunProperties {
     pub imprint: Option<bool>,
     pub outline: Option<bool>,
     pub shadow: Option<bool>,
+    /// §17.3.2.19: vertical position offset of text baseline, in half-points.
+    /// Positive raises, negative lowers.
+    pub position: Option<Dimension<HalfPoints>>,
     /// §17.3.2.20: proofing languages per script category (BCP 47 tags).
     pub lang: Option<Lang>,
 }

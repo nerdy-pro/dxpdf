@@ -272,6 +272,11 @@ pub fn parse_run_properties(
                         props.web_hidden =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"position" => {
+                        if let Some(val) = xml::optional_attr_i64(e, b"val")? {
+                            props.position = Some(Dimension::new(val));
+                        }
+                    }
                     b"lang" => {
                         props.lang = Some(Lang {
                             val: xml::optional_attr(e, b"val")?,
