@@ -29,14 +29,16 @@ pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                if local.as_slice() == b"rsids" {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                if local == b"rsids" {
                     parse_rsids(&mut reader, &mut buf, &mut settings)?;
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"defaultTabStop" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             settings.default_tab_stop = Dimension::new(val);
@@ -65,8 +67,9 @@ fn parse_rsids(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"rsidRoot" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             settings.rsid_root = RevisionSaveId::from_hex(&val);
@@ -82,7 +85,7 @@ fn parse_rsids(
                     _ => {
                         warn!(
                             "rsids: unsupported element <{}>",
-                            String::from_utf8_lossy(&local)
+                            String::from_utf8_lossy(local)
                         );
                     }
                 }

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/dxpdf-model", "crates/dxpdf-docx-model", "crates/dxpdf-docx", "crates/dxpdf-field"]
+members = [".", "crates/dxpdf-model", "crates/dxpdf-docx-model", "crates/dxpdf-docx", "crates/dxpdf-field", "crates/dxpdf-renderer"]
 
 [package]
 name = "dxpdf"

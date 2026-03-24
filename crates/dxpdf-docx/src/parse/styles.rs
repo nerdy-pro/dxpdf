@@ -32,8 +32,9 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"docDefaults" => {
                         parse_doc_defaults(&mut reader, &mut buf, &mut sheet)?;
                     }
@@ -45,7 +46,7 @@ pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
                     b"latentStyles" => {
                         sheet.latent_styles = Some(parse_latent_styles(e, &mut reader, &mut buf)?);
                     }
-                    _ => xml::warn_unsupported_element("styles", &local),
+                    _ => xml::warn_unsupported_element("styles", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"styles" => break,
@@ -68,15 +69,16 @@ fn parse_doc_defaults(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"rPrDefault" => {
                         parse_rpr_default(reader, buf, sheet)?;
                     }
                     b"pPrDefault" => {
                         parse_ppr_default(reader, buf, sheet)?;
                     }
-                    _ => xml::warn_unsupported_element("docDefaults", &local),
+                    _ => xml::warn_unsupported_element("docDefaults", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"docDefaults" => break,
@@ -164,8 +166,9 @@ fn parse_style(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pPr" => {
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         ppr = Some(parsed.properties);
@@ -186,14 +189,15 @@ fn parse_style(
                             overrides.push(ovr);
                         }
                     }
-                    _ => xml::warn_unsupported_element("style", &local),
+                    _ => xml::warn_unsupported_element("style", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                if local.as_slice() == b"basedOn" {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                if local == b"basedOn" {
                     based_on = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                } else if local.as_slice() == b"name" {
+                } else if local == b"name" {
                     name = xml::optional_attr(e, b"val")?;
                 }
             }
@@ -260,8 +264,9 @@ fn parse_table_style_override(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pPr" => {
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         ppr = Some(parsed.properties);
@@ -280,7 +285,7 @@ fn parse_table_style_override(
                     b"tcPr" => {
                         tc_pr = Some(properties::parse_table_cell_properties(reader, buf)?);
                     }
-                    _ => xml::warn_unsupported_element("tblStylePr", &local),
+                    _ => xml::warn_unsupported_element("tblStylePr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblStylePr" => break,
@@ -310,8 +315,9 @@ fn parse_latent_styles(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"lsdException" => {
                         exceptions.push(LatentStyleException {
                             name: xml::optional_attr(e, b"name")?,
@@ -322,7 +328,7 @@ fn parse_latent_styles(
                             q_format: xml::optional_attr_bool(e, b"qFormat")?,
                         });
                     }
-                    _ => xml::warn_unsupported_element("latentStyles", &local),
+                    _ => xml::warn_unsupported_element("latentStyles", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"latentStyles" => break,

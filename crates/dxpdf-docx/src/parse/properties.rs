@@ -46,8 +46,9 @@ pub fn parse_paragraph_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -92,12 +93,13 @@ pub fn parse_paragraph_properties(
                         sp.rsids = rsids;
                         sect_props = Some(sp);
                     }
-                    _ => xml::warn_unsupported_element("pPr", &local),
+                    _ => xml::warn_unsupported_element("pPr", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -176,7 +178,7 @@ pub fn parse_paragraph_properties(
                             ..SectionProperties::default()
                         });
                     }
-                    _ => xml::warn_unsupported_element("pPr", &local),
+                    _ => xml::warn_unsupported_element("pPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pPr" => break,
@@ -206,8 +208,9 @@ pub fn parse_run_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) | Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"rStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -320,7 +323,7 @@ pub fn parse_run_properties(
                     b"bdr" => {
                         props.border = Some(parse_border(e)?);
                     }
-                    _ => xml::warn_unsupported_element("rPr", &local),
+                    _ => xml::warn_unsupported_element("rPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rPr" => break,
@@ -345,8 +348,9 @@ pub fn parse_table_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tblStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -374,12 +378,13 @@ pub fn parse_table_properties(
                             props.overlap = Some(parse_table_overlap(&val)?);
                         }
                     }
-                    _ => xml::warn_unsupported_element("tblPr", &local),
+                    _ => xml::warn_unsupported_element("tblPr", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tblStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -423,7 +428,7 @@ pub fn parse_table_properties(
                             props.overlap = Some(parse_table_overlap(&val)?);
                         }
                     }
-                    _ => xml::warn_unsupported_element("tblPr", &local),
+                    _ => xml::warn_unsupported_element("tblPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblPr" => break,
@@ -445,8 +450,9 @@ pub fn parse_table_row_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"trHeight" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             let rule = match xml::optional_attr(e, b"hRule")?.as_deref() {
@@ -481,7 +487,7 @@ pub fn parse_table_row_properties(
                     b"wAfter" => {
                         props.w_after = Some(parse_table_measure(e)?);
                     }
-                    _ => xml::warn_unsupported_element("trPr", &local),
+                    _ => xml::warn_unsupported_element("trPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"trPr" => break,
@@ -503,20 +509,22 @@ pub fn parse_table_cell_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tcBorders" => {
                         props.borders = Some(parse_table_cell_borders(reader, buf)?);
                     }
                     b"tcMar" => {
                         props.margins = Some(parse_edge_insets_twips(reader, buf, b"tcMar")?);
                     }
-                    _ => xml::warn_unsupported_element("tcPr", &local),
+                    _ => xml::warn_unsupported_element("tcPr", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tcW" => {
                         props.width = Some(parse_table_measure(e)?);
                     }
@@ -552,7 +560,7 @@ pub fn parse_table_cell_properties(
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
-                    _ => xml::warn_unsupported_element("tcPr", &local),
+                    _ => xml::warn_unsupported_element("tcPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcPr" => break,
@@ -587,8 +595,9 @@ pub fn parse_section_properties(
         let is_start = matches!(event, Event::Start(_));
         match event {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pgSz" => {
                         let orientation = match xml::optional_attr(e, b"orient")?.as_deref() {
                             Some("landscape") => Some(PageOrientation::Landscape),
@@ -677,7 +686,7 @@ pub fn parse_section_properties(
                             props.section_type = Some(parse_section_type(&val)?);
                         }
                     }
-                    _ => xml::warn_unsupported_element("sectPr", &local),
+                    _ => xml::warn_unsupported_element("sectPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"sectPr" => break,
@@ -755,8 +764,9 @@ fn parse_numbering_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<N
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"ilvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             level = val as u8;
@@ -767,7 +777,7 @@ fn parse_numbering_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<N
                             num_id = val;
                         }
                     }
-                    _ => xml::warn_unsupported_element("numPr", &local),
+                    _ => xml::warn_unsupported_element("numPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numPr" => break,
@@ -837,15 +847,16 @@ fn parse_paragraph_borders(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
                 let border = parse_border(e)?;
-                match local.as_slice() {
+                match local {
                     b"top" => borders.top = Some(border),
                     b"bottom" => borders.bottom = Some(border),
                     b"left" | b"start" => borders.left = Some(border),
                     b"right" | b"end" => borders.right = Some(border),
                     b"between" => borders.between = Some(border),
-                    _ => xml::warn_unsupported_element("pBdr", &local),
+                    _ => xml::warn_unsupported_element("pBdr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pBdr" => break,
@@ -1077,15 +1088,16 @@ fn parse_column_definitions(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"col" => {
                         cols.push(ColumnDefinition {
                             width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
                             space: xml::optional_attr_i64(e, b"space")?.map(Dimension::new),
                         });
                     }
-                    _ => xml::warn_unsupported_element("cols", &local),
+                    _ => xml::warn_unsupported_element("cols", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"cols" => break,
@@ -1121,16 +1133,17 @@ fn parse_table_borders(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
                 let border = parse_border(e)?;
-                match local.as_slice() {
+                match local {
                     b"top" => borders.top = Some(border),
                     b"bottom" => borders.bottom = Some(border),
                     b"left" | b"start" => borders.left = Some(border),
                     b"right" | b"end" => borders.right = Some(border),
                     b"insideH" => borders.inside_h = Some(border),
                     b"insideV" => borders.inside_v = Some(border),
-                    _ => xml::warn_unsupported_element("tblBorders", &local),
+                    _ => xml::warn_unsupported_element("tblBorders", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblBorders" => break,
@@ -1160,9 +1173,10 @@ fn parse_table_cell_borders(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
                 let border = parse_border(e)?;
-                match local.as_slice() {
+                match local {
                     b"top" => borders.top = Some(border),
                     b"bottom" => borders.bottom = Some(border),
                     b"left" | b"start" => borders.left = Some(border),
@@ -1171,7 +1185,7 @@ fn parse_table_cell_borders(
                     b"insideV" => borders.inside_v = Some(border),
                     b"tl2br" => borders.tl2br = Some(border),
                     b"tr2bl" => borders.tr2bl = Some(border),
-                    _ => xml::warn_unsupported_element("tcBorders", &local),
+                    _ => xml::warn_unsupported_element("tcBorders", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tcBorders" => break,
@@ -1193,14 +1207,15 @@ fn parse_edge_insets_twips(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
                 let w = xml::optional_attr_i64(e, b"w")?.unwrap_or(0);
-                match local.as_slice() {
+                match local {
                     b"top" => insets.top = Dimension::new(w),
                     b"bottom" => insets.bottom = Dimension::new(w),
                     b"left" | b"start" => insets.left = Dimension::new(w),
                     b"right" | b"end" => insets.right = Dimension::new(w),
-                    _ => xml::warn_unsupported_element("margins", &local),
+                    _ => xml::warn_unsupported_element("margins", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,

@@ -39,8 +39,9 @@ pub fn parse_inline_image(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"cNvGraphicFramePr" => {
                         graphic_frame_locks = Some(parse_cnv_graphic_frame_pr(reader, buf)?);
                     }
@@ -51,14 +52,15 @@ pub fn parse_inline_image(
                         doc_properties = Some(parse_doc_properties(e, Some(reader), Some(buf))?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("inline-image", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("inline-image", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"extent" => {
                         extent = parse_positive_size_2d(e)?;
                     }
@@ -68,7 +70,7 @@ pub fn parse_inline_image(
                     b"docPr" => {
                         doc_properties = Some(parse_doc_properties(e, None, None)?);
                     }
-                    _ => xml::warn_unsupported_element("inline-image", &local),
+                    _ => xml::warn_unsupported_element("inline-image", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"inline" => break,
@@ -170,8 +172,9 @@ fn parse_cnv_graphic_frame_pr(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"graphicFrameLocks" => {
                         locks.no_change_aspect =
                             xml::optional_attr_bool(e, b"noChangeAspect")?;
@@ -181,7 +184,7 @@ fn parse_cnv_graphic_frame_pr(
                         locks.no_resize = xml::optional_attr_bool(e, b"noResize")?;
                         locks.no_select = xml::optional_attr_bool(e, b"noSelect")?;
                     }
-                    _ => xml::warn_unsupported_element("cNvGraphicFramePr", &local),
+                    _ => xml::warn_unsupported_element("cNvGraphicFramePr", local),
                 }
             }
             Event::End(ref e)
@@ -209,14 +212,15 @@ fn parse_graphic(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"graphicData" => {
                         content = parse_graphic_data(reader, buf)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("graphic", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("graphic", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -239,8 +243,9 @@ fn parse_graphic_data(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pic" => {
                         content =
                             Some(GraphicContent::Picture(parse_picture(reader, buf)?));
@@ -251,8 +256,8 @@ fn parse_graphic_data(
                         ));
                     }
                     _ => {
-                        xml::warn_unsupported_element("graphicData", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("graphicData", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -280,8 +285,9 @@ fn parse_word_processing_shape(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"cNvPr" => {
                         cnv_pr = Some(parse_cnv_pr(e, reader, buf)?);
                     }
@@ -296,14 +302,15 @@ fn parse_word_processing_shape(
                         txbx_content = parse_wsp_txbx(reader, buf)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("wsp", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("wsp", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"cNvPr" => {
                         cnv_pr = Some(parse_cnv_pr_attrs(e)?);
                     }
@@ -311,7 +318,7 @@ fn parse_word_processing_shape(
                     b"bodyPr" => {
                         body_pr = Some(parse_body_properties_attrs(e)?);
                     }
-                    _ => xml::warn_unsupported_element("wsp", &local),
+                    _ => xml::warn_unsupported_element("wsp", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"wsp" => break,
@@ -335,16 +342,17 @@ fn parse_wsp_txbx(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<B
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"txbxContent" => {
                         let (content, _) =
                             crate::parse::body::parse_block_content_public(reader, buf, b"txbxContent")?;
                         blocks = content;
                     }
                     _ => {
-                        xml::warn_unsupported_element("txbx", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("txbx", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -436,8 +444,9 @@ fn parse_body_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"noAutofit" => bp.auto_fit = Some(TextAutoFit::NoAutoFit),
                     b"normAutofit" => bp.auto_fit = Some(TextAutoFit::NormalAutoFit),
                     b"spAutoFit" => bp.auto_fit = Some(TextAutoFit::SpAutoFit),
@@ -463,8 +472,9 @@ fn parse_picture(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pictur
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"nvPicPr" => {
                         nv_pic_pr = Some(parse_nv_pic_pr(reader, buf)?);
                     }
@@ -475,8 +485,8 @@ fn parse_picture(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pictur
                         shape_properties = Some(parse_shape_properties(e, reader, buf)?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("pic", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("pic", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -511,8 +521,9 @@ fn parse_nv_pic_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NvPi
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"cNvPr" => {
                         cnv_pr = Some(parse_cnv_pr(e, reader, buf)?);
                     }
@@ -520,14 +531,15 @@ fn parse_nv_pic_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NvPi
                         cnv_pic_pr = Some(parse_cnv_pic_pr(e, reader, buf)?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("nvPicPr", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("nvPicPr", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"cNvPr" => {
                         cnv_pr = Some(parse_cnv_pr_attrs(e)?);
                     }
@@ -540,7 +552,7 @@ fn parse_nv_pic_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NvPi
                             pic_locks: None,
                         });
                     }
-                    _ => xml::warn_unsupported_element("nvPicPr", &local),
+                    _ => xml::warn_unsupported_element("nvPicPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"nvPicPr" => break,
@@ -596,12 +608,13 @@ fn parse_cnv_pic_pr(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) | Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"picLocks" => {
                         pic_locks = Some(parse_pic_locks(e)?);
                     }
-                    _ => xml::warn_unsupported_element("cNvPicPr", &local),
+                    _ => xml::warn_unsupported_element("cNvPicPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"cNvPicPr" => break,
@@ -649,8 +662,9 @@ fn parse_blip_fill(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"blip" => {
                         blip = Some(parse_blip(e, reader, buf)?);
                     }
@@ -658,21 +672,22 @@ fn parse_blip_fill(
                         stretch = Some(parse_stretch(reader, buf)?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("blipFill", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("blipFill", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"blip" => {
                         blip = Some(parse_blip_attrs(e)?);
                     }
                     b"srcRect" => {
                         src_rect = Some(parse_relative_rect(e)?);
                     }
-                    _ => xml::warn_unsupported_element("blipFill", &local),
+                    _ => xml::warn_unsupported_element("blipFill", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"blipFill" => break,
@@ -747,12 +762,13 @@ fn parse_stretch(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Stretc
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"fillRect" => {
                         fill_rect = Some(parse_relative_rect(e)?);
                     }
-                    _ => xml::warn_unsupported_element("stretch", &local),
+                    _ => xml::warn_unsupported_element("stretch", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"stretch" => break,
@@ -782,8 +798,9 @@ fn parse_shape_properties(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"xfrm" => {
                         transform = Some(parse_transform_2d(e, reader, buf)?);
                     }
@@ -794,30 +811,31 @@ fn parse_shape_properties(
                         outline = Some(parse_outline(e, reader, buf)?);
                     }
                     b"custGeom" => {
-                        xml::warn_unsupported_element("spPr", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("spPr", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                     // Fill group — complex, skip children for now.
                     b"solidFill" | b"gradFill" | b"blipFill" | b"pattFill" | b"grpFill" => {
-                        xml::warn_unsupported_element("spPr", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("spPr", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                     b"effectLst" | b"effectDag" | b"scene3d" | b"sp3d" | b"extLst" => {
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("spPr", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("spPr", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"noFill" => {
                         fill = Some(DrawingFill::NoFill);
                     }
-                    _ => xml::warn_unsupported_element("spPr", &local),
+                    _ => xml::warn_unsupported_element("spPr", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"spPr" => break,
@@ -872,8 +890,9 @@ fn parse_transform_2d(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"off" => {
                         let x = xml::optional_attr_i64(e, b"x")?
                             .ok_or_else(|| ParseError::MissingAttribute {
@@ -890,7 +909,7 @@ fn parse_transform_2d(
                     b"ext" => {
                         extent = Some(parse_positive_size_2d(e)?);
                     }
-                    _ => xml::warn_unsupported_element("xfrm", &local),
+                    _ => xml::warn_unsupported_element("xfrm", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"xfrm" => break,
@@ -926,22 +945,24 @@ fn parse_preset_geometry(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"avLst" => {
                         adjust_values = parse_geom_guide_list(reader, buf)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("prstGeom", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("prstGeom", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"avLst" => {} // empty adjustment list
-                    _ => xml::warn_unsupported_element("prstGeom", &local),
+                    _ => xml::warn_unsupported_element("prstGeom", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"prstGeom" => break,
@@ -1195,13 +1216,15 @@ fn parse_outline(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
                 // Skip complex children (dash, join, head/tail end, fills).
-                xml::skip_to_end(reader, buf, &local)?;
+                xml::skip_to_end(reader, buf, local)?;
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                if local.as_slice() == b"noFill" {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                if local == b"noFill" {
                     fill = Some(DrawingFill::NoFill);
                 }
             }
@@ -1316,8 +1339,9 @@ pub fn parse_anchor_image(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"simplePos" => {
                         let x = xml::optional_attr_i64(e, b"x")?
                             .ok_or_else(|| ParseError::MissingAttribute {
@@ -1397,17 +1421,18 @@ pub fn parse_anchor_image(
                     }
                     // Office extensions — skip content but don't warn.
                     b"sizeRelH" | b"sizeRelV" => {
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("anchor-image", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("anchor-image", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"extent" => {
                         extent = parse_positive_size_2d(e)?;
                     }
@@ -1463,7 +1488,7 @@ pub fn parse_anchor_image(
                             distance_bottom: Dimension::new(db),
                         };
                     }
-                    _ => xml::warn_unsupported_element("anchor-image", &local),
+                    _ => xml::warn_unsupported_element("anchor-image", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"anchor" => break,
@@ -1524,8 +1549,9 @@ fn parse_anchor_position(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"posOffset" => {
                         let text = xml::read_text_content(reader, buf)?;
                         let val: i64 = text.trim().parse().map_err(|_| {
@@ -1548,8 +1574,8 @@ fn parse_anchor_position(
                         });
                     }
                     _ => {
-                        xml::warn_unsupported_element("anchor-position", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("anchor-position", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }

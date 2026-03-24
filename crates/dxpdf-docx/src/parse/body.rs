@@ -72,8 +72,9 @@ fn parse_block_content(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"p" => {
                         let rsids = parse_paragraph_rsids(e)?;
                         let (para, sect) = parse_paragraph(reader, buf, rsids)?;
@@ -90,7 +91,7 @@ fn parse_block_content(
                         final_section = properties::parse_section_properties(reader, buf)?;
                         final_section.rsids = sect_rsids;
                     }
-                    _ => xml::warn_unsupported_element("body", &local),
+                    _ => xml::warn_unsupported_element("body", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
@@ -120,8 +121,9 @@ fn parse_paragraph(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"pPr" => {
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         para_props = parsed.properties;
@@ -160,12 +162,13 @@ fn parse_paragraph(
                         let field = parse_simple_field_content(&instr, reader, buf)?;
                         content.push(Inline::Field(field));
                     }
-                    _ => xml::warn_unsupported_element("paragraph", &local),
+                    _ => xml::warn_unsupported_element("paragraph", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"bookmarkStart" => {
                         if let (Some(id), Some(name)) = (
                             xml::optional_attr_i64(e, b"id")?,
@@ -182,7 +185,7 @@ fn parse_paragraph(
                             content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
                         }
                     }
-                    _ => xml::warn_unsupported_element("paragraph", &local),
+                    _ => xml::warn_unsupported_element("paragraph", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"p" => break,
@@ -243,8 +246,9 @@ fn parse_run(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"rPr" => {
                         let (rp, sid) = properties::parse_run_properties(reader, buf)?;
                         run_props = rp;
@@ -276,12 +280,13 @@ fn parse_run(
                             parse_alternate_content(reader, buf)?,
                         ));
                     }
-                    _ => xml::warn_unsupported_element("run", &local),
+                    _ => xml::warn_unsupported_element("run", local),
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"rPr" => {
                         // Empty rPr — no child elements, no properties to parse.
                     }
@@ -382,7 +387,7 @@ fn parse_run(
                             fld_lock: xml::optional_attr_bool(e, b"fldLock")?,
                         }));
                     }
-                    _ => xml::warn_unsupported_element("run", &local),
+                    _ => xml::warn_unsupported_element("run", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"r" => break,
@@ -510,8 +515,9 @@ pub fn parse_pict(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pict>
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"shapetype" => {
                         shape_type = Some(parse_vml_shapetype(e, reader, buf)?);
                     }
@@ -519,21 +525,22 @@ pub fn parse_pict(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pict>
                         shapes.push(parse_vml_shape(e, reader, buf)?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("pict", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("pict", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"shapetype" => {
                         shape_type = Some(parse_vml_shapetype_from_attrs(e)?);
                     }
                     b"shape" => {
                         shapes.push(parse_vml_shape_from_attrs(e)?);
                     }
-                    _ => xml::warn_unsupported_element("pict", &local),
+                    _ => xml::warn_unsupported_element("pict", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pict" => break,
@@ -585,24 +592,26 @@ fn parse_vml_shapetype(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"formulas" => {
                         st.formulas = parse_vml_formulas(reader, buf)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("shapetype", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("shapetype", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"stroke" => st.stroke = Some(parse_vml_stroke_attrs(e)?),
                     b"path" => st.vml_path = Some(parse_vml_path_attrs(e)?),
                     b"lock" => st.lock = Some(parse_vml_lock(e)?),
-                    _ => xml::warn_unsupported_element("shapetype", &local),
+                    _ => xml::warn_unsupported_element("shapetype", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"shapetype" => break,
@@ -654,8 +663,9 @@ fn parse_vml_shape(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"textbox" => {
                         shape.text_box = Some(parse_vml_textbox(e, reader, buf)?);
                     }
@@ -664,19 +674,20 @@ fn parse_vml_shape(
                         xml::skip_to_end(reader, buf, b"wrap")?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("shape", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("shape", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"stroke" => shape.stroke = Some(parse_vml_stroke_attrs(e)?),
                     b"path" => shape.vml_path = Some(parse_vml_path_attrs(e)?),
                     b"imagedata" => shape.image_data = Some(parse_vml_imagedata(e)?),
                     b"wrap" => shape.wrap = Some(parse_vml_wrap(e)?),
-                    _ => xml::warn_unsupported_element("shape", &local),
+                    _ => xml::warn_unsupported_element("shape", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"shape" => break,
@@ -855,14 +866,15 @@ fn parse_vml_textbox(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"txbxContent" => {
                         content = parse_txbx_content(reader, buf)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("textbox", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("textbox", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -1607,8 +1619,9 @@ fn parse_alternate_content(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"Choice" => {
                         let requires_str =
                             xml::optional_attr(e, b"Requires")?.unwrap_or_default();
@@ -1638,8 +1651,8 @@ fn parse_alternate_content(
                         fallback = Some(parse_run_inline_content(reader, buf, b"Fallback")?);
                     }
                     _ => {
-                        xml::warn_unsupported_element("AlternateContent", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("AlternateContent", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -1669,8 +1682,9 @@ fn parse_run_inline_content(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"drawing" => {
                         if let Some(img) = parse_drawing(reader, buf)? {
                             content.push(Inline::Image(Box::new(img)));
@@ -1680,8 +1694,8 @@ fn parse_run_inline_content(
                         content.push(Inline::Pict(parse_pict(reader, buf)?));
                     }
                     _ => {
-                        xml::warn_unsupported_element("mc-content", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("mc-content", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -1702,15 +1716,16 @@ fn parse_drawing(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"inline" => {
                         image = drawing::parse_inline_image(e, reader, buf)?;
                     }
                     b"anchor" => {
                         image = drawing::parse_anchor_image(e, reader, buf)?;
                     }
-                    _ => xml::warn_unsupported_element("drawing", &local),
+                    _ => xml::warn_unsupported_element("drawing", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"drawing" => break,
@@ -1732,8 +1747,9 @@ fn parse_table(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Table> {
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tblPr" => {
                         let (tp, _) = properties::parse_table_properties(reader, buf)?;
                         tbl_props = tp;
@@ -1745,7 +1761,7 @@ fn parse_table(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Table> {
                         let tr_rsids = parse_table_row_rsids(e)?;
                         rows.push(parse_table_row(reader, buf, tr_rsids)?);
                     }
-                    _ => xml::warn_unsupported_element("table", &local),
+                    _ => xml::warn_unsupported_element("table", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tbl" => break,
@@ -1794,15 +1810,16 @@ fn parse_table_row(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"trPr" => {
                         row_props = properties::parse_table_row_properties(reader, buf)?;
                     }
                     b"tc" => {
                         cells.push(parse_table_cell(reader, buf)?);
                     }
-                    _ => xml::warn_unsupported_element("table-row", &local),
+                    _ => xml::warn_unsupported_element("table-row", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tr" => break,
@@ -1825,8 +1842,9 @@ fn parse_table_cell(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Tab
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"tcPr" => {
                         cell_props = properties::parse_table_cell_properties(reader, buf)?;
                     }
@@ -1841,7 +1859,7 @@ fn parse_table_cell(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Tab
                     b"tbl" => {
                         blocks.push(Block::Table(Box::new(parse_table(reader, buf)?)));
                     }
-                    _ => xml::warn_unsupported_element("table-cell", &local),
+                    _ => xml::warn_unsupported_element("table-cell", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tc" => break,

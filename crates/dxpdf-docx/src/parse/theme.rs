@@ -29,26 +29,28 @@ pub fn parse_theme(data: &[u8]) -> Result<Theme> {
     loop {
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"themeElements" => {
                         parse_theme_elements(&mut reader, &mut buf, &mut theme)?;
                     }
                     // §20.1.6.7: object defaults — skip.
                     b"objectDefaults" | b"extraClrSchemeLst" | b"extLst" => {
-                        xml::skip_to_end(&mut reader, &mut buf, &local)?;
+                        xml::skip_to_end(&mut reader, &mut buf, local)?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("theme", &local);
-                        xml::skip_to_end(&mut reader, &mut buf, &local)?;
+                        xml::warn_unsupported_element("theme", local);
+                        xml::skip_to_end(&mut reader, &mut buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"objectDefaults" | b"extraClrSchemeLst" => {}
-                    _ => xml::warn_unsupported_element("theme", &local),
+                    _ => xml::warn_unsupported_element("theme", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"theme" => break,
@@ -70,8 +72,9 @@ fn parse_theme_elements(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"clrScheme" => {
                         theme.color_scheme = parse_color_scheme(reader, buf)?;
                     }
@@ -83,8 +86,8 @@ fn parse_theme_elements(
                         xml::skip_to_end(reader, buf, b"fmtScheme")?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("themeElements", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("themeElements", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -108,17 +111,18 @@ fn parse_color_scheme(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"dk1" | b"lt1" | b"dk2" | b"lt2" | b"accent1" | b"accent2" | b"accent3"
                     | b"accent4" | b"accent5" | b"accent6" | b"hlink" | b"folHlink" => {
-                        if let Some(rgb) = parse_theme_color(reader, buf, &local)? {
-                            set_theme_color(&mut scheme, &local, rgb);
+                        if let Some(rgb) = parse_theme_color(reader, buf, local)? {
+                            set_theme_color(&mut scheme, local, rgb);
                         }
                     }
                     _ => {
-                        xml::warn_unsupported_element("clrScheme", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("clrScheme", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -144,8 +148,9 @@ fn parse_theme_color(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"srgbClr" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             rgb = xml::parse_hex_color(&val);
@@ -160,14 +165,15 @@ fn parse_theme_color(
                         xml::skip_to_end(reader, buf, b"sysClr")?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("themeColor", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("themeColor", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"srgbClr" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             rgb = xml::parse_hex_color(&val);
@@ -178,7 +184,7 @@ fn parse_theme_color(
                             rgb = xml::parse_hex_color(&val);
                         }
                     }
-                    _ => xml::warn_unsupported_element("themeColor", &local),
+                    _ => xml::warn_unsupported_element("themeColor", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
@@ -218,8 +224,9 @@ fn parse_font_scheme(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"majorFont" => {
                         theme.major_font = parse_font_collection(reader, buf, b"majorFont")?;
                     }
@@ -227,8 +234,8 @@ fn parse_font_scheme(
                         theme.minor_font = parse_font_collection(reader, buf, b"minorFont")?;
                     }
                     _ => {
-                        xml::warn_unsupported_element("fontScheme", &local);
-                        xml::skip_to_end(reader, buf, &local)?;
+                        xml::warn_unsupported_element("fontScheme", local);
+                        xml::skip_to_end(reader, buf, local)?;
                     }
                 }
             }
@@ -252,8 +259,9 @@ fn parse_font_collection(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Empty(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"latin" => {
                         scheme.latin = xml::optional_attr(e, b"typeface")?
                             .ok_or_else(|| crate::error::ParseError::MissingAttribute {
@@ -288,7 +296,7 @@ fn parse_font_collection(
                             })?;
                         scheme.script_fonts.push(ThemeScriptFont { script, typeface });
                     }
-                    _ => xml::warn_unsupported_element("fontCollection", &local),
+                    _ => xml::warn_unsupported_element("fontCollection", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,

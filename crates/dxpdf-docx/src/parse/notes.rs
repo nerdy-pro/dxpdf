@@ -65,8 +65,9 @@ fn parse_note_content(
     loop {
         match xml::next_event(reader, buf)? {
             Event::Start(ref e) => {
-                let local = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
                     b"p" => {
                         let (para, sect) = body::parse_paragraph_public(e, reader, buf)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
@@ -81,7 +82,7 @@ fn parse_note_content(
                     _ => {
                         warn!(
                             "note: unsupported block element <{}>",
-                            String::from_utf8_lossy(&local)
+                            String::from_utf8_lossy(local)
                         );
                     }
                 }
