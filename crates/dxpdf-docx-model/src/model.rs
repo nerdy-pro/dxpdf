@@ -1834,43 +1834,52 @@ pub struct Pict {
     pub shapes: Vec<VmlShape>,
 }
 
+/// VML §14.2.1.6: path coordinate — literal integer or `@n` formula reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VmlPathCoord {
+    /// Literal integer coordinate value.
+    Literal(i64),
+    /// `@n` — reference to formula result n.
+    FormulaRef(u32),
+}
+
 /// VML §14.2.1.6: a single path command in the shape path language.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VmlPathCommand {
     /// `m x,y` — move to absolute position.
-    MoveTo { x: i64, y: i64 },
+    MoveTo { x: VmlPathCoord, y: VmlPathCoord },
     /// `l x,y` — line to absolute position.
-    LineTo { x: i64, y: i64 },
+    LineTo { x: VmlPathCoord, y: VmlPathCoord },
     /// `c x1,y1,x2,y2,x,y` — cubic bezier to absolute position.
     CurveTo {
-        x1: i64,
-        y1: i64,
-        x2: i64,
-        y2: i64,
-        x: i64,
-        y: i64,
+        x1: VmlPathCoord,
+        y1: VmlPathCoord,
+        x2: VmlPathCoord,
+        y2: VmlPathCoord,
+        x: VmlPathCoord,
+        y: VmlPathCoord,
     },
     /// `r dx,dy` — relative line to.
-    RLineTo { dx: i64, dy: i64 },
+    RLineTo { dx: VmlPathCoord, dy: VmlPathCoord },
     /// `v dx1,dy1,dx2,dy2,dx,dy` — relative cubic bezier.
     RCurveTo {
-        dx1: i64,
-        dy1: i64,
-        dx2: i64,
-        dy2: i64,
-        dx: i64,
-        dy: i64,
+        dx1: VmlPathCoord,
+        dy1: VmlPathCoord,
+        dx2: VmlPathCoord,
+        dy2: VmlPathCoord,
+        dx: VmlPathCoord,
+        dy: VmlPathCoord,
     },
     /// `t dx,dy` — relative move to.
-    RMoveTo { dx: i64, dy: i64 },
+    RMoveTo { dx: VmlPathCoord, dy: VmlPathCoord },
     /// `x` — close subpath.
     Close,
     /// `e` — end of path.
     End,
     /// `qx x,y` — elliptical quadrant, x-axis first.
-    QuadrantX { x: i64, y: i64 },
+    QuadrantX { x: VmlPathCoord, y: VmlPathCoord },
     /// `qy x,y` — elliptical quadrant, y-axis first.
-    QuadrantY { x: i64, y: i64 },
+    QuadrantY { x: VmlPathCoord, y: VmlPathCoord },
     /// `nf` — no fill for following subpath.
     NoFill,
     /// `ns` — no stroke for following subpath.
@@ -1880,14 +1889,14 @@ pub enum VmlPathCommand {
         /// `wa` (angle clockwise), `wr` (angle counter-clockwise),
         /// `at` (to clockwise), `ar` (to counter-clockwise).
         kind: VmlArcKind,
-        bounding_x1: i64,
-        bounding_y1: i64,
-        bounding_x2: i64,
-        bounding_y2: i64,
-        start_x: i64,
-        start_y: i64,
-        end_x: i64,
-        end_y: i64,
+        bounding_x1: VmlPathCoord,
+        bounding_y1: VmlPathCoord,
+        bounding_x2: VmlPathCoord,
+        bounding_y2: VmlPathCoord,
+        start_x: VmlPathCoord,
+        start_y: VmlPathCoord,
+        end_x: VmlPathCoord,
+        end_y: VmlPathCoord,
     },
 }
 
@@ -2013,6 +2022,8 @@ pub struct VmlShapeType {
     pub vml_path: Option<VmlPath>,
     /// VML §14.1.2.6: formula definitions.
     pub formulas: Vec<VmlFormula>,
+    /// Office VML extension: editing locks.
+    pub lock: Option<VmlLock>,
 }
 
 /// VML §14.1.2.19: a shape instance.
@@ -2036,6 +2047,8 @@ pub struct VmlShape {
     pub text_box: Option<VmlTextBox>,
     /// VML §14.1.2.23: text wrapping around shape.
     pub wrap: Option<VmlWrap>,
+    /// VML §14.1.2.11: image data reference.
+    pub image_data: Option<VmlImageData>,
 }
 
 /// VML §14.1.2.23: text wrapping element.
@@ -2064,6 +2077,32 @@ pub enum VmlWrapSide {
     Left,
     Right,
     Largest,
+}
+
+/// Office VML extension: editing locks on a shape type or shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VmlLock {
+    /// Lock aspect ratio.
+    pub aspect_ratio: Option<bool>,
+    /// v:ext — extension handling mode.
+    pub ext: Option<VmlExtHandling>,
+}
+
+/// VML v:ext — extension handling mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VmlExtHandling {
+    Edit,
+    View,
+    BackwardCompatible,
+}
+
+/// VML §14.1.2.11: image data reference.
+#[derive(Clone, Debug)]
+pub struct VmlImageData {
+    /// r:id — relationship ID to the image part.
+    pub rel_id: Option<RelId>,
+    /// o:title — image title/alt text.
+    pub title: Option<String>,
 }
 
 /// VML style — parsed CSS2 properties from the `style` attribute (§14.1.2.19).
