@@ -1,0 +1,11 @@
+[package]
+name = "dxpdf-field"
+version = "0.1.0"
+edition = "2021"
+description = "OOXML field instruction parser and evaluator for dxpdf"
+license = "MIT"
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
