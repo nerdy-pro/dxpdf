@@ -500,6 +500,8 @@ pub struct ParagraphProperties {
     pub widow_control: Option<bool>,
     pub page_break_before: Option<bool>,
     pub suppress_auto_hyphens: Option<bool>,
+    /// §17.3.1.9: suppress spacing when adjacent paragraph has same style.
+    pub contextual_spacing: Option<bool>,
     pub bidi: Option<bool>,
     pub outline_level: Option<OutlineLevel>,
     /// §17.3.1.39: vertical alignment of text on each line (ST_TextAlignment).

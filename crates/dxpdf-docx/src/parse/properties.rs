@@ -134,6 +134,10 @@ pub fn parse_paragraph_properties(
                         props.suppress_auto_hyphens =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"contextualSpacing" => {
+                        props.contextual_spacing =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                    }
                     b"bidi" => {
                         props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
