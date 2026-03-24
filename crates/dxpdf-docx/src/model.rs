@@ -444,6 +444,18 @@ pub struct ParagraphProperties {
     pub suppress_auto_hyphens: Option<bool>,
     pub bidi: Option<bool>,
     pub outline_level: Option<OutlineLevel>,
+    /// §17.3.1.39: vertical alignment of text on each line (ST_TextAlignment).
+    pub text_alignment: Option<TextAlignment>,
+}
+
+/// §17.18.91 ST_TextAlignment — vertical alignment of characters on a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlignment {
+    Auto,
+    Top,
+    Center,
+    Baseline,
+    Bottom,
 }
 
 /// Heading outline level (0–8, where 0 = Heading 1 in OOXML).

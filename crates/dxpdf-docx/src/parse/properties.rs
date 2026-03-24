@@ -137,6 +137,11 @@ pub fn parse_paragraph_properties(
                     b"bidi" => {
                         props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
+                    b"textAlignment" => {
+                        if let Some(val) = xml::optional_attr(e, b"val")? {
+                            props.text_alignment = Some(parse_text_alignment(&val)?);
+                        }
+                    }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
@@ -1166,5 +1171,17 @@ fn parse_section_type(val: &str) -> Result<SectionType> {
         "oddPage" => Ok(SectionType::OddPage),
         "nextColumn" => Ok(SectionType::NextColumn),
         other => Err(invalid_value("type/val", other)),
+    }
+}
+
+/// §17.18.91 ST_TextAlignment
+fn parse_text_alignment(val: &str) -> Result<TextAlignment> {
+    match val {
+        "auto" => Ok(TextAlignment::Auto),
+        "top" => Ok(TextAlignment::Top),
+        "center" => Ok(TextAlignment::Center),
+        "baseline" => Ok(TextAlignment::Baseline),
+        "bottom" => Ok(TextAlignment::Bottom),
+        other => Err(invalid_value("textAlignment/val", other)),
     }
 }
