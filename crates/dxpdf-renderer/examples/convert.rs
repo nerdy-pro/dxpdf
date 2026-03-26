@@ -17,11 +17,23 @@ fn main() {
         let docx_bytes = std::fs::read(&path).unwrap();
 
         let t0 = std::time::Instant::now();
-        let doc = dxpdf_docx::parse(&docx_bytes).unwrap();
+        let doc = match dxpdf_docx::parse(&docx_bytes) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("{filename}: parse error: {e}");
+                continue;
+            }
+        };
         let parse_ms = t0.elapsed().as_millis();
 
         let t1 = std::time::Instant::now();
-        let pdf_bytes = dxpdf_renderer::render_with_font_mgr(&doc, &font_mgr).unwrap();
+        let pdf_bytes = match dxpdf_renderer::render_with_font_mgr(&doc, &font_mgr) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{filename}: render error: {e}");
+                continue;
+            }
+        };
         let render_ms = t1.elapsed().as_millis();
 
         let out_path = format!("{out_dir}/{filename}.pdf");

@@ -10,7 +10,9 @@ pub mod styles;
 
 use std::collections::HashMap;
 
-use dxpdf_docx_model::model::{Document, NumId, RelId, StyleId, Theme};
+use dxpdf_docx_model::model::{
+    Document, NumId, ParagraphProperties, RelId, RunProperties, StyleId, Theme,
+};
 
 use self::numbering::ResolvedNumberingLevel;
 use self::sections::ResolvedSection;
@@ -33,6 +35,10 @@ pub struct ResolvedDocument {
     pub media: HashMap<RelId, Vec<u8>>,
     /// Theme (for color resolution during paint).
     pub theme: Option<Theme>,
+    /// Document-level default paragraph properties (from docDefaults).
+    pub doc_defaults_paragraph: ParagraphProperties,
+    /// Document-level default run properties (from docDefaults).
+    pub doc_defaults_run: RunProperties,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -48,6 +54,8 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         numbering,
         font_families,
         media: doc.media.clone(),
+        doc_defaults_paragraph: doc.styles.doc_defaults_paragraph.clone(),
+        doc_defaults_run: doc.styles.doc_defaults_run.clone(),
         theme: doc.theme.clone(),
     }
 }

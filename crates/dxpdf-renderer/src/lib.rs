@@ -75,15 +75,15 @@ pub fn layout_document_with_fonts(
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
-        let layout_blocks = build_layout_blocks(section, &config, &measurer, &resolved.styles, &resolved.media);
+        let layout_blocks = build_layout_blocks(section, &config, &measurer, resolved);
         let mut pages = layout_section(&layout_blocks, &config, default_line_height);
 
         // Render headers/footers onto each page in this section.
         let header_frags = section.header.as_ref().map(|blocks| {
-            collect_fragments_from_blocks(blocks, &measure, &resolved.styles)
+            collect_fragments_from_blocks(blocks, &measure, resolved)
         });
         let footer_frags = section.footer.as_ref().map(|blocks| {
-            collect_fragments_from_blocks(blocks, &measure, &resolved.styles)
+            collect_fragments_from_blocks(blocks, &measure, resolved)
         });
         render_headers_footers(
             &mut pages,
@@ -107,7 +107,7 @@ pub fn layout_document_with_fonts(
 fn collect_fragments_from_blocks<F>(
     blocks: &[dxpdf_docx_model::model::Block],
     measure: &F,
-    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
+    resolved: &ResolvedDocument,
 ) -> Vec<layout::fragment::Fragment>
 where
     F: Fn(&str, &layout::fragment::FontProps) -> (Pt, Pt, Pt),
@@ -118,8 +118,8 @@ where
     let mut all_frags = Vec::new();
     for block in blocks {
         if let Block::Paragraph(p) = block {
-            let (df, ds, _) = resolve_paragraph_defaults(p, styles);
-            let mut frags = collect_fragments(&p.content, &df, ds, None, measure);
+            let (df, ds, dc, _) = resolve_paragraph_defaults(p, resolved);
+            let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure);
             all_frags.append(&mut frags);
         }
     }
@@ -132,13 +132,14 @@ fn build_layout_blocks(
     section: &resolve::sections::ResolvedSection,
     config: &PageConfig,
     measurer: &TextMeasurer,
-    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
-    media: &std::collections::HashMap<dxpdf_docx_model::model::RelId, Vec<u8>>,
+    resolved: &ResolvedDocument,
 ) -> Vec<LayoutBlock> {
     use dxpdf_docx_model::model::Block;
     use layout::cell::CellBlock;
     use layout::fragment::{collect_fragments, FontProps};
     use layout::table::{compute_column_widths, TableCellInput, TableRowInput};
+
+    let media = &resolved.media;
 
     let measure = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
         measurer.measure(text, font)
@@ -151,8 +152,8 @@ fn build_layout_blocks(
     for block in &section.blocks {
         match block {
             Block::Paragraph(p) => {
-                let (default_family, default_size, merged_props) =
-                    resolve_paragraph_defaults(p, styles);
+                let (default_family, default_size, default_color, merged_props) =
+                    resolve_paragraph_defaults(p, resolved);
 
                 // Detect drop cap: paragraph with frame_properties.drop_cap = Drop or Margin.
                 let is_dropcap = merged_props
@@ -170,6 +171,7 @@ fn build_layout_blocks(
                     &p.content,
                     &default_family,
                     default_size,
+                    default_color,
                     None,
                     &measure,
                 );
@@ -214,12 +216,13 @@ fn build_layout_blocks(
                                     .iter()
                                     .filter_map(|b| {
                                         if let Block::Paragraph(p) = b {
-                                            let (df, ds, mp) =
-                                                resolve_paragraph_defaults(p, styles);
+                                            let (df, ds, dc, mp) =
+                                                resolve_paragraph_defaults(p, resolved);
                                             let mut frags = collect_fragments(
                                                 &p.content,
                                                 &df,
                                                 ds,
+                                                dc,
                                                 None,
                                                 &measure,
                                             );
@@ -234,10 +237,11 @@ fn build_layout_blocks(
                                     })
                                     .collect();
 
-                                // Resolve cell margins from cell properties or defaults.
+                                // Resolve cell margins: cell → table → hardcoded default.
                                 let cell_margins = cell
                                     .properties
                                     .margins
+                                    .or(t.properties.cell_margins)
                                     .map(|m| geometry::PtEdgeInsets::new(
                                         Pt::from(m.top),
                                         Pt::from(m.right),
@@ -275,10 +279,13 @@ fn build_layout_blocks(
                     })
                     .collect();
 
+                // Draw borders if the table has any border properties defined.
+                let has_borders = t.properties.borders.is_some();
+
                 blocks.push(LayoutBlock::Table {
                     rows,
                     col_widths,
-                    draw_borders: true,
+                    draw_borders: has_borders,
                 });
             }
             Block::SectionBreak(_) => {} // already split by resolve
@@ -310,36 +317,50 @@ fn populate_image_data(
 
 /// Resolve a paragraph's effective defaults by looking up its style_id
 /// in the resolved styles map and merging with direct properties.
+/// Cascade: direct properties → style properties → doc defaults.
 ///
-/// Returns (default_font_family, default_font_size, merged_paragraph_properties).
+/// Returns (default_font_family, default_font_size, default_color, merged_paragraph_properties).
 fn resolve_paragraph_defaults(
     para: &dxpdf_docx_model::model::Paragraph,
-    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
-) -> (String, Pt, dxpdf_docx_model::model::ParagraphProperties) {
+    resolved: &ResolvedDocument,
+) -> (String, Pt, resolve::color::RgbColor, dxpdf_docx_model::model::ParagraphProperties) {
+    use resolve::color::{resolve_color, ColorContext, RgbColor};
     use resolve::fonts::effective_font;
     use resolve::properties::merge_paragraph_properties;
 
     let mut para_props = para.properties.clone();
+    let mut run_defaults = resolved.doc_defaults_run.clone();
     let mut default_family = DEFAULT_FAMILY.to_string();
     let mut default_size = DEFAULT_SIZE;
+    let mut default_color = RgbColor::BLACK;
 
     // Look up the paragraph's style and merge its properties as base.
     if let Some(ref style_id) = para.style_id {
-        if let Some(resolved_style) = styles.get(style_id) {
-            // Merge: direct paragraph properties override style properties.
+        if let Some(resolved_style) = resolved.styles.get(style_id) {
             merge_paragraph_properties(&mut para_props, &resolved_style.paragraph);
-
-            // Use the style's run properties as defaults for font family/size.
-            if let Some(f) = effective_font(&resolved_style.run.fonts) {
-                default_family = f.to_string();
-            }
-            if let Some(fs) = resolved_style.run.font_size {
-                default_size = Pt::from(fs);
-            }
+            run_defaults = resolved_style.run.clone();
         }
     }
 
-    (default_family, default_size, para_props)
+    // Always merge doc defaults as the lowest-priority fallback.
+    merge_paragraph_properties(&mut para_props, &resolved.doc_defaults_paragraph);
+
+    // Resolve font family from: run defaults → theme minor font → hardcoded fallback.
+    if let Some(f) = effective_font(&run_defaults.fonts) {
+        default_family = f.to_string();
+    } else if let Some(ref theme) = resolved.theme {
+        if !theme.minor_font.latin.is_empty() {
+            default_family = theme.minor_font.latin.clone();
+        }
+    }
+    if let Some(fs) = run_defaults.font_size {
+        default_size = Pt::from(fs);
+    }
+    if let Some(c) = run_defaults.color {
+        default_color = resolve_color(c, ColorContext::Text);
+    }
+
+    (default_family, default_size, default_color, para_props)
 }
 
 fn paragraph_style_from_props(
@@ -376,12 +397,14 @@ fn paragraph_style_from_props(
         .map(Pt::from)
         .unwrap_or(Pt::ZERO);
 
+    // Word default: 10pt space after paragraphs (200 twips) when not specified.
     let space_after = props
         .spacing
         .and_then(|s| s.after)
         .map(Pt::from)
-        .unwrap_or(Pt::ZERO);
+        .unwrap_or(Pt::new(10.0));
 
+    // Word default: 1.15x line spacing (276/240) when not specified.
     let line_spacing = props
         .spacing
         .and_then(|s| s.line)
@@ -390,7 +413,7 @@ fn paragraph_style_from_props(
             LineSpacing::Exact(v) => LineSpacingRule::Exact(Pt::from(v)),
             LineSpacing::AtLeast(v) => LineSpacingRule::AtLeast(Pt::from(v)),
         })
-        .unwrap_or(LineSpacingRule::Auto(1.0));
+        .unwrap_or(LineSpacingRule::Auto(1.15));
 
     ParagraphStyle {
         alignment: props.alignment.unwrap_or(dxpdf_docx_model::model::Alignment::Start),
