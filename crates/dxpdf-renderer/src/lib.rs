@@ -21,12 +21,13 @@ use dxpdf_docx_model::model::Document;
 
 use crate::dimension::Pt;
 use crate::layout::draw_command::LayoutedPage;
+use crate::layout::measurer::TextMeasurer;
 use crate::layout::page::PageConfig;
 use crate::layout::section::{layout_section, LayoutBlock};
 use crate::resolve::ResolvedDocument;
 
-/// Default line height when no font metrics are available.
-const DEFAULT_LINE_HEIGHT: Pt = Pt::new(14.0);
+const DEFAULT_FAMILY: &str = "Helvetica";
+const DEFAULT_SIZE: Pt = Pt::new(12.0);
 
 /// Render a parsed DOCX document to PDF bytes.
 ///
@@ -43,35 +44,36 @@ pub fn render_with_font_mgr(
 ) -> Result<Vec<u8>, error::RenderError> {
     let resolved = resolve::resolve(doc);
     fonts::preload_fonts(font_mgr, &resolved.font_families);
-    let pages = layout_document(&resolved);
+    let pages = layout_document_with_fonts(&resolved, font_mgr);
     painter::render_to_pdf(&pages, font_mgr)
 }
 
 /// Resolve and lay out a document without painting to PDF.
-/// Useful for testing the layout pipeline independently.
+/// Uses a real FontMgr for text measurement.
 pub fn resolve_and_layout(doc: &Document) -> (ResolvedDocument, Vec<LayoutedPage>) {
+    let font_mgr = skia_safe::FontMgr::new();
     let resolved = resolve::resolve(doc);
-    let pages = layout_document(&resolved);
+    fonts::preload_fonts(&font_mgr, &resolved.font_families);
+    let pages = layout_document_with_fonts(&resolved, &font_mgr);
     (resolved, pages)
 }
 
-/// Lay out a resolved document into pages.
-pub fn layout_document(resolved: &ResolvedDocument) -> Vec<LayoutedPage> {
+/// Lay out a resolved document using Skia font metrics.
+pub fn layout_document_with_fonts(
+    resolved: &ResolvedDocument,
+    font_mgr: &skia_safe::FontMgr,
+) -> Vec<LayoutedPage> {
+    let measurer = TextMeasurer::new(font_mgr.clone());
+    let default_line_height = measurer.default_line_height(DEFAULT_FAMILY, DEFAULT_SIZE);
     let mut all_pages = Vec::new();
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
-
-        // Convert resolved blocks to layout blocks.
-        // For now, this is a simplified bridge — a full implementation would
-        // use Skia font metrics for text measurement.
-        let layout_blocks = build_layout_blocks(section, &config);
-
-        let mut pages = layout_section(&layout_blocks, &config, DEFAULT_LINE_HEIGHT);
+        let layout_blocks = build_layout_blocks(section, &config, &measurer);
+        let mut pages = layout_section(&layout_blocks, &config, default_line_height);
         all_pages.append(&mut pages);
     }
 
-    // Ensure at least one page
     if all_pages.is_empty() {
         all_pages.push(LayoutedPage::new(PageConfig::default().page_size));
     }
@@ -84,22 +86,15 @@ pub fn layout_document(resolved: &ResolvedDocument) -> Vec<LayoutedPage> {
 fn build_layout_blocks(
     section: &resolve::sections::ResolvedSection,
     config: &PageConfig,
+    measurer: &TextMeasurer,
 ) -> Vec<LayoutBlock> {
     use dxpdf_docx_model::model::Block;
     use layout::cell::CellBlock;
     use layout::fragment::{collect_fragments, FontProps};
     use layout::table::{compute_column_widths, TableCellInput, TableRowInput};
 
-    let default_family = "Helvetica";
-    let default_size = Pt::new(12.0);
-
-    // Dummy text measurer — width = len * 6, height = size, ascent = size * 0.8
-    // A real implementation uses Skia FontMgr.
     let measure = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
-        let w = Pt::new(text.len() as f32 * font.size.raw() * 0.5);
-        let h = font.size;
-        let a = font.size * 0.8;
-        (w, h, a)
+        measurer.measure(text, font)
     };
 
     let mut blocks = Vec::new();
@@ -109,8 +104,8 @@ fn build_layout_blocks(
             Block::Paragraph(p) => {
                 let fragments = collect_fragments(
                     &p.content,
-                    default_family,
-                    default_size,
+                    DEFAULT_FAMILY,
+                    DEFAULT_SIZE,
                     None,
                     &measure,
                 );
@@ -138,8 +133,8 @@ fn build_layout_blocks(
                                         if let Block::Paragraph(p) = b {
                                             let frags = collect_fragments(
                                                 &p.content,
-                                                default_family,
-                                                default_size,
+                                                DEFAULT_FAMILY,
+                                                DEFAULT_SIZE,
                                                 None,
                                                 &measure,
                                             );

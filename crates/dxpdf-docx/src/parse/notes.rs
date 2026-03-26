@@ -16,7 +16,7 @@ use super::body;
 /// `note_tag` is "footnote" or "endnote"; root element is "footnotes" or "endnotes".
 pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Block>>> {
     let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
+    // Do NOT trim text — whitespace in <w:t> runs is significant.
     let mut buf = Vec::new();
     let mut notes = HashMap::new();
 

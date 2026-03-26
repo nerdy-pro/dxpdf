@@ -46,7 +46,6 @@ pub enum DrawCommand {
 impl DrawCommand {
     /// Shift all y-coordinates by `dy`. Used when positioning commands
     /// relative to their final page position.
-    /// Note: `Line` is not shifted — table borders use absolute coordinates.
     pub fn shift_y(&mut self, dy: Pt) {
         match self {
             DrawCommand::Text { position, .. } => position.y += dy,
@@ -57,7 +56,10 @@ impl DrawCommand {
             DrawCommand::Image { rect, .. } => rect.origin.y += dy,
             DrawCommand::Rect { rect, .. } => rect.origin.y += dy,
             DrawCommand::LinkAnnotation { rect, .. } => rect.origin.y += dy,
-            DrawCommand::Line { .. } => {} // absolute coords
+            DrawCommand::Line { line, .. } => {
+                line.start.y += dy;
+                line.end.y += dy;
+            }
         }
     }
 }
@@ -102,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_y_does_not_move_line() {
+    fn shift_y_moves_line() {
         let mut cmd = DrawCommand::Line {
             line: PtLineSegment::new(
                 PtOffset::new(Pt::new(0.0), Pt::new(10.0)),
@@ -113,7 +115,7 @@ mod tests {
         };
         cmd.shift_y(Pt::new(50.0));
         if let DrawCommand::Line { line, .. } = cmd {
-            assert_eq!(line.start.y.raw(), 10.0, "Line y unchanged");
+            assert_eq!(line.start.y.raw(), 60.0, "Line y shifted");
         }
     }
 

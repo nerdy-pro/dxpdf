@@ -20,7 +20,7 @@ use super::{drawing, properties};
 /// then parses block content scoped to that element.
 pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
     let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
+    // Do NOT trim text — whitespace in <w:t> runs is significant.
     let mut buf = Vec::new();
 
     // Find the root element and remember its local name.
@@ -43,7 +43,7 @@ pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
 /// Scoped: enters `<w:document>`, then `<w:body>`, breaks on `</w:body>`.
 pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
     let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
+    // Do NOT trim text — whitespace in <w:t> runs is significant.
     let mut buf = Vec::new();
 
     // Find <w:body> inside <w:document>.

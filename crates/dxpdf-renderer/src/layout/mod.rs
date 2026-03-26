@@ -8,6 +8,7 @@ pub mod float;
 pub mod fragment;
 pub mod header_footer;
 pub mod line;
+pub mod measurer;
 pub mod page;
 pub mod paragraph;
 pub mod section;
