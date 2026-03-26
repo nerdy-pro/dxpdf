@@ -19,6 +19,10 @@ pub struct FontProps {
     pub italic: bool,
     pub underline: bool,
     pub char_spacing: Pt,
+    /// Underline position from font metrics (positive = below baseline).
+    pub underline_position: Pt,
+    /// Underline thickness from font metrics.
+    pub underline_thickness: Pt,
 }
 
 /// A measured fragment — the atomic unit for line fitting.
@@ -70,8 +74,11 @@ impl Fragment {
     }
 }
 
-/// Minimum tab fragment width for line fitting.
-pub const MIN_TAB_WIDTH: Pt = Pt::new(12.0);
+/// §17.3.1.37: minimum tab fragment width for line fitting.
+/// Tabs resolve to tab stops defined on the paragraph; this constant is only
+/// used as the fragment width during line breaking (actual tab position is
+/// computed during paragraph layout).
+pub const MIN_TAB_WIDTH: Pt = Pt::new(1.0);
 
 /// Extract font properties from RunProperties with a default font family fallback.
 pub fn font_props_from_run(
@@ -99,6 +106,9 @@ pub fn font_props_from_run(
         italic: rp.italic.unwrap_or(false),
         underline: rp.underline.is_some(),
         char_spacing,
+        // Populated by the measurer from Skia font metrics.
+        underline_position: Pt::ZERO,
+        underline_thickness: Pt::ZERO,
     }
 }
 
@@ -271,6 +281,8 @@ where
                     italic: false,
                     underline: false,
                     char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
                 };
                 let ch = char::from_u32(sym.char_code as u32).unwrap_or('\u{FFFD}');
                 let text = ch.to_string();

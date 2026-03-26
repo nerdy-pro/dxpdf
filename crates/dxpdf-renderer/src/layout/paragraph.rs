@@ -22,6 +22,25 @@ pub struct ParagraphStyle {
     pub indent_right: Pt,
     pub indent_first_line: Pt,
     pub line_spacing: LineSpacingRule,
+    /// Drop cap to render at the start of this paragraph.
+    pub drop_cap: Option<DropCapInfo>,
+}
+
+/// Drop cap letter to float at the start of a paragraph.
+#[derive(Clone, Debug)]
+pub struct DropCapInfo {
+    /// The drop cap fragments (usually a single large letter).
+    pub fragments: Vec<Fragment>,
+    /// §17.3.1.11 @w:lines: number of body text lines the drop cap spans.
+    pub lines: u32,
+    /// Total width of the drop cap (measured).
+    pub width: Pt,
+    /// Total height of the drop cap (measured).
+    pub height: Pt,
+    /// Ascent of the drop cap font (for baseline positioning).
+    pub ascent: Pt,
+    /// §17.3.1.11 @w:hSpace: horizontal distance from surrounding text.
+    pub h_space: Pt,
 }
 
 impl Default for ParagraphStyle {
@@ -34,6 +53,7 @@ impl Default for ParagraphStyle {
             indent_right: Pt::ZERO,
             indent_first_line: Pt::ZERO,
             line_spacing: LineSpacingRule::Auto(1.0),
+            drop_cap: None,
         }
     }
 }
@@ -68,17 +88,66 @@ pub fn layout_paragraph(
     style: &ParagraphStyle,
     default_line_height: Pt,
 ) -> ParagraphLayout {
+    // §17.3.1.11: drop cap text frame. The width includes any w:hSpace from framePr.
+    let drop_cap_indent = style
+        .drop_cap
+        .as_ref()
+        .map(|dc| dc.width + dc.h_space)
+        .unwrap_or(Pt::ZERO);
+    let drop_cap_lines = style
+        .drop_cap
+        .as_ref()
+        .map(|dc| dc.lines as usize)
+        .unwrap_or(0);
+
     let content_width = constraints.max_width - style.indent_left - style.indent_right;
-    let lines = fit_lines(fragments, content_width);
+    // Fit lines at the narrower width (drop cap area) so text wraps correctly
+    // for the lines beside the drop cap.
+    let effective_width = if drop_cap_indent > Pt::ZERO {
+        content_width - drop_cap_indent
+    } else {
+        content_width
+    };
+    let lines = fit_lines(fragments, effective_width);
 
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
 
+    // Render drop cap letter at the start.
+    if let Some(ref dc) = style.drop_cap {
+        for frag in &dc.fragments {
+            if let Fragment::Text {
+                text, font, color, ..
+            } = frag
+            {
+                // Position drop cap at left margin, baseline at font ascent.
+                let y = cursor_y + dc.ascent;
+                commands.push(DrawCommand::Text {
+                    position: PtOffset::new(style.indent_left, y),
+                    text: text.clone(),
+                    font_family: font.family.clone(),
+                    char_spacing: font.char_spacing,
+                    font_size: font.size,
+                    bold: font.bold,
+                    italic: font.italic,
+                    color: *color,
+                });
+            }
+        }
+    }
+
     for (line_idx, line) in lines.iter().enumerate() {
-        let indent = if line_idx == 0 {
-            style.indent_left + style.indent_first_line
+        // Drop cap lines get extra indent; after that, refit remaining lines at full width.
+        let dc_offset = if line_idx < drop_cap_lines {
+            drop_cap_indent
         } else {
-            style.indent_left
+            Pt::ZERO
+        };
+
+        let indent = if line_idx == 0 {
+            style.indent_left + style.indent_first_line + dc_offset
+        } else {
+            style.indent_left + dc_offset
         };
 
         let natural_height = if line.height > Pt::ZERO {
@@ -137,14 +206,18 @@ pub fn layout_paragraph(
                     }
 
                     if font.underline {
-                        let underline_y = y + Pt::new(2.0);
+                        // §17.3.2.40: underline position and thickness from font metrics.
+                        // Skia provides underlinePosition (negative = below baseline)
+                        // and underlineThickness.
+                        let underline_y = y - font.underline_position;
+                        let stroke_width = font.underline_thickness;
                         commands.push(DrawCommand::Underline {
                             line: crate::geometry::PtLineSegment::new(
                                 PtOffset::new(x, underline_y),
                                 PtOffset::new(x + *width, underline_y),
                             ),
                             color: *color,
-                            width: Pt::new(0.5),
+                            width: stroke_width,
                         });
                     }
 
@@ -216,6 +289,8 @@ mod tests {
                 italic: false,
                 underline: false,
                 char_spacing: Pt::ZERO,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
             width: Pt::new(width),

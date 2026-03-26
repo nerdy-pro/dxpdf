@@ -5,12 +5,12 @@ use dxpdf_docx_model::model::SectionProperties;
 use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtSize};
 
-/// US Letter page width in points (8.5 inches).
-const US_LETTER_WIDTH: Pt = Pt::new(612.0);
-/// US Letter page height in points (11 inches).
-const US_LETTER_HEIGHT: Pt = Pt::new(792.0);
-/// Default page margin in points (1 inch).
-const DEFAULT_MARGIN: Pt = Pt::new(72.0);
+/// §17.6.13: default page width when w:pgSz is absent. Word uses US Letter (8.5 inches = 12240 twips).
+const SPEC_DEFAULT_PAGE_WIDTH: Pt = Pt::new(612.0);
+/// §17.6.13: default page height when w:pgSz is absent. Word uses US Letter (11 inches = 15840 twips).
+const SPEC_DEFAULT_PAGE_HEIGHT: Pt = Pt::new(792.0);
+/// §17.6.11: default page margin when w:pgMar is absent (1 inch = 1440 twips).
+const SPEC_DEFAULT_MARGIN: Pt = Pt::new(72.0);
 
 /// Page layout configuration in points.
 #[derive(Debug, Clone, Copy)]
@@ -24,10 +24,10 @@ pub struct PageConfig {
 impl Default for PageConfig {
     fn default() -> Self {
         Self {
-            page_size: PtSize::new(US_LETTER_WIDTH, US_LETTER_HEIGHT),
-            margins: PtEdgeInsets::new(DEFAULT_MARGIN, DEFAULT_MARGIN, DEFAULT_MARGIN, DEFAULT_MARGIN),
-            header_margin: DEFAULT_MARGIN / 2.0,
-            footer_margin: DEFAULT_MARGIN / 2.0,
+            page_size: PtSize::new(SPEC_DEFAULT_PAGE_WIDTH, SPEC_DEFAULT_PAGE_HEIGHT),
+            margins: PtEdgeInsets::new(SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN),
+            header_margin: SPEC_DEFAULT_MARGIN / 2.0,
+            footer_margin: SPEC_DEFAULT_MARGIN / 2.0,
         }
     }
 }

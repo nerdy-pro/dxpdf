@@ -69,7 +69,8 @@ pub fn layout_table(
         for cell in &row.cells {
             let span = cell.grid_span.max(1) as usize;
             let cell_width: Pt = (grid_idx..grid_idx + span)
-                .map(|i| col_widths.get(i).copied().unwrap_or(Pt::new(72.0)))
+                .map(|i| col_widths.get(i).copied()// §17.4.14: missing grid column treated as zero width.
+                .unwrap_or(Pt::ZERO))
                 .sum();
             let cell_x: Pt = (0..grid_idx)
                 .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
@@ -131,6 +132,8 @@ pub fn layout_table(
                     PtOffset::new(Pt::ZERO, cursor_y),
                     PtOffset::new(table_width, cursor_y),
                 ),
+                // §17.4.38: default border color is auto (black) per spec.
+                // §17.4.38: default border width is 0.5pt (4 eighths of a point).
                 color: RgbColor::BLACK,
                 width: Pt::new(0.5),
             });
@@ -141,6 +144,8 @@ pub fn layout_table(
                     PtOffset::new(Pt::ZERO, cursor_y),
                     PtOffset::new(Pt::ZERO, cursor_y + row_height),
                 ),
+                // §17.4.38: default border color is auto (black) per spec.
+                // §17.4.38: default border width is 0.5pt (4 eighths of a point).
                 color: RgbColor::BLACK,
                 width: Pt::new(0.5),
             });
@@ -236,7 +241,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO,
+                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
             width: Pt::new(width),

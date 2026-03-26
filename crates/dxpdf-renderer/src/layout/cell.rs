@@ -97,7 +97,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO,
+                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
             width: Pt::new(width),

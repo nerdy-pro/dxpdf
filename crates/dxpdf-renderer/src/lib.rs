@@ -26,8 +26,10 @@ use crate::layout::page::PageConfig;
 use crate::layout::section::{layout_section, LayoutBlock};
 use crate::resolve::ResolvedDocument;
 
-const DEFAULT_FAMILY: &str = "Helvetica";
-const DEFAULT_SIZE: Pt = Pt::new(12.0);
+/// §17.8.3.2: OOXML fallback font when no theme or doc defaults specify one.
+const SPEC_FALLBACK_FONT: &str = "Times New Roman";
+/// §17.3.2.14: default font size when not specified (10pt = 20 half-points per ECMA-376 §17.3.2.14).
+const SPEC_DEFAULT_FONT_SIZE: Pt = Pt::new(10.0);
 
 /// Render a parsed DOCX document to PDF bytes.
 ///
@@ -69,7 +71,20 @@ pub fn layout_document_with_fonts(
     use layout::header_footer::render_headers_footers;
 
     let measurer = TextMeasurer::new(font_mgr.clone());
-    let default_line_height = measurer.default_line_height(DEFAULT_FAMILY, DEFAULT_SIZE);
+
+    // Derive the default font family and size from the document.
+    let doc_font_family = resolved
+        .theme
+        .as_ref()
+        .map(|t| t.minor_font.latin.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(SPEC_FALLBACK_FONT);
+    let doc_font_size = resolved
+        .doc_defaults_run
+        .font_size
+        .map(Pt::from)
+        .unwrap_or(SPEC_DEFAULT_FONT_SIZE);
+    let default_line_height = measurer.default_line_height(doc_font_family, doc_font_size);
     let measure = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
         measurer.measure(text, font)
     };
@@ -148,8 +163,8 @@ fn build_layout_blocks(
     };
 
     let mut blocks = Vec::new();
-    // Drop cap fragments to prepend to the next paragraph.
-    let mut pending_dropcap: Option<Vec<layout::fragment::Fragment>> = None;
+    // Drop cap info to attach to the next paragraph.
+    let mut pending_dropcap: Option<layout::paragraph::DropCapInfo> = None;
 
     for block in &section.blocks {
         match block {
@@ -169,6 +184,11 @@ fn build_layout_blocks(
                         )
                     });
 
+                let drop_cap_lines = merged_props
+                    .frame_properties
+                    .and_then(|fp| fp.lines)
+                    .unwrap_or(3);
+
                 let mut fragments = collect_fragments(
                     &p.content,
                     &default_family,
@@ -178,20 +198,38 @@ fn build_layout_blocks(
                     &measure,
                 );
                 populate_image_data(&mut fragments, media);
+                populate_underline_metrics(&mut fragments, measurer);
 
                 if is_dropcap {
-                    // Stash drop cap fragments — they'll be prepended to the next paragraph.
-                    pending_dropcap = Some(fragments);
+                    let width: Pt = fragments.iter().map(|f| f.width()).sum();
+                    let height: Pt = fragments.iter().map(|f| f.height()).fold(Pt::ZERO, Pt::max);
+                    let ascent: Pt = fragments.iter().map(|f| {
+                        if let layout::fragment::Fragment::Text { ascent, .. } = f { *ascent } else { Pt::ZERO }
+                    }).fold(Pt::ZERO, Pt::max);
+                    // §17.3.1.11: hSpace from frame properties.
+                    let h_space = merged_props
+                        .frame_properties
+                        .and_then(|fp| fp.h_space)
+                        .map(Pt::from)
+                        .unwrap_or(Pt::ZERO);
+                    pending_dropcap = Some(layout::paragraph::DropCapInfo {
+                        fragments,
+                        lines: drop_cap_lines,
+                        ascent,
+                        h_space,
+                        width,
+                        height,
+                    });
                     continue;
                 }
 
-                // Prepend any pending drop cap fragments.
-                if let Some(mut dc_frags) = pending_dropcap.take() {
-                    dc_frags.append(&mut fragments);
-                    fragments = dc_frags;
+                let mut style = paragraph_style_from_props(&merged_props);
+
+                // Attach pending drop cap to this paragraph.
+                if let Some(dc) = pending_dropcap.take() {
+                    style.drop_cap = Some(dc);
                 }
 
-                let style = paragraph_style_from_props(&merged_props);
                 blocks.push(LayoutBlock::Paragraph { fragments, style });
             }
             Block::Table(t) => {
@@ -229,6 +267,7 @@ fn build_layout_blocks(
                                                 &measure,
                                             );
                                             populate_image_data(&mut frags, media);
+                                            populate_underline_metrics(&mut frags, measurer);
                                             Some(CellBlock {
                                                 fragments: frags,
                                                 style: paragraph_style_from_props(&mp),
@@ -239,7 +278,7 @@ fn build_layout_blocks(
                                     })
                                     .collect();
 
-                                // Resolve cell margins: cell → table → hardcoded default.
+                                // §17.4.42: cell margins cascade: cell → table → 0.
                                 let cell_margins = cell
                                     .properties
                                     .margins
@@ -250,12 +289,7 @@ fn build_layout_blocks(
                                         Pt::from(m.bottom),
                                         Pt::from(m.left),
                                     ))
-                                    .unwrap_or(geometry::PtEdgeInsets::new(
-                                        Pt::new(2.0),
-                                        Pt::new(5.0),
-                                        Pt::new(2.0),
-                                        Pt::new(5.0),
-                                    ));
+                                    .unwrap_or(geometry::PtEdgeInsets::ZERO);
 
                                 // Resolve cell shading.
                                 let shading = cell.properties.shading.map(|s| {
@@ -317,6 +351,22 @@ fn populate_image_data(
     }
 }
 
+/// Populate underline position/thickness from Skia font metrics.
+fn populate_underline_metrics(
+    fragments: &mut [layout::fragment::Fragment],
+    measurer: &TextMeasurer,
+) {
+    for frag in fragments.iter_mut() {
+        if let layout::fragment::Fragment::Text { font, .. } = frag {
+            if font.underline {
+                let (pos, thickness) = measurer.underline_metrics(font);
+                font.underline_position = pos;
+                font.underline_thickness = thickness;
+            }
+        }
+    }
+}
+
 /// Resolve a paragraph's effective defaults by looking up its style_id
 /// in the resolved styles map and merging with direct properties.
 /// Cascade: direct properties → style properties → doc defaults.
@@ -332,8 +382,20 @@ fn resolve_paragraph_defaults(
 
     let mut para_props = para.properties.clone();
     let mut run_defaults = resolved.doc_defaults_run.clone();
-    let mut default_family = DEFAULT_FAMILY.to_string();
-    let mut default_size = DEFAULT_SIZE;
+
+    // Derive default font from: doc defaults → theme minor font → spec fallback.
+    let mut default_family = resolved
+        .theme
+        .as_ref()
+        .map(|t| t.minor_font.latin.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(SPEC_FALLBACK_FONT)
+        .to_string();
+    let mut default_size = resolved
+        .doc_defaults_run
+        .font_size
+        .map(Pt::from)
+        .unwrap_or(SPEC_DEFAULT_FONT_SIZE);
     let mut default_color = RgbColor::BLACK;
 
     // Look up the paragraph's style and merge its properties as base.
@@ -347,13 +409,9 @@ fn resolve_paragraph_defaults(
     // Always merge doc defaults as the lowest-priority fallback.
     merge_paragraph_properties(&mut para_props, &resolved.doc_defaults_paragraph);
 
-    // Resolve font family from: run defaults → theme minor font → hardcoded fallback.
+    // Style's run font overrides the document-level default.
     if let Some(f) = effective_font(&run_defaults.fonts) {
         default_family = f.to_string();
-    } else if let Some(ref theme) = resolved.theme {
-        if !theme.minor_font.latin.is_empty() {
-            default_family = theme.minor_font.latin.clone();
-        }
     }
     if let Some(fs) = run_defaults.font_size {
         default_size = Pt::from(fs);
@@ -399,23 +457,28 @@ fn paragraph_style_from_props(
         .map(Pt::from)
         .unwrap_or(Pt::ZERO);
 
-    // Word default: 10pt space after paragraphs (200 twips) when not specified.
+    // §17.3.1.33: space after defaults to 0 when not specified in the cascade.
+    // The doc defaults / style cascade should have already merged any intended
+    // default (e.g., Normal style with after=200twip). If it's still None after
+    // the full cascade, spec says 0.
     let space_after = props
         .spacing
         .and_then(|s| s.after)
         .map(Pt::from)
-        .unwrap_or(Pt::new(10.0));
+        .unwrap_or(Pt::ZERO);
 
-    // Word default: 1.15x line spacing (276/240) when not specified.
+    // §17.3.1.33: line spacing defaults to single (auto, 240 twips = 1.0x) per spec.
+    // Auto line spacing is in 240ths of a line: 240 = single, 480 = double.
     let line_spacing = props
         .spacing
         .and_then(|s| s.line)
         .map(|ls| match ls {
+            // §17.3.1.33: auto value is in 240ths of a line.
             LineSpacing::Auto(v) => LineSpacingRule::Auto(Pt::from(v).raw() / 12.0),
             LineSpacing::Exact(v) => LineSpacingRule::Exact(Pt::from(v)),
             LineSpacing::AtLeast(v) => LineSpacingRule::AtLeast(Pt::from(v)),
         })
-        .unwrap_or(LineSpacingRule::Auto(1.15));
+        .unwrap_or(LineSpacingRule::Auto(1.0));
 
     ParagraphStyle {
         alignment: props.alignment.unwrap_or(dxpdf_docx_model::model::Alignment::Start),
@@ -425,6 +488,7 @@ fn paragraph_style_from_props(
         indent_right,
         indent_first_line,
         line_spacing,
+        drop_cap: None,
     }
 }
 
