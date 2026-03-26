@@ -4,6 +4,8 @@
 
 pub mod draw_command;
 pub mod fragment;
+pub mod line;
+pub mod paragraph;
 
 use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtSize};
