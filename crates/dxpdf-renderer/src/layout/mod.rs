@@ -2,10 +2,12 @@
 //!
 //! Core protocol: **constraints go down, sizes go up, parent sets position**.
 
+pub mod cell;
 pub mod draw_command;
 pub mod fragment;
 pub mod line;
 pub mod paragraph;
+pub mod table;
 
 use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtSize};
