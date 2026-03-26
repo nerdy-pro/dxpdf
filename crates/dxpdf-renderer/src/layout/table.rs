@@ -123,7 +123,7 @@ pub fn layout_table(
             }
         }
 
-        // Borders (simple grid lines)
+        // Borders — draw at cell boundaries, not grid column boundaries.
         if draw_borders {
             // Top border of this row
             commands.push(DrawCommand::Line {
@@ -135,9 +135,24 @@ pub fn layout_table(
                 width: Pt::new(0.5),
             });
 
-            // Vertical borders between cells
-            let mut vx = Pt::ZERO;
-            for &cw in col_widths {
+            // Left edge
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(
+                    PtOffset::new(Pt::ZERO, cursor_y),
+                    PtOffset::new(Pt::ZERO, cursor_y + row_height),
+                ),
+                color: RgbColor::BLACK,
+                width: Pt::new(0.5),
+            });
+
+            // Vertical borders at each cell's right edge
+            let mut grid_idx = 0;
+            for cell_input in &rows[row_idx].cells {
+                let span = cell_input.grid_span.max(1) as usize;
+                grid_idx += span;
+                let vx: Pt = (0..grid_idx)
+                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                    .sum();
                 commands.push(DrawCommand::Line {
                     line: PtLineSegment::new(
                         PtOffset::new(vx, cursor_y),
@@ -146,17 +161,7 @@ pub fn layout_table(
                     color: RgbColor::BLACK,
                     width: Pt::new(0.5),
                 });
-                vx += cw;
             }
-            // Right edge
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(
-                    PtOffset::new(table_width, cursor_y),
-                    PtOffset::new(table_width, cursor_y + row_height),
-                ),
-                color: RgbColor::BLACK,
-                width: Pt::new(0.5),
-            });
         }
 
         cursor_y += row_height;

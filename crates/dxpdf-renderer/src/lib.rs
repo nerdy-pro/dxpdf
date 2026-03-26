@@ -69,7 +69,7 @@ pub fn layout_document_with_fonts(
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
-        let layout_blocks = build_layout_blocks(section, &config, &measurer);
+        let layout_blocks = build_layout_blocks(section, &config, &measurer, &resolved.styles);
         let mut pages = layout_section(&layout_blocks, &config, default_line_height);
         all_pages.append(&mut pages);
     }
@@ -87,6 +87,7 @@ fn build_layout_blocks(
     section: &resolve::sections::ResolvedSection,
     config: &PageConfig,
     measurer: &TextMeasurer,
+    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
 ) -> Vec<LayoutBlock> {
     use dxpdf_docx_model::model::Block;
     use layout::cell::CellBlock;
@@ -98,22 +99,57 @@ fn build_layout_blocks(
     };
 
     let mut blocks = Vec::new();
+    // Drop cap fragments to prepend to the next paragraph.
+    let mut pending_dropcap: Option<Vec<layout::fragment::Fragment>> = None;
 
     for block in &section.blocks {
         match block {
             Block::Paragraph(p) => {
-                let fragments = collect_fragments(
+                let (default_family, default_size, merged_props) =
+                    resolve_paragraph_defaults(p, styles);
+
+                // Detect drop cap: paragraph with frame_properties.drop_cap = Drop or Margin.
+                let is_dropcap = merged_props
+                    .frame_properties
+                    .and_then(|fp| fp.drop_cap)
+                    .is_some_and(|dc| {
+                        matches!(
+                            dc,
+                            dxpdf_docx_model::model::DropCap::Drop
+                                | dxpdf_docx_model::model::DropCap::Margin
+                        )
+                    });
+
+                let mut fragments = collect_fragments(
                     &p.content,
-                    DEFAULT_FAMILY,
-                    DEFAULT_SIZE,
+                    &default_family,
+                    default_size,
                     None,
                     &measure,
                 );
-                let style = paragraph_style_from_props(&p.properties);
+
+                if is_dropcap {
+                    // Stash drop cap fragments — they'll be prepended to the next paragraph.
+                    pending_dropcap = Some(fragments);
+                    continue;
+                }
+
+                // Prepend any pending drop cap fragments.
+                if let Some(mut dc_frags) = pending_dropcap.take() {
+                    dc_frags.append(&mut fragments);
+                    fragments = dc_frags;
+                }
+
+                let style = paragraph_style_from_props(&merged_props);
                 blocks.push(LayoutBlock::Paragraph { fragments, style });
             }
             Block::Table(t) => {
-                let num_cols = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+                // Use grid column count (not cell count) — cells may span multiple grid columns.
+                let num_cols = if t.grid.is_empty() {
+                    t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)
+                } else {
+                    t.grid.len()
+                };
                 let grid_cols: Vec<Pt> = t.grid.iter().map(|g| Pt::from(g.width)).collect();
                 let col_widths =
                     compute_column_widths(&grid_cols, num_cols, config.content_width());
@@ -131,16 +167,18 @@ fn build_layout_blocks(
                                     .iter()
                                     .filter_map(|b| {
                                         if let Block::Paragraph(p) = b {
+                                            let (df, ds, mp) =
+                                                resolve_paragraph_defaults(p, styles);
                                             let frags = collect_fragments(
                                                 &p.content,
-                                                DEFAULT_FAMILY,
-                                                DEFAULT_SIZE,
+                                                &df,
+                                                ds,
                                                 None,
                                                 &measure,
                                             );
                                             Some(CellBlock {
                                                 fragments: frags,
-                                                style: paragraph_style_from_props(&p.properties),
+                                                style: paragraph_style_from_props(&mp),
                                             })
                                         } else {
                                             None
@@ -180,6 +218,40 @@ fn build_layout_blocks(
     }
 
     blocks
+}
+
+/// Resolve a paragraph's effective defaults by looking up its style_id
+/// in the resolved styles map and merging with direct properties.
+///
+/// Returns (default_font_family, default_font_size, merged_paragraph_properties).
+fn resolve_paragraph_defaults(
+    para: &dxpdf_docx_model::model::Paragraph,
+    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
+) -> (String, Pt, dxpdf_docx_model::model::ParagraphProperties) {
+    use resolve::fonts::effective_font;
+    use resolve::properties::merge_paragraph_properties;
+
+    let mut para_props = para.properties.clone();
+    let mut default_family = DEFAULT_FAMILY.to_string();
+    let mut default_size = DEFAULT_SIZE;
+
+    // Look up the paragraph's style and merge its properties as base.
+    if let Some(ref style_id) = para.style_id {
+        if let Some(resolved_style) = styles.get(style_id) {
+            // Merge: direct paragraph properties override style properties.
+            merge_paragraph_properties(&mut para_props, &resolved_style.paragraph);
+
+            // Use the style's run properties as defaults for font family/size.
+            if let Some(f) = effective_font(&resolved_style.run.fonts) {
+                default_family = f.to_string();
+            }
+            if let Some(fs) = resolved_style.run.font_size {
+                default_size = Pt::from(fs);
+            }
+        }
+    }
+
+    (default_family, default_size, para_props)
 }
 
 fn paragraph_style_from_props(
