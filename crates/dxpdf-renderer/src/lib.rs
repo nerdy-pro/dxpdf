@@ -63,14 +63,36 @@ pub fn layout_document_with_fonts(
     resolved: &ResolvedDocument,
     font_mgr: &skia_safe::FontMgr,
 ) -> Vec<LayoutedPage> {
+    use layout::fragment::FontProps;
+    use layout::header_footer::render_headers_footers;
+
     let measurer = TextMeasurer::new(font_mgr.clone());
     let default_line_height = measurer.default_line_height(DEFAULT_FAMILY, DEFAULT_SIZE);
+    let measure = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
+        measurer.measure(text, font)
+    };
     let mut all_pages = Vec::new();
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
-        let layout_blocks = build_layout_blocks(section, &config, &measurer, &resolved.styles);
+        let layout_blocks = build_layout_blocks(section, &config, &measurer, &resolved.styles, &resolved.media);
         let mut pages = layout_section(&layout_blocks, &config, default_line_height);
+
+        // Render headers/footers onto each page in this section.
+        let header_frags = section.header.as_ref().map(|blocks| {
+            collect_fragments_from_blocks(blocks, &measure, &resolved.styles)
+        });
+        let footer_frags = section.footer.as_ref().map(|blocks| {
+            collect_fragments_from_blocks(blocks, &measure, &resolved.styles)
+        });
+        render_headers_footers(
+            &mut pages,
+            &config,
+            header_frags.as_deref(),
+            footer_frags.as_deref(),
+            default_line_height,
+        );
+
         all_pages.append(&mut pages);
     }
 
@@ -81,6 +103,29 @@ pub fn layout_document_with_fonts(
     all_pages
 }
 
+/// Collect fragments from a list of blocks (used for headers/footers).
+fn collect_fragments_from_blocks<F>(
+    blocks: &[dxpdf_docx_model::model::Block],
+    measure: &F,
+    styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
+) -> Vec<layout::fragment::Fragment>
+where
+    F: Fn(&str, &layout::fragment::FontProps) -> (Pt, Pt, Pt),
+{
+    use dxpdf_docx_model::model::Block;
+    use layout::fragment::collect_fragments;
+
+    let mut all_frags = Vec::new();
+    for block in blocks {
+        if let Block::Paragraph(p) = block {
+            let (df, ds, _) = resolve_paragraph_defaults(p, styles);
+            let mut frags = collect_fragments(&p.content, &df, ds, None, measure);
+            all_frags.append(&mut frags);
+        }
+    }
+    all_frags
+}
+
 /// Build layout blocks from a resolved section.
 /// This is the bridge between the resolve output and the layout input.
 fn build_layout_blocks(
@@ -88,6 +133,7 @@ fn build_layout_blocks(
     config: &PageConfig,
     measurer: &TextMeasurer,
     styles: &std::collections::HashMap<dxpdf_docx_model::model::StyleId, resolve::styles::ResolvedStyle>,
+    media: &std::collections::HashMap<dxpdf_docx_model::model::RelId, Vec<u8>>,
 ) -> Vec<LayoutBlock> {
     use dxpdf_docx_model::model::Block;
     use layout::cell::CellBlock;
@@ -127,6 +173,7 @@ fn build_layout_blocks(
                     None,
                     &measure,
                 );
+                populate_image_data(&mut fragments, media);
 
                 if is_dropcap {
                     // Stash drop cap fragments — they'll be prepended to the next paragraph.
@@ -169,13 +216,14 @@ fn build_layout_blocks(
                                         if let Block::Paragraph(p) = b {
                                             let (df, ds, mp) =
                                                 resolve_paragraph_defaults(p, styles);
-                                            let frags = collect_fragments(
+                                            let mut frags = collect_fragments(
                                                 &p.content,
                                                 &df,
                                                 ds,
                                                 None,
                                                 &measure,
                                             );
+                                            populate_image_data(&mut frags, media);
                                             Some(CellBlock {
                                                 fragments: frags,
                                                 style: paragraph_style_from_props(&mp),
@@ -186,23 +234,43 @@ fn build_layout_blocks(
                                     })
                                     .collect();
 
+                                // Resolve cell margins from cell properties or defaults.
+                                let cell_margins = cell
+                                    .properties
+                                    .margins
+                                    .map(|m| geometry::PtEdgeInsets::new(
+                                        Pt::from(m.top),
+                                        Pt::from(m.right),
+                                        Pt::from(m.bottom),
+                                        Pt::from(m.left),
+                                    ))
+                                    .unwrap_or(geometry::PtEdgeInsets::new(
+                                        Pt::new(2.0),
+                                        Pt::new(5.0),
+                                        Pt::new(2.0),
+                                        Pt::new(5.0),
+                                    ));
+
+                                // Resolve cell shading.
+                                let shading = cell.properties.shading.map(|s| {
+                                    resolve::color::resolve_color(
+                                        s.fill,
+                                        resolve::color::ColorContext::Background,
+                                    )
+                                });
+
                                 TableCellInput {
                                     blocks: cell_blocks,
-                                    margins: geometry::PtEdgeInsets::new(
-                                        Pt::new(2.0),
-                                        Pt::new(5.0),
-                                        Pt::new(2.0),
-                                        Pt::new(5.0),
-                                    ),
+                                    margins: cell_margins,
                                     grid_span: cell.properties.grid_span.unwrap_or(1),
-                                    shading: None,
+                                    shading,
                                 }
                             })
                             .collect();
 
                         TableRowInput {
                             cells,
-                            min_height: None,
+                            min_height: row.properties.height.map(|h| Pt::from(h.value)),
                         }
                     })
                     .collect();
@@ -218,6 +286,26 @@ fn build_layout_blocks(
     }
 
     blocks
+}
+
+/// Populate image data on Fragment::Image fragments by looking up the media map.
+fn populate_image_data(
+    fragments: &mut [layout::fragment::Fragment],
+    media: &std::collections::HashMap<dxpdf_docx_model::model::RelId, Vec<u8>>,
+) {
+    use dxpdf_docx_model::model::RelId;
+    for frag in fragments.iter_mut() {
+        if let layout::fragment::Fragment::Image {
+            rel_id, image_data, ..
+        } = frag
+        {
+            if image_data.is_none() {
+                if let Some(bytes) = media.get(&RelId::new(rel_id.as_str())) {
+                    *image_data = Some(bytes.as_slice().into());
+                }
+            }
+        }
+    }
 }
 
 /// Resolve a paragraph's effective defaults by looking up its style_id

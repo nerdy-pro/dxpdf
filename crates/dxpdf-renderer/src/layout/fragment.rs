@@ -37,6 +37,7 @@ pub enum Fragment {
     Image {
         size: PtSize,
         rel_id: String,
+        image_data: Option<std::rc::Rc<[u8]>>,
     },
     Tab {
         line_height: Pt,
@@ -200,6 +201,7 @@ where
                     fragments.push(Fragment::Image {
                         size: PtSize::new(w, h),
                         rel_id: rel_id.as_str().to_string(),
+                        image_data: None, // populated by caller with media bytes
                     });
                 }
             }

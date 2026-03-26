@@ -150,7 +150,20 @@ pub fn layout_paragraph(
 
                     x += *width;
                 }
-                Fragment::Image { size, .. } => {
+                Fragment::Image {
+                    size, image_data, ..
+                } => {
+                    if let Some(data) = image_data {
+                        commands.push(DrawCommand::Image {
+                            rect: crate::geometry::PtRect::from_xywh(
+                                x,
+                                cursor_y,
+                                size.width,
+                                size.height,
+                            ),
+                            image_data: data.clone(),
+                        });
+                    }
                     x += size.width;
                 }
                 Fragment::Tab { .. } => {
