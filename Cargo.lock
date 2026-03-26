@@ -418,7 +418,9 @@ dependencies = [
 name = "dxpdf-renderer"
 version = "0.1.0"
 dependencies = [
+ "dxpdf-docx",
  "dxpdf-docx-model",
+ "dxpdf-field",
  "log",
 ]
 

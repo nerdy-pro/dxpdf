@@ -7,4 +7,8 @@ license = "MIT"
 
 [dependencies]
 dxpdf-docx-model = { path = "../dxpdf-docx-model" }
+dxpdf-field = { path = "../dxpdf-field" }
 log = "0.4"
+
+[dev-dependencies]
+dxpdf-docx = { path = "../dxpdf-docx" }
