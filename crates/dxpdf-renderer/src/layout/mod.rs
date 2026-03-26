@@ -6,7 +6,9 @@ pub mod cell;
 pub mod draw_command;
 pub mod fragment;
 pub mod line;
+pub mod page;
 pub mod paragraph;
+pub mod section;
 pub mod table;
 
 use crate::dimension::Pt;
