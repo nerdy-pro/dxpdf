@@ -4,7 +4,9 @@
 
 pub mod cell;
 pub mod draw_command;
+pub mod float;
 pub mod fragment;
+pub mod header_footer;
 pub mod line;
 pub mod page;
 pub mod paragraph;

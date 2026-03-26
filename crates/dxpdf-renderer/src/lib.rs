@@ -10,9 +10,12 @@
 
 pub mod dimension;
 pub mod error;
+pub mod fonts;
 pub mod geometry;
 pub mod layout;
+pub mod painter;
 pub mod resolve;
+pub mod skia_conv;
 
 use dxpdf_docx_model::model::Document;
 
@@ -25,11 +28,27 @@ use crate::resolve::ResolvedDocument;
 /// Default line height when no font metrics are available.
 const DEFAULT_LINE_HEIGHT: Pt = Pt::new(14.0);
 
-/// Resolve and lay out a document, producing positioned pages with draw commands.
+/// Render a parsed DOCX document to PDF bytes.
 ///
-/// This performs phases 1 (resolve) and 3 (layout) of the pipeline.
-/// Phase 2 (measure with Skia fonts) and phase 4 (paint to PDF) require
-/// `skia-safe` and are handled separately.
+/// Full pipeline: resolve → preload fonts → layout → paint.
+pub fn render(doc: &Document) -> Result<Vec<u8>, error::RenderError> {
+    let font_mgr = skia_safe::FontMgr::new();
+    render_with_font_mgr(doc, &font_mgr)
+}
+
+/// Render with a pre-configured FontMgr (for reuse across calls).
+pub fn render_with_font_mgr(
+    doc: &Document,
+    font_mgr: &skia_safe::FontMgr,
+) -> Result<Vec<u8>, error::RenderError> {
+    let resolved = resolve::resolve(doc);
+    fonts::preload_fonts(font_mgr, &resolved.font_families);
+    let pages = layout_document(&resolved);
+    painter::render_to_pdf(&pages, font_mgr)
+}
+
+/// Resolve and lay out a document without painting to PDF.
+/// Useful for testing the layout pipeline independently.
 pub fn resolve_and_layout(doc: &Document) -> (ResolvedDocument, Vec<LayoutedPage>) {
     let resolved = resolve::resolve(doc);
     let pages = layout_document(&resolved);

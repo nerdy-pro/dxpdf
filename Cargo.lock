@@ -422,6 +422,7 @@ dependencies = [
  "dxpdf-docx-model",
  "dxpdf-field",
  "log",
+ "skia-safe",
 ]
 
 [[package]]

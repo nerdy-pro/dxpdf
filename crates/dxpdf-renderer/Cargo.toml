@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 dxpdf-docx-model = { path = "../dxpdf-docx-model" }
 dxpdf-field = { path = "../dxpdf-field" }
+skia-safe = "0.93"
 log = "0.4"
 
 [dev-dependencies]

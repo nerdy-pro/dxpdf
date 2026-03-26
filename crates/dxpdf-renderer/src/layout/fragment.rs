@@ -101,6 +101,32 @@ pub fn font_props_from_run(
     }
 }
 
+/// Split text into word-level chunks for line breaking.
+/// Whitespace is kept attached to the preceding word: "hello world" → ["hello ", "world"].
+/// This allows the line fitter to break between fragments at word boundaries.
+fn split_into_words(text: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut start = 0;
+
+    for (i, ch) in text.char_indices() {
+        if ch == ' ' || ch == '\t' {
+            // Include the whitespace with the word that precedes it
+            let end = i + ch.len_utf8();
+            if end > start {
+                words.push(&text[start..end]);
+                start = end;
+            }
+        }
+    }
+
+    // Remaining text (last word without trailing space)
+    if start < text.len() {
+        words.push(&text[start..]);
+    }
+
+    words
+}
+
 /// Walk inline content and collect fragments.
 /// `measure_text` is a callback that measures text width/height/ascent for a given font.
 ///
@@ -133,17 +159,22 @@ where
                     .unwrap_or(RgbColor::BLACK);
 
                 if !tr.text.is_empty() {
-                    let (w, h, a) = measure_text(&tr.text, &font);
-                    fragments.push(Fragment::Text {
-                        text: tr.text.clone(),
-                        font,
-                        color,
-                        width: w,
-                        height: h,
-                        ascent: a,
-                        hyperlink_url: hyperlink_url.map(String::from),
-                        baseline_offset: Pt::ZERO,
-                    });
+                    // Split text into word-level fragments so the line fitter
+                    // can break between words. Whitespace is kept as a trailing
+                    // part of the preceding word (e.g., "hello " + "world").
+                    for word in split_into_words(&tr.text) {
+                        let (w, h, a) = measure_text(word, &font);
+                        fragments.push(Fragment::Text {
+                            text: word.to_string(),
+                            font: font.clone(),
+                            color,
+                            width: w,
+                            height: h,
+                            ascent: a,
+                            hyperlink_url: hyperlink_url.map(String::from),
+                            baseline_offset: Pt::ZERO,
+                        });
+                    }
                 }
             }
             Inline::Tab => {
@@ -356,14 +387,14 @@ mod tests {
         })];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), None, &dummy_measure);
 
-        assert_eq!(frags.len(), 1);
+        assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
             hyperlink_url,
             text,
             ..
         } = &frags[0]
         {
-            assert_eq!(text, "click me");
+            assert_eq!(text, "click ");
             assert_eq!(hyperlink_url.as_deref(), Some("rId1"));
         } else {
             panic!("expected Text fragment");
@@ -488,6 +519,54 @@ mod tests {
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
             assert_eq!(text, "5");
+        }
+    }
+
+    // ── split_into_words ─────────────────────────────────────────────────
+
+    #[test]
+    fn split_single_word() {
+        assert_eq!(split_into_words("hello"), vec!["hello"]);
+    }
+
+    #[test]
+    fn split_two_words() {
+        assert_eq!(split_into_words("hello world"), vec!["hello ", "world"]);
+    }
+
+    #[test]
+    fn split_trailing_space() {
+        assert_eq!(split_into_words("hello "), vec!["hello "]);
+    }
+
+    #[test]
+    fn split_multiple_words() {
+        assert_eq!(
+            split_into_words("the quick brown fox"),
+            vec!["the ", "quick ", "brown ", "fox"]
+        );
+    }
+
+    #[test]
+    fn split_empty() {
+        let result: Vec<&str> = split_into_words("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn multi_word_text_run_splits_into_fragments() {
+        let inlines = vec![text_run("hello world foo")];
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), None, &dummy_measure);
+
+        assert_eq!(frags.len(), 3);
+        if let Fragment::Text { text, .. } = &frags[0] {
+            assert_eq!(text, "hello ");
+        }
+        if let Fragment::Text { text, .. } = &frags[1] {
+            assert_eq!(text, "world ");
+        }
+        if let Fragment::Text { text, .. } = &frags[2] {
+            assert_eq!(text, "foo");
         }
     }
 }
