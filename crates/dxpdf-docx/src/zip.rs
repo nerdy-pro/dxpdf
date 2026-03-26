@@ -93,6 +93,8 @@ pub enum RelationshipType {
     Footnotes,
     /// §11.3.2: endnotes part.
     Endnotes,
+    /// §15.2.13: font.
+    Font,
     /// §15.2.14: image.
     Image,
     /// §15.3.6: hyperlink.
@@ -140,6 +142,8 @@ impl RelationshipType {
             Self::Footnotes
         } else if uri.ends_with("/endnotes") {
             Self::Endnotes
+        } else if uri.ends_with("/font") {
+            Self::Font
         } else if uri.ends_with("/image") {
             Self::Image
         } else if uri.ends_with("/hyperlink") {
@@ -178,7 +182,7 @@ pub enum TargetMode {
 /// A collection of relationships from a single .rels file.
 #[derive(Clone, Debug, Default)]
 pub struct Relationships {
-    rels: Vec<Relationship>,
+    pub(crate) rels: Vec<Relationship>,
 }
 
 impl Relationships {

@@ -1,5 +1,6 @@
 /// Convert all sample DOCX files to PDF using the new renderer.
 fn main() {
+    env_logger::init();
     let test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../dxpdf-docx/test-files");
     let out_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/rendered");
     std::fs::create_dir_all(out_dir).unwrap();

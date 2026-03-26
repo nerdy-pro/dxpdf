@@ -3,7 +3,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use skia_safe::{Font, FontMgr, FontStyle, Typeface};
+use dxpdf_docx_model::model::{EmbeddedFont, EmbeddedFontVariant};
+use skia_safe::{Data, Font, FontMgr, FontStyle, Typeface};
 
 use crate::dimension::Pt;
 
@@ -81,6 +82,48 @@ pub fn resolve_typeface(font_mgr: &FontMgr, font_family: &str, style: FontStyle)
         cache.insert(key, tf.clone());
         tf
     })
+}
+
+/// Register embedded fonts from the document into the typeface cache.
+/// These take priority over system fonts since the document bundled them.
+pub fn register_embedded_fonts(font_mgr: &FontMgr, embedded: &[EmbeddedFont]) {
+    for font in embedded {
+        let skia_data = Data::new_copy(&font.data);
+        let typeface = match font_mgr.new_from_data(&skia_data, 0) {
+            Some(tf) => tf,
+            None => {
+                log::warn!(
+                    "failed to load embedded font '{}' ({:?}): invalid font data",
+                    font.family,
+                    font.variant
+                );
+                continue;
+            }
+        };
+
+        let style = match font.variant {
+            EmbeddedFontVariant::Regular => FontStyle::normal(),
+            EmbeddedFontVariant::Bold => FontStyle::bold(),
+            EmbeddedFontVariant::Italic => FontStyle::italic(),
+            EmbeddedFontVariant::BoldItalic => FontStyle::bold_italic(),
+        };
+
+        let key = TypefaceKey {
+            family: font.family.to_lowercase(),
+            weight: *style.weight(),
+            slant: style.slant(),
+        };
+
+        TYPEFACE_CACHE.with(|cache| {
+            cache.borrow_mut().insert(key, typeface);
+        });
+
+        log::debug!(
+            "registered embedded font '{}' {:?}",
+            font.family,
+            font.variant
+        );
+    }
 }
 
 /// Pre-resolve all font families for all style variants.

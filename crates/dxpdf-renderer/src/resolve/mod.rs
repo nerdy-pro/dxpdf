@@ -79,6 +79,7 @@ mod tests {
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
             media: HashMap::new(),
+            embedded_fonts: vec![],
         }
     }
 

@@ -43,6 +43,8 @@ pub fn render_with_font_mgr(
     font_mgr: &skia_safe::FontMgr,
 ) -> Result<Vec<u8>, error::RenderError> {
     let resolved = resolve::resolve(doc);
+    // Register embedded fonts first — they take priority over system fonts.
+    fonts::register_embedded_fonts(font_mgr, &doc.embedded_fonts);
     fonts::preload_fonts(font_mgr, &resolved.font_families);
     let pages = layout_document_with_fonts(&resolved, font_mgr);
     painter::render_to_pdf(&pages, font_mgr)
@@ -445,6 +447,7 @@ mod tests {
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
             media: HashMap::new(),
+            embedded_fonts: vec![],
         }
     }
 

@@ -166,6 +166,24 @@ pub fn warn_unsupported_attr(context: &str, attr: &str, value: &str) {
     log::warn!("{context}: unsupported {attr} value \"{value}\"");
 }
 
+/// Skip the current element and all its children (after a Start event).
+pub fn skip_element(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<()> {
+    let mut depth = 1u32;
+    loop {
+        match next_event(reader, buf)? {
+            Event::Start(_) => depth += 1,
+            Event::End(_) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(());
+                }
+            }
+            Event::Eof => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
 /// Skip elements until we reach the End event for `end_tag`.
 pub fn skip_to_end(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>, end_tag: &[u8]) -> Result<()> {
     let mut depth = 1u32;

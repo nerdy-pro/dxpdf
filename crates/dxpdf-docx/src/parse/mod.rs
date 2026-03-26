@@ -2,6 +2,7 @@
 
 pub mod body;
 pub mod drawing;
+pub mod fonts;
 pub mod notes;
 pub mod numbering;
 pub mod properties;
@@ -95,6 +96,28 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         }
     }
 
+    // Phase 2c: Parse embedded fonts from fontTable
+    let embedded_fonts = if let Some(ft_rel) = doc_rels.find_by_type(&RelationshipType::FontTable) {
+        let ft_path = zip::resolve_target(doc_dir, &ft_rel.target);
+        let ft_dir = zip::part_directory(&ft_path);
+        let ft_rels_path = zip::rels_path_for(&ft_path);
+        // Take data out to avoid overlapping borrows.
+        let ft_data = package.take_part(&ft_path);
+        let ft_rels_data = package.take_part(&ft_rels_path);
+        if let Some(ft_data) = ft_data {
+            let ft_rels = if let Some(rd) = ft_rels_data {
+                Relationships::parse(&rd)?
+            } else {
+                Relationships::default()
+            };
+            fonts::parse_embedded_fonts(&ft_data, &ft_rels, &mut package, ft_dir)?
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
     // Phase 3: Parse document body
     let doc_data = package.require_part(&doc_path)?;
     let (body_blocks, final_section) = body::parse_body(doc_data)?;
@@ -178,5 +201,6 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         footnotes,
         endnotes,
         media,
+        embedded_fonts,
     })
 }

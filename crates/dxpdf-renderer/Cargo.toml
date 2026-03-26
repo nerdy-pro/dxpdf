@@ -13,3 +13,4 @@ log = "0.4"
 
 [dev-dependencies]
 dxpdf-docx = { path = "../dxpdf-docx" }
+env_logger = "0.11"
