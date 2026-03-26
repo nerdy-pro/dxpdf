@@ -127,7 +127,7 @@ mod tests {
         Style {
             name: None,
             style_type: StyleType::Paragraph,
-            based_on: based_on.map(|s| StyleId::new(s)),
+            based_on: based_on.map(StyleId::new),
             is_default: false,
             paragraph_properties: para,
             run_properties: run,
