@@ -1,21 +1,33 @@
-/// Convert all sample DOCX files to PDF using the new renderer.
+/// Convert DOCX files to PDF using the new renderer.
+///
+/// With no arguments: converts all files in test-files/ and test-cases/.
+/// With arguments: converts the specified files.
 fn main() {
     env_logger::init();
-    let test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../dxpdf-docx/test-files");
     let out_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/rendered");
     std::fs::create_dir_all(out_dir).unwrap();
 
     let font_mgr = skia_safe::FontMgr::new();
 
-    for entry in std::fs::read_dir(test_dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "docx") {
-            continue;
-        }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let paths: Vec<std::path::PathBuf> = if args.is_empty() {
+        // Default: scan both directories.
+        let dirs = [
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../dxpdf-docx/test-files"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../test-cases"),
+        ];
+        dirs.iter()
+            .filter_map(|d| std::fs::read_dir(d).ok())
+            .flat_map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == "docx"))
+            .collect()
+    } else {
+        args.iter().map(std::path::PathBuf::from).collect()
+    };
 
+    for path in &paths {
         let filename = path.file_stem().unwrap().to_str().unwrap();
-        let docx_bytes = std::fs::read(&path).unwrap();
+        let docx_bytes = std::fs::read(path).unwrap();
 
         let t0 = std::time::Instant::now();
         let doc = match dxpdf_docx::parse(&docx_bytes) {
