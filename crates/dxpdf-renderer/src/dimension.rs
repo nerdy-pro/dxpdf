@@ -117,7 +117,7 @@ impl Sum for Pt {
 
 // ── Conversions from OOXML units ─────────────────────────────────────────
 
-use dxpdf_docx_model::dimension::{Dimension, EighthPoints, Emu, HalfPoints, Twips};
+use dxpdf_docx_model::dimension::{Dimension, EighthPoints, Emu, HalfPoints, Points, Twips};
 
 impl From<Dimension<Twips>> for Pt {
     /// 1 twip = 1/20 pt.
@@ -144,6 +144,13 @@ impl From<Dimension<EighthPoints>> for Pt {
     /// 1 eighth-point = 1/8 pt.
     fn from(d: Dimension<EighthPoints>) -> Self {
         Self(d.raw() as f32 / 8.0)
+    }
+}
+
+impl From<Dimension<Points>> for Pt {
+    /// §17.18.68 ST_PointMeasure: 1 point = 1 pt.
+    fn from(d: Dimension<Points>) -> Self {
+        Self(d.raw() as f32)
     }
 }
 

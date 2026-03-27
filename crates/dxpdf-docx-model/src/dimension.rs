@@ -113,6 +113,14 @@ impl Unit for FractionPoints {
     const NAME: &'static str = "fp4096";
 }
 
+/// §17.18.68 ST_PointMeasure — whole points (1/72nd of an inch).
+/// Used for border spacing (§17.3.4 w:space).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Points;
+impl Unit for Points {
+    const NAME: &'static str = "pt";
+}
+
 /// Percentage in 1/1000th of a percent (OOXML ST_DecimalNumberOrPercent).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ThousandthPercent;

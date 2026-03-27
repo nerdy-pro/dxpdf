@@ -1,7 +1,7 @@
 //! Shared formatting primitives — borders, shading, tabs, alignment, and enums
 //! used across paragraph, table, and run properties.
 
-use crate::dimension::{Dimension, EighthPoints, Twips};
+use crate::dimension::{Dimension, EighthPoints, Points, Twips};
 
 use super::color::Color;
 
@@ -56,8 +56,10 @@ pub struct ParagraphBorders {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Border {
     pub style: BorderStyle,
+    /// §17.3.4: border width in eighths of a point (ST_EighthPointMeasure).
     pub width: Dimension<EighthPoints>,
-    pub space: Dimension<Twips>,
+    /// §17.3.4: spacing offset (ST_PointMeasure §17.18.68).
+    pub space: Dimension<Points>,
     pub color: Color,
 }
 

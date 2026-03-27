@@ -501,6 +501,10 @@ fn paragraph_style_from_props(
         line_spacing,
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
+        // §17.3.1.31: paragraph shading.
+        shading: props.shading.as_ref().map(|s| {
+            resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background)
+        }),
     }
 }
 
@@ -514,8 +518,10 @@ fn resolve_paragraph_borders(
 
     let convert = |b: &dxpdf_docx_model::model::Border| -> BorderLine {
         BorderLine {
+            // §17.3.4: w:sz is ST_EighthPointMeasure.
             width: Pt::from(b.width),
             color: resolve::color::resolve_color(b.color, resolve::color::ColorContext::Text),
+            // §17.3.4: w:space is ST_PointMeasure (§17.18.68).
             space: Pt::from(b.space),
         }
     };

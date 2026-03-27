@@ -906,6 +906,7 @@ pub fn parse_border(e: &BytesStart<'_>) -> Result<Border> {
     Ok(Border {
         style,
         width: Dimension::new(sz),
+        // §17.3.4: w:space is ST_PointMeasure (§17.18.68).
         space: Dimension::new(space),
         color,
     })

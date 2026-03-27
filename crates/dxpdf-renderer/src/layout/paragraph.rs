@@ -26,6 +26,8 @@ pub struct ParagraphStyle {
     pub drop_cap: Option<DropCapInfo>,
     /// §17.3.1.24: paragraph borders.
     pub borders: Option<ParagraphBorderStyle>,
+    /// §17.3.1.31: paragraph shading (background fill).
+    pub shading: Option<RgbColor>,
 }
 
 /// Resolved paragraph border style for rendering.
@@ -75,9 +77,13 @@ impl Default for ParagraphStyle {
             line_spacing: LineSpacingRule::Auto(1.0),
             drop_cap: None,
             borders: None,
+            shading: None,
         }
     }
 }
+
+// Workaround for clippy: ParagraphStyle has many fields but they all map 1:1 to spec properties.
+// A builder pattern would add complexity without value here.
 
 /// Line spacing rules matching OOXML semantics.
 #[derive(Clone, Copy, Debug)]
@@ -121,7 +127,25 @@ pub fn layout_paragraph(
         .map(|dc| dc.lines as usize)
         .unwrap_or(0);
 
-    let content_width = constraints.max_width - style.indent_left - style.indent_right;
+    // §17.3.1.24: border space is the distance between the border line and the text.
+    // Only the space reduces the text area, not the border line width.
+    let border_space_left = style
+        .borders
+        .as_ref()
+        .and_then(|b| b.left.as_ref())
+        .map(|b| b.space)
+        .unwrap_or(Pt::ZERO);
+    let border_space_right = style
+        .borders
+        .as_ref()
+        .and_then(|b| b.right.as_ref())
+        .map(|b| b.space)
+        .unwrap_or(Pt::ZERO);
+    let content_width = constraints.max_width
+        - style.indent_left
+        - style.indent_right
+        - border_space_left
+        - border_space_right;
     // §17.3.1.12: first-line indent reduces the available width for the first line.
     // Drop cap indent also reduces width for the first N lines.
     let first_line_reduction = style.indent_first_line.max(Pt::ZERO) + drop_cap_indent;
@@ -207,8 +231,14 @@ pub fn layout_paragraph(
         };
         let line_height = resolve_line_height(natural_height, &style.line_spacing);
 
-        // Alignment offset
-        let remaining = content_width - line.width;
+        // Alignment offset — computed relative to the line's available width,
+        // which differs for the first line (reduced by first-line indent).
+        let line_available = if line_idx == 0 {
+            first_line_width
+        } else {
+            remaining_width
+        };
+        let remaining = (line_available - line.width).max(Pt::ZERO);
         let align_offset = match style.alignment {
             Alignment::Center => remaining * 0.5,
             Alignment::End => remaining,
@@ -313,30 +343,45 @@ pub fn layout_paragraph(
         cursor_y += line_height;
     }
 
-    // §17.3.1.24: render paragraph borders.
-    if let Some(ref borders) = style.borders {
-        let content_top = style.space_before;
-        let content_bottom = cursor_y;
-        let left_x = style.indent_left;
-        let right_x = constraints.max_width - style.indent_right;
+    // §17.3.1.24: paragraph border and shading coordinate system.
+    // Borders sit at the paragraph indent edges. The border `space` is the
+    // distance inward from the border to the text. Shading fills the area
+    // enclosed by the borders.
+    let para_left = style.indent_left;
+    let para_right = constraints.max_width - style.indent_right;
+    let para_top = style.space_before;
+    let para_bottom = cursor_y;
 
+    // §17.3.1.31: render paragraph shading (fills the border area).
+    if let Some(bg_color) = style.shading {
+        commands.insert(0, DrawCommand::Rect {
+            rect: crate::geometry::PtRect::from_xywh(
+                para_left,
+                para_top,
+                para_right - para_left,
+                para_bottom - para_top,
+            ),
+            color: bg_color,
+        });
+    }
+
+    // §17.3.1.24: render paragraph borders at the indent edges.
+    if let Some(ref borders) = style.borders {
         if let Some(ref top) = borders.top {
-            let y = content_top - top.space;
             commands.push(DrawCommand::Line {
                 line: crate::geometry::PtLineSegment::new(
-                    PtOffset::new(left_x, y),
-                    PtOffset::new(right_x, y),
+                    PtOffset::new(para_left, para_top),
+                    PtOffset::new(para_right, para_top),
                 ),
                 color: top.color,
                 width: top.width,
             });
         }
         if let Some(ref bottom) = borders.bottom {
-            let y = content_bottom + bottom.space;
             commands.push(DrawCommand::Line {
                 line: crate::geometry::PtLineSegment::new(
-                    PtOffset::new(left_x, y),
-                    PtOffset::new(right_x, y),
+                    PtOffset::new(para_left, para_bottom),
+                    PtOffset::new(para_right, para_bottom),
                 ),
                 color: bottom.color,
                 width: bottom.width,
@@ -345,8 +390,8 @@ pub fn layout_paragraph(
         if let Some(ref left) = borders.left {
             commands.push(DrawCommand::Line {
                 line: crate::geometry::PtLineSegment::new(
-                    PtOffset::new(left_x - left.space, content_top),
-                    PtOffset::new(left_x - left.space, content_bottom),
+                    PtOffset::new(para_left, para_top),
+                    PtOffset::new(para_left, para_bottom),
                 ),
                 color: left.color,
                 width: left.width,
@@ -355,8 +400,8 @@ pub fn layout_paragraph(
         if let Some(ref right) = borders.right {
             commands.push(DrawCommand::Line {
                 line: crate::geometry::PtLineSegment::new(
-                    PtOffset::new(right_x + right.space, content_top),
-                    PtOffset::new(right_x + right.space, content_bottom),
+                    PtOffset::new(para_right, para_top),
+                    PtOffset::new(para_right, para_bottom),
                 ),
                 color: right.color,
                 width: right.width,
