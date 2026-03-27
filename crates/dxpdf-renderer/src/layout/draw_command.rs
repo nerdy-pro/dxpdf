@@ -44,23 +44,36 @@ pub enum DrawCommand {
 }
 
 impl DrawCommand {
-    /// Shift all y-coordinates by `dy`. Used when positioning commands
-    /// relative to their final page position.
-    pub fn shift_y(&mut self, dy: Pt) {
+    /// Shift all coordinates by `(dx, dy)`.
+    pub fn shift(&mut self, dx: Pt, dy: Pt) {
         match self {
-            DrawCommand::Text { position, .. } => position.y += dy,
-            DrawCommand::Underline { line, .. } => {
+            DrawCommand::Text { position, .. } => {
+                position.x += dx;
+                position.y += dy;
+            }
+            DrawCommand::Underline { line, .. } | DrawCommand::Line { line, .. } => {
+                line.start.x += dx;
                 line.start.y += dy;
+                line.end.x += dx;
                 line.end.y += dy;
             }
-            DrawCommand::Image { rect, .. } => rect.origin.y += dy,
-            DrawCommand::Rect { rect, .. } => rect.origin.y += dy,
-            DrawCommand::LinkAnnotation { rect, .. } => rect.origin.y += dy,
-            DrawCommand::Line { line, .. } => {
-                line.start.y += dy;
-                line.end.y += dy;
+            DrawCommand::Image { rect, .. }
+            | DrawCommand::Rect { rect, .. }
+            | DrawCommand::LinkAnnotation { rect, .. } => {
+                rect.origin.x += dx;
+                rect.origin.y += dy;
             }
         }
+    }
+
+    /// Shift all y-coordinates by `dy`.
+    pub fn shift_y(&mut self, dy: Pt) {
+        self.shift(Pt::ZERO, dy);
+    }
+
+    /// Shift all x-coordinates by `dx`.
+    pub fn shift_x(&mut self, dx: Pt) {
+        self.shift(dx, Pt::ZERO);
     }
 }
 

@@ -4,7 +4,7 @@
 //! fits them into pages respecting page size and margins, handles page breaks.
 
 use crate::dimension::Pt;
-use super::draw_command::{DrawCommand, LayoutedPage};
+use super::draw_command::LayoutedPage;
 use super::fragment::Fragment;
 use super::page::PageConfig;
 use super::paragraph::{layout_paragraph, ParagraphStyle};
@@ -101,7 +101,7 @@ pub fn layout_section(
                 // Offset commands to absolute page position
                 for mut cmd in para.commands {
                     cmd.shift_y(cursor_y);
-                    shift_x(&mut cmd, config.margins.left);
+                    cmd.shift_x(config.margins.left);
                     current_page.commands.push(cmd);
                 }
 
@@ -139,7 +139,7 @@ pub fn layout_section(
 
                     for mut cmd in table.commands {
                         cmd.shift_y(cursor_y);
-                        shift_x(&mut cmd, config.margins.left);
+                        cmd.shift_x(config.margins.left);
                         current_page.commands.push(cmd);
                     }
 
@@ -159,7 +159,7 @@ pub fn layout_section(
 
                 for mut cmd in table.commands {
                     cmd.shift_y(cursor_y);
-                    shift_x(&mut cmd, config.margins.left);
+                    cmd.shift_x(config.margins.left);
                     current_page.commands.push(cmd);
                 }
 
@@ -174,28 +174,12 @@ pub fn layout_section(
     pages
 }
 
-fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
-    match cmd {
-        DrawCommand::Text { position, .. } => position.x += dx,
-        DrawCommand::Underline { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-        DrawCommand::Image { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Rect { rect, .. } => rect.origin.x += dx,
-        DrawCommand::LinkAnnotation { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Line { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geometry::{PtEdgeInsets, PtSize};
     use crate::layout::cell::CellBlock;
+    use crate::layout::draw_command::DrawCommand;
     use crate::layout::fragment::FontProps;
     use crate::layout::table::TableCellInput;
     use crate::resolve::color::RgbColor;

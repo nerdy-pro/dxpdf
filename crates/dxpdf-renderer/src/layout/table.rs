@@ -88,6 +88,15 @@ pub enum TableBorderStyle {
     Double,
 }
 
+/// Per-cell layout result with positioning info from pass 2.
+struct CellLayoutEntry {
+    layout: CellLayout,
+    cell_x: Pt,
+    cell_w: Pt,
+    /// Starting grid column index (for vMerge neighbor lookup).
+    grid_col: usize,
+}
+
 /// Result of laying out a table.
 #[derive(Debug)]
 pub struct TableLayout {
@@ -118,142 +127,92 @@ pub fn layout_table(
     let mut row_heights = Vec::with_capacity(rows.len());
 
     // Pass 2: lay out each cell, determine row heights.
-    let mut row_cell_layouts: Vec<Vec<(CellLayout, Pt, Pt)>> = Vec::new(); // (layout, x, width)
+    let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
 
     for row in rows {
-        let mut cell_layouts = Vec::new();
+        let mut entries = Vec::new();
         let mut max_height = Pt::ZERO;
         let mut grid_idx = 0;
 
         for cell in &row.cells {
             let span = cell.grid_span.max(1) as usize;
-            let cell_width: Pt = (grid_idx..grid_idx + span)
-                .map(|i| col_widths.get(i).copied()
-                .unwrap_or(Pt::ZERO))
-                .sum();
-            let cell_x: Pt = (0..grid_idx)
-                .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
-                .sum();
+            let cell_w: Pt = col_widths[grid_idx..grid_idx + span].iter().copied().sum();
+            let cell_x: Pt = col_widths[..grid_idx].iter().copied().sum();
 
             // §17.4.85: vMerge=continue cells have no content.
-            let cell_layout = if cell.vertical_merge == Some(VerticalMergeState::Continue) {
-                CellLayout {
-                    commands: Vec::new(),
-                    content_height: Pt::ZERO,
-                }
+            let is_continue = cell.vertical_merge == Some(VerticalMergeState::Continue);
+            let layout = if is_continue {
+                CellLayout { commands: Vec::new(), content_height: Pt::ZERO }
             } else {
-                layout_cell(
-                    &cell.blocks,
-                    cell_width,
-                    &cell.margins,
-                    default_line_height,
-                )
+                layout_cell(&cell.blocks, cell_w, &cell.margins, default_line_height)
             };
 
-            let total_cell_height =
-                cell_layout.content_height + cell.margins.vertical();
-            max_height = max_height.max(total_cell_height);
+            // §17.4.85: Continue cells don't contribute to row height.
+            if !is_continue {
+                max_height = max_height.max(layout.content_height + cell.margins.vertical());
+            }
 
-            cell_layouts.push((cell_layout, cell_x, cell_width));
+            entries.push(CellLayoutEntry { layout, cell_x, cell_w, grid_col: grid_idx });
             grid_idx += span;
         }
 
-        // Apply minimum row height
         if let Some(min_h) = row.min_height {
             max_height = max_height.max(min_h);
         }
 
         row_heights.push(max_height);
-        row_cell_layouts.push(cell_layouts);
+        row_cell_layouts.push(entries);
     }
 
-    // Pass 3: position cells, emit shading and commands.
-    for (row_idx, (_row, cell_layouts)) in rows.iter().zip(row_cell_layouts.iter()).enumerate() {
-        let row_height = row_heights[row_idx];
+    // §17.4.85: expand the last row of each vertical merge group so the
+    // Restart cell's content fits within the combined spanned row heights.
+    expand_rows_for_vmerge(rows, &row_cell_layouts, &mut row_heights);
 
-        for ((cell_layout, cell_x, cell_width), cell_input) in
-            cell_layouts.iter().zip(rows[row_idx].cells.iter())
+    // Pass 3: position cells, emit shading, content, and borders.
+    for (row_idx, entries) in row_cell_layouts.iter().enumerate() {
+        let row_height = row_heights[row_idx];
+        let num_cells = rows[row_idx].cells.len();
+
+        for (cell_ci, (entry, cell_input)) in
+            entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
         {
-            // Cell shading
+            // Cell shading.
             if let Some(color) = cell_input.shading {
                 commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(*cell_x, cursor_y, *cell_width, row_height),
+                    rect: PtRect::from_xywh(entry.cell_x, cursor_y, entry.cell_w, row_height),
                     color,
                 });
             }
 
-            // Cell content commands — offset by cell position + row position
-            for cmd in &cell_layout.commands {
+            // Cell content — offset by cell position + row position.
+            for cmd in &entry.layout.commands {
                 let mut cmd = cmd.clone();
-                cmd.shift_y(cursor_y);
-                shift_x(&mut cmd, *cell_x);
+                cmd.shift(entry.cell_x, cursor_y);
                 commands.push(cmd);
             }
-        }
 
-        // §17.4.38 / §17.7.6: draw borders.
-        // Per-cell borders (from conditional formatting) take priority over
-        // table-level borders. Vertical borders extend to cover horizontal
-        // border thickness at corners.
-        {
-            let mut grid_idx = 0;
-            for (cell_ci, cell_input) in rows[row_idx].cells.iter().enumerate() {
-                let span = cell_input.grid_span.max(1) as usize;
-                let cell_x: Pt = (0..grid_idx)
-                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
-                    .sum();
-                let cell_w: Pt = (grid_idx..grid_idx + span)
-                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
-                    .sum();
-                grid_idx += span;
+            // §17.4.38 / §17.7.6: resolve borders.
+            let (mut b_top, mut b_bottom, b_left, b_right) =
+                resolve_cell_effective_borders(cell_input, borders, row_idx, cell_ci,
+                    rows.len(), num_cells);
 
-                // Resolve effective borders for this cell.
-                let (mut b_top, mut b_bottom, b_left, b_right) =
-                    resolve_cell_effective_borders(cell_input, borders, row_idx, cell_ci,
-                        rows.len(), rows[row_idx].cells.len());
-
-                // §17.4.85: suppress horizontal borders between vertically
-                // merged cells so the merged area looks continuous.
-                if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
-                    b_top = None;
-                }
-                // If the cell below in the same grid column is a Continue cell,
-                // suppress the bottom border of this cell.
-                if row_idx + 1 < rows.len() {
-                    let below_merge = find_cell_at_grid_col(&rows[row_idx + 1], grid_idx - span)
-                        .and_then(|c| c.vertical_merge);
-                    if below_merge == Some(VerticalMergeState::Continue) {
-                        b_bottom = None;
-                    }
-                }
-
-                // Horizontal borders.
-                let h_top_half = b_top.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
-                let h_bot_half = b_bottom.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
-
-                if let Some(ref b) = b_top {
-                    emit_h_border(&mut commands, b, cell_x, cell_x + cell_w, cursor_y);
-                }
-                if let Some(ref b) = b_bottom {
-                    emit_h_border(&mut commands, b, cell_x, cell_x + cell_w, cursor_y + row_height);
-                }
-
-                // Vertical borders (extend for clean corners).
-                let v_top = cursor_y - h_top_half;
-                let v_bot = cursor_y + row_height + h_bot_half;
-                if let Some(ref b) = b_left {
-                    emit_v_border(&mut commands, b, cell_x, v_top, v_bot);
-                }
-                if let Some(ref b) = b_right {
-                    emit_v_border(&mut commands, b, cell_x + cell_w, v_top, v_bot);
-                }
+            // §17.4.85: suppress horizontal borders inside vMerge groups.
+            if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
+                b_top = None;
             }
+            if row_idx + 1 < rows.len()
+                && is_vmerge_continue(&rows[row_idx + 1], entry.grid_col)
+            {
+                b_bottom = None;
+            }
+
+            emit_cell_borders(&mut commands,
+                CellBorders { top: b_top, bottom: b_bottom, left: b_left, right: b_right },
+                entry.cell_x, entry.cell_w, cursor_y, row_height);
         }
 
         cursor_y += row_height;
     }
-
-    // Bottom border is now drawn per-cell in the loop above.
 
     TableLayout {
         commands,
@@ -313,16 +272,59 @@ fn resolve_cell_effective_borders(
     (top, bottom, left, right)
 }
 
+/// §17.4.85: expand the last row of each vertical merge group so the
+/// Restart cell's content fits within the combined spanned row heights.
+fn expand_rows_for_vmerge(
+    rows: &[TableRowInput],
+    row_cell_layouts: &[Vec<CellLayoutEntry>],
+    row_heights: &mut [Pt],
+) {
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (cell_ci, cell) in row.cells.iter().enumerate() {
+            if cell.vertical_merge != Some(VerticalMergeState::Restart) {
+                continue;
+            }
+
+            let entry = &row_cell_layouts[row_idx][cell_ci];
+            let content_h = entry.layout.content_height + cell.margins.vertical();
+
+            // Find last row in this merge group.
+            let mut last_merged_row = row_idx;
+            for (r, row_below) in rows.iter().enumerate().skip(row_idx + 1) {
+                if is_vmerge_continue(row_below, entry.grid_col) {
+                    last_merged_row = r;
+                } else {
+                    break;
+                }
+            }
+            if last_merged_row == row_idx {
+                continue;
+            }
+
+            // Expand last row if content overflows.
+            let spanned: Pt = row_heights[row_idx..=last_merged_row].iter().copied().sum();
+            if content_h > spanned {
+                row_heights[last_merged_row] += content_h - spanned;
+            }
+        }
+    }
+}
+
+/// Check if the cell at `grid_col` in `row` is a vMerge Continue cell.
+fn is_vmerge_continue(row: &TableRowInput, grid_col: usize) -> bool {
+    find_cell_at_grid_col(row, grid_col)
+        .is_some_and(|c| c.vertical_merge == Some(VerticalMergeState::Continue))
+}
+
 /// Find the cell in a row that covers the given grid column index.
-/// Returns `None` if no cell covers that column.
 fn find_cell_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<&TableCellInput> {
-    let mut grid_col = 0;
+    let mut col = 0;
     for cell in &row.cells {
         let span = cell.grid_span.max(1) as usize;
-        if target_grid_col >= grid_col && target_grid_col < grid_col + span {
+        if target_grid_col < col + span {
             return Some(cell);
         }
-        grid_col += span;
+        col += span;
     }
     None
 }
@@ -334,75 +336,80 @@ fn resolve_override(ovr: &CellBorderOverride) -> Option<TableBorderLine> {
     }
 }
 
-fn emit_h_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x1: Pt, x2: Pt, y: Pt) {
+/// Resolved borders for one cell edge.
+struct CellBorders {
+    top: Option<TableBorderLine>,
+    bottom: Option<TableBorderLine>,
+    left: Option<TableBorderLine>,
+    right: Option<TableBorderLine>,
+}
+
+/// Emit all four borders for a cell, extending verticals for clean corners.
+fn emit_cell_borders(
+    commands: &mut Vec<DrawCommand>,
+    b: CellBorders,
+    cell_x: Pt, cell_w: Pt, row_y: Pt, row_h: Pt,
+) {
+    let h_top_half = b.top.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+    let h_bot_half = b.bottom.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+
+    if let Some(ref border) = b.top {
+        emit_border(commands, border,
+            PtOffset::new(cell_x, row_y),
+            PtOffset::new(cell_x + cell_w, row_y));
+    }
+    if let Some(ref border) = b.bottom {
+        emit_border(commands, border,
+            PtOffset::new(cell_x, row_y + row_h),
+            PtOffset::new(cell_x + cell_w, row_y + row_h));
+    }
+
+    // Vertical borders extend past horizontal border thickness for clean corners.
+    let v_top = row_y - h_top_half;
+    let v_bot = row_y + row_h + h_bot_half;
+    if let Some(ref border) = b.left {
+        emit_border(commands, border,
+            PtOffset::new(cell_x, v_top),
+            PtOffset::new(cell_x, v_bot));
+    }
+    if let Some(ref border) = b.right {
+        emit_border(commands, border,
+            PtOffset::new(cell_x + cell_w, v_top),
+            PtOffset::new(cell_x + cell_w, v_bot));
+    }
+}
+
+/// Emit a single border line (or two lines for §17.4.38 double style).
+fn emit_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, p1: PtOffset, p2: PtOffset) {
     match b.style {
         TableBorderStyle::Single => {
             commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x1, y), PtOffset::new(x2, y)),
+                line: PtLineSegment::new(p1, p2),
                 color: b.color,
                 width: b.width,
             });
         }
         TableBorderStyle::Double => {
-            // §17.4.38: double border — two lines with a gap equal to line width.
-            // Total height = w:sz. Each line = sz/3, gap = sz/3.
-            let line_w = b.width * (1.0 / 3.0);
-            let gap = b.width * (1.0 / 3.0);
-            let offset = line_w * 0.5 + gap * 0.5;
+            // §17.4.38: total = w:sz, each sub-line = sz/3, gap = sz/3.
+            let sub_w = b.width * (1.0 / 3.0);
+            let off = sub_w; // half sub-line + half gap = sz/3
+            // Offset perpendicular to the line direction.
+            let dx = if p1.x == p2.x { off } else { Pt::ZERO };
+            let dy = if p1.y == p2.y { off } else { Pt::ZERO };
             commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x1, y - offset), PtOffset::new(x2, y - offset)),
+                line: PtLineSegment::new(
+                    PtOffset::new(p1.x - dx, p1.y - dy),
+                    PtOffset::new(p2.x - dx, p2.y - dy)),
                 color: b.color,
-                width: line_w,
+                width: sub_w,
             });
             commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x1, y + offset), PtOffset::new(x2, y + offset)),
+                line: PtLineSegment::new(
+                    PtOffset::new(p1.x + dx, p1.y + dy),
+                    PtOffset::new(p2.x + dx, p2.y + dy)),
                 color: b.color,
-                width: line_w,
+                width: sub_w,
             });
-        }
-    }
-}
-
-fn emit_v_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x: Pt, y1: Pt, y2: Pt) {
-    match b.style {
-        TableBorderStyle::Single => {
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x, y1), PtOffset::new(x, y2)),
-                color: b.color,
-                width: b.width,
-            });
-        }
-        TableBorderStyle::Double => {
-            let line_w = b.width * (1.0 / 3.0);
-            let gap = b.width * (1.0 / 3.0);
-            let offset = line_w * 0.5 + gap * 0.5;
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x - offset, y1), PtOffset::new(x - offset, y2)),
-                color: b.color,
-                width: line_w,
-            });
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(PtOffset::new(x + offset, y1), PtOffset::new(x + offset, y2)),
-                color: b.color,
-                width: line_w,
-            });
-        }
-    }
-}
-
-fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
-    match cmd {
-        DrawCommand::Text { position, .. } => position.x += dx,
-        DrawCommand::Underline { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-        DrawCommand::Image { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Rect { rect, .. } => rect.origin.x += dx,
-        DrawCommand::LinkAnnotation { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Line { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
         }
     }
 }

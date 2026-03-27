@@ -57,8 +57,7 @@ pub fn layout_cell(
                     default_line_height,
                 );
                 for mut cmd in para.commands {
-                    cmd.shift_y(margins.top + cursor_y);
-                    shift_x(&mut cmd, margins.left);
+                    cmd.shift(margins.left, margins.top + cursor_y);
                     commands.push(cmd);
                 }
                 cursor_y += para.size.height;
@@ -66,8 +65,7 @@ pub fn layout_cell(
             CellBlock::NestedTable { commands: table_cmds, size } => {
                 for cmd in table_cmds {
                     let mut cmd = cmd.clone();
-                    cmd.shift_y(margins.top + cursor_y);
-                    shift_x(&mut cmd, margins.left);
+                    cmd.shift(margins.left, margins.top + cursor_y);
                     commands.push(cmd);
                 }
                 cursor_y += size.height;
@@ -81,23 +79,6 @@ pub fn layout_cell(
     }
 }
 
-/// Shift x-coordinate of a draw command.
-fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
-    match cmd {
-        DrawCommand::Text { position, .. } => position.x += dx,
-        DrawCommand::Underline { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-        DrawCommand::Image { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Rect { rect, .. } => rect.origin.x += dx,
-        DrawCommand::LinkAnnotation { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Line { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -37,8 +37,7 @@ pub fn render_headers_footers(
                 .commands
                 .into_iter()
                 .map(|mut cmd| {
-                    cmd.shift_y(header_y);
-                    shift_x(&mut cmd, config.margins.left);
+                    cmd.shift(config.margins.left, header_y);
                     cmd
                 })
                 .collect();
@@ -55,27 +54,9 @@ pub fn render_headers_footers(
 
             let footer_y = config.page_size.height - config.footer_margin - para.size.height;
             for mut cmd in para.commands {
-                cmd.shift_y(footer_y);
-                shift_x(&mut cmd, config.margins.left);
+                cmd.shift(config.margins.left, footer_y);
                 page.commands.push(cmd);
             }
-        }
-    }
-}
-
-fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
-    match cmd {
-        DrawCommand::Text { position, .. } => position.x += dx,
-        DrawCommand::Underline { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
-        }
-        DrawCommand::Image { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Rect { rect, .. } => rect.origin.x += dx,
-        DrawCommand::LinkAnnotation { rect, .. } => rect.origin.x += dx,
-        DrawCommand::Line { line, .. } => {
-            line.start.x += dx;
-            line.end.x += dx;
         }
     }
 }
