@@ -107,10 +107,17 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
             line_ascent = line_ascent.max(*ascent);
         }
 
-        // Track break opportunity: after each fragment (text ending with space,
-        // tab, image, etc.) we can break before the next fragment.
-        // For simplicity, every fragment boundary is a potential break point.
-        last_break_point = Some(i + 1);
+        // Track break opportunity: only after fragments that end with whitespace,
+        // or non-text fragments (tabs, images). Text fragments without trailing
+        // whitespace are mid-word continuations (e.g., a word split across runs)
+        // and must not be broken.
+        let is_break_point = match frag {
+            Fragment::Text { text, .. } => text.ends_with(' ') || text.ends_with('\t'),
+            _ => true, // tabs, images, line breaks are always break points
+        };
+        if is_break_point {
+            last_break_point = Some(i + 1);
+        }
 
         i += 1;
     }
