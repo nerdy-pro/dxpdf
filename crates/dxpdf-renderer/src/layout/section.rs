@@ -169,7 +169,7 @@ mod tests {
             height: Pt::new(height),
             ascent: Pt::new(height * 0.7),
             hyperlink_url: None,
-            shading: None, baseline_offset: Pt::ZERO,
+            shading: None, border: None, baseline_offset: Pt::ZERO,
         }
     }
 

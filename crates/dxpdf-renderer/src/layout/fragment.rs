@@ -25,6 +25,14 @@ pub struct FontProps {
     pub underline_thickness: Pt,
 }
 
+/// §17.3.2.4: run-level border for rendering.
+#[derive(Clone, Copy, Debug)]
+pub struct FragmentBorder {
+    pub width: Pt,
+    pub color: RgbColor,
+    pub space: Pt,
+}
+
 /// A measured fragment — the atomic unit for line fitting.
 #[derive(Clone, Debug)]
 pub enum Fragment {
@@ -34,6 +42,8 @@ pub enum Fragment {
         color: RgbColor,
         /// §17.3.2.32: run-level shading (background color behind text).
         shading: Option<RgbColor>,
+        /// §17.3.2.4: run-level border (box around text).
+        border: Option<FragmentBorder>,
         /// Full width including trailing whitespace (used for positioning).
         width: Pt,
         /// Width excluding trailing whitespace (used for line-break overflow checking).
@@ -254,6 +264,13 @@ where
                     _ => Pt::ZERO,
                 };
 
+                // §17.3.2.4: run-level border.
+                let border = effective_props.border.as_ref().map(|b| FragmentBorder {
+                    width: Pt::from(b.width),
+                    color: crate::resolve::color::resolve_color(b.color, crate::resolve::color::ColorContext::Text),
+                    space: Pt::new(b.space.raw() as f32),
+                });
+
                 if !tr.text.is_empty() {
                     // Split text into word-level fragments so the line fitter
                     // can break between words. Whitespace is kept as a trailing
@@ -273,6 +290,7 @@ where
                             font: font.clone(),
                             color,
                             shading,
+                            border,
                             width: w,
                             trimmed_width: tw,
                             height: h,
@@ -391,12 +409,14 @@ where
                     text,
                     font,
                     color: RgbColor::BLACK,
+                    shading: None,
+                    border: None,
                     width: w,
-                    trimmed_width: w, // symbols have no trailing whitespace
+                    trimmed_width: w,
                     height: h,
                     ascent: a,
                     hyperlink_url: hyperlink_url.map(String::from),
-                    shading: None, baseline_offset: Pt::ZERO,
+                    baseline_offset: Pt::ZERO,
                 });
             }
             // Non-visual inlines — skip

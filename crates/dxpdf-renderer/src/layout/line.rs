@@ -171,7 +171,7 @@ mod tests {
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
-            shading: None, baseline_offset: Pt::ZERO,
+            shading: None, border: None, baseline_offset: Pt::ZERO,
         }
     }
 
@@ -289,7 +289,7 @@ mod tests {
                 height: Pt::new(12.0),
                 ascent: Pt::new(9.0),
                 hyperlink_url: None,
-                shading: None, baseline_offset: Pt::ZERO,
+                shading: None, border: None, baseline_offset: Pt::ZERO,
             },
             Fragment::Text {
                 text: "big".into(),
@@ -306,7 +306,7 @@ mod tests {
                 height: Pt::new(28.0),
                 ascent: Pt::new(22.0),
                 hyperlink_url: None,
-                shading: None, baseline_offset: Pt::ZERO,
+                shading: None, border: None, baseline_offset: Pt::ZERO,
             },
         ];
         let lines = fit_lines(&frags, Pt::new(100.0));

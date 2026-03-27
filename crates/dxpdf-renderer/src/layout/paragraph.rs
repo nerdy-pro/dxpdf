@@ -257,6 +257,7 @@ pub fn layout_paragraph(
                     font,
                     color,
                     shading,
+                    border,
                     width,
                     hyperlink_url,
                     baseline_offset,
@@ -272,6 +273,47 @@ pub fn layout_paragraph(
                                 line_height,
                             ),
                             color: *bg_color,
+                        });
+                    }
+
+                    // §17.3.2.4: render run-level border (box around text).
+                    if let Some(bdr) = border {
+                        let bx = x - bdr.space;
+                        let by = cursor_y;
+                        let bw = *width + bdr.space * 2.0;
+                        let bh = line_height;
+                        let half = bdr.width * 0.5;
+                        // Top
+                        commands.push(DrawCommand::Line {
+                            line: crate::geometry::PtLineSegment::new(
+                                PtOffset::new(bx, by + half),
+                                PtOffset::new(bx + bw, by + half),
+                            ),
+                            color: bdr.color, width: bdr.width,
+                        });
+                        // Bottom
+                        commands.push(DrawCommand::Line {
+                            line: crate::geometry::PtLineSegment::new(
+                                PtOffset::new(bx, by + bh - half),
+                                PtOffset::new(bx + bw, by + bh - half),
+                            ),
+                            color: bdr.color, width: bdr.width,
+                        });
+                        // Left
+                        commands.push(DrawCommand::Line {
+                            line: crate::geometry::PtLineSegment::new(
+                                PtOffset::new(bx + half, by),
+                                PtOffset::new(bx + half, by + bh),
+                            ),
+                            color: bdr.color, width: bdr.width,
+                        });
+                        // Right
+                        commands.push(DrawCommand::Line {
+                            line: crate::geometry::PtLineSegment::new(
+                                PtOffset::new(bx + bw - half, by),
+                                PtOffset::new(bx + bw - half, by + bh),
+                            ),
+                            color: bdr.color, width: bdr.width,
                         });
                     }
 
@@ -457,7 +499,7 @@ mod tests {
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
-            shading: None, baseline_offset: Pt::ZERO,
+            shading: None, border: None, baseline_offset: Pt::ZERO,
         }
     }
 
