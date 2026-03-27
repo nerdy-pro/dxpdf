@@ -465,17 +465,39 @@ fn build_table_cell(
                 .map(|s| resolve_color(s.fill, ColorContext::Background))
         });
 
-    // §17.7.6: per-cell borders from conditional formatting.
-    let cell_borders = cond
+    // §17.4.66: cell borders cascade — direct cell borders (highest priority)
+    // → conditional formatting → table-level borders (resolved in layout).
+    let cond_borders = cond
         .cell_properties
         .as_ref()
-        .and_then(|tcp| tcp.borders.as_ref())
-        .map(|tcb| CellBorderConfig {
-            top: convert_cell_border_override(&tcb.top),
-            bottom: convert_cell_border_override(&tcb.bottom),
-            left: convert_cell_border_override(&tcb.left),
-            right: convert_cell_border_override(&tcb.right),
-        });
+        .and_then(|tcp| tcp.borders.as_ref());
+    let direct_borders = cell.properties.borders.as_ref();
+
+    let cell_borders = match (direct_borders, cond_borders) {
+        (Some(db), _) => {
+            // Direct cell borders: highest priority.  Fall through to
+            // conditional for edges not specified directly.
+            Some(CellBorderConfig {
+                top: convert_cell_border_override(&db.top)
+                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.top))),
+                bottom: convert_cell_border_override(&db.bottom)
+                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.bottom))),
+                left: convert_cell_border_override(&db.left)
+                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.left))),
+                right: convert_cell_border_override(&db.right)
+                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.right))),
+            })
+        }
+        (None, Some(cb)) => {
+            Some(CellBorderConfig {
+                top: convert_cell_border_override(&cb.top),
+                bottom: convert_cell_border_override(&cb.bottom),
+                left: convert_cell_border_override(&cb.left),
+                right: convert_cell_border_override(&cb.right),
+            })
+        }
+        (None, None) => None,
+    };
 
     TableCellInput {
         blocks: cell_blocks,
