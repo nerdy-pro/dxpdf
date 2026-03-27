@@ -397,18 +397,20 @@ fn build_layout_blocks(
                                                 color: resolve::color::resolve_color(
                                                     b.color, resolve::color::ColorContext::Text,
                                                 ),
+                                                style: match b.style {
+                                                    dxpdf_docx_model::model::BorderStyle::Double => layout::table::TableBorderStyle::Double,
+                                                    _ => layout::table::TableBorderStyle::Single,
+                                                },
                                             }
                                         };
                                         // §17.4.38: convert tcBorders to CellBorderConfig.
-                                        // None = not mentioned (no override).
-                                        // Some(None) = val="nil" (explicitly remove border).
-                                        // Some(Some(line)) = specific border.
-                                        let convert_cell_border = |b: &Option<dxpdf_docx_model::model::Border>| -> Option<Option<TableBorderLine>> {
+                                        use layout::table::CellBorderOverride;
+                                        let convert_cell_border = |b: &Option<dxpdf_docx_model::model::Border>| -> Option<CellBorderOverride> {
                                             b.as_ref().map(|b| {
                                                 if b.style == dxpdf_docx_model::model::BorderStyle::None {
-                                                    None // val="nil"
+                                                    CellBorderOverride::Nil
                                                 } else {
-                                                    Some(convert_border(b))
+                                                    CellBorderOverride::Border(convert_border(b))
                                                 }
                                             })
                                         };
@@ -449,7 +451,7 @@ fn build_layout_blocks(
                     });
 
                 let border_config = tbl_borders.map(|b| {
-                    use layout::table::{TableBorderConfig, TableBorderLine};
+                    use layout::table::{TableBorderConfig, TableBorderLine, TableBorderStyle};
                     let convert = |border: &dxpdf_docx_model::model::Border| -> TableBorderLine {
                         TableBorderLine {
                             width: Pt::from(border.width),
@@ -457,6 +459,10 @@ fn build_layout_blocks(
                                 border.color,
                                 resolve::color::ColorContext::Text,
                             ),
+                            style: match border.style {
+                                dxpdf_docx_model::model::BorderStyle::Double => TableBorderStyle::Double,
+                                _ => TableBorderStyle::Single,
+                            },
                         }
                     };
                     TableBorderConfig {

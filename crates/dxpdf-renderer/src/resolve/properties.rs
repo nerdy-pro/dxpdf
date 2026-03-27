@@ -43,7 +43,20 @@ pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
 pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &ParagraphProperties) {
     merge_opt(&mut target.alignment, &base.alignment);
     merge_opt(&mut target.indentation, &base.indentation);
-    merge_opt(&mut target.spacing, &base.spacing);
+    // §17.3.1.33: merge spacing sub-fields individually so partial
+    // overrides (e.g., line from table style, after from paragraph style)
+    // combine correctly.
+    match (&mut target.spacing, &base.spacing) {
+        (Some(ref mut ts), Some(bs)) => {
+            merge_opt(&mut ts.before, &bs.before);
+            merge_opt(&mut ts.after, &bs.after);
+            merge_opt(&mut ts.line, &bs.line);
+            merge_opt(&mut ts.before_auto_spacing, &bs.before_auto_spacing);
+            merge_opt(&mut ts.after_auto_spacing, &bs.after_auto_spacing);
+        }
+        (None, Some(_)) => target.spacing = base.spacing,
+        _ => {}
+    }
     merge_opt(&mut target.numbering, &base.numbering);
     merge_opt(&mut target.borders, &base.borders);
     merge_opt(&mut target.shading, &base.shading);

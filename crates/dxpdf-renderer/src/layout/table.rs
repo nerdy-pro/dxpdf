@@ -31,15 +31,23 @@ pub struct TableCellInput {
     pub cell_borders: Option<CellBorderConfig>,
 }
 
+/// §17.7.6: a conditional border override for a single cell edge.
+#[derive(Clone, Copy, Debug)]
+pub enum CellBorderOverride {
+    /// §17.4.38 val="nil": explicitly no border on this edge.
+    Nil,
+    /// A specific border line on this edge.
+    Border(TableBorderLine),
+}
+
 /// Per-cell border configuration (resolved from conditional formatting).
-/// Each field: `None` = no override (use table-level), `Some(None)` = nil
-/// (explicitly no border), `Some(Some(line))` = specific border.
+/// `None` = no override (use table-level default for this edge).
 #[derive(Clone, Debug)]
 pub struct CellBorderConfig {
-    pub top: Option<Option<TableBorderLine>>,
-    pub bottom: Option<Option<TableBorderLine>>,
-    pub left: Option<Option<TableBorderLine>>,
-    pub right: Option<Option<TableBorderLine>>,
+    pub top: Option<CellBorderOverride>,
+    pub bottom: Option<CellBorderOverride>,
+    pub left: Option<CellBorderOverride>,
+    pub right: Option<CellBorderOverride>,
 }
 
 /// Resolved table border configuration.
@@ -58,6 +66,15 @@ pub struct TableBorderConfig {
 pub struct TableBorderLine {
     pub width: Pt,
     pub color: RgbColor,
+    /// §17.4.38: border style (single, double, etc.)
+    pub style: TableBorderStyle,
+}
+
+/// Supported table border styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableBorderStyle {
+    Single,
+    Double,
 }
 
 /// Result of laying out a table.
@@ -252,31 +269,77 @@ fn resolve_cell_effective_borders(
     let mut right = if is_last_col { tb.and_then(|b| b.right) } else { tb.and_then(|b| b.inside_v) };
 
     // Per-cell borders from conditional formatting override.
-    // Some(None) = nil (explicitly remove border), Some(Some(line)) = override border.
     if let Some(ref cb) = cell.cell_borders {
-        if let Some(v) = cb.top { top = v; }
-        if let Some(v) = cb.bottom { bottom = v; }
-        if let Some(v) = cb.left { left = v; }
-        if let Some(v) = cb.right { right = v; }
+        if let Some(v) = &cb.top { top = resolve_override(v); }
+        if let Some(v) = &cb.bottom { bottom = resolve_override(v); }
+        if let Some(v) = &cb.left { left = resolve_override(v); }
+        if let Some(v) = &cb.right { right = resolve_override(v); }
     }
 
     (top, bottom, left, right)
 }
 
+fn resolve_override(ovr: &CellBorderOverride) -> Option<TableBorderLine> {
+    match ovr {
+        CellBorderOverride::Nil => None,
+        CellBorderOverride::Border(line) => Some(*line),
+    }
+}
+
 fn emit_h_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x1: Pt, x2: Pt, y: Pt) {
-    commands.push(DrawCommand::Line {
-        line: PtLineSegment::new(PtOffset::new(x1, y), PtOffset::new(x2, y)),
-        color: b.color,
-        width: b.width,
-    });
+    match b.style {
+        TableBorderStyle::Single => {
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x1, y), PtOffset::new(x2, y)),
+                color: b.color,
+                width: b.width,
+            });
+        }
+        TableBorderStyle::Double => {
+            // §17.4.38: double border — two lines with a gap equal to line width.
+            // Total height = w:sz. Each line = sz/3, gap = sz/3.
+            let line_w = b.width * (1.0 / 3.0);
+            let gap = b.width * (1.0 / 3.0);
+            let offset = line_w * 0.5 + gap * 0.5;
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x1, y - offset), PtOffset::new(x2, y - offset)),
+                color: b.color,
+                width: line_w,
+            });
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x1, y + offset), PtOffset::new(x2, y + offset)),
+                color: b.color,
+                width: line_w,
+            });
+        }
+    }
 }
 
 fn emit_v_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x: Pt, y1: Pt, y2: Pt) {
-    commands.push(DrawCommand::Line {
-        line: PtLineSegment::new(PtOffset::new(x, y1), PtOffset::new(x, y2)),
-        color: b.color,
-        width: b.width,
-    });
+    match b.style {
+        TableBorderStyle::Single => {
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x, y1), PtOffset::new(x, y2)),
+                color: b.color,
+                width: b.width,
+            });
+        }
+        TableBorderStyle::Double => {
+            let line_w = b.width * (1.0 / 3.0);
+            let gap = b.width * (1.0 / 3.0);
+            let offset = line_w * 0.5 + gap * 0.5;
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x - offset, y1), PtOffset::new(x - offset, y2)),
+                color: b.color,
+                width: line_w,
+            });
+            commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(PtOffset::new(x + offset, y1), PtOffset::new(x + offset, y2)),
+                color: b.color,
+                width: line_w,
+            });
+        }
+    }
 }
 
 fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
@@ -499,7 +562,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }) }));
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }));
 
         let line_count = result
             .commands
