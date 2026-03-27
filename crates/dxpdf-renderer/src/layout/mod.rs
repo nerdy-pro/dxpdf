@@ -2,6 +2,7 @@
 //!
 //! Core protocol: **constraints go down, sizes go up, parent sets position**.
 
+pub mod build;
 pub mod cell;
 pub mod draw_command;
 pub mod float;
