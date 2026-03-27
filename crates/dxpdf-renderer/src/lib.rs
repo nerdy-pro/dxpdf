@@ -136,7 +136,7 @@ where
     for block in blocks {
         if let Block::Paragraph(p) = block {
             let (df, ds, dc, _) = resolve_paragraph_defaults(p, resolved);
-            let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure);
+            let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure, Some(&resolved.styles));
             all_frags.append(&mut frags);
         }
     }
@@ -196,6 +196,7 @@ fn build_layout_blocks(
                     default_color,
                     None,
                     &measure,
+                    Some(&resolved.styles),
                 );
                 populate_image_data(&mut fragments, media);
                 populate_underline_metrics(&mut fragments, measurer);
@@ -266,6 +267,7 @@ fn build_layout_blocks(
                                                 dc,
                                                 None,
                                                 &measure,
+                                                Some(&resolved.styles),
                                             );
                                             populate_image_data(&mut frags, media);
                                             populate_underline_metrics(&mut frags, measurer);
