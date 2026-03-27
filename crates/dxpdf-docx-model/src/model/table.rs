@@ -18,6 +18,8 @@ pub struct Table {
 
 #[derive(Clone, Debug, Default)]
 pub struct TableProperties {
+    /// §17.4.63: table style reference.
+    pub style_id: Option<super::identifiers::StyleId>,
     pub alignment: Option<Alignment>,
     pub width: Option<TableMeasure>,
     pub layout: Option<TableLayout>,

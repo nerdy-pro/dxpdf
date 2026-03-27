@@ -352,7 +352,8 @@ pub fn parse_table_properties(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
+                        props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
+                        style_id.clone_from(&props.style_id);
                     }
                     b"tblBorders" => {
                         props.borders = Some(parse_table_borders(reader, buf)?);
@@ -386,7 +387,8 @@ pub fn parse_table_properties(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"tblStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
+                        props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
+                        style_id.clone_from(&props.style_id);
                     }
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {

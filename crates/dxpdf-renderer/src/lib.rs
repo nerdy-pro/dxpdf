@@ -246,6 +246,18 @@ fn build_layout_blocks(
                 let col_widths =
                     compute_column_widths(&grid_cols, num_cols, config.content_width());
 
+                // §17.7.6: resolve table style for borders and conditional formatting.
+                // Look up the raw style definition for table style overrides (tblStylePr).
+                let raw_table_style = t
+                    .properties
+                    .style_id
+                    .as_ref()
+                    .and_then(|sid| {
+                        // The raw stylesheet is not in ResolvedDocument, but the resolved style
+                        // carries the table properties with borders.
+                        resolved.styles.get(sid)
+                    });
+
                 let rows: Vec<TableRowInput> = t
                     .rows
                     .iter()
@@ -296,7 +308,7 @@ fn build_layout_blocks(
                                     ))
                                     .unwrap_or(geometry::PtEdgeInsets::ZERO);
 
-                                // Resolve cell shading.
+                                // Resolve cell shading: direct cell → table style (not yet implemented).
                                 let shading = cell.properties.shading.map(|s| {
                                     resolve::color::resolve_color(
                                         s.fill,
@@ -320,8 +332,12 @@ fn build_layout_blocks(
                     })
                     .collect();
 
-                // Draw borders if the table has any border properties defined.
-                let has_borders = t.properties.borders.is_some();
+                // §17.4.38: draw borders from table properties or table style.
+                let has_borders = t.properties.borders.is_some()
+                    || raw_table_style
+                        .and_then(|s| s.table.as_ref())
+                        .and_then(|tp| tp.borders.as_ref())
+                        .is_some();
 
                 blocks.push(LayoutBlock::Table {
                     rows,
