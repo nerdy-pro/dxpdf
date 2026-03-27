@@ -539,8 +539,10 @@ pub fn layout_paragraph(
     cursor_y += style.space_after;
 
     // If no lines, still consume default height + spacing.
+    // Apply the paragraph's line spacing rule to the default line height.
     if lines.is_empty() {
-        cursor_y = style.space_before + default_line_height + style.space_after;
+        let line_h = resolve_line_height(default_line_height, &style.line_spacing);
+        cursor_y = style.space_before + line_h + style.space_after;
     }
 
     let total_height = constraints.constrain(PtSize::new(constraints.max_width, cursor_y)).height;

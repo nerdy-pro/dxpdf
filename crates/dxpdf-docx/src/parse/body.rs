@@ -94,6 +94,21 @@ fn parse_block_content(
                     _ => xml::warn_unsupported_element("body", local),
                 }
             }
+            // Self-closing elements: <w:p/> is an empty paragraph.
+            Event::Empty(ref e) => {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                if local == b"p" {
+                    let rsids = parse_paragraph_rsids(e)?;
+                    blocks.push(Block::Paragraph(Box::new(Paragraph {
+                        style_id: None,
+                        properties: ParagraphProperties::default(),
+                        mark_run_properties: None,
+                        content: vec![],
+                        rsids,
+                    })));
+                }
+            }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
             Event::Eof => return Err(xml::unexpected_eof(b"container")),
             _ => {}
