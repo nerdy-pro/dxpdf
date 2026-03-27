@@ -143,27 +143,35 @@ pub fn layout_table(
         }
 
         // §17.4.38: draw borders from resolved config.
+        // Vertical borders extend to cover the horizontal border thickness
+        // at corners so there are no gaps.
         if let Some(bdr) = borders {
-            // Top border (only on first row) or insideH (between rows)
-            if row_idx == 0 {
-                if let Some(ref b) = bdr.top {
-                    emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
-                }
-            } else if let Some(ref b) = bdr.inside_h {
+            // Horizontal border at the top of this row.
+            let h_top = if row_idx == 0 { &bdr.top } else { &bdr.inside_h };
+            let h_top_half = h_top.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+
+            // Horizontal border at the bottom of this row.
+            let is_last_row = row_idx == rows.len() - 1;
+            let h_bot = if is_last_row { &bdr.bottom } else { &bdr.inside_h };
+            let h_bot_half = h_bot.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+
+            // Draw horizontal borders.
+            if let Some(ref b) = h_top {
                 emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
             }
 
-            // Left border
+            // Vertical borders: extend past horizontal borders for clean corners.
+            let v_top = cursor_y - h_top_half;
+            let v_bot = cursor_y + row_height + h_bot_half;
+
             if let Some(ref b) = bdr.left {
-                emit_v_border(&mut commands, b, Pt::ZERO, cursor_y, cursor_y + row_height);
+                emit_v_border(&mut commands, b, Pt::ZERO, v_top, v_bot);
             }
-
-            // Right border
             if let Some(ref b) = bdr.right {
-                emit_v_border(&mut commands, b, table_width, cursor_y, cursor_y + row_height);
+                emit_v_border(&mut commands, b, table_width, v_top, v_bot);
             }
 
-            // Inside vertical borders between cells
+            // Inside vertical borders between cells.
             if let Some(ref b) = bdr.inside_v {
                 let mut grid_idx = 0;
                 for cell_input in &rows[row_idx].cells {
@@ -173,7 +181,7 @@ pub fn layout_table(
                         let vx: Pt = (0..grid_idx)
                             .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
                             .sum();
-                        emit_v_border(&mut commands, b, vx, cursor_y, cursor_y + row_height);
+                        emit_v_border(&mut commands, b, vx, v_top, v_bot);
                     }
                 }
             }
