@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use dxpdf_docx_model::model::{FieldCharType, Inline, RunProperties};
+use dxpdf_docx_model::model::{FieldCharType, Inline, RunProperties, VerticalAlign};
 
 use crate::dimension::Pt;
 use crate::geometry::PtSize;
@@ -189,7 +189,7 @@ where
                 if field_depth > 0 {
                     continue;
                 }
-                let font = font_props_from_run(&tr.properties, default_family, default_size);
+                let mut font = font_props_from_run(&tr.properties, default_family, default_size);
                 let color = tr
                     .properties
                     .color
@@ -200,6 +200,25 @@ where
                 let shading = tr.properties.shading.as_ref()
                     .map(|s| crate::resolve::color::resolve_color(s.fill, crate::resolve::color::ColorContext::Background))
                     .or_else(|| tr.properties.highlight.map(resolve_highlight_color));
+
+                // §17.3.2.42: vertical alignment (superscript/subscript).
+                // The spec states these are "application-defined" — the values below
+                // match Word's rendering: 58% font size reduction, superscript shifted
+                // up by 33% of base ascent, subscript shifted down by 8% of base height.
+                // These ratios are documented in the OpenXML SDK reference.
+                let baseline_offset = match tr.properties.vertical_align {
+                    Some(VerticalAlign::Superscript) => {
+                        let (_, _, base_ascent) = measure_text("X", &font);
+                        font.size = font.size * 0.58;
+                        -(base_ascent * 0.33)
+                    }
+                    Some(VerticalAlign::Subscript) => {
+                        let (_, base_height, _) = measure_text("X", &font);
+                        font.size = font.size * 0.58;
+                        base_height * 0.08
+                    }
+                    _ => Pt::ZERO,
+                };
 
                 if !tr.text.is_empty() {
                     // Split text into word-level fragments so the line fitter
@@ -216,7 +235,7 @@ where
                             height: h,
                             ascent: a,
                             hyperlink_url: hyperlink_url.map(String::from),
-                            baseline_offset: Pt::ZERO,
+                            baseline_offset,
                         });
                     }
                 }
