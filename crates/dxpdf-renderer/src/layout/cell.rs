@@ -8,10 +8,18 @@ use super::fragment::Fragment;
 use super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::BoxConstraints;
 
-/// A block of measured fragments ready for layout inside a cell.
-pub struct CellBlock {
-    pub fragments: Vec<Fragment>,
-    pub style: ParagraphStyle,
+/// A block of content ready for layout inside a cell.
+pub enum CellBlock {
+    /// A paragraph with measured fragments.
+    Paragraph {
+        fragments: Vec<Fragment>,
+        style: ParagraphStyle,
+    },
+    /// A pre-rendered nested table (draw commands + size).
+    NestedTable {
+        commands: Vec<DrawCommand>,
+        size: crate::geometry::PtSize,
+    },
 }
 
 /// Result of laying out a cell.
@@ -40,21 +48,31 @@ pub fn layout_cell(
     let mut cursor_y = Pt::ZERO;
 
     for block in blocks {
-        let para = layout_paragraph(
-            &block.fragments,
-            &constraints,
-            &block.style,
-            default_line_height,
-        );
-
-        // Offset commands by margins + cursor position
-        for mut cmd in para.commands {
-            cmd.shift_y(margins.top + cursor_y);
-            shift_x(&mut cmd, margins.left);
-            commands.push(cmd);
+        match block {
+            CellBlock::Paragraph { fragments, style } => {
+                let para = layout_paragraph(
+                    fragments,
+                    &constraints,
+                    style,
+                    default_line_height,
+                );
+                for mut cmd in para.commands {
+                    cmd.shift_y(margins.top + cursor_y);
+                    shift_x(&mut cmd, margins.left);
+                    commands.push(cmd);
+                }
+                cursor_y += para.size.height;
+            }
+            CellBlock::NestedTable { commands: table_cmds, size } => {
+                for cmd in table_cmds {
+                    let mut cmd = cmd.clone();
+                    cmd.shift_y(margins.top + cursor_y);
+                    shift_x(&mut cmd, margins.left);
+                    commands.push(cmd);
+                }
+                cursor_y += size.height;
+            }
         }
-
-        cursor_y += para.size.height;
     }
 
     CellLayout {
@@ -109,7 +127,7 @@ mod tests {
     }
 
     fn simple_block(text: &str, width: f32) -> CellBlock {
-        CellBlock {
+        CellBlock::Paragraph {
             fragments: vec![text_frag(text, width)],
             style: ParagraphStyle::default(),
         }
@@ -164,7 +182,7 @@ mod tests {
     fn margins_narrow_available_width() {
         // Cell is 100 wide, margins eat 60 (left=30, right=30), leaving 40 for content
         // Two fragments of 30 each = 60 > 40, so they should wrap
-        let blocks = vec![CellBlock {
+        let blocks = vec![CellBlock::Paragraph {
             fragments: vec![text_frag("aa ", 30.0), text_frag("bb", 30.0)],
             style: ParagraphStyle::default(),
         }];

@@ -330,13 +330,13 @@ mod tests {
         let blocks = vec![LayoutBlock::Table {
             rows: vec![TableRowInput {
                 cells: vec![TableCellInput {
-                    blocks: vec![CellBlock {
+                    blocks: vec![CellBlock::Paragraph {
                         fragments: vec![text_frag("cell", 30.0, 14.0)],
                         style: ParagraphStyle::default(),
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None,
+                    shading: None, cell_borders: None, vertical_merge: None,
                 }],
                 min_height: None,
             }],

@@ -352,9 +352,33 @@ fn build_layout_blocks(
                                             );
                                             populate_image_data(&mut frags, media);
                                             populate_underline_metrics(&mut frags, measurer);
-                                            Some(CellBlock {
+                                            Some(CellBlock::Paragraph {
                                                 fragments: frags,
                                                 style: paragraph_style_from_props(&mp),
+                                            })
+                                        } else if let Block::Table(nested_t) = b {
+                                            // Nested table: constrained by the outer cell's width.
+                                            let span = cell.properties.grid_span.unwrap_or(1) as usize;
+                                            let mut grid_start = 0;
+                                            for ci in 0..col_idx {
+                                                grid_start += row.cells[ci].properties.grid_span.unwrap_or(1) as usize;
+                                            }
+                                            let outer_cell_width: Pt = (grid_start..grid_start + span)
+                                                .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                                                .sum();
+                                            // Subtract cell margins to get the content area.
+                                            let outer_margins = cell.properties.margins
+                                                .or(t.properties.cell_margins)
+                                                .or(style_cell_margins)
+                                                .map(|m| Pt::from(m.left) + Pt::from(m.right))
+                                                .unwrap_or(Pt::ZERO);
+                                            let nested_available = (outer_cell_width - outer_margins).max(Pt::ZERO);
+                                            let nested_result = render_table(
+                                                nested_t, nested_available, measurer, resolved, media, &measure,
+                                            );
+                                            Some(CellBlock::NestedTable {
+                                                commands: nested_result.commands,
+                                                size: nested_result.size,
                                             })
                                         } else {
                                             None
@@ -428,6 +452,12 @@ fn build_layout_blocks(
                                     grid_span: cell.properties.grid_span.unwrap_or(1),
                                     shading,
                                     cell_borders,
+                                    vertical_merge: cell.properties.vertical_merge.map(|vm| {
+                                        match vm {
+                                            dxpdf_docx_model::model::VerticalMerge::Restart => layout::table::VerticalMergeState::Restart,
+                                            dxpdf_docx_model::model::VerticalMerge::Continue => layout::table::VerticalMergeState::Continue,
+                                        }
+                                    }),
                                 }
                             })
                             .collect();
@@ -501,6 +531,164 @@ fn build_layout_blocks(
     }
 
     blocks
+}
+
+/// Render a table to draw commands (used for both top-level and nested tables).
+fn render_table<F>(
+    t: &dxpdf_docx_model::model::Table,
+    available_width: Pt,
+    measurer: &TextMeasurer,
+    resolved: &ResolvedDocument,
+    media: &std::collections::HashMap<dxpdf_docx_model::model::RelId, Vec<u8>>,
+    measure: &F,
+) -> layout::table::TableLayout
+where
+    F: Fn(&str, &layout::fragment::FontProps) -> (Pt, Pt, Pt),
+{
+    use dxpdf_docx_model::model::{Block, TableMeasure};
+    use layout::cell::CellBlock;
+    use layout::fragment::collect_fragments;
+    use layout::table::{compute_column_widths, TableCellInput, TableRowInput};
+
+    let num_cols = if t.grid.is_empty() {
+        t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)
+    } else {
+        t.grid.len()
+    };
+    let grid_cols: Vec<Pt> = t.grid.iter().map(|g| Pt::from(g.width)).collect();
+    let is_auto_width = matches!(t.properties.width, None | Some(TableMeasure::Auto) | Some(TableMeasure::Nil));
+    let col_widths = if is_auto_width && !grid_cols.is_empty() {
+        grid_cols.clone()
+    } else {
+        compute_column_widths(&grid_cols, num_cols, available_width)
+    };
+
+    let raw_table_style = t.properties.style_id.as_ref().and_then(|sid| resolved.styles.get(sid));
+    let style_overrides = raw_table_style.map(|s| s.table_style_overrides.as_slice()).unwrap_or(&[]);
+    let tbl_look = t.properties.look.as_ref();
+    let row_band_size = t.properties.style_row_band_size.unwrap_or(1);
+    let col_band_size = t.properties.style_col_band_size.unwrap_or(1);
+    let num_rows = t.rows.len();
+    let style_cell_margins = raw_table_style.and_then(|s| s.table.as_ref()).and_then(|tp| tp.cell_margins);
+
+    let tbl_borders = t.properties.borders.as_ref()
+        .or_else(|| raw_table_style.and_then(|s| s.table.as_ref()).and_then(|tp| tp.borders.as_ref()));
+
+    let border_config = tbl_borders.map(|b| {
+        use layout::table::{TableBorderConfig, TableBorderLine, TableBorderStyle};
+        let convert = |border: &dxpdf_docx_model::model::Border| -> TableBorderLine {
+            TableBorderLine {
+                width: Pt::from(border.width),
+                color: resolve::color::resolve_color(border.color, resolve::color::ColorContext::Text),
+                style: match border.style {
+                    dxpdf_docx_model::model::BorderStyle::Double => TableBorderStyle::Double,
+                    _ => TableBorderStyle::Single,
+                },
+            }
+        };
+        TableBorderConfig {
+            top: b.top.as_ref().map(&convert),
+            bottom: b.bottom.as_ref().map(&convert),
+            left: b.left.as_ref().map(&convert),
+            right: b.right.as_ref().map(&convert),
+            inside_h: b.inside_h.as_ref().map(&convert),
+            inside_v: b.inside_v.as_ref().map(&convert),
+        }
+    });
+
+    let rows: Vec<TableRowInput> = t.rows.iter().enumerate().map(|(row_idx, row)| {
+        let num_cells = row.cells.len();
+        let cells: Vec<TableCellInput> = row.cells.iter().enumerate().map(|(col_idx, cell)| {
+            let cond = resolve::conditional::resolve_cell_conditional(
+                row_idx, col_idx, num_rows, num_cells,
+                tbl_look, style_overrides, row_band_size, col_band_size,
+            );
+
+            let cell_blocks: Vec<CellBlock> = cell.content.iter().filter_map(|b| {
+                if let Block::Paragraph(p) = b {
+                    let mut table_para = p.clone();
+                    if let Some(ts) = raw_table_style {
+                        resolve::properties::merge_paragraph_properties(&mut table_para.properties, &ts.paragraph);
+                    }
+                    if let Some(ref pp) = cond.paragraph_properties {
+                        resolve::properties::merge_paragraph_properties(&mut table_para.properties, pp);
+                    }
+                    let (df, mut ds, mut dc, mp, mut rd) = resolve_paragraph_defaults(&table_para, resolved);
+                    if let Some(ts) = raw_table_style {
+                        if let Some(fs) = ts.run.font_size {
+                            ds = Pt::from(fs);
+                            rd.font_size = Some(fs);
+                        }
+                    }
+                    if let Some(ref rp) = cond.run_properties {
+                        resolve::properties::merge_run_properties(&mut rd, rp);
+                        if let Some(c) = rd.color {
+                            dc = resolve::color::resolve_color(c, resolve::color::ColorContext::Text);
+                        }
+                    }
+                    let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure, Some(&resolved.styles), Some(&rd));
+                    populate_image_data(&mut frags, media);
+                    populate_underline_metrics(&mut frags, measurer);
+                    Some(CellBlock::Paragraph { fragments: frags, style: paragraph_style_from_props(&mp) })
+                } else if let Block::Table(nested_t) = b {
+                    let nested = render_table(nested_t, available_width, measurer, resolved, media, measure);
+                    Some(CellBlock::NestedTable { commands: nested.commands, size: nested.size })
+                } else {
+                    None
+                }
+            }).collect();
+
+            let cell_margins = cell.properties.margins.or(t.properties.cell_margins).or(style_cell_margins)
+                .map(|m| geometry::PtEdgeInsets::new(Pt::from(m.top), Pt::from(m.right), Pt::from(m.bottom), Pt::from(m.left)))
+                .unwrap_or(geometry::PtEdgeInsets::ZERO);
+
+            let shading = cell.properties.shading
+                .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
+                .or_else(|| cond.cell_properties.as_ref().and_then(|tcp| tcp.shading.as_ref())
+                    .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background)));
+
+            let cell_borders = cond.cell_properties.as_ref().and_then(|tcp| tcp.borders.as_ref()).map(|tcb| {
+                use layout::table::CellBorderOverride;
+                let convert_cell_border = |b: &Option<dxpdf_docx_model::model::Border>| -> Option<CellBorderOverride> {
+                    b.as_ref().map(|b| {
+                        if b.style == dxpdf_docx_model::model::BorderStyle::None {
+                            CellBorderOverride::Nil
+                        } else {
+                            use layout::table::{TableBorderLine, TableBorderStyle};
+                            CellBorderOverride::Border(TableBorderLine {
+                                width: Pt::from(b.width),
+                                color: resolve::color::resolve_color(b.color, resolve::color::ColorContext::Text),
+                                style: match b.style {
+                                    dxpdf_docx_model::model::BorderStyle::Double => TableBorderStyle::Double,
+                                    _ => TableBorderStyle::Single,
+                                },
+                            })
+                        }
+                    })
+                };
+                layout::table::CellBorderConfig {
+                    top: convert_cell_border(&tcb.top),
+                    bottom: convert_cell_border(&tcb.bottom),
+                    left: convert_cell_border(&tcb.left),
+                    right: convert_cell_border(&tcb.right),
+                }
+            });
+
+            TableCellInput {
+                blocks: cell_blocks, margins: cell_margins,
+                grid_span: cell.properties.grid_span.unwrap_or(1),
+                shading, cell_borders,
+                vertical_merge: cell.properties.vertical_merge.map(|vm| match vm {
+                    dxpdf_docx_model::model::VerticalMerge::Restart => layout::table::VerticalMergeState::Restart,
+                    dxpdf_docx_model::model::VerticalMerge::Continue => layout::table::VerticalMergeState::Continue,
+                }),
+            }
+        }).collect();
+        TableRowInput { cells, min_height: row.properties.height.map(|h| Pt::from(h.value)) }
+    }).collect();
+
+    let default_line_height = measurer.default_line_height(SPEC_FALLBACK_FONT, SPEC_DEFAULT_FONT_SIZE);
+    layout::table::layout_table(&rows, &col_widths, &layout::BoxConstraints::unbounded(), default_line_height, border_config.as_ref())
 }
 
 /// Populate image data on Fragment::Image fragments by looking up the media map.

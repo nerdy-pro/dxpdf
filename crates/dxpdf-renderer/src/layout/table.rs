@@ -29,6 +29,17 @@ pub struct TableCellInput {
     pub shading: Option<RgbColor>,
     /// §17.7.6: per-cell resolved borders from conditional formatting.
     pub cell_borders: Option<CellBorderConfig>,
+    /// §17.4.85: vertical merge state.
+    pub vertical_merge: Option<VerticalMergeState>,
+}
+
+/// §17.4.85: vertical merge state for a cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerticalMergeState {
+    /// This cell starts a new vertical merge group.
+    Restart,
+    /// This cell continues from the cell above (content is skipped).
+    Continue,
 }
 
 /// §17.7.6: a conditional border override for a single cell edge.
@@ -117,19 +128,27 @@ pub fn layout_table(
         for cell in &row.cells {
             let span = cell.grid_span.max(1) as usize;
             let cell_width: Pt = (grid_idx..grid_idx + span)
-                .map(|i| col_widths.get(i).copied()// §17.4.14: missing grid column treated as zero width.
+                .map(|i| col_widths.get(i).copied()
                 .unwrap_or(Pt::ZERO))
                 .sum();
             let cell_x: Pt = (0..grid_idx)
                 .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
                 .sum();
 
-            let cell_layout = layout_cell(
-                &cell.blocks,
-                cell_width,
-                &cell.margins,
-                default_line_height,
-            );
+            // §17.4.85: vMerge=continue cells have no content.
+            let cell_layout = if cell.vertical_merge == Some(VerticalMergeState::Continue) {
+                CellLayout {
+                    commands: Vec::new(),
+                    content_height: Pt::ZERO,
+                }
+            } else {
+                layout_cell(
+                    &cell.blocks,
+                    cell_width,
+                    &cell.margins,
+                    default_line_height,
+                )
+            };
 
             let total_cell_height =
                 cell_layout.content_height + cell.margins.vertical();
@@ -189,9 +208,24 @@ pub fn layout_table(
                 grid_idx += span;
 
                 // Resolve effective borders for this cell.
-                let (b_top, b_bottom, b_left, b_right) =
+                let (mut b_top, mut b_bottom, b_left, b_right) =
                     resolve_cell_effective_borders(cell_input, borders, row_idx, cell_ci,
                         rows.len(), rows[row_idx].cells.len());
+
+                // §17.4.85: suppress horizontal borders between vertically
+                // merged cells so the merged area looks continuous.
+                if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
+                    b_top = None;
+                }
+                // If the cell below in the same grid column is a Continue cell,
+                // suppress the bottom border of this cell.
+                if row_idx + 1 < rows.len() {
+                    let below_merge = find_cell_at_grid_col(&rows[row_idx + 1], grid_idx - span)
+                        .and_then(|c| c.vertical_merge);
+                    if below_merge == Some(VerticalMergeState::Continue) {
+                        b_bottom = None;
+                    }
+                }
 
                 // Horizontal borders.
                 let h_top_half = b_top.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
@@ -277,6 +311,20 @@ fn resolve_cell_effective_borders(
     }
 
     (top, bottom, left, right)
+}
+
+/// Find the cell in a row that covers the given grid column index.
+/// Returns `None` if no cell covers that column.
+fn find_cell_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<&TableCellInput> {
+    let mut grid_col = 0;
+    for cell in &row.cells {
+        let span = cell.grid_span.max(1) as usize;
+        if target_grid_col >= grid_col && target_grid_col < grid_col + span {
+            return Some(cell);
+        }
+        grid_col += span;
+    }
+    None
 }
 
 fn resolve_override(ovr: &CellBorderOverride) -> Option<TableBorderLine> {
@@ -388,14 +436,14 @@ mod tests {
 
     fn simple_cell(text: &str) -> TableCellInput {
         TableCellInput {
-            blocks: vec![CellBlock {
+            blocks: vec![CellBlock::Paragraph {
                 fragments: vec![text_frag(text, 30.0)],
                 style: ParagraphStyle::default(),
             }],
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,
             shading: None,
-            cell_borders: None,
+            cell_borders: None, vertical_merge: None,
         }
     }
 
@@ -499,13 +547,13 @@ mod tests {
             cells: vec![
                 simple_cell("short"),
                 TableCellInput {
-                    blocks: vec![CellBlock {
+                    blocks: vec![CellBlock::Paragraph {
                         fragments: vec![text_frag("long ", 60.0), text_frag("text", 60.0)],
                         style: ParagraphStyle::default(),
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None,
+                    shading: None, cell_borders: None, vertical_merge: None,
                 },
             ],
             min_height: None,
@@ -533,14 +581,14 @@ mod tests {
     fn cell_shading_emits_rect() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock {
+                blocks: vec![CellBlock::Paragraph {
                     fragments: vec![text_frag("x", 10.0)],
                     style: ParagraphStyle::default(),
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
                 shading: Some(RgbColor { r: 200, g: 200, b: 200 }),
-                cell_borders: None,
+                cell_borders: None, vertical_merge: None,
             }],
             min_height: None,
         }];
@@ -578,13 +626,13 @@ mod tests {
     fn grid_span_widens_cell() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock {
+                blocks: vec![CellBlock::Paragraph {
                     fragments: vec![text_frag("spanning", 30.0)],
                     style: ParagraphStyle::default(),
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 2, // spans both columns
-                shading: None, cell_borders: None,
+                shading: None, cell_borders: None, vertical_merge: None,
             }],
             min_height: None,
         }];
@@ -605,13 +653,13 @@ mod tests {
     fn cell_margins_affect_layout() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock {
+                blocks: vec![CellBlock::Paragraph {
                     fragments: vec![text_frag("text", 30.0)],
                     style: ParagraphStyle::default(),
                 }],
                 margins: PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0)),
                 grid_span: 1,
-                shading: None, cell_borders: None,
+                shading: None, cell_borders: None, vertical_merge: None,
             }],
             min_height: None,
         }];
