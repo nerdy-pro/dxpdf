@@ -100,7 +100,7 @@ mod tests {
                 char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(40.0),
+            width: Pt::new(40.0), trimmed_width: Pt::new(40.0),
             height: Pt::new(12.0),
             ascent: Pt::new(9.0),
             hyperlink_url: None,

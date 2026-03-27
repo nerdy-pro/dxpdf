@@ -34,7 +34,11 @@ pub enum Fragment {
         color: RgbColor,
         /// §17.3.2.32: run-level shading (background color behind text).
         shading: Option<RgbColor>,
+        /// Full width including trailing whitespace (used for positioning).
         width: Pt,
+        /// Width excluding trailing whitespace (used for line-break overflow checking).
+        /// Trailing whitespace is allowed to hang past the margin per Word behavior.
+        trimmed_width: Pt,
         height: Pt,
         ascent: Pt,
         hyperlink_url: Option<String>,
@@ -60,6 +64,14 @@ impl Fragment {
             Fragment::Image { size, .. } => size.width,
             Fragment::Tab { .. } => MIN_TAB_WIDTH,
             Fragment::LineBreak { .. } => Pt::ZERO,
+        }
+    }
+
+    /// Width for overflow checking — excludes trailing whitespace on text fragments.
+    pub fn trimmed_width(&self) -> Pt {
+        match self {
+            Fragment::Text { trimmed_width, .. } => *trimmed_width,
+            other => other.width(),
         }
     }
 
@@ -248,12 +260,21 @@ where
                     // part of the preceding word (e.g., "hello " + "world").
                     for word in split_into_words(&tr.text) {
                         let (w, h, a) = measure_text(word, &font);
+                        // Measure trimmed width for overflow checking.
+                        // Trailing whitespace is allowed to hang past the margin.
+                        let trimmed = word.trim_end();
+                        let tw = if trimmed.len() < word.len() {
+                            measure_text(trimmed, &font).0
+                        } else {
+                            w
+                        };
                         fragments.push(Fragment::Text {
                             text: word.to_string(),
                             font: font.clone(),
                             color,
                             shading,
                             width: w,
+                            trimmed_width: tw,
                             height: h,
                             ascent: a,
                             hyperlink_url: hyperlink_url.map(String::from),
@@ -371,6 +392,7 @@ where
                     font,
                     color: RgbColor::BLACK,
                     width: w,
+                    trimmed_width: w, // symbols have no trailing whitespace
                     height: h,
                     ascent: a,
                     hyperlink_url: hyperlink_url.map(String::from),

@@ -165,7 +165,7 @@ mod tests {
                 char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width),
+            width: Pt::new(width), trimmed_width: Pt::new(width),
             height: Pt::new(height),
             ascent: Pt::new(height * 0.7),
             hyperlink_url: None,

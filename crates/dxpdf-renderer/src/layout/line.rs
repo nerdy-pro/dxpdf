@@ -23,7 +23,15 @@ pub struct FittedLine {
 ///
 /// Breaks at the last whitespace/hyphen boundary when a line overflows.
 /// A single fragment wider than `max_width` gets its own line (no infinite loop).
+///
+/// `first_line_width`: if provided, the first line uses this narrower width
+/// (e.g., to account for first-line indent). Subsequent lines use `max_width`.
 pub fn fit_lines(fragments: &[Fragment], max_width: Pt) -> Vec<FittedLine> {
+    fit_lines_with_first(fragments, max_width, max_width)
+}
+
+/// Line fitting with separate first-line and remaining-line widths.
+pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remaining_width: Pt) -> Vec<FittedLine> {
     if fragments.is_empty() {
         return Vec::new();
     }
@@ -62,8 +70,16 @@ pub fn fit_lines(fragments: &[Fragment], max_width: Pt) -> Vec<FittedLine> {
         let frag_width = frag.width();
         let new_width = line_width + frag_width;
 
+        // Use first-line width for line 0, remaining width for subsequent lines.
+        let current_max = if lines.is_empty() { first_line_width } else { remaining_width };
+
+        // For overflow checking, use trimmed width — trailing whitespace on the
+        // last word is allowed to hang past the margin (standard Word behavior).
+        // The check uses: previous fragments' full widths + this fragment's trimmed width.
+        let check_width = line_width + frag.trimmed_width();
+
         // Check if adding this fragment overflows.
-        if new_width > max_width && line_start < i {
+        if check_width > current_max && line_start < i {
             // Overflow — break at last break point, or before this fragment.
             let break_at = last_break_point.unwrap_or(i);
             let (w, h, a) = measure_range(fragments, line_start, break_at);
@@ -151,7 +167,7 @@ mod tests {
                 char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width),
+            width: Pt::new(width), trimmed_width: Pt::new(width),
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
@@ -269,7 +285,7 @@ mod tests {
                     char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
                 },
                 color: RgbColor::BLACK,
-                width: Pt::new(20.0),
+                width: Pt::new(20.0), trimmed_width: Pt::new(20.0),
                 height: Pt::new(12.0),
                 ascent: Pt::new(9.0),
                 hyperlink_url: None,
@@ -286,7 +302,7 @@ mod tests {
                     char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
                 },
                 color: RgbColor::BLACK,
-                width: Pt::new(30.0),
+                width: Pt::new(30.0), trimmed_width: Pt::new(30.0),
                 height: Pt::new(28.0),
                 ascent: Pt::new(22.0),
                 hyperlink_url: None,

@@ -10,7 +10,6 @@ use crate::geometry::{PtOffset, PtSize};
 use crate::resolve::color::RgbColor;
 use super::draw_command::DrawCommand;
 use super::fragment::Fragment;
-use super::line::fit_lines;
 use super::BoxConstraints;
 
 /// Configuration for paragraph layout.
@@ -123,14 +122,16 @@ pub fn layout_paragraph(
         .unwrap_or(0);
 
     let content_width = constraints.max_width - style.indent_left - style.indent_right;
-    // Fit lines at the narrower width (drop cap area) so text wraps correctly
-    // for the lines beside the drop cap.
-    let effective_width = if drop_cap_indent > Pt::ZERO {
+    // §17.3.1.12: first-line indent reduces the available width for the first line.
+    // Drop cap indent also reduces width for the first N lines.
+    let first_line_reduction = style.indent_first_line.max(Pt::ZERO) + drop_cap_indent;
+    let first_line_width = (content_width - first_line_reduction).max(Pt::ZERO);
+    let remaining_width = if drop_cap_indent > Pt::ZERO {
         content_width - drop_cap_indent
     } else {
         content_width
     };
-    let lines = fit_lines(fragments, effective_width);
+    let lines = super::line::fit_lines_with_first(fragments, first_line_width, remaining_width);
 
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
@@ -407,7 +408,7 @@ mod tests {
                 underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width),
+            width: Pt::new(width), trimmed_width: Pt::new(width),
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
