@@ -113,6 +113,7 @@ fn build_block(
                 rows: built.rows,
                 col_widths: built.col_widths,
                 border_config: built.border_config,
+                indent: built.indent,
                 float_info: built.float_info,
             })
         }
@@ -256,6 +257,8 @@ struct BuiltTable {
     rows: Vec<TableRowInput>,
     col_widths: Vec<Pt>,
     border_config: Option<TableBorderConfig>,
+    /// §17.4.51: table indentation from left margin.
+    indent: Pt,
     float_info: Option<(Pt, Pt, Pt)>,
 }
 
@@ -270,23 +273,40 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
     };
     let grid_cols: Vec<Pt> = t.grid.iter().map(|g| Pt::from(g.width)).collect();
 
-    // §17.4.63: table width determines whether to scale columns.
-    let is_auto_width = matches!(
-        t.properties.width,
-        None | Some(model::TableMeasure::Auto) | Some(model::TableMeasure::Nil)
-    );
-    let col_widths = if is_auto_width && !grid_cols.is_empty() {
-        grid_cols.clone()
-    } else {
-        compute_column_widths(&grid_cols, num_cols, available_width)
-    };
-
-    // §17.7.6: table style and conditional formatting context.
+    // §17.7.6: table style for conditional formatting, borders, cell margins.
     let raw_table_style = t
         .properties
         .style_id
         .as_ref()
         .and_then(|sid| ctx.resolved.styles.get(sid));
+
+    // §17.4.42: default cell margins from table style cascade.
+    let style_cell_margins = raw_table_style
+        .and_then(|s| s.table.as_ref())
+        .and_then(|tp| tp.cell_margins);
+    let default_cell_margins = t.properties.cell_margins.or(style_cell_margins);
+
+    // §17.4.63: table width determines whether to scale columns.
+    let is_auto_width = matches!(
+        t.properties.width,
+        None | Some(model::TableMeasure::Auto) | Some(model::TableMeasure::Nil)
+    );
+    // When using percentage width, the table extends beyond the content
+    // margins by the default cell margins (left + right) so that cell
+    // content aligns with paragraph text.
+    let effective_width = if !is_auto_width {
+        let extra = default_cell_margins
+            .map(|m| Pt::from(m.left) + Pt::from(m.right))
+            .unwrap_or(Pt::ZERO);
+        available_width + extra
+    } else {
+        available_width
+    };
+    let col_widths = if is_auto_width && !grid_cols.is_empty() {
+        grid_cols.clone()
+    } else {
+        compute_column_widths(&grid_cols, num_cols, effective_width)
+    };
     let style_overrides = raw_table_style
         .map(|s| s.table_style_overrides.as_slice())
         .unwrap_or(&[]);
@@ -294,11 +314,6 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
     let row_band_size = t.properties.style_row_band_size.unwrap_or(1);
     let col_band_size = t.properties.style_col_band_size.unwrap_or(1);
     let num_rows = t.rows.len();
-
-    // §17.4.42: cell margins from table style.
-    let style_cell_margins = raw_table_style
-        .and_then(|s| s.table.as_ref())
-        .and_then(|tp| tp.cell_margins);
 
     // Build rows by iterating cells and recursing into their content.
     let rows: Vec<TableRowInput> = t
@@ -370,7 +385,20 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         (table_width, right_gap, bottom_gap)
     });
 
-    BuiltTable { rows, col_widths, border_config, float_info }
+    // §17.4.51: table indentation from left margin.
+    // When tblInd is 0 (or absent), MS Word shifts the table left by the
+    // default left cell margin so that cell content aligns with paragraph
+    // text at the margin edge.
+    let explicit_indent = match t.properties.indent {
+        Some(model::TableMeasure::Twips(tw)) => Some(Pt::from(tw)),
+        _ => None,
+    };
+    let default_left_cell_margin = default_cell_margins
+        .map(|m| Pt::from(m.left))
+        .unwrap_or(Pt::ZERO);
+    let indent = explicit_indent.unwrap_or(-default_left_cell_margin);
+
+    BuiltTable { rows, col_widths, border_config, indent, float_info }
 }
 
 /// Build a single table cell: resolve content blocks, margins, shading, borders.

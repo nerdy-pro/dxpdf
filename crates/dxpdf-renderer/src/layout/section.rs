@@ -24,6 +24,8 @@ pub enum LayoutBlock {
         col_widths: Vec<Pt>,
         /// §17.4.38: resolved table border configuration.
         border_config: Option<super::table::TableBorderConfig>,
+        /// §17.4.51: table indentation from left margin.
+        indent: Pt,
         /// §17.4.58: floating table — text wraps around it.
         /// (table_width, right_gap, bottom_gap) for float positioning.
         float_info: Option<(Pt, Pt, Pt)>,
@@ -111,6 +113,7 @@ pub fn layout_section(
                 rows,
                 col_widths,
                 border_config,
+                indent,
                 float_info,
             } => {
                 let table = layout_table(
@@ -137,9 +140,11 @@ pub fn layout_section(
                     // §17.4.58: bottomFromText extends the float area below the table.
                     let float_y_end = cursor_y + table.size.height + *bottom_gap;
 
+                    // §17.4.51: table indent offsets from left margin.
+                    let table_x = config.margins.left + *indent;
                     for mut cmd in table.commands {
                         cmd.shift_y(cursor_y);
-                        cmd.shift_x(config.margins.left);
+                        cmd.shift_x(table_x);
                         current_page.commands.push(cmd);
                     }
 
@@ -157,9 +162,11 @@ pub fn layout_section(
                     cursor_y = config.margins.top;
                 }
 
+                // §17.4.51: table indent offsets from left margin.
+                let table_x = config.margins.left + *indent;
                 for mut cmd in table.commands {
                     cmd.shift_y(cursor_y);
-                    cmd.shift_x(config.margins.left);
+                    cmd.shift_x(table_x);
                     current_page.commands.push(cmd);
                 }
 
@@ -326,7 +333,8 @@ mod tests {
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,
-            float_info: None, // (table_width, right_gap, bottom_gap)
+            indent: Pt::ZERO,
+            float_info: None,
         }];
 
         let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));
