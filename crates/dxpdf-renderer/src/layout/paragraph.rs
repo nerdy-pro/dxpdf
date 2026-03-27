@@ -173,6 +173,10 @@ pub fn layout_paragraph(
 
     // Fit lines: if float_beside is set, fit at narrow width first, then refit
     // remaining fragments at full width once past the float height.
+    // Number of lines fit at narrow width (beside a float). Lines after this
+    // index were fit at full width and should not get float_offset in rendering.
+    let mut narrow_line_count: usize = usize::MAX; // no float = all lines treated uniformly
+
     let lines = if let Some((_, float_remaining_height)) = style.float_beside {
         let mut all_lines = Vec::new();
         let narrow_lines = super::line::fit_lines_with_first(fragments, first_line_width, remaining_narrow);
@@ -184,8 +188,6 @@ pub fn layout_paragraph(
             let natural = if line.height > Pt::ZERO { line.height } else { default_line_height };
             let lh = resolve_line_height(natural, &style.line_spacing);
             if accum_height + lh > float_remaining_height {
-                // This line crosses the float boundary — its fragments should
-                // be refit at full width since they'll render below the float.
                 last_narrow_end = line.start;
                 break;
             }
@@ -199,6 +201,8 @@ pub fn layout_paragraph(
             });
             accum_height += lh;
         }
+
+        narrow_line_count = all_lines.len();
 
         // Refit remaining fragments at full width.
         if last_narrow_end < fragments.len() {
@@ -284,8 +288,10 @@ pub fn layout_paragraph(
         };
 
         // §17.4.58: lines beside the float get extra left indent.
-        let float_offset = if let Some((fw, float_h)) = style.float_beside {
-            if accum_line_height < float_h { fw } else { Pt::ZERO }
+        // Use narrow_line_count (from fitting) to determine which lines are
+        // beside the float, ensuring fitting and rendering agree on the boundary.
+        let float_offset = if let Some((fw, _)) = style.float_beside {
+            if line_idx < narrow_line_count { fw } else { Pt::ZERO }
         } else {
             Pt::ZERO
         };

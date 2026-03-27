@@ -22,10 +22,11 @@ pub enum LayoutBlock {
     Table {
         rows: Vec<TableRowInput>,
         col_widths: Vec<Pt>,
-        draw_borders: bool,
+        /// §17.4.38: resolved table border configuration.
+        border_config: Option<super::table::TableBorderConfig>,
         /// §17.4.58: floating table — text wraps around it.
-        /// (table_width, right_gap) for float positioning.
-        float_info: Option<(Pt, Pt)>,
+        /// (table_width, right_gap, bottom_gap) for float positioning.
+        float_info: Option<(Pt, Pt, Pt)>,
     },
 }
 
@@ -109,7 +110,7 @@ pub fn layout_section(
             LayoutBlock::Table {
                 rows,
                 col_widths,
-                draw_borders,
+                border_config,
                 float_info,
             } => {
                 let table = layout_table(
@@ -117,12 +118,12 @@ pub fn layout_section(
                     col_widths,
                     &constraints,
                     default_line_height,
-                    *draw_borders,
+                    border_config.as_ref(),
                 );
 
                 // §17.4.58: floating table — render at current position and
                 // register as a float so subsequent text wraps around it.
-                if let Some((_, right_gap)) = float_info {
+                if let Some((_, right_gap, bottom_gap)) = float_info {
                     // Page break if table doesn't fit
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                         pages.push(std::mem::replace(
@@ -133,7 +134,8 @@ pub fn layout_section(
                     }
 
                     let float_y_start = cursor_y;
-                    let float_y_end = cursor_y + table.size.height;
+                    // §17.4.58: bottomFromText extends the float area below the table.
+                    let float_y_end = cursor_y + table.size.height + *bottom_gap;
 
                     for mut cmd in table.commands {
                         cmd.shift_y(cursor_y);
@@ -142,7 +144,6 @@ pub fn layout_section(
                     }
 
                     // Register as active float — don't advance cursor_y.
-                    // Text will flow to the right.
                     active_float = Some((table.size.width, *right_gap, float_y_start, float_y_end));
                     continue;
                 }
@@ -340,8 +341,8 @@ mod tests {
                 min_height: None,
             }],
             col_widths: vec![Pt::new(100.0)],
-            draw_borders: false,
-            float_info: None,
+            border_config: None,
+            float_info: None, // (table_width, right_gap, bottom_gap)
         }];
 
         let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));

@@ -270,10 +270,20 @@ fn build_layout_blocks(
                         resolved.styles.get(sid)
                     });
 
+                // §17.7.6.6: find firstRow conditional override from table style.
+                use dxpdf_docx_model::model::TableStyleOverrideType;
+                let first_row_override = raw_table_style
+                    .and_then(|s| {
+                        s.table_style_overrides
+                            .iter()
+                            .find(|o| o.override_type == TableStyleOverrideType::FirstRow)
+                    });
+
                 let rows: Vec<TableRowInput> = t
                     .rows
                     .iter()
-                    .map(|row| {
+                    .enumerate()
+                    .map(|(row_idx, row)| {
                         let cells: Vec<TableCellInput> = row
                             .cells
                             .iter()
@@ -283,8 +293,45 @@ fn build_layout_blocks(
                                     .iter()
                                     .filter_map(|b| {
                                         if let Block::Paragraph(p) = b {
-                                            let (df, ds, dc, mp, rd) =
-                                                resolve_paragraph_defaults(p, resolved);
+                                            // §17.7.2: table style properties are applied in the
+                                            // cascade with priority over the default paragraph
+                                            // style (Normal) for table cells.
+                                            let mut table_para = p.clone();
+                                            if let Some(ts) = raw_table_style {
+                                                resolve::properties::merge_paragraph_properties(
+                                                    &mut table_para.properties, &ts.paragraph,
+                                                );
+                                            }
+                                            let (df, mut ds, mut dc, mp, mut rd) =
+                                                resolve_paragraph_defaults(&table_para, resolved);
+
+                                            // §17.7.2: for table cells, table style run properties
+                                            // take priority over the paragraph style (Normal).
+                                            // The table style's resolved run includes doc defaults,
+                                            // so font_size comes from table style → doc defaults,
+                                            // overriding Normal's potentially different size.
+                                            if let Some(ts) = raw_table_style {
+                                                if let Some(fs) = ts.run.font_size {
+                                                    ds = Pt::from(fs);
+                                                    rd.font_size = Some(fs);
+                                                }
+                                                if let Some(ref f) = resolve::fonts::effective_font(&ts.run.fonts) {
+                                                    rd.fonts.ascii = Some(f.to_string());
+                                                }
+                                            }
+
+                                            // §17.7.6.6: firstRow override run properties.
+                                            if row_idx == 0 {
+                                                if let Some(fro) = first_row_override {
+                                                    if let Some(ref rp) = fro.run_properties {
+                                                        resolve::properties::merge_run_properties(&mut rd, rp);
+                                                        if let Some(c) = rd.color {
+                                                            dc = resolve::color::resolve_color(c, resolve::color::ColorContext::Text);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
                                             let mut frags = collect_fragments(
                                                 &p.content,
                                                 &df,
@@ -307,11 +354,15 @@ fn build_layout_blocks(
                                     })
                                     .collect();
 
-                                // §17.4.42: cell margins cascade: cell → table → 0.
+                                // §17.4.42: cell margins cascade: cell → table direct → table style → 0.
+                                let style_cell_margins = raw_table_style
+                                    .and_then(|s| s.table.as_ref())
+                                    .and_then(|tp| tp.cell_margins);
                                 let cell_margins = cell
                                     .properties
                                     .margins
                                     .or(t.properties.cell_margins)
+                                    .or(style_cell_margins)
                                     .map(|m| geometry::PtEdgeInsets::new(
                                         Pt::from(m.top),
                                         Pt::from(m.right),
@@ -320,13 +371,20 @@ fn build_layout_blocks(
                                     ))
                                     .unwrap_or(geometry::PtEdgeInsets::ZERO);
 
-                                // Resolve cell shading: direct cell → table style (not yet implemented).
-                                let shading = cell.properties.shading.map(|s| {
-                                    resolve::color::resolve_color(
-                                        s.fill,
-                                        resolve::color::ColorContext::Background,
-                                    )
-                                });
+                                // §17.7.6.6: resolve cell shading.
+                                // Priority: direct cell → firstRow override (for row 0) → none.
+                                let shading = cell.properties.shading
+                                    .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
+                                    .or_else(|| {
+                                        if row_idx == 0 {
+                                            first_row_override
+                                                .and_then(|o| o.table_cell_properties.as_ref())
+                                                .and_then(|tcp| tcp.shading.as_ref())
+                                                .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
+                                        } else {
+                                            None
+                                        }
+                                    });
 
                                 TableCellInput {
                                     blocks: cell_blocks,
@@ -344,12 +402,37 @@ fn build_layout_blocks(
                     })
                     .collect();
 
-                // §17.4.38: draw borders from table properties or table style.
-                let has_borders = t.properties.borders.is_some()
-                    || raw_table_style
-                        .and_then(|s| s.table.as_ref())
-                        .and_then(|tp| tp.borders.as_ref())
-                        .is_some();
+                // §17.4.38: resolve table borders from direct properties or table style.
+                let tbl_borders = t
+                    .properties
+                    .borders
+                    .as_ref()
+                    .or_else(|| {
+                        raw_table_style
+                            .and_then(|s| s.table.as_ref())
+                            .and_then(|tp| tp.borders.as_ref())
+                    });
+
+                let border_config = tbl_borders.map(|b| {
+                    use layout::table::{TableBorderConfig, TableBorderLine};
+                    let convert = |border: &dxpdf_docx_model::model::Border| -> TableBorderLine {
+                        TableBorderLine {
+                            width: Pt::from(border.width),
+                            color: resolve::color::resolve_color(
+                                border.color,
+                                resolve::color::ColorContext::Text,
+                            ),
+                        }
+                    };
+                    TableBorderConfig {
+                        top: b.top.as_ref().map(&convert),
+                        bottom: b.bottom.as_ref().map(&convert),
+                        left: b.left.as_ref().map(&convert),
+                        right: b.right.as_ref().map(&convert),
+                        inside_h: b.inside_h.as_ref().map(&convert),
+                        inside_v: b.inside_v.as_ref().map(&convert),
+                    }
+                });
 
                 // §17.4.58: floating table positioning.
                 let float_info = t.properties.positioning.as_ref().map(|pos| {
@@ -358,13 +441,17 @@ fn build_layout_blocks(
                         .right_from_text
                         .map(Pt::from)
                         .unwrap_or(Pt::ZERO);
-                    (table_width, right_gap)
+                    let bottom_gap = pos
+                        .bottom_from_text
+                        .map(Pt::from)
+                        .unwrap_or(Pt::ZERO);
+                    (table_width, right_gap, bottom_gap)
                 });
 
                 blocks.push(LayoutBlock::Table {
                     rows,
                     col_widths,
-                    draw_borders: has_borders,
+                    border_config,
                     float_info,
                 });
             }

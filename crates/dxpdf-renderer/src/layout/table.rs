@@ -29,6 +29,24 @@ pub struct TableCellInput {
     pub shading: Option<RgbColor>,
 }
 
+/// Resolved table border configuration.
+#[derive(Clone, Debug)]
+pub struct TableBorderConfig {
+    pub top: Option<TableBorderLine>,
+    pub bottom: Option<TableBorderLine>,
+    pub left: Option<TableBorderLine>,
+    pub right: Option<TableBorderLine>,
+    pub inside_h: Option<TableBorderLine>,
+    pub inside_v: Option<TableBorderLine>,
+}
+
+/// A single table border line.
+#[derive(Clone, Copy, Debug)]
+pub struct TableBorderLine {
+    pub width: Pt,
+    pub color: RgbColor,
+}
+
 /// Result of laying out a table.
 #[derive(Debug)]
 pub struct TableLayout {
@@ -44,7 +62,7 @@ pub fn layout_table(
     col_widths: &[Pt],
     _constraints: &BoxConstraints,
     default_line_height: Pt,
-    draw_borders: bool,
+    borders: Option<&TableBorderConfig>,
 ) -> TableLayout {
     if rows.is_empty() || col_widths.is_empty() {
         return TableLayout {
@@ -124,48 +142,40 @@ pub fn layout_table(
             }
         }
 
-        // Borders — draw at cell boundaries, not grid column boundaries.
-        if draw_borders {
-            // Top border of this row
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(
-                    PtOffset::new(Pt::ZERO, cursor_y),
-                    PtOffset::new(table_width, cursor_y),
-                ),
-                // §17.4.38: default border color is auto (black) per spec.
-                // §17.4.38: default border width is 0.5pt (4 eighths of a point).
-                color: RgbColor::BLACK,
-                width: Pt::new(0.5),
-            });
+        // §17.4.38: draw borders from resolved config.
+        if let Some(bdr) = borders {
+            // Top border (only on first row) or insideH (between rows)
+            if row_idx == 0 {
+                if let Some(ref b) = bdr.top {
+                    emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
+                }
+            } else if let Some(ref b) = bdr.inside_h {
+                emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
+            }
 
-            // Left edge
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(
-                    PtOffset::new(Pt::ZERO, cursor_y),
-                    PtOffset::new(Pt::ZERO, cursor_y + row_height),
-                ),
-                // §17.4.38: default border color is auto (black) per spec.
-                // §17.4.38: default border width is 0.5pt (4 eighths of a point).
-                color: RgbColor::BLACK,
-                width: Pt::new(0.5),
-            });
+            // Left border
+            if let Some(ref b) = bdr.left {
+                emit_v_border(&mut commands, b, Pt::ZERO, cursor_y, cursor_y + row_height);
+            }
 
-            // Vertical borders at each cell's right edge
-            let mut grid_idx = 0;
-            for cell_input in &rows[row_idx].cells {
-                let span = cell_input.grid_span.max(1) as usize;
-                grid_idx += span;
-                let vx: Pt = (0..grid_idx)
-                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
-                    .sum();
-                commands.push(DrawCommand::Line {
-                    line: PtLineSegment::new(
-                        PtOffset::new(vx, cursor_y),
-                        PtOffset::new(vx, cursor_y + row_height),
-                    ),
-                    color: RgbColor::BLACK,
-                    width: Pt::new(0.5),
-                });
+            // Right border
+            if let Some(ref b) = bdr.right {
+                emit_v_border(&mut commands, b, table_width, cursor_y, cursor_y + row_height);
+            }
+
+            // Inside vertical borders between cells
+            if let Some(ref b) = bdr.inside_v {
+                let mut grid_idx = 0;
+                for cell_input in &rows[row_idx].cells {
+                    let span = cell_input.grid_span.max(1) as usize;
+                    grid_idx += span;
+                    if grid_idx < col_widths.len() {
+                        let vx: Pt = (0..grid_idx)
+                            .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                            .sum();
+                        emit_v_border(&mut commands, b, vx, cursor_y, cursor_y + row_height);
+                    }
+                }
             }
         }
 
@@ -173,15 +183,10 @@ pub fn layout_table(
     }
 
     // Bottom border
-    if draw_borders {
-        commands.push(DrawCommand::Line {
-            line: PtLineSegment::new(
-                PtOffset::new(Pt::ZERO, cursor_y),
-                PtOffset::new(table_width, cursor_y),
-            ),
-            color: RgbColor::BLACK,
-            width: Pt::new(0.5),
-        });
+    if let Some(bdr) = borders {
+        if let Some(ref b) = bdr.bottom {
+            emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
+        }
     }
 
     TableLayout {
@@ -206,6 +211,22 @@ pub fn compute_column_widths(grid_cols: &[Pt], num_cols: usize, available_width:
     } else {
         vec![]
     }
+}
+
+fn emit_h_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x1: Pt, x2: Pt, y: Pt) {
+    commands.push(DrawCommand::Line {
+        line: PtLineSegment::new(PtOffset::new(x1, y), PtOffset::new(x2, y)),
+        color: b.color,
+        width: b.width,
+    });
+}
+
+fn emit_v_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x: Pt, y1: Pt, y2: Pt) {
+    commands.push(DrawCommand::Line {
+        line: PtLineSegment::new(PtOffset::new(x, y1), PtOffset::new(x, y2)),
+        color: b.color,
+        width: b.width,
+    });
 }
 
 fn shift_x(cmd: &mut DrawCommand, dx: Pt) {
@@ -306,7 +327,7 @@ mod tests {
 
     #[test]
     fn empty_table() {
-        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None);
         assert!(result.commands.is_empty());
         assert_eq!(result.size, PtSize::ZERO);
     }
@@ -318,7 +339,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 14.0);
@@ -344,7 +365,7 @@ mod tests {
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 28.0); // 2 rows * 14pt
@@ -377,7 +398,7 @@ mod tests {
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         assert_eq!(result.size.height.raw(), 28.0, "row height = tallest cell");
     }
@@ -389,7 +410,7 @@ mod tests {
             min_height: Some(Pt::new(40.0)),
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         assert_eq!(result.size.height.raw(), 40.0, "min height > content height");
     }
@@ -409,7 +430,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         let rect_count = result
             .commands
@@ -426,7 +447,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), true);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK }) }));
 
         let line_count = result
             .commands
@@ -452,7 +473,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         // Cell gets full 200pt width, text should still render
         assert_eq!(result.size.width.raw(), 200.0);
@@ -479,7 +500,7 @@ mod tests {
             min_height: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), false);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
 
         // Row height = content(14) + top(5) + bottom(5) = 24
         assert_eq!(result.size.height.raw(), 24.0);

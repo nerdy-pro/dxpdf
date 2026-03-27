@@ -31,7 +31,10 @@ impl TextMeasurer {
 
         let (width, _bounds) = font.measure_str(text, None);
         let (_, metrics) = font.metrics();
-        let line_height = Pt::new(-metrics.ascent + metrics.descent + metrics.leading);
+        // §17.18.48: single line spacing = ascent + descent (no leading).
+        // Word uses OS/2 winAscent + winDescent for line height.
+        // Leading is external spacing between lines, not part of the line box.
+        let line_height = Pt::new(-metrics.ascent + metrics.descent);
         let ascent = Pt::new(-metrics.ascent);
 
         (Pt::new(width), line_height, ascent)
@@ -70,6 +73,7 @@ impl TextMeasurer {
     pub fn default_line_height(&self, family: &str, size: Pt) -> Pt {
         let font = fonts::make_font(&self.font_mgr, family, size, false, false);
         let (_, metrics) = font.metrics();
-        Pt::new(-metrics.ascent + metrics.descent + metrics.leading)
+        // §17.18.48: single line height = ascent + descent (no leading).
+        Pt::new(-metrics.ascent + metrics.descent)
     }
 }

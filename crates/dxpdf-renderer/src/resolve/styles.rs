@@ -14,6 +14,8 @@ pub struct ResolvedStyle {
     pub paragraph: ParagraphProperties,
     pub run: RunProperties,
     pub table: Option<TableProperties>,
+    /// §17.7.6.6: table style conditional formatting overrides.
+    pub table_style_overrides: Vec<dxpdf_docx_model::model::TableStyleOverride>,
 }
 
 /// Resolve all styles in the stylesheet by walking `basedOn` chains.
@@ -63,6 +65,7 @@ fn resolve_one(
                 paragraph: para,
                 run,
                 table: style.table_properties.clone(),
+                table_style_overrides: style.table_style_overrides.clone(),
             },
         );
         return;
@@ -105,6 +108,7 @@ fn resolve_one(
             paragraph: para,
             run,
             table: style.table_properties.clone(),
+                table_style_overrides: style.table_style_overrides.clone(),
         },
     );
 }
