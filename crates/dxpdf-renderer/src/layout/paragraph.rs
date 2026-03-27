@@ -7,6 +7,7 @@ use dxpdf_docx_model::model::Alignment;
 
 use crate::dimension::Pt;
 use crate::geometry::{PtOffset, PtSize};
+use crate::resolve::color::RgbColor;
 use super::draw_command::DrawCommand;
 use super::fragment::Fragment;
 use super::line::fit_lines;
@@ -24,6 +25,26 @@ pub struct ParagraphStyle {
     pub line_spacing: LineSpacingRule,
     /// Drop cap to render at the start of this paragraph.
     pub drop_cap: Option<DropCapInfo>,
+    /// §17.3.1.24: paragraph borders.
+    pub borders: Option<ParagraphBorderStyle>,
+}
+
+/// Resolved paragraph border style for rendering.
+#[derive(Clone, Debug)]
+pub struct ParagraphBorderStyle {
+    pub top: Option<BorderLine>,
+    pub bottom: Option<BorderLine>,
+    pub left: Option<BorderLine>,
+    pub right: Option<BorderLine>,
+}
+
+/// A single border line for rendering.
+#[derive(Clone, Copy, Debug)]
+pub struct BorderLine {
+    pub width: Pt,
+    pub color: RgbColor,
+    /// §17.3.1.24: space between border and text in points.
+    pub space: Pt,
 }
 
 /// Drop cap letter to float at the start of a paragraph.
@@ -54,6 +75,7 @@ impl Default for ParagraphStyle {
             indent_first_line: Pt::ZERO,
             line_spacing: LineSpacingRule::Auto(1.0),
             drop_cap: None,
+            borders: None,
         }
     }
 }
@@ -288,6 +310,57 @@ pub fn layout_paragraph(
         }
 
         cursor_y += line_height;
+    }
+
+    // §17.3.1.24: render paragraph borders.
+    if let Some(ref borders) = style.borders {
+        let content_top = style.space_before;
+        let content_bottom = cursor_y;
+        let left_x = style.indent_left;
+        let right_x = constraints.max_width - style.indent_right;
+
+        if let Some(ref top) = borders.top {
+            let y = content_top - top.space;
+            commands.push(DrawCommand::Line {
+                line: crate::geometry::PtLineSegment::new(
+                    PtOffset::new(left_x, y),
+                    PtOffset::new(right_x, y),
+                ),
+                color: top.color,
+                width: top.width,
+            });
+        }
+        if let Some(ref bottom) = borders.bottom {
+            let y = content_bottom + bottom.space;
+            commands.push(DrawCommand::Line {
+                line: crate::geometry::PtLineSegment::new(
+                    PtOffset::new(left_x, y),
+                    PtOffset::new(right_x, y),
+                ),
+                color: bottom.color,
+                width: bottom.width,
+            });
+        }
+        if let Some(ref left) = borders.left {
+            commands.push(DrawCommand::Line {
+                line: crate::geometry::PtLineSegment::new(
+                    PtOffset::new(left_x - left.space, content_top),
+                    PtOffset::new(left_x - left.space, content_bottom),
+                ),
+                color: left.color,
+                width: left.width,
+            });
+        }
+        if let Some(ref right) = borders.right {
+            commands.push(DrawCommand::Line {
+                line: crate::geometry::PtLineSegment::new(
+                    PtOffset::new(right_x + right.space, content_top),
+                    PtOffset::new(right_x + right.space, content_bottom),
+                ),
+                color: right.color,
+                width: right.width,
+            });
+        }
     }
 
     cursor_y += style.space_after;

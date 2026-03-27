@@ -489,6 +489,38 @@ fn paragraph_style_from_props(
         indent_first_line,
         line_spacing,
         drop_cap: None,
+        borders: resolve_paragraph_borders(props),
+    }
+}
+
+/// §17.3.1.24: resolve paragraph borders for rendering.
+fn resolve_paragraph_borders(
+    props: &dxpdf_docx_model::model::ParagraphProperties,
+) -> Option<layout::paragraph::ParagraphBorderStyle> {
+    use layout::paragraph::{BorderLine, ParagraphBorderStyle};
+
+    let pbdr = props.borders.as_ref()?;
+
+    let convert = |b: &dxpdf_docx_model::model::Border| -> BorderLine {
+        BorderLine {
+            width: Pt::from(b.width),
+            color: resolve::color::resolve_color(b.color, resolve::color::ColorContext::Text),
+            space: Pt::from(b.space),
+        }
+    };
+
+    let style = ParagraphBorderStyle {
+        top: pbdr.top.as_ref().map(convert),
+        bottom: pbdr.bottom.as_ref().map(convert),
+        left: pbdr.left.as_ref().map(convert),
+        right: pbdr.right.as_ref().map(convert),
+    };
+
+    // Only return if at least one border is set.
+    if style.top.is_some() || style.bottom.is_some() || style.left.is_some() || style.right.is_some() {
+        Some(style)
+    } else {
+        None
     }
 }
 
