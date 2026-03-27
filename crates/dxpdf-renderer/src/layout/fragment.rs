@@ -32,6 +32,8 @@ pub enum Fragment {
         text: String,
         font: FontProps,
         color: RgbColor,
+        /// §17.3.2.32: run-level shading (background color behind text).
+        shading: Option<RgbColor>,
         width: Pt,
         height: Pt,
         ascent: Pt,
@@ -169,6 +171,10 @@ where
                     .color
                     .map(|c| crate::resolve::color::resolve_color(c, crate::resolve::color::ColorContext::Text))
                     .unwrap_or(default_color);
+                // §17.3.2.32: run-level shading (background behind text).
+                let shading = tr.properties.shading.as_ref().map(|s| {
+                    crate::resolve::color::resolve_color(s.fill, crate::resolve::color::ColorContext::Background)
+                });
 
                 if !tr.text.is_empty() {
                     // Split text into word-level fragments so the line fitter
@@ -180,6 +186,7 @@ where
                             text: word.to_string(),
                             font: font.clone(),
                             color,
+                            shading,
                             width: w,
                             height: h,
                             ascent: a,
@@ -295,7 +302,7 @@ where
                     height: h,
                     ascent: a,
                     hyperlink_url: hyperlink_url.map(String::from),
-                    baseline_offset: Pt::ZERO,
+                    shading: None, baseline_offset: Pt::ZERO,
                 });
             }
             // Non-visual inlines — skip

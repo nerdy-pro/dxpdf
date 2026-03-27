@@ -113,17 +113,44 @@ pub fn layout_paragraph(
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
 
-    // Render drop cap letter at the start.
-    if let Some(ref dc) = style.drop_cap {
+    // §17.3.1.11: compute the baseline of the Nth body text line for drop cap positioning.
+    // The drop cap baseline must align with the baseline of the last line it spans.
+    let drop_cap_baseline_y = if let Some(ref dc) = style.drop_cap {
+        let n = dc.lines.max(1) as usize;
+        let mut y = cursor_y;
+        for (i, fitted_line) in lines.iter().enumerate().take(n) {
+            let natural = if fitted_line.height > Pt::ZERO {
+                fitted_line.height
+            } else {
+                default_line_height
+            };
+            let lh = resolve_line_height(natural, &style.line_spacing);
+            if i == n - 1 {
+                // Nth line: baseline = current y + this line's ascent.
+                y += fitted_line.ascent;
+                break;
+            }
+            y += lh;
+        }
+        Some(y)
+    } else {
+        None
+    };
+
+    // Render drop cap at the computed baseline.
+    // §17.3.1.11: the drop cap baseline aligns with the Nth body line's baseline,
+    // but the glyph's top must not extend above the paragraph start (cursor_y).
+    // When cross-engine font metric differences cause the glyph to be taller than
+    // the N-line span, clamp so the top aligns with the paragraph start instead.
+    if let (Some(ref dc), Some(nth_baseline_y)) = (&style.drop_cap, drop_cap_baseline_y) {
+        let baseline_y = nth_baseline_y.max(cursor_y + dc.ascent);
         for frag in &dc.fragments {
             if let Fragment::Text {
                 text, font, color, ..
             } = frag
             {
-                // Position drop cap at left margin, baseline at font ascent.
-                let y = cursor_y + dc.ascent;
                 commands.push(DrawCommand::Text {
-                    position: PtOffset::new(style.indent_left, y),
+                    position: PtOffset::new(style.indent_left, baseline_y),
                     text: text.clone(),
                     font_family: font.family.clone(),
                     char_spacing: font.char_spacing,
@@ -176,11 +203,25 @@ pub fn layout_paragraph(
                     text,
                     font,
                     color,
+                    shading,
                     width,
                     hyperlink_url,
                     baseline_offset,
                     ..
                 } => {
+                    // §17.3.2.32: render run-level shading behind text.
+                    if let Some(bg_color) = shading {
+                        commands.push(DrawCommand::Rect {
+                            rect: crate::geometry::PtRect::from_xywh(
+                                x,
+                                cursor_y,
+                                *width,
+                                line_height,
+                            ),
+                            color: *bg_color,
+                        });
+                    }
+
                     let y = cursor_y + line.ascent + *baseline_offset;
                     commands.push(DrawCommand::Text {
                         position: PtOffset::new(x, y),
@@ -297,7 +338,7 @@ mod tests {
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
-            baseline_offset: Pt::ZERO,
+            shading: None, baseline_offset: Pt::ZERO,
         }
     }
 
