@@ -168,51 +168,111 @@ pub fn layout_table(
     // Restart cell's content fits within the combined spanned row heights.
     expand_rows_for_vmerge(rows, &row_cell_layouts, &mut row_heights);
 
-    // Pass 3: position cells, emit shading, content, and borders.
+    // Pass 3: resolve per-cell borders, then apply §17.4.43 conflict
+    // resolution at shared edges so each edge is drawn exactly once.
+    let num_rows = rows.len();
+
+    // 3a: resolve raw borders for every cell.
+    let cell_borders: Vec<Vec<CellBorders>> = rows
+        .iter()
+        .enumerate()
+        .map(|(row_idx, row)| {
+            row.cells
+                .iter()
+                .enumerate()
+                .zip(row_cell_layouts[row_idx].iter())
+                .map(|((cell_ci, cell_input), entry)| {
+                    let (mut b_top, mut b_bottom, b_left, b_right) =
+                        resolve_cell_effective_borders(
+                            cell_input, borders, row_idx, cell_ci,
+                            num_rows, row.cells.len(),
+                        );
+                    // §17.4.85: suppress horizontal borders inside vMerge groups.
+                    if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
+                        b_top = None;
+                    }
+                    if row_idx + 1 < num_rows
+                        && is_vmerge_continue(&rows[row_idx + 1], entry.grid_col)
+                    {
+                        b_bottom = None;
+                    }
+                    CellBorders { top: b_top, bottom: b_bottom, left: b_left, right: b_right }
+                })
+                .collect()
+        })
+        .collect();
+
+    // 3b: §17.4.43 conflict resolution at shared edges.
+    // Horizontal interior edges: cell[r].bottom vs cell[r+1].top → winner kept
+    // on cell[r].bottom, cell[r+1].top set to None.
+    // Vertical interior edges: cell[c].right vs cell[c+1].left → winner kept
+    // on cell[c].right, cell[c+1].left set to None.
+    let mut resolved_borders = cell_borders;
+
+    for row_idx in 0..num_rows {
+        let num_cells = rows[row_idx].cells.len();
+        for cell_ci in 0..num_cells {
+            // Vertical: resolve right vs next cell's left.
+            if cell_ci + 1 < num_cells {
+                let right = resolved_borders[row_idx][cell_ci].right;
+                let left = resolved_borders[row_idx][cell_ci + 1].left;
+                let winner = resolve_border_conflict(right, left);
+                resolved_borders[row_idx][cell_ci].right = winner;
+                resolved_borders[row_idx][cell_ci + 1].left = None;
+            }
+            // Horizontal: resolve bottom vs next row's top.
+            if row_idx + 1 < num_rows {
+                // Find the cell in the next row at the same grid column.
+                let grid_col = row_cell_layouts[row_idx][cell_ci].grid_col;
+                if let Some(below_ci) = cell_index_at_grid_col(&rows[row_idx + 1], grid_col) {
+                    let bottom = resolved_borders[row_idx][cell_ci].bottom;
+                    let top = resolved_borders[row_idx + 1][below_ci].top;
+                    let winner = resolve_border_conflict(bottom, top);
+                    resolved_borders[row_idx][cell_ci].bottom = winner;
+                    resolved_borders[row_idx + 1][below_ci].top = None;
+                }
+            }
+        }
+    }
+
+    // 3c: emit in layered order — shading below content below borders.
+    // This prevents shading rectangles from overlapping adjacent borders.
+    let mut content_commands = Vec::new();
+    let mut border_commands = Vec::new();
+
     for (row_idx, entries) in row_cell_layouts.iter().enumerate() {
         let row_height = row_heights[row_idx];
-        let num_cells = rows[row_idx].cells.len();
 
         for (cell_ci, (entry, cell_input)) in
             entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
         {
-            // Cell shading.
+            // Layer 1: shading (bottom).
             if let Some(color) = cell_input.shading {
                 commands.push(DrawCommand::Rect {
                     rect: PtRect::from_xywh(entry.cell_x, cursor_y, entry.cell_w, row_height),
                     color,
                 });
             }
-
-            // Cell content — offset by cell position + row position.
+            // Layer 2: content (middle).
             for cmd in &entry.layout.commands {
                 let mut cmd = cmd.clone();
                 cmd.shift(entry.cell_x, cursor_y);
-                commands.push(cmd);
+                content_commands.push(cmd);
             }
-
-            // §17.4.38 / §17.7.6: resolve borders.
-            let (mut b_top, mut b_bottom, b_left, b_right) =
-                resolve_cell_effective_borders(cell_input, borders, row_idx, cell_ci,
-                    rows.len(), num_cells);
-
-            // §17.4.85: suppress horizontal borders inside vMerge groups.
-            if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
-                b_top = None;
-            }
-            if row_idx + 1 < rows.len()
-                && is_vmerge_continue(&rows[row_idx + 1], entry.grid_col)
-            {
-                b_bottom = None;
-            }
-
-            emit_cell_borders(&mut commands,
-                CellBorders { top: b_top, bottom: b_bottom, left: b_left, right: b_right },
-                entry.cell_x, entry.cell_w, cursor_y, row_height);
+            // Layer 3: borders (top).
+            let b = &resolved_borders[row_idx][cell_ci];
+            emit_cell_borders(
+                &mut border_commands,
+                CellBorders { top: b.top, bottom: b.bottom, left: b.left, right: b.right },
+                entry.cell_x, entry.cell_w, cursor_y, row_height,
+            );
         }
 
         cursor_y += row_height;
     }
+
+    commands.append(&mut content_commands);
+    commands.append(&mut border_commands);
 
     TableLayout {
         commands,
@@ -327,6 +387,49 @@ fn find_cell_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<
         col += span;
     }
     None
+}
+
+/// Return the cell index (not grid column) for the cell covering `grid_col`.
+fn cell_index_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<usize> {
+    let mut col = 0;
+    for (i, cell) in row.cells.iter().enumerate() {
+        let span = cell.grid_span.max(1) as usize;
+        if target_grid_col < col + span {
+            return Some(i);
+        }
+        col += span;
+    }
+    None
+}
+
+/// §17.4.43: resolve a border conflict between two competing borders on
+/// a shared edge.  Returns the winning border (or `None` if both are `None`).
+///
+/// Algorithm per [MS-OI29500] §17.4.66:
+///   1. `none` yields to the opposing border; `nil` suppresses both.
+///   2. Weight = border_width_eighths × border_number.  Higher wins.
+///   3. Equal weight: style precedence list.
+///   4. Equal style: darker color wins (R+B+2G, then B+2G, then G).
+fn resolve_border_conflict(
+    a: Option<TableBorderLine>,
+    b: Option<TableBorderLine>,
+) -> Option<TableBorderLine> {
+    match (a, b) {
+        (None, b) => b,
+        (a, None) => a,
+        (Some(a), Some(b)) => Some(if border_weight(&b) > border_weight(&a) { b } else { a }),
+    }
+}
+
+/// §17.4.43: compute border weight = width_eighths × style_number.
+/// We only support Single (1) and Double (3).
+fn border_weight(b: &TableBorderLine) -> f32 {
+    let eighths = b.width.raw() * 8.0; // width is in points, sz is eighths
+    let style_number = match b.style {
+        TableBorderStyle::Single => 1.0,
+        TableBorderStyle::Double => 3.0,
+    };
+    eighths * style_number
 }
 
 fn resolve_override(ovr: &CellBorderOverride) -> Option<TableBorderLine> {
@@ -624,9 +727,9 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, DrawCommand::Line { .. }))
             .count();
-        // Top border (1) + 3 vertical borders (left, middle, right) + bottom border (1) = 5
-        // Per-cell borders: 2 cells × 4 borders = 8 lines (shared edges drawn by both cells).
-        assert_eq!(line_count, 8);
+        // §17.4.43: shared edges drawn once after conflict resolution.
+        // Top(2) + bottom(2) + left(1) + insideV(1) + right(1) = 7 lines.
+        assert_eq!(line_count, 7);
     }
 
     #[test]
