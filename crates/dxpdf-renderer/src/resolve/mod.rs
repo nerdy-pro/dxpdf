@@ -39,14 +39,27 @@ pub struct ResolvedDocument {
     pub doc_defaults_paragraph: ParagraphProperties,
     /// Document-level default run properties (from docDefaults).
     pub doc_defaults_run: RunProperties,
+    /// §17.7.4.17: the default paragraph style (w:default="1", type="paragraph").
+    /// Applied to paragraphs that don't specify a style explicitly.
+    pub default_paragraph_style_id: Option<StyleId>,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
 pub fn resolve(doc: &Document) -> ResolvedDocument {
+    use dxpdf_docx_model::model::StyleType;
+
     let styles = styles::resolve_styles(&doc.styles);
     let numbering = numbering::resolve_numbering(&doc.numbering);
     let sections = sections::resolve_sections(doc);
     let font_families = fonts::collect_font_families(doc);
+
+    // §17.7.4.17: find the default paragraph style.
+    let default_paragraph_style_id = doc
+        .styles
+        .styles
+        .iter()
+        .find(|(_, s)| s.is_default && s.style_type == StyleType::Paragraph)
+        .map(|(id, _)| id.clone());
 
     ResolvedDocument {
         sections,
@@ -56,6 +69,7 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         media: doc.media.clone(),
         doc_defaults_paragraph: doc.styles.doc_defaults_paragraph.clone(),
         doc_defaults_run: doc.styles.doc_defaults_run.clone(),
+        default_paragraph_style_id,
         theme: doc.theme.clone(),
     }
 }

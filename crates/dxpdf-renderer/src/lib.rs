@@ -400,7 +400,13 @@ fn resolve_paragraph_defaults(
     let mut default_color = RgbColor::BLACK;
 
     // Look up the paragraph's style and merge its properties as base.
-    if let Some(ref style_id) = para.style_id {
+    // §17.7.4.17: if no style is specified, use the default paragraph style.
+    let effective_style_id = para
+        .style_id
+        .as_ref()
+        .or(resolved.default_paragraph_style_id.as_ref());
+
+    if let Some(style_id) = effective_style_id {
         if let Some(resolved_style) = resolved.styles.get(style_id) {
             merge_paragraph_properties(&mut para_props, &resolved_style.paragraph);
             run_defaults = resolved_style.run.clone();
