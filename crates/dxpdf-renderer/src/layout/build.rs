@@ -221,10 +221,18 @@ fn build_fragments(
         }
     }
 
-    // §17.7.6: conditional run property overrides.
+    // §17.7.6: conditional run property overrides — higher priority than
+    // table style and paragraph style. Overlay (not merge): conditional
+    // values replace existing ones.
     if let Some(c) = cond {
         if let Some(ref rp) = c.run_properties {
-            merge_run_properties(&mut run_defaults, rp);
+            // Overlay: for each Some field in rp, replace in run_defaults.
+            let mut overlay = rp.clone();
+            merge_run_properties(&mut overlay, &run_defaults);
+            run_defaults = overlay;
+            if let Some(fs) = run_defaults.font_size {
+                default_size = Pt::from(fs);
+            }
             if let Some(color) = run_defaults.color {
                 default_color = resolve_color(color, ColorContext::Text);
             }
