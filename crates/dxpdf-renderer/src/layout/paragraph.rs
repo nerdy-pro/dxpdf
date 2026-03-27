@@ -187,7 +187,10 @@ pub fn layout_paragraph(
         for line in &narrow_lines {
             let natural = if line.height > Pt::ZERO { line.height } else { default_line_height };
             let lh = resolve_line_height(natural, &style.line_spacing);
-            if accum_height + lh > float_remaining_height {
+            // A line is beside the float if its TOP (accum_height) is within
+            // the float area. The line may extend past the float bottom — that's
+            // OK, the next line will be full-width.
+            if accum_height >= float_remaining_height {
                 last_narrow_end = line.start;
                 break;
             }

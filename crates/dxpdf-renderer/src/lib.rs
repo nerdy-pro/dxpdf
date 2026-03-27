@@ -305,8 +305,8 @@ fn build_layout_blocks(
                                             let (df, mut ds, mut dc, mp, mut rd) =
                                                 resolve_paragraph_defaults(&table_para, resolved);
 
-                                            // §17.7.2: for table cells, table style run properties
-                                            // take priority over the paragraph style (Normal).
+                                            // §17.7.2: table style run properties take priority
+                                            // over the paragraph style (Normal) for table cells.
                                             // The table style's resolved run includes doc defaults,
                                             // so font_size comes from table style → doc defaults,
                                             // overriding Normal's potentially different size.
@@ -314,9 +314,6 @@ fn build_layout_blocks(
                                                 if let Some(fs) = ts.run.font_size {
                                                     ds = Pt::from(fs);
                                                     rd.font_size = Some(fs);
-                                                }
-                                                if let Some(ref f) = resolve::fonts::effective_font(&ts.run.fonts) {
-                                                    rd.fonts.ascii = Some(f.to_string());
                                                 }
                                             }
 
