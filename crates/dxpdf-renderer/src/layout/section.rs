@@ -26,6 +26,8 @@ pub enum LayoutBlock {
         border_config: Option<super::table::TableBorderConfig>,
         /// §17.4.51: table indentation from left margin.
         indent: Pt,
+        /// §17.4.28: table horizontal alignment.
+        alignment: Option<dxpdf_docx_model::model::Alignment>,
         /// §17.4.58: floating table — text wraps around it.
         /// (table_width, right_gap, bottom_gap) for float positioning.
         float_info: Option<(Pt, Pt, Pt)>,
@@ -114,6 +116,7 @@ pub fn layout_section(
                 col_widths,
                 border_config,
                 indent,
+                alignment,
                 float_info,
             } => {
                 let table = layout_table(
@@ -124,10 +127,16 @@ pub fn layout_section(
                     border_config.as_ref(),
                 );
 
+                // §17.4.28 / §17.4.51: compute table x position from
+                // alignment and indent.
+                let table_x = table_x_offset(
+                    *alignment, *indent, table.size.width, content_width,
+                    config.margins.left,
+                );
+
                 // §17.4.58: floating table — render at current position and
                 // register as a float so subsequent text wraps around it.
                 if let Some((_, right_gap, bottom_gap)) = float_info {
-                    // Page break if table doesn't fit
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                         pages.push(std::mem::replace(
                             &mut current_page,
@@ -137,23 +146,19 @@ pub fn layout_section(
                     }
 
                     let float_y_start = cursor_y;
-                    // §17.4.58: bottomFromText extends the float area below the table.
                     let float_y_end = cursor_y + table.size.height + *bottom_gap;
 
-                    // §17.4.51: table indent offsets from left margin.
-                    let table_x = config.margins.left + *indent;
                     for mut cmd in table.commands {
                         cmd.shift_y(cursor_y);
                         cmd.shift_x(table_x);
                         current_page.commands.push(cmd);
                     }
 
-                    // Register as active float — don't advance cursor_y.
                     active_float = Some((table.size.width, *right_gap, float_y_start, float_y_end));
                     continue;
                 }
 
-                // Non-floating table: page break if table doesn't fit
+                // Non-floating table: page break if table doesn't fit.
                 if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                     pages.push(std::mem::replace(
                         &mut current_page,
@@ -162,8 +167,6 @@ pub fn layout_section(
                     cursor_y = config.margins.top;
                 }
 
-                // §17.4.51: table indent offsets from left margin.
-                let table_x = config.margins.left + *indent;
                 for mut cmd in table.commands {
                     cmd.shift_y(cursor_y);
                     cmd.shift_x(table_x);
@@ -179,6 +182,26 @@ pub fn layout_section(
     pages.push(current_page);
 
     pages
+}
+
+/// §17.4.28: compute the table's x offset based on alignment and indent.
+fn table_x_offset(
+    alignment: Option<dxpdf_docx_model::model::Alignment>,
+    indent: Pt,
+    table_width: Pt,
+    content_width: Pt,
+    margin_left: Pt,
+) -> Pt {
+    use dxpdf_docx_model::model::Alignment;
+    match alignment {
+        Some(Alignment::Center) => {
+            margin_left + (content_width - table_width) * 0.5
+        }
+        Some(Alignment::End) => {
+            margin_left + content_width - table_width
+        }
+        _ => margin_left + indent,
+    }
 }
 
 #[cfg(test)]
@@ -334,6 +357,7 @@ mod tests {
             col_widths: vec![Pt::new(100.0)],
             border_config: None,
             indent: Pt::ZERO,
+            alignment: None,
             float_info: None,
         }];
 

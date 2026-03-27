@@ -114,6 +114,7 @@ fn build_block(
                 col_widths: built.col_widths,
                 border_config: built.border_config,
                 indent: built.indent,
+                alignment: built.alignment,
                 float_info: built.float_info,
             })
         }
@@ -259,6 +260,8 @@ struct BuiltTable {
     border_config: Option<TableBorderConfig>,
     /// §17.4.51: table indentation from left margin.
     indent: Pt,
+    /// §17.4.28: table horizontal alignment (left/center/right).
+    alignment: Option<model::Alignment>,
     float_info: Option<(Pt, Pt, Pt)>,
 }
 
@@ -286,26 +289,34 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         .and_then(|tp| tp.cell_margins);
     let default_cell_margins = t.properties.cell_margins.or(style_cell_margins);
 
-    // §17.4.63: table width determines whether to scale columns.
+    // §17.4.63: resolve table width from tblW.
     let is_auto_width = matches!(
         t.properties.width,
         None | Some(model::TableMeasure::Auto) | Some(model::TableMeasure::Nil)
     );
-    // When using percentage width, the table extends beyond the content
-    // margins by the default cell margins (left + right) so that cell
-    // content aligns with paragraph text.
-    let effective_width = if !is_auto_width {
-        let extra = default_cell_margins
-            .map(|m| Pt::from(m.left) + Pt::from(m.right))
-            .unwrap_or(Pt::ZERO);
-        available_width + extra
-    } else {
-        available_width
+    let cell_margins_h = default_cell_margins
+        .map(|m| Pt::from(m.left) + Pt::from(m.right))
+        .unwrap_or(Pt::ZERO);
+    let target_width = match t.properties.width {
+        Some(model::TableMeasure::Pct(pct)) => {
+            // §17.4.63: percentage in fiftieths of a percent.
+            // 5000 = 100%. Full-width tables extend by cell margins so
+            // cell content aligns with paragraph text at the margins.
+            let ratio = pct.raw() as f32 / 5000.0;
+            let base = if pct.raw() >= 5000 {
+                available_width + cell_margins_h
+            } else {
+                available_width
+            };
+            base * ratio
+        }
+        Some(model::TableMeasure::Twips(tw)) => Pt::from(tw),
+        _ => available_width, // auto/nil: use grid cols or available width
     };
     let col_widths = if is_auto_width && !grid_cols.is_empty() {
         grid_cols.clone()
     } else {
-        compute_column_widths(&grid_cols, num_cols, effective_width)
+        compute_column_widths(&grid_cols, num_cols, target_width)
     };
     let style_overrides = raw_table_style
         .map(|s| s.table_style_overrides.as_slice())
@@ -386,19 +397,25 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
     });
 
     // §17.4.51: table indentation from left margin.
-    // When tblInd is 0 (or absent), MS Word shifts the table left by the
-    // default left cell margin so that cell content aligns with paragraph
-    // text at the margin edge.
-    let explicit_indent = match t.properties.indent {
-        Some(model::TableMeasure::Twips(tw)) => Some(Pt::from(tw)),
-        _ => None,
+    // For full-width left-aligned tables, MS Word shifts the table left
+    // by the default cell margin so cell content aligns with paragraph text.
+    let is_full_width = matches!(
+        t.properties.width,
+        Some(model::TableMeasure::Pct(pct)) if pct.raw() >= 5000
+    );
+    let is_left_aligned = !matches!(
+        t.properties.alignment,
+        Some(model::Alignment::Center) | Some(model::Alignment::End)
+    );
+    let indent = match t.properties.indent {
+        Some(model::TableMeasure::Twips(tw)) => Pt::from(tw),
+        _ if is_full_width && is_left_aligned => {
+            -default_cell_margins.map(|m| Pt::from(m.left)).unwrap_or(Pt::ZERO)
+        }
+        _ => Pt::ZERO,
     };
-    let default_left_cell_margin = default_cell_margins
-        .map(|m| Pt::from(m.left))
-        .unwrap_or(Pt::ZERO);
-    let indent = explicit_indent.unwrap_or(-default_left_cell_margin);
 
-    BuiltTable { rows, col_widths, border_config, indent, float_info }
+    BuiltTable { rows, col_widths, border_config, indent, alignment: t.properties.alignment, float_info }
 }
 
 /// Build a single table cell: resolve content blocks, margins, shading, borders.
