@@ -23,6 +23,9 @@ pub enum LayoutBlock {
         rows: Vec<TableRowInput>,
         col_widths: Vec<Pt>,
         draw_borders: bool,
+        /// §17.4.58: floating table — text wraps around it.
+        /// (table_width, right_gap) for float positioning.
+        float_info: Option<(Pt, Pt)>,
     },
 }
 
@@ -45,6 +48,9 @@ pub fn layout_section(
     let mut current_page = LayoutedPage::new(config.page_size);
     let mut cursor_y = config.margins.top;
     let bottom = config.page_size.height - config.margins.bottom;
+    // §17.4.58: active floating table that text wraps around.
+    // (table_width, right_gap, float_y_start, float_y_end)
+    let mut active_float: Option<(Pt, Pt, Pt, Pt)> = None;
 
     for block in blocks {
         match block {
@@ -62,10 +68,22 @@ pub fn layout_section(
                     cursor_y = config.margins.top;
                 }
 
+                // §17.4.58: if a floating table is active, set float_beside on
+                // the paragraph style so individual lines wrap around the float.
+                let mut effective_style = style.clone();
+                if let Some((fw, fg, _fy_start, fy_end)) = active_float {
+                    if cursor_y < fy_end {
+                        let float_remaining = fy_end - cursor_y;
+                        effective_style.float_beside = Some((fw + fg, float_remaining));
+                    } else {
+                        active_float = None;
+                    }
+                }
+
                 let para = layout_paragraph(
                     fragments,
                     &constraints,
-                    style,
+                    &effective_style,
                     default_line_height,
                 );
 
@@ -76,6 +94,7 @@ pub fn layout_section(
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    active_float = None;
                 }
 
                 // Offset commands to absolute page position
@@ -91,6 +110,7 @@ pub fn layout_section(
                 rows,
                 col_widths,
                 draw_borders,
+                float_info,
             } => {
                 let table = layout_table(
                     rows,
@@ -100,7 +120,34 @@ pub fn layout_section(
                     *draw_borders,
                 );
 
-                // Page break if table doesn't fit
+                // §17.4.58: floating table — render at current position and
+                // register as a float so subsequent text wraps around it.
+                if let Some((_, right_gap)) = float_info {
+                    // Page break if table doesn't fit
+                    if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
+                        pages.push(std::mem::replace(
+                            &mut current_page,
+                            LayoutedPage::new(config.page_size),
+                        ));
+                        cursor_y = config.margins.top;
+                    }
+
+                    let float_y_start = cursor_y;
+                    let float_y_end = cursor_y + table.size.height;
+
+                    for mut cmd in table.commands {
+                        cmd.shift_y(cursor_y);
+                        shift_x(&mut cmd, config.margins.left);
+                        current_page.commands.push(cmd);
+                    }
+
+                    // Register as active float — don't advance cursor_y.
+                    // Text will flow to the right.
+                    active_float = Some((table.size.width, *right_gap, float_y_start, float_y_end));
+                    continue;
+                }
+
+                // Non-floating table: page break if table doesn't fit
                 if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                     pages.push(std::mem::replace(
                         &mut current_page,
@@ -294,6 +341,7 @@ mod tests {
             }],
             col_widths: vec![Pt::new(100.0)],
             draw_borders: false,
+            float_info: None,
         }];
 
         let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));

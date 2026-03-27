@@ -243,8 +243,20 @@ fn build_layout_blocks(
                     t.grid.len()
                 };
                 let grid_cols: Vec<Pt> = t.grid.iter().map(|g| Pt::from(g.width)).collect();
-                let col_widths =
-                    compute_column_widths(&grid_cols, num_cols, config.content_width());
+
+                // §17.4.63: table width determines whether to scale columns.
+                // Auto or absent: use natural grid column widths (no scaling).
+                // Pct/fixed: scale to fill available width.
+                use dxpdf_docx_model::model::TableMeasure;
+                let is_auto_width = matches!(
+                    t.properties.width,
+                    None | Some(TableMeasure::Auto) | Some(TableMeasure::Nil)
+                );
+                let col_widths = if is_auto_width && !grid_cols.is_empty() {
+                    grid_cols.clone()
+                } else {
+                    compute_column_widths(&grid_cols, num_cols, config.content_width())
+                };
 
                 // §17.7.6: resolve table style for borders and conditional formatting.
                 // Look up the raw style definition for table style overrides (tblStylePr).
@@ -339,10 +351,21 @@ fn build_layout_blocks(
                         .and_then(|tp| tp.borders.as_ref())
                         .is_some();
 
+                // §17.4.58: floating table positioning.
+                let float_info = t.properties.positioning.as_ref().map(|pos| {
+                    let table_width: Pt = col_widths.iter().copied().sum();
+                    let right_gap = pos
+                        .right_from_text
+                        .map(Pt::from)
+                        .unwrap_or(Pt::ZERO);
+                    (table_width, right_gap)
+                });
+
                 blocks.push(LayoutBlock::Table {
                     rows,
                     col_widths,
                     draw_borders: has_borders,
+                    float_info,
                 });
             }
             Block::SectionBreak(_) => {} // already split by resolve
@@ -521,6 +544,7 @@ fn paragraph_style_from_props(
         shading: props.shading.as_ref().map(|s| {
             resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background)
         }),
+        float_beside: None,
     }
 }
 
