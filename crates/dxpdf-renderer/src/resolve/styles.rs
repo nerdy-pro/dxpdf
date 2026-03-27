@@ -90,9 +90,12 @@ fn resolve_one(
         }
     }
 
-    // Finally, merge doc defaults as the lowest-priority base.
-    merge_paragraph_properties(&mut para, &sheet.doc_defaults_paragraph);
-    merge_run_properties(&mut run, &sheet.doc_defaults_run);
+    // §17.7.2: doc defaults apply to paragraph and table styles, NOT character styles.
+    // Character styles only inherit from their basedOn chain.
+    if style.style_type != dxpdf_docx_model::model::StyleType::Character {
+        merge_paragraph_properties(&mut para, &sheet.doc_defaults_paragraph);
+        merge_run_properties(&mut run, &sheet.doc_defaults_run);
+    }
 
     visiting.remove(id);
 

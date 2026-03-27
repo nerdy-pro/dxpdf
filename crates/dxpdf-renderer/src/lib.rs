@@ -135,8 +135,8 @@ where
     let mut all_frags = Vec::new();
     for block in blocks {
         if let Block::Paragraph(p) = block {
-            let (df, ds, dc, _) = resolve_paragraph_defaults(p, resolved);
-            let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure, Some(&resolved.styles));
+            let (df, ds, dc, _, rd) = resolve_paragraph_defaults(p, resolved);
+            let mut frags = collect_fragments(&p.content, &df, ds, dc, None, measure, Some(&resolved.styles), Some(&rd));
             all_frags.append(&mut frags);
         }
     }
@@ -169,7 +169,7 @@ fn build_layout_blocks(
     for block in &section.blocks {
         match block {
             Block::Paragraph(p) => {
-                let (default_family, default_size, default_color, merged_props) =
+                let (default_family, default_size, default_color, merged_props, run_defaults) =
                     resolve_paragraph_defaults(p, resolved);
 
                 // Detect drop cap: paragraph with frame_properties.drop_cap = Drop or Margin.
@@ -197,6 +197,7 @@ fn build_layout_blocks(
                     None,
                     &measure,
                     Some(&resolved.styles),
+                    Some(&run_defaults),
                 );
                 populate_image_data(&mut fragments, media);
                 populate_underline_metrics(&mut fragments, measurer);
@@ -258,7 +259,7 @@ fn build_layout_blocks(
                                     .iter()
                                     .filter_map(|b| {
                                         if let Block::Paragraph(p) = b {
-                                            let (df, ds, dc, mp) =
+                                            let (df, ds, dc, mp, rd) =
                                                 resolve_paragraph_defaults(p, resolved);
                                             let mut frags = collect_fragments(
                                                 &p.content,
@@ -268,6 +269,7 @@ fn build_layout_blocks(
                                                 None,
                                                 &measure,
                                                 Some(&resolved.styles),
+                                                Some(&rd),
                                             );
                                             populate_image_data(&mut frags, media);
                                             populate_underline_metrics(&mut frags, measurer);
@@ -374,11 +376,11 @@ fn populate_underline_metrics(
 /// in the resolved styles map and merging with direct properties.
 /// Cascade: direct properties → style properties → doc defaults.
 ///
-/// Returns (default_font_family, default_font_size, default_color, merged_paragraph_properties).
+/// Returns (default_font_family, default_font_size, default_color, merged_paragraph_properties, run_defaults).
 fn resolve_paragraph_defaults(
     para: &dxpdf_docx_model::model::Paragraph,
     resolved: &ResolvedDocument,
-) -> (String, Pt, resolve::color::RgbColor, dxpdf_docx_model::model::ParagraphProperties) {
+) -> (String, Pt, resolve::color::RgbColor, dxpdf_docx_model::model::ParagraphProperties, dxpdf_docx_model::model::RunProperties) {
     use resolve::color::{resolve_color, ColorContext, RgbColor};
     use resolve::fonts::effective_font;
     use resolve::properties::merge_paragraph_properties;
@@ -429,7 +431,7 @@ fn resolve_paragraph_defaults(
         default_color = resolve_color(c, ColorContext::Text);
     }
 
-    (default_family, default_size, default_color, para_props)
+    (default_family, default_size, default_color, para_props, run_defaults)
 }
 
 fn paragraph_style_from_props(

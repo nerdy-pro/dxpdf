@@ -169,6 +169,7 @@ fn split_into_words(text: &str) -> Vec<&str> {
 /// `resolved_styles` is used to look up character styles (w:rStyle) on text runs.
 ///
 /// Returns fragments suitable for the line-fitting algorithm.
+#[allow(clippy::too_many_arguments)]
 pub fn collect_fragments<F>(
     inlines: &[Inline],
     default_family: &str,
@@ -177,6 +178,8 @@ pub fn collect_fragments<F>(
     hyperlink_url: Option<&str>,
     measure_text: &F,
     resolved_styles: Option<&std::collections::HashMap<dxpdf_docx_model::model::StyleId, crate::resolve::styles::ResolvedStyle>>,
+    // §17.3.1: paragraph style's run properties, merged as base for all runs.
+    paragraph_run_defaults: Option<&RunProperties>,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, Pt, Pt), // (width, height, ascent)
@@ -191,8 +194,8 @@ where
                 if field_depth > 0 {
                     continue;
                 }
-                // §17.3.2.29: merge character style (w:rStyle) properties as base,
-                // then direct run properties override.
+                // Run property cascade per §17.7.2:
+                // direct run properties → character style (w:rStyle) → paragraph style run defaults.
                 let mut effective_props = tr.properties.clone();
                 if let (Some(ref style_id), Some(styles)) = (&tr.style_id, resolved_styles) {
                     if let Some(resolved_style) = styles.get(style_id) {
@@ -201,6 +204,12 @@ where
                             &resolved_style.run,
                         );
                     }
+                }
+                if let Some(para_run) = paragraph_run_defaults {
+                    crate::resolve::properties::merge_run_properties(
+                        &mut effective_props,
+                        para_run,
+                    );
                 }
 
                 let mut font = font_props_from_run(&effective_props, default_family, default_size);
@@ -297,6 +306,7 @@ where
                     url,
                     measure_text,
                     resolved_styles,
+                    paragraph_run_defaults,
                 );
                 fragments.append(&mut sub);
             }
@@ -310,6 +320,7 @@ where
                     hyperlink_url,
                     measure_text,
                     resolved_styles,
+                    paragraph_run_defaults,
                 );
                 fragments.append(&mut sub);
             }
@@ -336,6 +347,7 @@ where
                         hyperlink_url,
                         measure_text,
                     resolved_styles,
+                    paragraph_run_defaults,
                     );
                     fragments.append(&mut sub);
                 }
@@ -426,7 +438,7 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         assert_eq!(frags[0].width().raw(), 30.0); // 5 * 6
@@ -436,7 +448,7 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         if let Fragment::Text { font, .. } = &frags[0] {
             assert_eq!(&*font.family, "Arial");
@@ -449,7 +461,7 @@ mod tests {
     #[test]
     fn tab_produces_tab_fragment() {
         let inlines = vec![Inline::Tab];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         assert!(matches!(frags[0], Fragment::Tab { .. }));
@@ -458,7 +470,7 @@ mod tests {
     #[test]
     fn line_break_produces_break_fragment() {
         let inlines = vec![Inline::LineBreak(BreakKind::TextWrapping)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         assert!(frags[0].is_line_break());
@@ -470,7 +482,7 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
@@ -508,7 +520,7 @@ mod tests {
                 fld_lock: None,
             }),
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
@@ -532,7 +544,7 @@ mod tests {
             Inline::EndnoteRefMark,
             Inline::LastRenderedPageBreak,
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1, "only the text run should produce a fragment");
     }
@@ -546,7 +558,7 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -562,7 +574,7 @@ mod tests {
             text: String::new(),
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
         assert!(frags.is_empty());
     }
 
@@ -582,7 +594,7 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
@@ -599,7 +611,7 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -641,7 +653,7 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {
