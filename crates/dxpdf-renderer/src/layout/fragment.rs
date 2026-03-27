@@ -114,6 +114,30 @@ pub fn font_props_from_run(
     }
 }
 
+/// §17.18.40 ST_HighlightColor: map highlight enum to RGB.
+/// These are the fixed palette colors defined in the OOXML spec.
+fn resolve_highlight_color(hl: dxpdf_docx_model::model::HighlightColor) -> RgbColor {
+    use dxpdf_docx_model::model::HighlightColor;
+    match hl {
+        HighlightColor::Black => RgbColor { r: 0, g: 0, b: 0 },
+        HighlightColor::Blue => RgbColor { r: 0, g: 0, b: 255 },
+        HighlightColor::Cyan => RgbColor { r: 0, g: 255, b: 255 },
+        HighlightColor::DarkBlue => RgbColor { r: 0, g: 0, b: 139 },
+        HighlightColor::DarkCyan => RgbColor { r: 0, g: 139, b: 139 },
+        HighlightColor::DarkGray => RgbColor { r: 169, g: 169, b: 169 },
+        HighlightColor::DarkGreen => RgbColor { r: 0, g: 100, b: 0 },
+        HighlightColor::DarkMagenta => RgbColor { r: 139, g: 0, b: 139 },
+        HighlightColor::DarkRed => RgbColor { r: 139, g: 0, b: 0 },
+        HighlightColor::DarkYellow => RgbColor { r: 139, g: 139, b: 0 },
+        HighlightColor::Green => RgbColor { r: 0, g: 255, b: 0 },
+        HighlightColor::LightGray => RgbColor { r: 211, g: 211, b: 211 },
+        HighlightColor::Magenta => RgbColor { r: 255, g: 0, b: 255 },
+        HighlightColor::Red => RgbColor { r: 255, g: 0, b: 0 },
+        HighlightColor::White => RgbColor { r: 255, g: 255, b: 255 },
+        HighlightColor::Yellow => RgbColor { r: 255, g: 255, b: 0 },
+    }
+}
+
 /// Split text into word-level chunks for line breaking.
 /// Whitespace is kept attached to the preceding word: "hello world" → ["hello ", "world"].
 /// This allows the line fitter to break between fragments at word boundaries.
@@ -172,9 +196,10 @@ where
                     .map(|c| crate::resolve::color::resolve_color(c, crate::resolve::color::ColorContext::Text))
                     .unwrap_or(default_color);
                 // §17.3.2.32: run-level shading (background behind text).
-                let shading = tr.properties.shading.as_ref().map(|s| {
-                    crate::resolve::color::resolve_color(s.fill, crate::resolve::color::ColorContext::Background)
-                });
+                // §17.3.2.15: highlight color (fixed palette) takes effect when shading is absent.
+                let shading = tr.properties.shading.as_ref()
+                    .map(|s| crate::resolve::color::resolve_color(s.fill, crate::resolve::color::ColorContext::Background))
+                    .or_else(|| tr.properties.highlight.map(resolve_highlight_color));
 
                 if !tr.text.is_empty() {
                     // Split text into word-level fragments so the line fitter
