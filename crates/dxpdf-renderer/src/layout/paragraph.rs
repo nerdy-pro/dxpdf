@@ -146,10 +146,11 @@ pub fn layout_paragraph(
         - style.indent_right
         - border_space_left
         - border_space_right;
-    // §17.3.1.12: first-line indent reduces the available width for the first line.
+    // §17.3.1.12: first-line indent adjusts the first line's available width.
+    // Positive = narrower (indent), negative = wider (hanging indent).
     // Drop cap indent also reduces width for the first N lines.
-    let first_line_reduction = style.indent_first_line.max(Pt::ZERO) + drop_cap_indent;
-    let first_line_width = (content_width - first_line_reduction).max(Pt::ZERO);
+    let first_line_adjustment = style.indent_first_line + drop_cap_indent;
+    let first_line_width = (content_width - first_line_adjustment).max(Pt::ZERO);
     let remaining_width = if drop_cap_indent > Pt::ZERO {
         content_width - drop_cap_indent
     } else {
