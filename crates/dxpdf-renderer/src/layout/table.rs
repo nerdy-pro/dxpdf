@@ -27,6 +27,19 @@ pub struct TableCellInput {
     pub grid_span: u32,
     /// Background color for cell shading.
     pub shading: Option<RgbColor>,
+    /// §17.7.6: per-cell resolved borders from conditional formatting.
+    pub cell_borders: Option<CellBorderConfig>,
+}
+
+/// Per-cell border configuration (resolved from conditional formatting).
+/// Each field: `None` = no override (use table-level), `Some(None)` = nil
+/// (explicitly no border), `Some(Some(line))` = specific border.
+#[derive(Clone, Debug)]
+pub struct CellBorderConfig {
+    pub top: Option<Option<TableBorderLine>>,
+    pub bottom: Option<Option<TableBorderLine>>,
+    pub left: Option<Option<TableBorderLine>>,
+    pub right: Option<Option<TableBorderLine>>,
 }
 
 /// Resolved table border configuration.
@@ -142,47 +155,46 @@ pub fn layout_table(
             }
         }
 
-        // §17.4.38: draw borders from resolved config.
-        // Vertical borders extend to cover the horizontal border thickness
-        // at corners so there are no gaps.
-        if let Some(bdr) = borders {
-            // Horizontal border at the top of this row.
-            let h_top = if row_idx == 0 { &bdr.top } else { &bdr.inside_h };
-            let h_top_half = h_top.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+        // §17.4.38 / §17.7.6: draw borders.
+        // Per-cell borders (from conditional formatting) take priority over
+        // table-level borders. Vertical borders extend to cover horizontal
+        // border thickness at corners.
+        {
+            let mut grid_idx = 0;
+            for (cell_ci, cell_input) in rows[row_idx].cells.iter().enumerate() {
+                let span = cell_input.grid_span.max(1) as usize;
+                let cell_x: Pt = (0..grid_idx)
+                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                    .sum();
+                let cell_w: Pt = (grid_idx..grid_idx + span)
+                    .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
+                    .sum();
+                grid_idx += span;
 
-            // Horizontal border at the bottom of this row.
-            let is_last_row = row_idx == rows.len() - 1;
-            let h_bot = if is_last_row { &bdr.bottom } else { &bdr.inside_h };
-            let h_bot_half = h_bot.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+                // Resolve effective borders for this cell.
+                let (b_top, b_bottom, b_left, b_right) =
+                    resolve_cell_effective_borders(cell_input, borders, row_idx, cell_ci,
+                        rows.len(), rows[row_idx].cells.len());
 
-            // Draw horizontal borders.
-            if let Some(ref b) = h_top {
-                emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
-            }
+                // Horizontal borders.
+                let h_top_half = b_top.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+                let h_bot_half = b_bottom.as_ref().map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
 
-            // Vertical borders: extend past horizontal borders for clean corners.
-            let v_top = cursor_y - h_top_half;
-            let v_bot = cursor_y + row_height + h_bot_half;
+                if let Some(ref b) = b_top {
+                    emit_h_border(&mut commands, b, cell_x, cell_x + cell_w, cursor_y);
+                }
+                if let Some(ref b) = b_bottom {
+                    emit_h_border(&mut commands, b, cell_x, cell_x + cell_w, cursor_y + row_height);
+                }
 
-            if let Some(ref b) = bdr.left {
-                emit_v_border(&mut commands, b, Pt::ZERO, v_top, v_bot);
-            }
-            if let Some(ref b) = bdr.right {
-                emit_v_border(&mut commands, b, table_width, v_top, v_bot);
-            }
-
-            // Inside vertical borders between cells.
-            if let Some(ref b) = bdr.inside_v {
-                let mut grid_idx = 0;
-                for cell_input in &rows[row_idx].cells {
-                    let span = cell_input.grid_span.max(1) as usize;
-                    grid_idx += span;
-                    if grid_idx < col_widths.len() {
-                        let vx: Pt = (0..grid_idx)
-                            .map(|i| col_widths.get(i).copied().unwrap_or(Pt::ZERO))
-                            .sum();
-                        emit_v_border(&mut commands, b, vx, v_top, v_bot);
-                    }
+                // Vertical borders (extend for clean corners).
+                let v_top = cursor_y - h_top_half;
+                let v_bot = cursor_y + row_height + h_bot_half;
+                if let Some(ref b) = b_left {
+                    emit_v_border(&mut commands, b, cell_x, v_top, v_bot);
+                }
+                if let Some(ref b) = b_right {
+                    emit_v_border(&mut commands, b, cell_x + cell_w, v_top, v_bot);
                 }
             }
         }
@@ -190,12 +202,7 @@ pub fn layout_table(
         cursor_y += row_height;
     }
 
-    // Bottom border
-    if let Some(bdr) = borders {
-        if let Some(ref b) = bdr.bottom {
-            emit_h_border(&mut commands, b, Pt::ZERO, table_width, cursor_y);
-        }
-    }
+    // Bottom border is now drawn per-cell in the loop above.
 
     TableLayout {
         commands,
@@ -219,6 +226,41 @@ pub fn compute_column_widths(grid_cols: &[Pt], num_cols: usize, available_width:
     } else {
         vec![]
     }
+}
+
+/// §17.4.38 / §17.7.6: resolve effective borders for a cell.
+/// Per-cell borders (from conditional formatting) override table-level borders.
+/// Table-level insideH/insideV are mapped to cell edges based on position.
+fn resolve_cell_effective_borders(
+    cell: &TableCellInput,
+    table_borders: Option<&TableBorderConfig>,
+    row_idx: usize,
+    col_idx: usize,
+    num_rows: usize,
+    num_cols: usize,
+) -> (Option<TableBorderLine>, Option<TableBorderLine>, Option<TableBorderLine>, Option<TableBorderLine>) {
+    // Start with table-level borders mapped to cell edges.
+    let tb = table_borders;
+    let is_first_row = row_idx == 0;
+    let is_last_row = row_idx == num_rows - 1;
+    let is_first_col = col_idx == 0;
+    let is_last_col = col_idx == num_cols - 1;
+
+    let mut top = if is_first_row { tb.and_then(|b| b.top) } else { tb.and_then(|b| b.inside_h) };
+    let mut bottom = if is_last_row { tb.and_then(|b| b.bottom) } else { tb.and_then(|b| b.inside_h) };
+    let mut left = if is_first_col { tb.and_then(|b| b.left) } else { tb.and_then(|b| b.inside_v) };
+    let mut right = if is_last_col { tb.and_then(|b| b.right) } else { tb.and_then(|b| b.inside_v) };
+
+    // Per-cell borders from conditional formatting override.
+    // Some(None) = nil (explicitly remove border), Some(Some(line)) = override border.
+    if let Some(ref cb) = cell.cell_borders {
+        if let Some(v) = cb.top { top = v; }
+        if let Some(v) = cb.bottom { bottom = v; }
+        if let Some(v) = cb.left { left = v; }
+        if let Some(v) = cb.right { right = v; }
+    }
+
+    (top, bottom, left, right)
 }
 
 fn emit_h_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, x1: Pt, x2: Pt, y: Pt) {
@@ -290,6 +332,7 @@ mod tests {
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,
             shading: None,
+            cell_borders: None,
         }
     }
 
@@ -399,7 +442,7 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None,
+                    shading: None, cell_borders: None,
                 },
             ],
             min_height: None,
@@ -434,6 +477,7 @@ mod tests {
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
                 shading: Some(RgbColor { r: 200, g: 200, b: 200 }),
+                cell_borders: None,
             }],
             min_height: None,
         }];
@@ -463,7 +507,8 @@ mod tests {
             .filter(|c| matches!(c, DrawCommand::Line { .. }))
             .count();
         // Top border (1) + 3 vertical borders (left, middle, right) + bottom border (1) = 5
-        assert_eq!(line_count, 5);
+        // Per-cell borders: 2 cells × 4 borders = 8 lines (shared edges drawn by both cells).
+        assert_eq!(line_count, 8);
     }
 
     #[test]
@@ -476,7 +521,7 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 2, // spans both columns
-                shading: None,
+                shading: None, cell_borders: None,
             }],
             min_height: None,
         }];
@@ -503,7 +548,7 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0)),
                 grid_span: 1,
-                shading: None,
+                shading: None, cell_borders: None,
             }],
             min_height: None,
         }];

@@ -1112,15 +1112,45 @@ fn parse_column_definitions(
     Ok(cols)
 }
 
+/// §17.4.56: parse tblLook. Supports both individual attributes (OOXML 2010+)
+/// and the legacy `val` bit field format.
 fn parse_table_look(e: &BytesStart<'_>) -> Result<TableLook> {
-    Ok(TableLook {
-        first_row: xml::optional_attr_bool(e, b"firstRow")?,
-        last_row: xml::optional_attr_bool(e, b"lastRow")?,
-        first_column: xml::optional_attr_bool(e, b"firstColumn")?,
-        last_column: xml::optional_attr_bool(e, b"lastColumn")?,
-        no_h_band: xml::optional_attr_bool(e, b"noHBand")?,
-        no_v_band: xml::optional_attr_bool(e, b"noVBand")?,
-    })
+    let first_row = xml::optional_attr_bool(e, b"firstRow")?;
+    let last_row = xml::optional_attr_bool(e, b"lastRow")?;
+    let first_column = xml::optional_attr_bool(e, b"firstColumn")?;
+    let last_column = xml::optional_attr_bool(e, b"lastColumn")?;
+    let no_h_band = xml::optional_attr_bool(e, b"noHBand")?;
+    let no_v_band = xml::optional_attr_bool(e, b"noVBand")?;
+
+    // If individual attributes are present, use them directly.
+    if first_row.is_some() || last_row.is_some() || first_column.is_some()
+        || last_column.is_some() || no_h_band.is_some() || no_v_band.is_some()
+    {
+        return Ok(TableLook {
+            first_row, last_row, first_column, last_column, no_h_band, no_v_band,
+        });
+    }
+
+    // §17.4.56: legacy `val` attribute is a hex bit field.
+    // Bit 0x0020: firstRow
+    // Bit 0x0040: lastRow
+    // Bit 0x0080: firstColumn
+    // Bit 0x0100: lastColumn
+    // Bit 0x0200: noHBand (horizontal banding disabled)
+    // Bit 0x0400: noVBand (vertical banding disabled)
+    if let Some(val_str) = xml::optional_attr(e, b"val")? {
+        let val = u32::from_str_radix(&val_str, 16).unwrap_or(0);
+        return Ok(TableLook {
+            first_row: Some(val & 0x0020 != 0),
+            last_row: Some(val & 0x0040 != 0),
+            first_column: Some(val & 0x0080 != 0),
+            last_column: Some(val & 0x0100 != 0),
+            no_h_band: Some(val & 0x0200 != 0),
+            no_v_band: Some(val & 0x0400 != 0),
+        });
+    }
+
+    Ok(TableLook::default())
 }
 
 fn parse_table_borders(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<TableBorders> {

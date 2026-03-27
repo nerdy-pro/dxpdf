@@ -336,7 +336,7 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None,
+                    shading: None, cell_borders: None,
                 }],
                 min_height: None,
             }],

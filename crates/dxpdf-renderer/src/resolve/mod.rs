@@ -1,6 +1,7 @@
 //! Resolve layer — transforms raw `Document` into layout-ready `ResolvedDocument`.
 
 pub mod color;
+pub mod conditional;
 pub mod fonts;
 pub mod images;
 pub mod numbering;

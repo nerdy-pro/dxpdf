@@ -270,46 +270,61 @@ fn build_layout_blocks(
                         resolved.styles.get(sid)
                     });
 
-                // §17.7.6.6: find firstRow conditional override from table style.
-                use dxpdf_docx_model::model::TableStyleOverrideType;
-                let first_row_override = raw_table_style
-                    .and_then(|s| {
-                        s.table_style_overrides
-                            .iter()
-                            .find(|o| o.override_type == TableStyleOverrideType::FirstRow)
-                    });
+                // §17.7.6: resolve conditional formatting for each cell.
+                let style_overrides = raw_table_style
+                    .map(|s| s.table_style_overrides.as_slice())
+                    .unwrap_or(&[]);
+                let tbl_look = t.properties.look.as_ref();
+                let row_band_size = t.properties.style_row_band_size.unwrap_or(1);
+                let col_band_size = t.properties.style_col_band_size.unwrap_or(1);
+                let num_rows = t.rows.len();
+
+                // §17.4.42: cell margins from table style.
+                let style_cell_margins = raw_table_style
+                    .and_then(|s| s.table.as_ref())
+                    .and_then(|tp| tp.cell_margins);
 
                 let rows: Vec<TableRowInput> = t
                     .rows
                     .iter()
                     .enumerate()
                     .map(|(row_idx, row)| {
+                        let num_cols = row.cells.len();
                         let cells: Vec<TableCellInput> = row
                             .cells
                             .iter()
-                            .map(|cell| {
+                            .enumerate()
+                            .map(|(col_idx, cell)| {
+                                // §17.7.6: resolve conditional formatting for this cell.
+                                let cond = resolve::conditional::resolve_cell_conditional(
+                                    row_idx, col_idx, num_rows, num_cols,
+                                    tbl_look, style_overrides, row_band_size, col_band_size,
+                                );
+
                                 let cell_blocks: Vec<CellBlock> = cell
                                     .content
                                     .iter()
                                     .filter_map(|b| {
                                         if let Block::Paragraph(p) = b {
-                                            // §17.7.2: table style properties are applied in the
-                                            // cascade with priority over the default paragraph
-                                            // style (Normal) for table cells.
+                                            // §17.7.2: table style paragraph properties
+                                            // take priority over Normal for table cells.
                                             let mut table_para = p.clone();
                                             if let Some(ts) = raw_table_style {
                                                 resolve::properties::merge_paragraph_properties(
                                                     &mut table_para.properties, &ts.paragraph,
                                                 );
                                             }
+                                            // §17.7.6: conditional paragraph overrides.
+                                            if let Some(ref pp) = cond.paragraph_properties {
+                                                resolve::properties::merge_paragraph_properties(
+                                                    &mut table_para.properties, pp,
+                                                );
+                                            }
+
                                             let (df, mut ds, mut dc, mp, mut rd) =
                                                 resolve_paragraph_defaults(&table_para, resolved);
 
-                                            // §17.7.2: table style run properties take priority
-                                            // over the paragraph style (Normal) for table cells.
-                                            // The table style's resolved run includes doc defaults,
-                                            // so font_size comes from table style → doc defaults,
-                                            // overriding Normal's potentially different size.
+                                            // §17.7.2: table style run properties override Normal.
                                             if let Some(ts) = raw_table_style {
                                                 if let Some(fs) = ts.run.font_size {
                                                     ds = Pt::from(fs);
@@ -317,15 +332,11 @@ fn build_layout_blocks(
                                                 }
                                             }
 
-                                            // §17.7.6.6: firstRow override run properties.
-                                            if row_idx == 0 {
-                                                if let Some(fro) = first_row_override {
-                                                    if let Some(ref rp) = fro.run_properties {
-                                                        resolve::properties::merge_run_properties(&mut rd, rp);
-                                                        if let Some(c) = rd.color {
-                                                            dc = resolve::color::resolve_color(c, resolve::color::ColorContext::Text);
-                                                        }
-                                                    }
+                                            // §17.7.6: conditional run property overrides.
+                                            if let Some(ref rp) = cond.run_properties {
+                                                resolve::properties::merge_run_properties(&mut rd, rp);
+                                                if let Some(c) = rd.color {
+                                                    dc = resolve::color::resolve_color(c, resolve::color::ColorContext::Text);
                                                 }
                                             }
 
@@ -351,10 +362,7 @@ fn build_layout_blocks(
                                     })
                                     .collect();
 
-                                // §17.4.42: cell margins cascade: cell → table direct → table style → 0.
-                                let style_cell_margins = raw_table_style
-                                    .and_then(|s| s.table.as_ref())
-                                    .and_then(|tp| tp.cell_margins);
+                                // §17.4.42: cell margins cascade.
                                 let cell_margins = cell
                                     .properties
                                     .margins
@@ -368,18 +376,47 @@ fn build_layout_blocks(
                                     ))
                                     .unwrap_or(geometry::PtEdgeInsets::ZERO);
 
-                                // §17.7.6.6: resolve cell shading.
-                                // Priority: direct cell → firstRow override (for row 0) → none.
+                                // §17.7.6: resolve cell shading.
+                                // Priority: direct cell → conditional → none.
                                 let shading = cell.properties.shading
                                     .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
                                     .or_else(|| {
-                                        if row_idx == 0 {
-                                            first_row_override
-                                                .and_then(|o| o.table_cell_properties.as_ref())
-                                                .and_then(|tcp| tcp.shading.as_ref())
-                                                .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
-                                        } else {
-                                            None
+                                        cond.cell_properties.as_ref()
+                                            .and_then(|tcp| tcp.shading.as_ref())
+                                            .map(|s| resolve::color::resolve_color(s.fill, resolve::color::ColorContext::Background))
+                                    });
+
+                                // §17.7.6: resolve per-cell borders from conditional formatting.
+                                let cell_borders = cond.cell_properties.as_ref()
+                                    .and_then(|tcp| tcp.borders.as_ref())
+                                    .map(|tcb| {
+                                        use layout::table::{CellBorderConfig, TableBorderLine};
+                                        let convert_border = |b: &dxpdf_docx_model::model::Border| -> TableBorderLine {
+                                            TableBorderLine {
+                                                width: Pt::from(b.width),
+                                                color: resolve::color::resolve_color(
+                                                    b.color, resolve::color::ColorContext::Text,
+                                                ),
+                                            }
+                                        };
+                                        // §17.4.38: convert tcBorders to CellBorderConfig.
+                                        // None = not mentioned (no override).
+                                        // Some(None) = val="nil" (explicitly remove border).
+                                        // Some(Some(line)) = specific border.
+                                        let convert_cell_border = |b: &Option<dxpdf_docx_model::model::Border>| -> Option<Option<TableBorderLine>> {
+                                            b.as_ref().map(|b| {
+                                                if b.style == dxpdf_docx_model::model::BorderStyle::None {
+                                                    None // val="nil"
+                                                } else {
+                                                    Some(convert_border(b))
+                                                }
+                                            })
+                                        };
+                                        CellBorderConfig {
+                                            top: convert_cell_border(&tcb.top),
+                                            bottom: convert_cell_border(&tcb.bottom),
+                                            left: convert_cell_border(&tcb.left),
+                                            right: convert_cell_border(&tcb.right),
                                         }
                                     });
 
@@ -388,6 +425,7 @@ fn build_layout_blocks(
                                     margins: cell_margins,
                                     grid_span: cell.properties.grid_span.unwrap_or(1),
                                     shading,
+                                    cell_borders,
                                 }
                             })
                             .collect();
