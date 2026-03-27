@@ -230,7 +230,8 @@ fn build_layout_blocks(
                     style.drop_cap = Some(dc);
                 }
 
-                blocks.push(LayoutBlock::Paragraph { fragments, style });
+                let page_break_before = merged_props.page_break_before.unwrap_or(false);
+                blocks.push(LayoutBlock::Paragraph { fragments, style, page_break_before });
             }
             Block::Table(t) => {
                 // Use grid column count (not cell count) — cells may span multiple grid columns.

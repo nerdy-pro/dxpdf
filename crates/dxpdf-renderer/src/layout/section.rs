@@ -16,6 +16,8 @@ pub enum LayoutBlock {
     Paragraph {
         fragments: Vec<Fragment>,
         style: ParagraphStyle,
+        /// §17.3.1.23: force a page break before this paragraph.
+        page_break_before: bool,
     },
     Table {
         rows: Vec<TableRowInput>,
@@ -46,7 +48,20 @@ pub fn layout_section(
 
     for block in blocks {
         match block {
-            LayoutBlock::Paragraph { fragments, style } => {
+            LayoutBlock::Paragraph {
+                fragments,
+                style,
+                page_break_before,
+            } => {
+                // §17.3.1.23: force a new page before this paragraph.
+                if *page_break_before && cursor_y > config.margins.top {
+                    pages.push(std::mem::replace(
+                        &mut current_page,
+                        LayoutedPage::new(config.page_size),
+                    ));
+                    cursor_y = config.margins.top;
+                }
+
                 let para = layout_paragraph(
                     fragments,
                     &constraints,
@@ -162,6 +177,7 @@ mod tests {
         LayoutBlock::Paragraph {
             fragments: vec![text_frag(text, width, 14.0)],
             style: ParagraphStyle::default(),
+            page_break_before: false,
         }
     }
 
