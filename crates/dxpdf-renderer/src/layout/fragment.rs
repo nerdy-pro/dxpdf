@@ -351,14 +351,18 @@ where
                 });
             }
             Inline::Image(img) => {
-                if let Some(rel_id) = crate::resolve::images::extract_image_rel_id(img) {
-                    let w = Pt::from(img.extent.width);
-                    let h = Pt::from(img.extent.height);
-                    fragments.push(Fragment::Image {
-                        size: PtSize::new(w, h),
-                        rel_id: rel_id.as_str().to_string(),
-                        image_data: None, // populated by caller with media bytes
-                    });
+                // Only render INLINE images as fragments.
+                // Anchor (floating) images are handled separately in build.rs.
+                if matches!(img.placement, dxpdf_docx_model::model::ImagePlacement::Inline { .. }) {
+                    if let Some(rel_id) = crate::resolve::images::extract_image_rel_id(img) {
+                        let w = Pt::from(img.extent.width);
+                        let h = Pt::from(img.extent.height);
+                        fragments.push(Fragment::Image {
+                            size: PtSize::new(w, h),
+                            rel_id: rel_id.as_str().to_string(),
+                            image_data: None,
+                        });
+                    }
                 }
             }
             Inline::Hyperlink(link) => {

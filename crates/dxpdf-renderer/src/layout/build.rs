@@ -327,12 +327,145 @@ fn build_paragraph_block(
         }
     }
 
+    // §20.4.2.3: extract floating (anchor) images from this paragraph.
+    let floating_images = extract_floating_images(p, ctx);
+
     Some(LayoutBlock::Paragraph {
         fragments,
         style,
         page_break_before,
         footnotes: para_footnotes,
+        floating_images,
     })
+}
+
+/// Extract floating (anchor) images from a paragraph's inlines.
+fn extract_floating_images(
+    para: &Paragraph,
+    ctx: &BuildContext,
+) -> Vec<crate::layout::section::FloatingImage> {
+    use dxpdf_docx_model::model::{ImagePlacement, AnchorPosition, AnchorRelativeFrom, AnchorAlignment, Inline};
+    use crate::layout::section::{FloatingImage, FloatingImageY};
+
+    let mut images = Vec::new();
+
+    fn find_anchor_images<'a>(inlines: &'a [Inline], out: &mut Vec<&'a dxpdf_docx_model::model::Image>) {
+        for inline in inlines {
+            match inline {
+                Inline::Image(img) => {
+                    if matches!(img.placement, ImagePlacement::Anchor(_)) {
+                        out.push(img);
+                    }
+                }
+                Inline::Hyperlink(link) => find_anchor_images(&link.content, out),
+                Inline::Field(f) => find_anchor_images(&f.content, out),
+                Inline::AlternateContent(ac) => {
+                    if let Some(ref fb) = ac.fallback {
+                        find_anchor_images(fb, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut anchor_imgs = Vec::new();
+    find_anchor_images(&para.content, &mut anchor_imgs);
+
+    for img in &anchor_imgs {
+        if let ImagePlacement::Anchor(ref anchor) = img.placement {
+            let rel_id = match crate::resolve::images::extract_image_rel_id(img) {
+                Some(id) => id,
+                None => {
+                    eprintln!("  -> no rel_id, graphic.is_some()={}", img.graphic.is_some());
+                    continue;
+                }
+            };
+
+            let image_data = match ctx.resolved.media.get(rel_id) {
+                Some(bytes) => std::rc::Rc::from(bytes.as_slice()),
+                None => {
+                    eprintln!("Anchor image: rel_id={} NOT FOUND in media (media has {} entries)", rel_id.as_str(), ctx.resolved.media.len());
+                    continue;
+                }
+            };
+
+                let w = Pt::from(img.extent.width);
+                let h = Pt::from(img.extent.height);
+
+                // Resolve horizontal position.
+                // TODO: get actual page config here. For now use US Letter defaults.
+                let page_width = Pt::new(612.0);
+                let margin_left = Pt::new(72.0);
+                let margin_right = Pt::new(72.0);
+                let content_width = page_width - margin_left - margin_right;
+
+                let x = match &anchor.horizontal_position {
+                    AnchorPosition::Offset { relative_from, offset } => {
+                        let base = match relative_from {
+                            AnchorRelativeFrom::Page => Pt::ZERO,
+                            AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => margin_left,
+                            _ => margin_left,
+                        };
+                        base + Pt::from(*offset)
+                    }
+                    AnchorPosition::Align { relative_from, alignment } => {
+                        let (area_left, area_width) = match relative_from {
+                            AnchorRelativeFrom::Page => (Pt::ZERO, page_width),
+                            AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => (margin_left, content_width),
+                            _ => (margin_left, content_width),
+                        };
+                        match alignment {
+                            AnchorAlignment::Left => area_left,
+                            AnchorAlignment::Right => area_left + area_width - w,
+                            AnchorAlignment::Center => area_left + (area_width - w) * 0.5,
+                            _ => area_left,
+                        }
+                    }
+                };
+
+                // Resolve vertical position.
+                let y = match &anchor.vertical_position {
+                    AnchorPosition::Offset { relative_from, offset } => {
+                        let margin_top = Pt::new(72.0);
+                        match relative_from {
+                            AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
+                            AnchorRelativeFrom::Margin => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
+                            AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
+                                FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                            }
+                            _ => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
+                        }
+                    }
+                    AnchorPosition::Align { relative_from, alignment } => {
+                        let margin_top = Pt::new(72.0);
+                        let page_height = Pt::new(792.0);
+                        let margin_bottom = Pt::new(72.0);
+                        let (area_top, area_height) = match relative_from {
+                            AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
+                            AnchorRelativeFrom::Margin => (margin_top, page_height - margin_top - margin_bottom),
+                            _ => (margin_top, page_height - margin_top - margin_bottom),
+                        };
+                        let y_pos = match alignment {
+                            AnchorAlignment::Top => area_top,
+                            AnchorAlignment::Bottom => area_top + area_height - h,
+                            AnchorAlignment::Center => area_top + (area_height - h) * 0.5,
+                            _ => area_top,
+                        };
+                        FloatingImageY::Absolute(y_pos)
+                    }
+                };
+
+                images.push(FloatingImage {
+                    image_data,
+                    size: crate::geometry::PtSize::new(w, h),
+                    x,
+                    y,
+                });
+            }
+        }
+
+    images
 }
 
 /// Build fragments and resolved paragraph properties for a paragraph.

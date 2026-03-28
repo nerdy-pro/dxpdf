@@ -3,13 +3,36 @@
 //! Takes measured blocks (paragraphs with fragments, tables with cells),
 //! fits them into pages respecting page size and margins, handles page breaks.
 
+use std::rc::Rc;
+
 use crate::dimension::Pt;
-use super::draw_command::LayoutedPage;
+use crate::geometry::{PtRect, PtSize};
+use super::draw_command::{DrawCommand, LayoutedPage};
 use super::fragment::Fragment;
 use super::page::PageConfig;
 use super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::table::{layout_table, TableRowInput};
 use super::BoxConstraints;
+
+/// A floating (anchor) image to be positioned absolutely on the page.
+#[derive(Clone)]
+pub struct FloatingImage {
+    pub image_data: Rc<[u8]>,
+    pub size: PtSize,
+    /// Resolved absolute x position on the page.
+    pub x: Pt,
+    /// Resolved absolute y position on the page (may be relative to paragraph).
+    pub y: FloatingImageY,
+}
+
+/// Vertical position for a floating image.
+#[derive(Clone, Copy)]
+pub enum FloatingImageY {
+    /// Absolute page position.
+    Absolute(Pt),
+    /// Relative to the paragraph's y position (offset added to cursor_y).
+    RelativeToParagraph(Pt),
+}
 
 /// A block ready for layout — either a paragraph or a table.
 pub enum LayoutBlock {
@@ -20,6 +43,8 @@ pub enum LayoutBlock {
         page_break_before: bool,
         /// Footnotes referenced in this paragraph — rendered at page bottom.
         footnotes: Vec<(Vec<Fragment>, ParagraphStyle)>,
+        /// §20.4.2.3: floating images anchored to this paragraph.
+        floating_images: Vec<FloatingImage>,
     },
     Table {
         rows: Vec<TableRowInput>,
@@ -72,6 +97,7 @@ pub fn layout_section(
                 style,
                 page_break_before,
                 footnotes,
+                floating_images,
             } => {
                 // §17.3.1.23: force a new page before this paragraph.
                 if *page_break_before && cursor_y > config.margins.top {
@@ -130,6 +156,20 @@ pub fn layout_section(
                 }
 
                 cursor_y += para.size.height;
+
+                // §20.4.2.3: emit floating images anchored to this paragraph.
+                for fi in floating_images {
+                    let img_y = match fi.y {
+                        FloatingImageY::Absolute(y) => y,
+                        FloatingImageY::RelativeToParagraph(offset) => {
+                            cursor_y - para.size.height + offset
+                        }
+                    };
+                    current_page.commands.push(DrawCommand::Image {
+                        rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
+                        image_data: fi.image_data.clone(),
+                    });
+                }
 
                 // Collect footnotes for this page and reserve space at bottom.
                 if !footnotes.is_empty() {
@@ -348,6 +388,7 @@ mod tests {
             style: ParagraphStyle::default(),
             page_break_before: false,
             footnotes: vec![],
+            floating_images: vec![],
         }
     }
 
