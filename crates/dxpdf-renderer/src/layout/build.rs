@@ -506,6 +506,16 @@ fn build_table_cell(
         (None, None) => None,
     };
 
+    // §17.4.84: vertical alignment — direct cell, conditional, or default top.
+    let valign = cell.properties.vertical_align
+        .or_else(|| cond.cell_properties.as_ref().and_then(|tcp| tcp.vertical_align))
+        .map(|va| match va {
+            model::CellVerticalAlign::Bottom => crate::layout::table::CellVAlign::Bottom,
+            model::CellVerticalAlign::Center => crate::layout::table::CellVAlign::Center,
+            _ => crate::layout::table::CellVAlign::Top,
+        })
+        .unwrap_or(crate::layout::table::CellVAlign::Top);
+
     TableCellInput {
         blocks: cell_blocks,
         margins: cell_margins,
@@ -516,6 +526,7 @@ fn build_table_cell(
             model::VerticalMerge::Restart => crate::layout::table::VerticalMergeState::Restart,
             model::VerticalMerge::Continue => crate::layout::table::VerticalMergeState::Continue,
         }),
+        vertical_align: valign,
     }
 }
 

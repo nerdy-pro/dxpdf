@@ -350,7 +350,7 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None, vertical_merge: None,
+                    shading: None, cell_borders: None, vertical_merge: None, vertical_align: crate::layout::table::CellVAlign::Top,
                 }],
                 height_rule: None,
             }],

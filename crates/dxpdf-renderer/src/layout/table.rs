@@ -28,6 +28,14 @@ pub struct TableRowInput {
     pub height_rule: Option<RowHeightRule>,
 }
 
+/// §17.4.84: cell vertical alignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellVAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
 /// A single cell for layout.
 pub struct TableCellInput {
     pub blocks: Vec<CellBlock>,
@@ -40,6 +48,8 @@ pub struct TableCellInput {
     pub cell_borders: Option<CellBorderConfig>,
     /// §17.4.85: vertical merge state.
     pub vertical_merge: Option<VerticalMergeState>,
+    /// §17.4.84: vertical alignment of content within the cell.
+    pub vertical_align: CellVAlign,
 }
 
 /// §17.4.85: vertical merge state for a cell.
@@ -264,10 +274,19 @@ pub fn layout_table(
             // Content offset: border pushes content inward only beyond margins.
             let b = &resolved_borders[row_idx][cell_ci];
             let dx = (border_width(b.left) - cell_input.margins.left).max(Pt::ZERO);
-            let dy = (border_width(b.top) - cell_input.margins.top).max(Pt::ZERO);
+            let dy_border = (border_width(b.top) - cell_input.margins.top).max(Pt::ZERO);
+
+            // §17.4.84: vertical alignment within the cell.
+            let content_h = entry.layout.content_height + cell_input.margins.vertical();
+            let dy_valign = match cell_input.vertical_align {
+                CellVAlign::Bottom => (row_height - content_h - dy_border).max(Pt::ZERO),
+                CellVAlign::Center => ((row_height - content_h - dy_border) * 0.5).max(Pt::ZERO),
+                CellVAlign::Top => Pt::ZERO,
+            };
+
             for cmd in &entry.layout.commands {
                 let mut cmd = cmd.clone();
-                cmd.shift(entry.cell_x + dx, cursor_y + dy);
+                cmd.shift(entry.cell_x + dx, cursor_y + dy_border + dy_valign);
                 content_commands.push(cmd);
             }
 
@@ -578,7 +597,7 @@ mod tests {
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,
             shading: None,
-            cell_borders: None, vertical_merge: None,
+            cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
         }
     }
 
@@ -688,7 +707,7 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None, vertical_merge: None,
+                    shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
                 },
             ],
             height_rule: None,
@@ -723,7 +742,7 @@ mod tests {
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
                 shading: Some(RgbColor { r: 200, g: 200, b: 200 }),
-                cell_borders: None, vertical_merge: None,
+                cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
         }];
@@ -767,7 +786,7 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 2, // spans both columns
-                shading: None, cell_borders: None, vertical_merge: None,
+                shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
         }];
@@ -794,7 +813,7 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0)),
                 grid_span: 1,
-                shading: None, cell_borders: None, vertical_merge: None,
+                shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
         }];
