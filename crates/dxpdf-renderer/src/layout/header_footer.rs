@@ -30,7 +30,7 @@ pub fn render_headers_footers(
         // Header
         if let Some(frags) = header_fragments {
             let constraints = BoxConstraints::tight_width(content_width, config.margins.top);
-            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height);
+            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height, None);
 
             let header_y = config.header_margin;
             let mut header_cmds: Vec<DrawCommand> = para
@@ -50,7 +50,7 @@ pub fn render_headers_footers(
         // Footer
         if let Some(frags) = footer_fragments {
             let constraints = BoxConstraints::tight_width(content_width, config.margins.bottom);
-            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height);
+            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height, None);
 
             let footer_y = config.page_size.height - config.footer_margin - para.size.height;
             for mut cmd in para.commands {

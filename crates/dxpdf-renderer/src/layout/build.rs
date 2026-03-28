@@ -443,9 +443,6 @@ fn build_table_cell(
     inner_width: Pt,
     ctx: &BuildContext,
 ) -> TableCellInput {
-    // Recurse into cell content blocks.
-    let cell_blocks = build_cell_blocks(&cell.content, table_style, cond, inner_width, ctx);
-
     // §17.4.42: cell margins cascade: cell → table → table style.
     let cell_margins = cell
         .properties
@@ -516,6 +513,26 @@ fn build_table_cell(
         })
         .unwrap_or(crate::layout::table::CellVAlign::Top);
 
+    // Estimate border insets to compute effective content width for
+    // character-level splitting of oversized fragments.
+    let border_w = |ovr: &Option<CellBorderOverride>| -> Pt {
+        match ovr {
+            Some(CellBorderOverride::Border(b)) => b.width,
+            _ => Pt::ZERO,
+        }
+    };
+    let border_inset_h = cell_borders.as_ref()
+        .map(|cb| {
+            let bl = (border_w(&cb.left) - cell_margins.left).max(Pt::ZERO);
+            let br = (border_w(&cb.right) - cell_margins.right).max(Pt::ZERO);
+            bl + br
+        })
+        .unwrap_or(Pt::ZERO);
+    let content_width = (inner_width - border_inset_h).max(Pt::ZERO);
+
+    // Recurse into cell content blocks.
+    let cell_blocks = build_cell_blocks(&cell.content, table_style, cond, content_width, ctx);
+
     TableCellInput {
         blocks: cell_blocks,
         margins: cell_margins,
@@ -558,6 +575,9 @@ fn build_cell_blocks(
                     return None;
                 }
                 let (frags, merged_props) = build_fragments(p, ctx, table_style, Some(cond));
+                // Split oversized text fragments into per-character fragments
+                // so narrow table cells get character-level line breaking.
+                let frags = split_oversized_fragments(frags, inner_width, ctx);
                 Some(CellBlock::Paragraph {
                     fragments: frags,
                     style: paragraph_style_from_props(&merged_props),
@@ -565,12 +585,16 @@ fn build_cell_blocks(
             }
             Block::Table(nested_t) => {
                 let built = build_table(nested_t, inner_width, ctx);
+                let measure_fn = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
+                    ctx.measurer.measure(text, font)
+                };
                 let result = layout_table(
                     &built.rows,
                     &built.col_widths,
                     &crate::layout::BoxConstraints::unbounded(),
                     dlh,
                     built.border_config.as_ref(),
+                    Some(&measure_fn),
                 );
                 // §17.4.28: apply nested table alignment within the cell.
                 let align_offset = match built.alignment {
@@ -783,6 +807,54 @@ fn convert_table_border_config(b: &model::TableBorders) -> TableBorderConfig {
         inside_h: b.inside_h.as_ref().map(convert_model_border),
         inside_v: b.inside_v.as_ref().map(convert_model_border),
     }
+}
+
+/// Split text fragments wider than `max_width` into per-character fragments
+/// with individually measured widths. Used in narrow table cells for
+/// character-level line breaking.
+fn split_oversized_fragments(
+    fragments: Vec<Fragment>,
+    max_width: Pt,
+    ctx: &BuildContext,
+) -> Vec<Fragment> {
+    if max_width <= Pt::ZERO {
+        return fragments;
+    }
+    let mut result = Vec::with_capacity(fragments.len());
+    for frag in fragments {
+        match &frag {
+            Fragment::Text { text, width, font, .. }
+                if *width > max_width && text.chars().count() > 1 =>
+            {
+                // Re-measure each character individually.
+                for ch in text.chars() {
+                    let ch_str = ch.to_string();
+                    let (w, h, a) = ctx.measurer.measure(&ch_str, font);
+                    if let Fragment::Text {
+                        color, shading, border, hyperlink_url,
+                        baseline_offset, ..
+                    } = &frag
+                    {
+                        result.push(Fragment::Text {
+                            text: ch_str,
+                            font: font.clone(),
+                            color: *color,
+                            shading: *shading,
+                            border: *border,
+                            width: w,
+                            trimmed_width: w,
+                            height: h,
+                            ascent: a,
+                            hyperlink_url: hyperlink_url.clone(),
+                            baseline_offset: *baseline_offset,
+                        });
+                    }
+                }
+            }
+            _ => result.push(frag),
+        }
+    }
+    result
 }
 
 /// Populate image data on Fragment::Image fragments from the media map.

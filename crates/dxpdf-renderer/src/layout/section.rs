@@ -38,6 +38,7 @@ pub enum LayoutBlock {
 pub fn layout_section(
     blocks: &[LayoutBlock],
     config: &PageConfig,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
     default_line_height: Pt,
 ) -> Vec<LayoutedPage> {
     let content_width = config.content_width();
@@ -90,6 +91,7 @@ pub fn layout_section(
                     &constraints,
                     &effective_style,
                     default_line_height,
+                    measure_text,
                 );
 
                 // Page break if paragraph doesn't fit
@@ -125,6 +127,7 @@ pub fn layout_section(
                     &constraints,
                     default_line_height,
                     border_config.as_ref(),
+                    measure_text,
                 );
 
                 // §17.4.28 / §17.4.51: compute table x position from
@@ -254,7 +257,7 @@ mod tests {
 
     #[test]
     fn empty_blocks_produces_one_empty_page() {
-        let pages = layout_section(&[], &small_config(), Pt::new(14.0));
+        let pages = layout_section(&[], &small_config(), None, Pt::new(14.0));
         assert_eq!(pages.len(), 1);
         assert!(pages[0].commands.is_empty());
     }
@@ -262,7 +265,7 @@ mod tests {
     #[test]
     fn single_paragraph_on_one_page() {
         let blocks = vec![para_block("hello", 30.0)];
-        let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
 
         assert_eq!(pages.len(), 1);
         let text_count = pages[0]
@@ -277,7 +280,7 @@ mod tests {
     fn text_positioned_at_margins() {
         let blocks = vec![para_block("hello", 30.0)];
         let config = small_config();
-        let pages = layout_section(&blocks, &config, Pt::new(14.0));
+        let pages = layout_section(&blocks, &config, None, Pt::new(14.0));
 
         if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
             assert!(
@@ -297,7 +300,7 @@ mod tests {
         // Each paragraph: 14pt tall
         // 6 paragraphs = 84pt > 80pt → should break to 2 pages
         let blocks: Vec<_> = (0..6).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
 
         assert_eq!(pages.len(), 2, "should overflow to 2 pages");
 
@@ -325,7 +328,7 @@ mod tests {
     #[test]
     fn page_size_set_on_layouted_page() {
         let config = small_config();
-        let pages = layout_section(&[], &config, Pt::new(14.0));
+        let pages = layout_section(&[], &config, None, Pt::new(14.0));
         assert_eq!(pages[0].page_size, config.page_size);
     }
 
@@ -334,7 +337,7 @@ mod tests {
         // 20 paragraphs at 14pt each = 280pt
         // Content area = 80pt → need 4 pages (80/14 = 5.7 paras per page)
         let blocks: Vec<_> = (0..20).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
 
         assert_eq!(pages.len(), 4);
     }
@@ -361,7 +364,7 @@ mod tests {
             float_info: None,
         }];
 
-        let pages = layout_section(&blocks, &small_config(), Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
         assert_eq!(pages.len(), 1);
 
         let text_count = pages[0]

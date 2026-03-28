@@ -132,6 +132,7 @@ pub fn layout_table(
     _constraints: &BoxConstraints,
     default_line_height: Pt,
     borders: Option<&TableBorderConfig>,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
 ) -> TableLayout {
     if rows.is_empty() || col_widths.is_empty() {
         return TableLayout {
@@ -228,7 +229,7 @@ pub fn layout_table(
             let layout = if is_continue {
                 CellLayout { commands: Vec::new(), content_height: Pt::ZERO }
             } else {
-                layout_cell(&cell.blocks, layout_w, &cell.margins, default_line_height)
+                layout_cell(&cell.blocks, layout_w, &cell.margins, default_line_height, measure_text)
             };
 
             if cell.vertical_merge.is_none() {
@@ -643,7 +644,7 @@ mod tests {
 
     #[test]
     fn empty_table() {
-        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None, None);
         assert!(result.commands.is_empty());
         assert_eq!(result.size, PtSize::ZERO);
     }
@@ -655,7 +656,7 @@ mod tests {
             height_rule: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 14.0);
@@ -681,7 +682,7 @@ mod tests {
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 28.0); // 2 rows * 14pt
@@ -714,7 +715,7 @@ mod tests {
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         assert_eq!(result.size.height.raw(), 28.0, "row height = tallest cell");
     }
@@ -726,7 +727,7 @@ mod tests {
             height_rule: Some(RowHeightRule::AtLeast(Pt::new(40.0))),
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         assert_eq!(result.size.height.raw(), 40.0, "min height > content height");
     }
@@ -747,7 +748,7 @@ mod tests {
             height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         let rect_count = result
             .commands
@@ -764,7 +765,7 @@ mod tests {
             height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }));
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }), None);
 
         let line_count = result
             .commands
@@ -791,7 +792,7 @@ mod tests {
             height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         // Cell gets full 200pt width, text should still render
         assert_eq!(result.size.width.raw(), 200.0);
@@ -818,7 +819,7 @@ mod tests {
             height_rule: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
 
         // Row height = content(14) + top(5) + bottom(5) = 24
         assert_eq!(result.size.height.raw(), 24.0);

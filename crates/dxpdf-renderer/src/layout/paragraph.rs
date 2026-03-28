@@ -110,6 +110,9 @@ pub struct ParagraphLayout {
     pub size: PtSize,
 }
 
+/// Optional text measurement callback for accurate per-character splitting.
+pub type MeasureTextFn<'a> = Option<&'a dyn Fn(&str, &super::fragment::FontProps) -> (Pt, Pt, Pt)>;
+
 /// Lay out a paragraph: fit fragments into lines, apply alignment and spacing.
 ///
 /// Returns draw commands positioned relative to (0, 0). The caller positions
@@ -119,6 +122,7 @@ pub fn layout_paragraph(
     constraints: &BoxConstraints,
     style: &ParagraphStyle,
     default_line_height: Pt,
+    measure_text: MeasureTextFn<'_>,
 ) -> ParagraphLayout {
     // §17.3.1.11: drop cap text frame. The width includes any w:hSpace from framePr.
     let drop_cap_indent = style
@@ -172,16 +176,15 @@ pub fn layout_paragraph(
     };
 
     // Split oversized text fragments into per-character fragments so narrow
-    // table cells get character-level line breaking.
+    // cells get character-level line breaking.
     let min_avail = first_line_width.min(narrow_width).min(wide_width);
-    let split_fragments: Vec<Fragment>;
-    let effective_fragments: &[Fragment] = if min_avail > Pt::ZERO {
-        split_fragments = split_oversized_fragments(fragments, min_avail);
-        &split_fragments
+    let split_frags;
+    let fragments = if min_avail > Pt::ZERO {
+        split_frags = split_oversized_fragments(fragments, min_avail, measure_text);
+        &split_frags
     } else {
         fragments
     };
-    let fragments = effective_fragments;
 
     // Fit lines: if float_beside is set, fit at narrow width first, then refit
     // remaining fragments at full width once past the float height.
@@ -565,30 +568,41 @@ pub fn layout_paragraph(
     }
 }
 
-/// Split text fragments that exceed `max_width` into per-character fragments.
-/// Non-text fragments and text fragments that fit are returned as-is.
-fn split_oversized_fragments(fragments: &[Fragment], max_width: Pt) -> Vec<Fragment> {
+/// Split text fragments wider than `max_width` into per-character fragments.
+/// Uses accurate measurements when a measurer is provided, otherwise
+/// falls back to uniform width distribution.
+fn split_oversized_fragments(
+    fragments: &[Fragment],
+    max_width: Pt,
+    measure: MeasureTextFn<'_>,
+) -> Vec<Fragment> {
     let mut result = Vec::with_capacity(fragments.len());
+    let mut any_split = false;
     for frag in fragments {
         match frag {
             Fragment::Text { text, width, font, color, shading, border,
                              height, ascent, hyperlink_url, baseline_offset, .. }
                 if *width > max_width && text.chars().count() > 1 =>
             {
-                // Split into individual characters with uniform width estimate.
-                let chars: Vec<char> = text.chars().collect();
-                let per_char = *width / chars.len() as f32;
-                for ch in &chars {
+                any_split = true;
+                for ch in text.chars() {
+                    let ch_str = ch.to_string();
+                    let (w, h, a) = if let Some(m) = measure {
+                        m(&ch_str, font)
+                    } else {
+                        let per_char = *width / text.chars().count() as f32;
+                        (per_char, *height, *ascent)
+                    };
                     result.push(Fragment::Text {
-                        text: ch.to_string(),
+                        text: ch_str,
                         font: font.clone(),
                         color: *color,
                         shading: *shading,
                         border: *border,
-                        width: per_char,
-                        trimmed_width: per_char,
-                        height: *height,
-                        ascent: *ascent,
+                        width: w,
+                        trimmed_width: w,
+                        height: h,
+                        ascent: a,
                         hyperlink_url: hyperlink_url.clone(),
                         baseline_offset: *baseline_offset,
                     });
@@ -597,6 +611,7 @@ fn split_oversized_fragments(fragments: &[Fragment], max_width: Pt) -> Vec<Fragm
             _ => result.push(frag.clone()),
         }
     }
+    if !any_split { return fragments.to_vec(); }
     result
 }
 
@@ -651,6 +666,7 @@ mod tests {
             &body_constraints(400.0),
             &ParagraphStyle::default(),
             Pt::new(14.0),
+            None,
         );
         assert_eq!(result.size.height.raw(), 14.0, "default line height");
         assert!(result.commands.is_empty());
@@ -664,6 +680,7 @@ mod tests {
             &body_constraints(400.0),
             &ParagraphStyle::default(),
             Pt::new(14.0),
+            None,
         );
 
         assert_eq!(result.commands.len(), 1);
@@ -680,7 +697,7 @@ mod tests {
             alignment: Alignment::Center,
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0), None);
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 40.0); // (100 - 20) / 2
@@ -694,7 +711,7 @@ mod tests {
             alignment: Alignment::End,
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0), None);
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 80.0); // 100 - 20
@@ -708,7 +725,7 @@ mod tests {
             indent_left: Pt::new(36.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 36.0);
@@ -725,7 +742,7 @@ mod tests {
             indent_first_line: Pt::new(24.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 24.0, "first line indented");
@@ -740,7 +757,7 @@ mod tests {
             space_after: Pt::new(8.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
 
         // Height should be: space_before(10) + line_height(14) + space_after(8) = 32
         assert_eq!(result.size.height.raw(), 32.0);
@@ -759,7 +776,7 @@ mod tests {
             ..Default::default()
         };
         // With max_width=80, they'll break into 2 lines
-        let result = layout_paragraph(&frags, &body_constraints(80.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(80.0), &style, Pt::new(14.0), None);
 
         assert_eq!(result.size.height.raw(), 40.0, "2 lines * 20pt each");
     }
@@ -771,7 +788,7 @@ mod tests {
             line_spacing: LineSpacingRule::AtLeast(Pt::new(10.0)),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0));
+        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
 
         // Natural height is 14, at-least is 10 → should be 14
         assert_eq!(result.size.height.raw(), 14.0);
@@ -789,6 +806,7 @@ mod tests {
             &body_constraints(80.0),
             &ParagraphStyle::default(),
             Pt::new(14.0),
+            None,
         );
 
         // Should have 3 text commands (one per word, each on its own line)

@@ -40,6 +40,7 @@ pub fn layout_cell(
     cell_width: Pt,
     margins: &PtEdgeInsets,
     default_line_height: Pt,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
 ) -> CellLayout {
     let content_width = (cell_width - margins.horizontal()).max(Pt::ZERO);
     let constraints = BoxConstraints::tight_width(content_width, Pt::INFINITY);
@@ -55,6 +56,7 @@ pub fn layout_cell(
                     &constraints,
                     style,
                     default_line_height,
+                    measure_text,
                 );
                 for mut cmd in para.commands {
                     cmd.shift(margins.left, margins.top + cursor_y);
@@ -121,6 +123,7 @@ mod tests {
             Pt::new(200.0),
             &PtEdgeInsets::ZERO,
             Pt::new(14.0),
+            None,
         );
         assert_eq!(result.content_height.raw(), 0.0);
         assert!(result.commands.is_empty());
@@ -134,6 +137,7 @@ mod tests {
             Pt::new(200.0),
             &PtEdgeInsets::ZERO,
             Pt::new(14.0),
+            None,
         );
         assert_eq!(result.content_height.raw(), 14.0);
         assert!(!result.commands.is_empty());
@@ -148,7 +152,7 @@ mod tests {
             Pt::new(5.0),   // bottom
             Pt::new(10.0),  // left
         );
-        let result = layout_cell(&blocks, Pt::new(200.0), &margins, Pt::new(14.0));
+        let result = layout_cell(&blocks, Pt::new(200.0), &margins, Pt::new(14.0), None);
 
         // Text should be shifted right by left margin
         if let Some(DrawCommand::Text { position, .. }) = result.commands.first() {
@@ -168,7 +172,7 @@ mod tests {
             style: ParagraphStyle::default(),
         }];
         let margins = PtEdgeInsets::new(Pt::ZERO, Pt::new(30.0), Pt::ZERO, Pt::new(30.0));
-        let result = layout_cell(&blocks, Pt::new(100.0), &margins, Pt::new(14.0));
+        let result = layout_cell(&blocks, Pt::new(100.0), &margins, Pt::new(14.0), None);
 
         // Should wrap to 2 lines → height = 28
         assert_eq!(result.content_height.raw(), 28.0);
@@ -185,6 +189,7 @@ mod tests {
             Pt::new(200.0),
             &PtEdgeInsets::ZERO,
             Pt::new(14.0),
+            None,
         );
         assert_eq!(result.content_height.raw(), 28.0, "14 + 14");
 

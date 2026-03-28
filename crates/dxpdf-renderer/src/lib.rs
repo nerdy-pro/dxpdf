@@ -69,7 +69,10 @@ pub fn layout_document(
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
         let layout_blocks = build_section_blocks(section, &config, &ctx);
-        let mut pages = layout_section(&layout_blocks, &config, dlh);
+        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
+            measurer.measure(text, font)
+        };
+        let mut pages = layout_section(&layout_blocks, &config, Some(&measure_fn), dlh);
 
         // Render headers/footers onto each page.
         let header_frags = section.header.as_ref()
