@@ -19,6 +19,7 @@ use crate::layout::page::PageConfig;
 use crate::layout::paragraph::{
     BorderLine, DropCapInfo, LineSpacingRule, ParagraphBorderStyle, ParagraphStyle,
 };
+use crate::layout::paragraph::TabStopDef;
 use crate::layout::section::LayoutBlock;
 use crate::layout::table::{
     CellBorderConfig, CellBorderOverride, TableBorderConfig, TableBorderLine, TableBorderStyle,
@@ -869,6 +870,13 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         })
         .unwrap_or(LineSpacingRule::Auto(1.0));
 
+    // §17.3.1.38: convert tab stops to layout format.
+    let tabs: Vec<TabStopDef> = props.tabs.iter().map(|t| TabStopDef {
+        position: Pt::from(t.position),
+        alignment: t.alignment,
+        leader: t.leader,
+    }).collect();
+
     ParagraphStyle {
         alignment: props.alignment.unwrap_or(model::Alignment::Start),
         space_before,
@@ -877,6 +885,7 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         indent_right,
         indent_first_line,
         line_spacing,
+        tabs,
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),

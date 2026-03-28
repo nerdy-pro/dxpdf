@@ -12,6 +12,17 @@ use super::draw_command::DrawCommand;
 use super::fragment::Fragment;
 use super::BoxConstraints;
 
+/// §17.3.1.38: a resolved tab stop for layout.
+#[derive(Clone, Debug)]
+pub struct TabStopDef {
+    /// Absolute position from paragraph left edge.
+    pub position: Pt,
+    /// §17.18.81: tab alignment (left, center, right, decimal).
+    pub alignment: dxpdf_docx_model::model::TabAlignment,
+    /// §17.18.82: leader character (dot, hyphen, underscore, etc.).
+    pub leader: dxpdf_docx_model::model::TabLeader,
+}
+
 /// Configuration for paragraph layout.
 #[derive(Clone, Debug)]
 pub struct ParagraphStyle {
@@ -22,6 +33,8 @@ pub struct ParagraphStyle {
     pub indent_right: Pt,
     pub indent_first_line: Pt,
     pub line_spacing: LineSpacingRule,
+    /// §17.3.1.38: custom tab stops.
+    pub tabs: Vec<TabStopDef>,
     /// Drop cap to render at the start of this paragraph.
     pub drop_cap: Option<DropCapInfo>,
     /// §17.3.1.24: paragraph borders.
@@ -87,6 +100,7 @@ impl Default for ParagraphStyle {
             indent_right: Pt::ZERO,
             indent_first_line: Pt::ZERO,
             line_spacing: LineSpacingRule::Auto(1.0),
+            tabs: Vec::new(),
             drop_cap: None,
             borders: None,
             shading: None,
@@ -375,7 +389,7 @@ pub fn layout_paragraph(
 
         // Emit text commands for this line
         let mut x = x_start;
-        for frag in &fragments[line.start..line.end] {
+        for (frag_idx, frag) in (line.start..line.end).zip(&fragments[line.start..line.end]) {
             match frag {
                 Fragment::Text {
                     text,
@@ -505,7 +519,44 @@ pub fn layout_paragraph(
                     x += size.width;
                 }
                 Fragment::Tab { .. } => {
-                    x += super::fragment::MIN_TAB_WIDTH;
+                    // §17.3.1.37: resolve to the next tab stop.
+                    // Tab stop positions are absolute from the paragraph's
+                    // left edge, not relative to the text indent.
+                    let (tab_pos, tab_stop) = find_next_tab_stop(x, &style.tabs, line_available);
+
+                    let new_x = if let Some(ts) = tab_stop {
+                        use dxpdf_docx_model::model::TabAlignment;
+                        match ts.alignment {
+                            TabAlignment::Right => {
+                                let remaining_width: Pt = fragments[frag_idx + 1..line.end]
+                                    .iter()
+                                    .map(|f| f.width())
+                                    .sum();
+                                (tab_pos - remaining_width).max(x)
+                            }
+                            TabAlignment::Center => {
+                                let remaining_width: Pt = fragments[frag_idx + 1..line.end]
+                                    .iter()
+                                    .map(|f| f.width())
+                                    .sum();
+                                (tab_pos - remaining_width * 0.5).max(x)
+                            }
+                            _ => tab_pos,
+                        }
+                    } else {
+                        tab_pos
+                    };
+
+                    // Emit leader characters between tab start and tab position.
+                    if let Some(ts) = tab_stop {
+                        emit_tab_leader(
+                            &mut commands, ts.leader, x, new_x,
+                            cursor_y + line.ascent, line_height,
+                            measure_text, default_line_height,
+                        );
+                    }
+
+                    x = new_x;
                 }
                 Fragment::LineBreak { .. } => {}
                 Fragment::Bookmark { name } => {
@@ -649,6 +700,93 @@ fn split_oversized_fragments(
     }
     if !any_split { return fragments.to_vec(); }
     result
+}
+
+/// §17.3.1.37: find the next tab stop position greater than `current_x`.
+/// Returns (position, optional tab stop definition).
+/// If no custom tab stop matches, uses default tab stops every 36pt (0.5 inch).
+fn find_next_tab_stop(current_x: Pt, tabs: &[TabStopDef], line_width: Pt) -> (Pt, Option<&TabStopDef>) {
+    // §17.15.1.25: default tab stop interval is 36pt (0.5 inch).
+    const DEFAULT_TAB_INTERVAL: f32 = 36.0;
+
+    // Find the first custom tab stop past current position.
+    for ts in tabs {
+        if ts.position > current_x {
+            return (ts.position, Some(ts));
+        }
+    }
+
+    // No custom tab stop — use default interval.
+    let next = ((current_x.raw() / DEFAULT_TAB_INTERVAL).floor() + 1.0) * DEFAULT_TAB_INTERVAL;
+    (Pt::new(next.min(line_width.raw())), None)
+}
+
+/// Emit leader characters (dots, hyphens, etc.) between tab start and end.
+#[allow(clippy::too_many_arguments)]
+fn emit_tab_leader(
+    commands: &mut Vec<DrawCommand>,
+    leader: dxpdf_docx_model::model::TabLeader,
+    x_start: Pt, x_end: Pt,
+    baseline_y: Pt, _line_height: Pt,
+    measure_text: MeasureTextFn<'_>,
+    default_line_height: Pt,
+) {
+    use dxpdf_docx_model::model::TabLeader;
+
+    let leader_char = match leader {
+        TabLeader::Dot => ".",
+        TabLeader::Hyphen => "-",
+        TabLeader::Underscore => "_",
+        TabLeader::MiddleDot => "\u{00B7}",
+        TabLeader::Heavy => "_",
+        TabLeader::None => return,
+    };
+
+    let gap = x_end - x_start;
+    if gap <= Pt::ZERO {
+        return;
+    }
+
+    // Build a string of leader characters that fills the gap.
+    // Use a small font to get the leader char width.
+    let leader_font = super::fragment::FontProps {
+        family: std::rc::Rc::from("Times New Roman"),
+        size: default_line_height.min(Pt::new(12.0)),
+        bold: false, italic: false, underline: false,
+        char_spacing: Pt::ZERO,
+        underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+    };
+
+    let char_width = if let Some(m) = measure_text {
+        m(leader_char, &leader_font).0
+    } else {
+        Pt::new(4.0) // fallback estimate
+    };
+
+    if char_width <= Pt::ZERO {
+        return;
+    }
+
+    let count = ((gap / char_width) as usize).min(500);
+    if count == 0 {
+        return;
+    }
+
+    let leader_text: String = leader_char.repeat(count);
+    let leader_width = char_width * count as f32;
+
+    // Right-align the leader dots within the gap (looks cleaner).
+    let leader_x = x_end - leader_width;
+
+    commands.push(DrawCommand::Text {
+        position: PtOffset::new(leader_x.max(x_start), baseline_y),
+        text: leader_text,
+        font_family: leader_font.family,
+        char_spacing: Pt::ZERO,
+        font_size: leader_font.size,
+        bold: false, italic: false,
+        color: crate::resolve::color::RgbColor::BLACK,
+    });
 }
 
 fn resolve_line_height(natural: Pt, rule: &LineSpacingRule) -> Pt {

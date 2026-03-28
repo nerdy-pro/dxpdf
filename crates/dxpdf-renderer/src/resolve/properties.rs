@@ -42,7 +42,18 @@ pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &ParagraphProperties) {
     merge_opt(&mut target.alignment, &base.alignment);
-    merge_opt(&mut target.indentation, &base.indentation);
+    // §17.3.1.12: merge indentation sub-fields individually so partial
+    // overrides (e.g., left from child style, firstLine from parent) combine.
+    match (&mut target.indentation, &base.indentation) {
+        (Some(ref mut ti), Some(bi)) => {
+            merge_opt(&mut ti.start, &bi.start);
+            merge_opt(&mut ti.end, &bi.end);
+            merge_opt(&mut ti.first_line, &bi.first_line);
+            merge_opt(&mut ti.mirror, &bi.mirror);
+        }
+        (None, Some(_)) => target.indentation = base.indentation,
+        _ => {}
+    }
     // §17.3.1.33: merge spacing sub-fields individually so partial
     // overrides (e.g., line from table style, after from paragraph style)
     // combine correctly.
