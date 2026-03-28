@@ -85,6 +85,18 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 let url_data = Data::new_copy(&url_bytes);
                 canvas.annotate_rect_with_url(to_rect(*rect), &url_data);
             }
+            DrawCommand::InternalLink { rect, destination } => {
+                let mut name_bytes = destination.as_bytes().to_vec();
+                name_bytes.push(0);
+                let name_data = Data::new_copy(&name_bytes);
+                canvas.annotate_link_to_destination(to_rect(*rect), &name_data);
+            }
+            DrawCommand::NamedDestination { position, name } => {
+                let mut name_bytes = name.as_bytes().to_vec();
+                name_bytes.push(0);
+                let name_data = Data::new_copy(&name_bytes);
+                canvas.annotate_named_destination(to_point(*position), &name_data);
+            }
         }
     }
 }

@@ -455,15 +455,19 @@ pub fn layout_paragraph(
                     });
 
                     if let Some(url) = hyperlink_url {
-                        commands.push(DrawCommand::LinkAnnotation {
-                            rect: crate::geometry::PtRect::from_xywh(
-                                x,
-                                cursor_y,
-                                *width,
-                                line_height,
-                            ),
-                            url: url.clone(),
-                        });
+                        let rect = crate::geometry::PtRect::from_xywh(
+                            x, cursor_y, *width, line_height,
+                        );
+                        if url.starts_with("http://") || url.starts_with("https://")
+                            || url.starts_with("mailto:") || url.starts_with("ftp://") {
+                            commands.push(DrawCommand::LinkAnnotation { rect, url: url.clone() });
+                        } else {
+                            // Internal bookmark link.
+                            commands.push(DrawCommand::InternalLink {
+                                rect,
+                                destination: url.clone(),
+                            });
+                        }
                     }
 
                     if font.underline {
@@ -504,6 +508,12 @@ pub fn layout_paragraph(
                     x += super::fragment::MIN_TAB_WIDTH;
                 }
                 Fragment::LineBreak { .. } => {}
+                Fragment::Bookmark { name } => {
+                    commands.push(DrawCommand::NamedDestination {
+                        position: PtOffset::new(x, cursor_y),
+                        name: name.clone(),
+                    });
+                }
             }
         }
 

@@ -65,6 +65,10 @@ pub enum Fragment {
     LineBreak {
         line_height: Pt,
     },
+    /// Named destination (bookmark target) — zero-width marker.
+    Bookmark {
+        name: String,
+    },
 }
 
 impl Fragment {
@@ -73,7 +77,7 @@ impl Fragment {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
             Fragment::Tab { .. } => MIN_TAB_WIDTH,
-            Fragment::LineBreak { .. } => Pt::ZERO,
+            Fragment::LineBreak { .. } | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
@@ -90,6 +94,7 @@ impl Fragment {
             Fragment::Text { height, .. } => *height,
             Fragment::Image { size, .. } => size.height,
             Fragment::Tab { line_height } | Fragment::LineBreak { line_height } => *line_height,
+            Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
@@ -357,10 +362,12 @@ where
                 }
             }
             Inline::Hyperlink(link) => {
-                let url = match &link.target {
+                let url: Option<&str> = match &link.target {
                     dxpdf_docx_model::model::HyperlinkTarget::External(rel_id) => {
                         Some(rel_id.as_str())
                     }
+                    // Internal bookmarks use the anchor name as the hyperlink_url
+                    // prefixed with # to distinguish from external URLs.
                     dxpdf_docx_model::model::HyperlinkTarget::Internal { anchor } => {
                         Some(anchor.as_str())
                     }
@@ -453,9 +460,12 @@ where
                     baseline_offset: Pt::ZERO,
                 });
             }
+            // Bookmark target — emit as zero-width named destination.
+            Inline::BookmarkStart { name, .. } => {
+                fragments.push(Fragment::Bookmark { name: name.clone() });
+            }
             // Non-visual inlines — skip
-            Inline::BookmarkStart { .. }
-            | Inline::BookmarkEnd(_)
+            Inline::BookmarkEnd(_)
             | Inline::Separator
             | Inline::ContinuationSeparator
             | Inline::FootnoteRefMark
@@ -684,7 +694,10 @@ mod tests {
         ];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
-        assert_eq!(frags.len(), 1, "only the text run should produce a fragment");
+        // BookmarkStart produces a Bookmark fragment, text run produces a Text fragment.
+        assert_eq!(frags.len(), 2, "bookmark + text run should produce fragments");
+        assert!(matches!(frags[0], Fragment::Bookmark { .. }));
+        assert!(matches!(frags[1], Fragment::Text { .. }));
     }
 
     #[test]

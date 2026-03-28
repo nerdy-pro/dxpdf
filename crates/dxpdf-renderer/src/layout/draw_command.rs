@@ -41,6 +41,16 @@ pub enum DrawCommand {
         rect: PtRect,
         url: String,
     },
+    /// Internal link to a named destination (bookmark).
+    InternalLink {
+        rect: PtRect,
+        destination: String,
+    },
+    /// Named destination marker (bookmark target).
+    NamedDestination {
+        position: PtOffset,
+        name: String,
+    },
 }
 
 impl DrawCommand {
@@ -59,9 +69,14 @@ impl DrawCommand {
             }
             DrawCommand::Image { rect, .. }
             | DrawCommand::Rect { rect, .. }
-            | DrawCommand::LinkAnnotation { rect, .. } => {
+            | DrawCommand::LinkAnnotation { rect, .. }
+            | DrawCommand::InternalLink { rect, .. } => {
                 rect.origin.x += dx;
                 rect.origin.y += dy;
+            }
+            DrawCommand::NamedDestination { position, .. } => {
+                position.x += dx;
+                position.y += dy;
             }
         }
     }

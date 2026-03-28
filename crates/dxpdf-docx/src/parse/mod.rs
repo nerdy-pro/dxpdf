@@ -120,7 +120,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
 
     // Phase 3: Parse document body
     let doc_data = package.require_part(&doc_path)?;
-    let (body_blocks, final_section) = body::parse_body(doc_data)?;
+    let (mut body_blocks, final_section) = body::parse_body(doc_data)?;
 
     // Phase 4: Parse headers and footers
     let mut headers = HashMap::new();
@@ -166,7 +166,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
     }
 
     // Phase 4b: Parse footnotes and endnotes
-    let footnotes = if let Some(fn_rel) = doc_rels.find_by_type(&RelationshipType::Footnotes) {
+    let mut footnotes = if let Some(fn_rel) = doc_rels.find_by_type(&RelationshipType::Footnotes) {
         let path = zip::resolve_target(doc_dir, &fn_rel.target);
         if let Some(data) = package.get_part(&path) {
             notes::parse_notes(data, "footnote")?
@@ -177,7 +177,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         HashMap::new()
     };
 
-    let endnotes = if let Some(en_rel) = doc_rels.find_by_type(&RelationshipType::Endnotes) {
+    let mut endnotes = if let Some(en_rel) = doc_rels.find_by_type(&RelationshipType::Endnotes) {
         let path = zip::resolve_target(doc_dir, &en_rel.target);
         if let Some(data) = package.get_part(&path) {
             notes::parse_notes(data, "endnote")?
@@ -188,7 +188,22 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         HashMap::new()
     };
 
-    // Phase 5: Assemble
+    // Phase 5: Resolve hyperlink RelIds to actual URLs.
+    resolve_hyperlinks(&mut body_blocks, &doc_rels);
+    for blocks in headers.values_mut() {
+        resolve_hyperlinks(blocks, &doc_rels);
+    }
+    for blocks in footers.values_mut() {
+        resolve_hyperlinks(blocks, &doc_rels);
+    }
+    for blocks in footnotes.values_mut() {
+        resolve_hyperlinks(blocks, &doc_rels);
+    }
+    for blocks in endnotes.values_mut() {
+        resolve_hyperlinks(blocks, &doc_rels);
+    }
+
+    // Phase 6: Assemble
     Ok(Document {
         settings: doc_settings,
         theme,
@@ -203,4 +218,49 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         media,
         embedded_fonts,
     })
+}
+
+/// Walk blocks and resolve `HyperlinkTarget::External(RelId)` to actual URLs.
+fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::zip::Relationships) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => resolve_hyperlinks_in_inlines(&mut p.content, rels),
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        resolve_hyperlinks(&mut cell.content, rels);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_hyperlinks_in_inlines(inlines: &mut [dxpdf_docx_model::model::Inline], rels: &crate::zip::Relationships) {
+    use dxpdf_docx_model::model::{HyperlinkTarget, Inline, RelId};
+
+    for inline in inlines {
+        match inline {
+            Inline::Hyperlink(link) => {
+                // Resolve External(RelId) to the actual URL.
+                if let HyperlinkTarget::External(ref rel_id) = link.target {
+                    if let Some(rel) = rels.find_by_id(rel_id.as_str()) {
+                        link.target = HyperlinkTarget::External(RelId::new(&rel.target));
+                    }
+                }
+                // Recurse into hyperlink content.
+                resolve_hyperlinks_in_inlines(&mut link.content, rels);
+            }
+            Inline::Field(field) => {
+                resolve_hyperlinks_in_inlines(&mut field.content, rels);
+            }
+            Inline::AlternateContent(ac) => {
+                if let Some(ref mut fallback) = ac.fallback {
+                    resolve_hyperlinks_in_inlines(fallback, rels);
+                }
+            }
+            _ => {}
+        }
+    }
 }
