@@ -67,6 +67,7 @@ pub fn layout_document(
         resolved,
         footnote_counter: std::cell::Cell::new(0),
         endnote_counter: std::cell::Cell::new(0),
+        list_counters: std::cell::RefCell::new(std::collections::HashMap::new()),
     };
     let dlh = default_line_height(&ctx);
     let mut all_pages = Vec::new();

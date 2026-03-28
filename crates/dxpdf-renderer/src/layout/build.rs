@@ -48,6 +48,8 @@ pub struct BuildContext<'a> {
     pub footnote_counter: std::cell::Cell<u32>,
     /// Sequential endnote display number (i, ii, iii...).
     pub endnote_counter: std::cell::Cell<u32>,
+    /// Per-(numId, level) running counters for list labels.
+    pub list_counters: std::cell::RefCell<HashMap<(model::NumId, u8), u32>>,
 }
 
 impl BuildContext<'_> {
@@ -210,7 +212,132 @@ fn build_paragraph_block(
     ctx: &BuildContext,
     pending_dropcap: &mut Option<DropCapInfo>,
 ) -> Option<LayoutBlock> {
-    let (mut fragments, merged_props) = build_fragments(p, ctx, None, None);
+    let (mut fragments, mut merged_props) = build_fragments(p, ctx, None, None);
+
+    // §17.9.22: inject list label if paragraph has a numbering reference.
+    if let Some(ref num_ref) = merged_props.numbering {
+        let num_id = model::NumId::new(num_ref.num_id);
+        let level = num_ref.level;
+        if let Some(levels) = ctx.resolved.numbering.get(&num_id) {
+            // Update counters: increment this level, reset deeper levels.
+            {
+                let mut counters = ctx.list_counters.borrow_mut();
+                let count = counters.entry((num_id, level)).or_insert_with(|| {
+                    levels.get(level as usize).map(|l| l.start).unwrap_or(1) - 1
+                });
+                *count += 1;
+                // Reset deeper levels.
+                let max_level = levels.len() as u8;
+                for deeper in (level + 1)..max_level {
+                    counters.remove(&(num_id, deeper));
+                }
+            }
+
+            let counters = ctx.list_counters.borrow();
+            if let Some(label_text) = crate::resolve::numbering::format_list_label(
+                levels, level, &counters, num_id,
+            ) {
+                // Resolve label font from level run_properties or paragraph defaults.
+                let (default_family, default_size, default_color, _, _) =
+                    resolve_paragraph_defaults(p, ctx.resolved);
+                let level_def = levels.get(level as usize);
+                let level_font_family = level_def
+                    .and_then(|l| l.run_properties.as_ref())
+                    .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
+                    .unwrap_or("");
+
+                // Remap PUA codepoints from legacy Symbol/Wingdings encoding to
+                // Unicode equivalents so standard fonts can render them.
+                // Symbol mapping: unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
+                // Wingdings mapping: standard Microsoft Wingdings-to-Unicode table.
+                let (label_text, label_family) = remap_symbol_bullets(
+                    &label_text, level_font_family, &default_family,
+                );
+                let label_family: std::rc::Rc<str> = std::rc::Rc::from(label_family.as_str());
+
+                let label_size = level_def
+                    .and_then(|l| l.run_properties.as_ref())
+                    .and_then(|rp| rp.font_size)
+                    .map(Pt::from)
+                    .unwrap_or(default_size);
+                let label_bold = level_def
+                    .and_then(|l| l.run_properties.as_ref())
+                    .and_then(|rp| rp.bold)
+                    .unwrap_or(false);
+                let label_italic = level_def
+                    .and_then(|l| l.run_properties.as_ref())
+                    .and_then(|rp| rp.italic)
+                    .unwrap_or(false);
+
+                let label_font = FontProps {
+                    family: label_family,
+                    size: label_size,
+                    bold: label_bold,
+                    italic: label_italic,
+                    underline: false,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
+                };
+                let (w, h, a) = ctx.measurer.measure(&label_text, &label_font);
+                let label_frag = Fragment::Text {
+                    text: label_text,
+                    font: label_font.clone(),
+                    color: default_color,
+                    shading: None,
+                    border: None,
+                    width: w,
+                    trimmed_width: w,
+                    height: h,
+                    ascent: a,
+                    hyperlink_url: None,
+                    baseline_offset: Pt::ZERO,
+                };
+                // Tab fragment after label — aligns body text at the indent position.
+                let tab_frag = Fragment::Tab {
+                    line_height: h,
+                };
+                fragments.insert(0, tab_frag);
+                fragments.insert(0, label_frag);
+
+                // Add an implicit tab stop at indent_left so the tab after the
+                // label lands at the hanging indent boundary, not at a default
+                // 36pt tab stop. The tab position is in the paragraph's x
+                // coordinate space (same as the rendering loop's x).
+                if let Some(lvl_left) = levels.get(level as usize)
+                    .and_then(|l| l.indentation.as_ref())
+                    .and_then(|ind| ind.start)
+                {
+                    merged_props.tabs.insert(0, dxpdf_docx_model::model::TabStop {
+                        position: lvl_left,
+                        alignment: dxpdf_docx_model::model::TabAlignment::Left,
+                        leader: dxpdf_docx_model::model::TabLeader::None,
+                    });
+                }
+            }
+
+            // §17.9.3: numbering level indentation overrides paragraph style indentation.
+            // §17.9.23: numbering level pPr overrides the paragraph style.
+            // The numbering level's left defines the text body position and
+            // its hanging defines the label offset (bullet at left - hanging).
+            // Only the paragraph's direct ind overrides the numbering level.
+            if let Some(lvl_ind) = levels.get(level as usize).and_then(|l| l.indentation.as_ref()) {
+                let mut ind = *lvl_ind;
+                if let Some(direct) = p.properties.indentation {
+                    if let Some(start) = direct.start {
+                        ind.start = Some(start);
+                    }
+                    if let Some(end) = direct.end {
+                        ind.end = Some(end);
+                    }
+                    if let Some(first_line) = direct.first_line {
+                        ind.first_line = Some(first_line);
+                    }
+                }
+                merged_props.indentation = Some(ind);
+            }
+        }
+    }
 
     // Word suppresses Hyperlink character style (blue/underline) for ToC
     // entries in print view. Strip visual hyperlink styling but keep the
@@ -1173,6 +1300,52 @@ fn populate_image_data(
             }
         }
     }
+}
+
+/// Remap PUA codepoints from legacy Symbol/Wingdings encoding to Unicode.
+///
+/// Symbol font mapping per unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt.
+/// Wingdings mapping per the standard Microsoft Wingdings-to-Unicode table.
+///
+/// Returns the remapped text and the font family to use for rendering.
+fn remap_symbol_bullets(text: &str, font_family: &str, fallback_family: &str) -> (String, String) {
+    let is_symbol = font_family.eq_ignore_ascii_case("Symbol");
+    let is_wingdings = font_family.eq_ignore_ascii_case("Wingdings");
+
+    if !is_symbol && !is_wingdings {
+        // Not a legacy symbol font — use as-is.
+        let family = if font_family.is_empty() { fallback_family } else { font_family };
+        return (text.to_string(), family.to_string());
+    }
+
+    let remapped: String = text.chars().map(|ch| {
+        let code = ch as u32;
+        if is_symbol && (0xF020..=0xF0FF).contains(&code) {
+            // Symbol font: offset 0xF000 from encoding position.
+            match code {
+                0xF0B7 => '\u{2022}', // BULLET
+                0xF0A8 => '\u{2666}', // BLACK DIAMOND SUIT
+                0xF0B0 => '\u{00B0}', // DEGREE SIGN
+                0xF0D7 => '\u{00D7}', // MULTIPLICATION SIGN
+                0xF0B1 => '\u{00B1}', // PLUS-MINUS SIGN
+                _ => ch, // keep as-is for unmapped
+            }
+        } else if is_wingdings && (0xF020..=0xF0FF).contains(&code) {
+            match code {
+                0xF0A7 => '\u{25AA}', // BLACK SMALL SQUARE
+                0xF0D8 => '\u{2794}', // HEAVY WIDE-HEADED RIGHTWARDS ARROW
+                0xF0FC => '\u{2714}', // HEAVY CHECK MARK
+                0xF076 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
+                0xF06C => '\u{25CF}', // BLACK CIRCLE
+                _ => ch,
+            }
+        } else {
+            ch
+        }
+    }).collect();
+
+    // Use a standard font for the Unicode equivalents.
+    (remapped, fallback_family.to_string())
 }
 
 /// Populate underline position/thickness from Skia font metrics.

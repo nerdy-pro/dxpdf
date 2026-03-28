@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use dxpdf_docx_model::model::{
     NumberFormat, NumberingDefinitions, NumberingLevelDefinition, NumId,
+    RunProperties, Indentation,
 };
 
 /// A resolved numbering level — ready for label generation.
@@ -12,6 +13,11 @@ pub struct ResolvedNumberingLevel {
     pub format: NumberFormat,
     pub level_text: String,
     pub start: u32,
+    /// §17.9.3: run properties for the numbering symbol (font, color, etc.).
+    pub run_properties: Option<RunProperties>,
+    /// §17.9.3: paragraph indentation from the numbering level definition.
+    /// When present, overrides the paragraph style's indentation.
+    pub indentation: Option<Indentation>,
 }
 
 /// Resolve numbering definitions into a flat lookup: NumId → Vec<ResolvedNumberingLevel>.
@@ -54,7 +60,93 @@ fn resolve_level(def: &NumberingLevelDefinition) -> ResolvedNumberingLevel {
         format: def.format.unwrap_or(NumberFormat::None),
         level_text: def.level_text.clone(),
         start: def.start.unwrap_or(1),
+        run_properties: def.run_properties.clone(),
+        indentation: def.indentation,
     }
+}
+
+/// §17.9.11: format a list label by expanding the level_text template.
+/// `%1` is replaced with the formatted counter for level 0, `%2` for level 1, etc.
+/// Returns `None` for `NumberFormat::None`.
+pub fn format_list_label(
+    levels: &[ResolvedNumberingLevel],
+    level: u8,
+    counters: &HashMap<(NumId, u8), u32>,
+    num_id: NumId,
+) -> Option<String> {
+    let lvl = levels.get(level as usize)?;
+    if lvl.format == NumberFormat::None {
+        return None;
+    }
+    if lvl.format == NumberFormat::Bullet {
+        return Some(lvl.level_text.clone());
+    }
+
+    // Expand template: %1 → level 0 counter, %2 → level 1 counter, etc.
+    let mut result = lvl.level_text.clone();
+    for i in (0..=level).rev() {
+        let placeholder = format!("%{}", i + 1);
+        if result.contains(&placeholder) {
+            let count = counters.get(&(num_id, i)).copied().unwrap_or(1);
+            let fmt = levels.get(i as usize).map(|l| l.format).unwrap_or(NumberFormat::Decimal);
+            let formatted = format_number(count, fmt);
+            result = result.replace(&placeholder, &formatted);
+        }
+    }
+    Some(result)
+}
+
+/// Format a number according to the OOXML number format.
+fn format_number(n: u32, fmt: NumberFormat) -> String {
+    match fmt {
+        NumberFormat::Decimal => n.to_string(),
+        NumberFormat::LowerLetter => to_letter_lower(n),
+        NumberFormat::UpperLetter => to_letter_upper(n),
+        NumberFormat::LowerRoman => to_roman_lower(n),
+        NumberFormat::UpperRoman => to_roman_upper(n),
+        NumberFormat::Ordinal => format_ordinal(n),
+        _ => n.to_string(),
+    }
+}
+
+fn to_letter_lower(n: u32) -> String {
+    if n == 0 { return String::new(); }
+    let idx = ((n - 1) % 26) as u8;
+    String::from((b'a' + idx) as char)
+}
+
+fn to_letter_upper(n: u32) -> String {
+    to_letter_lower(n).to_uppercase()
+}
+
+fn to_roman_lower(mut n: u32) -> String {
+    const VALS: [(u32, &str); 13] = [
+        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+    ];
+    let mut s = String::new();
+    for &(val, sym) in &VALS {
+        while n >= val { s.push_str(sym); n -= val; }
+    }
+    s
+}
+
+fn to_roman_upper(n: u32) -> String {
+    to_roman_lower(n).to_uppercase()
+}
+
+fn format_ordinal(n: u32) -> String {
+    let suffix = match n % 100 {
+        11..=13 => "th",
+        _ => match n % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        },
+    };
+    format!("{n}{suffix}")
 }
 
 #[cfg(test)]
