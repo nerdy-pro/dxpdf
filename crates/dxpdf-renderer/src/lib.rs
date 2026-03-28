@@ -110,12 +110,41 @@ pub fn layout_document(
         all_pages.append(&mut pages);
     }
 
-    // Render endnotes at the end of the document.
+    // Render endnotes on a new page at the end of the document.
     if !all_endnotes.is_empty() {
         let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
             measurer.measure(text, font)
         };
-        render_endnotes(&mut all_pages, &last_config, &all_endnotes, dlh, Some(&measure_fn));
+        let mut endnote_page = LayoutedPage::new(last_config.page_size);
+        let content_width = last_config.content_width();
+        let constraints = layout::BoxConstraints::tight_width(content_width, dimension::Pt::INFINITY);
+        let mut cursor_y = last_config.margins.top;
+
+        // Separator line.
+        let sep_width = content_width * 0.33;
+        let sep_x = last_config.margins.left + separator_indent;
+        endnote_page.commands.push(layout::draw_command::DrawCommand::Line {
+            line: crate::geometry::PtLineSegment::new(
+                crate::geometry::PtOffset::new(sep_x, cursor_y),
+                crate::geometry::PtOffset::new(sep_x + sep_width, cursor_y),
+            ),
+            color: crate::resolve::color::RgbColor::BLACK,
+            width: dimension::Pt::new(0.5),
+        });
+        cursor_y += dimension::Pt::new(4.0);
+
+        for (_, frags, style) in &all_endnotes {
+            let para = layout::paragraph::layout_paragraph(
+                frags, &constraints, style, dlh, Some(&measure_fn),
+            );
+            for mut cmd in para.commands {
+                cmd.shift_y(cursor_y);
+                cmd.shift_x(last_config.margins.left);
+                endnote_page.commands.push(cmd);
+            }
+            cursor_y += para.size.height;
+        }
+        all_pages.push(endnote_page);
     }
 
     if all_pages.is_empty() {
@@ -123,63 +152,6 @@ pub fn layout_document(
     }
 
     all_pages
-}
-
-/// Render endnotes at the bottom of the last page.
-fn render_endnotes(
-    pages: &mut [LayoutedPage],
-    config: &PageConfig,
-    footnotes: &[(String, Vec<layout::fragment::Fragment>, layout::paragraph::ParagraphStyle)],
-    default_line_height: dimension::Pt,
-    measure_text: layout::paragraph::MeasureTextFn<'_>,
-) {
-    use layout::draw_command::DrawCommand;
-    use layout::paragraph::layout_paragraph;
-
-    if pages.is_empty() || footnotes.is_empty() {
-        return;
-    }
-
-    let page = pages.last_mut().unwrap();
-    let content_width = config.content_width();
-    let constraints = layout::BoxConstraints::tight_width(content_width, dimension::Pt::INFINITY);
-
-    // Start from the bottom margin, building upward.
-    let page_bottom = config.page_size.height - config.margins.bottom;
-
-    // Layout all footnotes to compute total height.
-    let mut footnote_layouts = Vec::new();
-    let mut total_height = dimension::Pt::new(4.0); // separator line + gap
-    for (_, frags, style) in footnotes {
-        let para = layout_paragraph(frags, &constraints, style, default_line_height, measure_text);
-        total_height += para.size.height;
-        footnote_layouts.push(para);
-    }
-
-    let footnote_top = page_bottom - total_height;
-
-    // Draw separator line (short horizontal rule).
-    let sep_y = footnote_top;
-    let sep_width = content_width * 0.33;
-    page.commands.push(DrawCommand::Line {
-        line: crate::geometry::PtLineSegment::new(
-            crate::geometry::PtOffset::new(config.margins.left, sep_y),
-            crate::geometry::PtOffset::new(config.margins.left + sep_width, sep_y),
-        ),
-        color: crate::resolve::color::RgbColor::BLACK,
-        width: dimension::Pt::new(0.5),
-    });
-
-    // Render footnote paragraphs below the separator.
-    let mut cursor_y = sep_y + dimension::Pt::new(4.0);
-    for para in footnote_layouts {
-        for mut cmd in para.commands {
-            cmd.shift_y(cursor_y);
-            cmd.shift_x(config.margins.left);
-            page.commands.push(cmd);
-        }
-        cursor_y += para.size.height;
-    }
 }
 
 #[cfg(test)]
