@@ -215,6 +215,7 @@ fn build_paragraph_block(
     let (mut fragments, mut merged_props) = build_fragments(p, ctx, None, None);
 
     // §17.9.22: inject list label if paragraph has a numbering reference.
+    let mut has_list_label = false;
     if let Some(ref num_ref) = merged_props.numbering {
         let num_id = model::NumId::new(num_ref.num_id);
         let level = num_ref.level;
@@ -299,6 +300,7 @@ fn build_paragraph_block(
                 };
                 fragments.insert(0, tab_frag);
                 fragments.insert(0, label_frag);
+                has_list_label = true;
 
                 // Add an implicit tab stop at indent_left so the tab after the
                 // label lands at the hanging indent boundary, not at a default
@@ -428,6 +430,7 @@ fn build_paragraph_block(
     }
 
     let mut style = paragraph_style_from_props(&merged_props);
+    style.has_list_label = has_list_label;
 
     // Attach pending drop cap to this paragraph.
     if let Some(dc) = pending_dropcap.take() {
@@ -1168,6 +1171,7 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
+        has_list_label: false,
         page_floats: Vec::new(),
         page_y: crate::dimension::Pt::ZERO,
         page_x: crate::dimension::Pt::ZERO,
