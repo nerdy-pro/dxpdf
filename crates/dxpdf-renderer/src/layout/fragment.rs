@@ -274,7 +274,7 @@ where
                 // match Word's rendering: 58% font size reduction, superscript shifted
                 // up by 33% of base ascent, subscript shifted down by 8% of base height.
                 // These ratios are documented in the OpenXML SDK reference.
-                let baseline_offset = match effective_props.vertical_align {
+                let mut baseline_offset = match effective_props.vertical_align {
                     Some(VerticalAlign::Superscript) => {
                         let (_, _, base_ascent) = measure_text("X", &font);
                         font.size = font.size * 0.58;
@@ -287,6 +287,10 @@ where
                     }
                     _ => Pt::ZERO,
                 };
+                // §17.3.2.19: w:position — vertical baseline offset in half-points.
+                if let Some(pos) = effective_props.position {
+                    baseline_offset += Pt::from(pos);
+                }
 
                 // §17.3.2.4: run-level border.
                 let border = effective_props.border.as_ref().map(|b| FragmentBorder {

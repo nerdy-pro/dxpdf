@@ -238,6 +238,36 @@ fn build_paragraph_block(
             .and_then(|fp| fp.h_space)
             .map(Pt::from)
             .unwrap_or(Pt::ZERO);
+        let margin_mode = merged_props
+            .frame_properties
+            .and_then(|fp| fp.drop_cap)
+            .is_some_and(|dc| matches!(dc, model::DropCap::Margin));
+        // The drop cap paragraph's own indent determines the x position.
+        // This includes indent_left + indent_first_line from the cascade.
+        let dc_indent_left = merged_props.indentation
+            .and_then(|i| i.start).map(Pt::from).unwrap_or(Pt::ZERO);
+        let dc_indent_first = merged_props.indentation
+            .and_then(|i| i.first_line)
+            .map(|fl| match fl {
+                model::FirstLineIndent::FirstLine(v) => Pt::from(v),
+                model::FirstLineIndent::Hanging(v) => -Pt::from(v),
+                model::FirstLineIndent::None => Pt::ZERO,
+            })
+            .unwrap_or(Pt::ZERO);
+        // §17.3.1.33: frame height from drop cap paragraph's exact line spacing.
+        let frame_height = merged_props.spacing
+            .and_then(|s| s.line)
+            .and_then(|ls| match ls {
+                model::LineSpacing::Exact(v) => Some(Pt::from(v)),
+                _ => None,
+            });
+        // §17.3.2.19: position offset from the drop cap run.
+        let position_offset = fragments.first()
+            .and_then(|f| match f {
+                Fragment::Text { baseline_offset, .. } => Some(*baseline_offset),
+                _ => None,
+            })
+            .unwrap_or(Pt::ZERO);
         *pending_dropcap = Some(DropCapInfo {
             fragments,
             lines: drop_cap_lines,
@@ -245,6 +275,10 @@ fn build_paragraph_block(
             h_space,
             width,
             height,
+            margin_mode,
+            indent: dc_indent_left + dc_indent_first,
+            frame_height,
+            position_offset,
         });
         return None;
     }

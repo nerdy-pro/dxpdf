@@ -67,6 +67,14 @@ pub struct DropCapInfo {
     pub ascent: Pt,
     /// §17.3.1.11 @w:hSpace: horizontal distance from surrounding text.
     pub h_space: Pt,
+    /// §17.3.1.11: true = Margin mode (drop cap in margin), false = Drop mode (in text area).
+    pub margin_mode: bool,
+    /// Left indent of the drop cap paragraph (from its own style cascade).
+    pub indent: Pt,
+    /// Frame height from the drop cap paragraph's spacing (lineRule="exact").
+    pub frame_height: Option<Pt>,
+    /// §17.3.2.19: vertical baseline offset in points (negative = down).
+    pub position_offset: Pt,
 }
 
 impl Default for ParagraphStyle {
@@ -124,11 +132,14 @@ pub fn layout_paragraph(
     default_line_height: Pt,
     measure_text: MeasureTextFn<'_>,
 ) -> ParagraphLayout {
-    // §17.3.1.11: drop cap text frame. The width includes any w:hSpace from framePr.
+    // §17.3.1.11: drop cap text frame.
+    // Drop mode: body text indented by drop cap position + width + hSpace.
+    // Margin mode: drop cap is in the margin, body text is NOT indented.
     let drop_cap_indent = style
         .drop_cap
         .as_ref()
-        .map(|dc| dc.width + dc.h_space)
+        .filter(|dc| !dc.margin_mode)
+        .map(|dc| dc.indent + dc.width + dc.h_space)
         .unwrap_or(Pt::ZERO);
     let drop_cap_lines = style
         .drop_cap
@@ -245,44 +256,59 @@ pub fn layout_paragraph(
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
 
-    // §17.3.1.11: compute the baseline of the Nth body text line for drop cap positioning.
-    // The drop cap baseline must align with the baseline of the last line it spans.
+    // §17.3.1.11: compute the drop cap baseline.
+    // When frame_height is set (lineRule="exact"), use:
+    //   baseline = frame_top + frame_height - descent + position_offset
+    // Otherwise fall back to aligning with the Nth body line's baseline.
     let drop_cap_baseline_y = if let Some(ref dc) = style.drop_cap {
-        let n = dc.lines.max(1) as usize;
-        let mut y = cursor_y;
-        for (i, fitted_line) in lines.iter().enumerate().take(n) {
-            let natural = if fitted_line.height > Pt::ZERO {
-                fitted_line.height
-            } else {
-                default_line_height
-            };
-            let lh = resolve_line_height(natural, &style.line_spacing);
-            if i == n - 1 {
-                // Nth line: baseline = current y + this line's ascent.
-                y += fitted_line.ascent;
-                break;
+        if let Some(fh) = dc.frame_height {
+            // §17.3.1.11: frame-based positioning.
+            // Frame top = paragraph start. Word pre-computes the frame height
+            // (spacing.line) and position offset so that:
+            //   baseline = frame_top + frame_height + position_offset
+            // lands exactly on the Nth body line's baseline.
+            let baseline = cursor_y + fh + dc.position_offset;
+            Some(baseline)
+        } else {
+            // Fallback: align with Nth body line baseline.
+            let n = dc.lines.max(1) as usize;
+            let mut y = cursor_y;
+            for (i, fitted_line) in lines.iter().enumerate().take(n) {
+                let natural = if fitted_line.height > Pt::ZERO {
+                    fitted_line.height
+                } else {
+                    default_line_height
+                };
+                let lh = resolve_line_height(natural, &style.line_spacing);
+                if i == n - 1 {
+                    y += fitted_line.ascent;
+                    break;
+                }
+                y += lh;
             }
-            y += lh;
+            Some(y)
         }
-        Some(y)
     } else {
         None
     };
 
     // Render drop cap at the computed baseline.
-    // §17.3.1.11: the drop cap baseline aligns with the Nth body line's baseline,
-    // but the glyph's top must not extend above the paragraph start (cursor_y).
-    // When cross-engine font metric differences cause the glyph to be taller than
-    // the N-line span, clamp so the top aligns with the paragraph start instead.
-    if let (Some(ref dc), Some(nth_baseline_y)) = (&style.drop_cap, drop_cap_baseline_y) {
-        let baseline_y = nth_baseline_y.max(cursor_y + dc.ascent);
+    if let (Some(ref dc), Some(baseline_y)) = (&style.drop_cap, drop_cap_baseline_y) {
+        // §17.3.1.11: position the drop cap using its own paragraph's indent.
+        // Drop mode: at the drop cap paragraph's indent (inside text area).
+        // Margin mode: in the page margin, to the left of text.
+        let dc_x = if dc.margin_mode {
+            dc.indent - dc.width - dc.h_space
+        } else {
+            dc.indent
+        };
         for frag in &dc.fragments {
             if let Fragment::Text {
                 text, font, color, ..
             } = frag
             {
                 commands.push(DrawCommand::Text {
-                    position: PtOffset::new(style.indent_left, baseline_y),
+                    position: PtOffset::new(dc_x, baseline_y),
                     text: text.clone(),
                     font_family: font.family.clone(),
                     char_spacing: font.char_spacing,
