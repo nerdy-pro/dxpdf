@@ -62,17 +62,38 @@ pub fn layout_document(
     font_mgr: &skia_safe::FontMgr,
 ) -> Vec<LayoutedPage> {
     let measurer = layout::measurer::TextMeasurer::new(font_mgr.clone());
-    let ctx = BuildContext { measurer: &measurer, resolved };
+    let ctx = BuildContext {
+        measurer: &measurer,
+        resolved,
+        footnote_counter: std::cell::Cell::new(0),
+        endnote_counter: std::cell::Cell::new(0),
+    };
     let dlh = default_line_height(&ctx);
     let mut all_pages = Vec::new();
+    let mut all_endnotes = Vec::new();
+    let mut last_config = PageConfig::default();
+
+    // §17.11.23: footnote separator indent from default paragraph style.
+    let separator_indent = resolved.default_paragraph_style_id.as_ref()
+        .and_then(|id| resolved.styles.get(id))
+        .and_then(|s| s.paragraph.indentation)
+        .and_then(|ind| ind.first_line)
+        .map(|fl| match fl {
+            dxpdf_docx_model::model::FirstLineIndent::FirstLine(v) => dimension::Pt::from(v),
+            _ => dimension::Pt::ZERO,
+        })
+        .unwrap_or(dimension::Pt::ZERO);
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
-        let layout_blocks = build_section_blocks(section, &config, &ctx);
+        let built = build_section_blocks(section, &config, &ctx);
         let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
             measurer.measure(text, font)
         };
-        let mut pages = layout_section(&layout_blocks, &config, Some(&measure_fn), dlh);
+        let mut pages = layout_section(&built.blocks, &config, Some(&measure_fn), separator_indent, dlh);
+
+        // Collect endnotes for rendering at document end.
+        all_endnotes.extend(built.endnotes);
 
         // Render headers/footers onto each page.
         let header_frags = section.header.as_ref()
@@ -85,7 +106,16 @@ pub fn layout_document(
             dlh,
         );
 
+        last_config = config;
         all_pages.append(&mut pages);
+    }
+
+    // Render endnotes at the end of the document.
+    if !all_endnotes.is_empty() {
+        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
+            measurer.measure(text, font)
+        };
+        render_endnotes(&mut all_pages, &last_config, &all_endnotes, dlh, Some(&measure_fn));
     }
 
     if all_pages.is_empty() {
@@ -93,6 +123,63 @@ pub fn layout_document(
     }
 
     all_pages
+}
+
+/// Render endnotes at the bottom of the last page.
+fn render_endnotes(
+    pages: &mut [LayoutedPage],
+    config: &PageConfig,
+    footnotes: &[(String, Vec<layout::fragment::Fragment>, layout::paragraph::ParagraphStyle)],
+    default_line_height: dimension::Pt,
+    measure_text: layout::paragraph::MeasureTextFn<'_>,
+) {
+    use layout::draw_command::DrawCommand;
+    use layout::paragraph::layout_paragraph;
+
+    if pages.is_empty() || footnotes.is_empty() {
+        return;
+    }
+
+    let page = pages.last_mut().unwrap();
+    let content_width = config.content_width();
+    let constraints = layout::BoxConstraints::tight_width(content_width, dimension::Pt::INFINITY);
+
+    // Start from the bottom margin, building upward.
+    let page_bottom = config.page_size.height - config.margins.bottom;
+
+    // Layout all footnotes to compute total height.
+    let mut footnote_layouts = Vec::new();
+    let mut total_height = dimension::Pt::new(4.0); // separator line + gap
+    for (_, frags, style) in footnotes {
+        let para = layout_paragraph(frags, &constraints, style, default_line_height, measure_text);
+        total_height += para.size.height;
+        footnote_layouts.push(para);
+    }
+
+    let footnote_top = page_bottom - total_height;
+
+    // Draw separator line (short horizontal rule).
+    let sep_y = footnote_top;
+    let sep_width = content_width * 0.33;
+    page.commands.push(DrawCommand::Line {
+        line: crate::geometry::PtLineSegment::new(
+            crate::geometry::PtOffset::new(config.margins.left, sep_y),
+            crate::geometry::PtOffset::new(config.margins.left + sep_width, sep_y),
+        ),
+        color: crate::resolve::color::RgbColor::BLACK,
+        width: dimension::Pt::new(0.5),
+    });
+
+    // Render footnote paragraphs below the separator.
+    let mut cursor_y = sep_y + dimension::Pt::new(4.0);
+    for para in footnote_layouts {
+        for mut cmd in para.commands {
+            cmd.shift_y(cursor_y);
+            cmd.shift_x(config.margins.left);
+            page.commands.push(cmd);
+        }
+        cursor_y += para.size.height;
+    }
 }
 
 #[cfg(test)]

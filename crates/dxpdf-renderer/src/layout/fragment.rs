@@ -96,6 +96,14 @@ impl Fragment {
     pub fn is_line_break(&self) -> bool {
         matches!(self, Fragment::LineBreak { .. })
     }
+
+    /// Get font properties if this is a text fragment.
+    pub fn font_props(&self) -> Option<&FontProps> {
+        match self {
+            Fragment::Text { font, .. } => Some(font),
+            _ => None,
+        }
+    }
 }
 
 /// §17.3.1.37: minimum tab fragment width for line fitting.
@@ -163,6 +171,20 @@ fn resolve_highlight_color(hl: dxpdf_docx_model::model::HighlightColor) -> RgbCo
 /// Split text into word-level chunks for line breaking.
 /// Whitespace is kept attached to the preceding word: "hello world" → ["hello ", "world"].
 /// This allows the line fitter to break between fragments at word boundaries.
+/// Convert a number to lowercase Roman numerals.
+pub fn to_roman_lower(mut n: u32) -> String {
+    const VALS: [(u32, &str); 13] = [
+        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+    ];
+    let mut s = String::new();
+    for &(val, sym) in &VALS {
+        while n >= val { s.push_str(sym); n -= val; }
+    }
+    s
+}
+
 fn split_into_words(text: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let mut start = 0;
@@ -202,6 +224,8 @@ pub fn collect_fragments<F>(
     resolved_styles: Option<&std::collections::HashMap<dxpdf_docx_model::model::StyleId, crate::resolve::styles::ResolvedStyle>>,
     // §17.3.1: paragraph style's run properties, merged as base for all runs.
     paragraph_run_defaults: Option<&RunProperties>,
+    footnote_counter: &mut u32,
+    endnote_counter: &mut u32,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, Pt, Pt), // (width, height, ascent)
@@ -346,6 +370,8 @@ where
                     measure_text,
                     resolved_styles,
                     paragraph_run_defaults,
+                    footnote_counter,
+                    endnote_counter,
                 );
                 fragments.append(&mut sub);
             }
@@ -360,6 +386,8 @@ where
                     measure_text,
                     resolved_styles,
                     paragraph_run_defaults,
+                    footnote_counter,
+                    endnote_counter,
                 );
                 fragments.append(&mut sub);
             }
@@ -385,8 +413,10 @@ where
                         default_color,
                         hyperlink_url,
                         measure_text,
-                    resolved_styles,
-                    paragraph_run_defaults,
+                        resolved_styles,
+                        paragraph_run_defaults,
+                        footnote_counter,
+                        endnote_counter,
                     );
                     fragments.append(&mut sub);
                 }
@@ -427,10 +457,72 @@ where
             | Inline::FootnoteRefMark
             | Inline::EndnoteRefMark
             | Inline::LastRenderedPageBreak => {}
+            // §17.11.12: footnote reference — render as superscript number.
+            Inline::FootnoteRef(_note_id) => {
+                *footnote_counter += 1;
+                let num_text = format!("{}", *footnote_counter);
+                // §17.11.12: footnote reference uses superscript at 58% size.
+                let ref_size = default_size * 0.58;
+                let ref_font = FontProps {
+                    family: std::rc::Rc::from(default_family),
+                    size: ref_size,
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
+                };
+                let (w, h, a) = measure_text(&num_text, &ref_font);
+                // Superscript baseline offset: raise by ~40% of the full-size ascent.
+                let baseline_offset = -(default_size * 0.4);
+                fragments.push(Fragment::Text {
+                    text: num_text,
+                    font: ref_font,
+                    color: default_color,
+                    shading: None,
+                    border: None,
+                    width: w,
+                    trimmed_width: w,
+                    height: h,
+                    ascent: a,
+                    hyperlink_url: None,
+                    baseline_offset,
+                });
+            }
+            // §17.11.2: endnote reference — render as superscript Roman numeral.
+            Inline::EndnoteRef(_note_id) => {
+                *endnote_counter += 1;
+                let num_text = to_roman_lower(*endnote_counter);
+                let ref_size = default_size * 0.58;
+                let ref_font = FontProps {
+                    family: std::rc::Rc::from(default_family),
+                    size: ref_size,
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
+                };
+                let (w, h, a) = measure_text(&num_text, &ref_font);
+                let baseline_offset = -(default_size * 0.4);
+                fragments.push(Fragment::Text {
+                    text: num_text,
+                    font: ref_font,
+                    color: default_color,
+                    shading: None,
+                    border: None,
+                    width: w,
+                    trimmed_width: w,
+                    height: h,
+                    ascent: a,
+                    hyperlink_url: None,
+                    baseline_offset,
+                });
+            }
             // Not yet handled — skip silently
-            Inline::FootnoteRef(_)
-            | Inline::EndnoteRef(_)
-            | Inline::Pict(_) => {}
+            Inline::Pict(_) => {}
         }
     }
 
@@ -480,7 +572,7 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         assert_eq!(frags[0].width().raw(), 30.0); // 5 * 6
@@ -490,7 +582,7 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         if let Fragment::Text { font, .. } = &frags[0] {
             assert_eq!(&*font.family, "Arial");
@@ -503,7 +595,7 @@ mod tests {
     #[test]
     fn tab_produces_tab_fragment() {
         let inlines = vec![Inline::Tab];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         assert!(matches!(frags[0], Fragment::Tab { .. }));
@@ -512,7 +604,7 @@ mod tests {
     #[test]
     fn line_break_produces_break_fragment() {
         let inlines = vec![Inline::LineBreak(BreakKind::TextWrapping)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         assert!(frags[0].is_line_break());
@@ -524,7 +616,7 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
@@ -562,7 +654,7 @@ mod tests {
                 fld_lock: None,
             }),
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
@@ -586,7 +678,7 @@ mod tests {
             Inline::EndnoteRefMark,
             Inline::LastRenderedPageBreak,
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1, "only the text run should produce a fragment");
     }
@@ -600,7 +692,7 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -616,7 +708,7 @@ mod tests {
             text: String::new(),
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
         assert!(frags.is_empty());
     }
 
@@ -636,7 +728,7 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
@@ -653,7 +745,7 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -695,7 +787,7 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {

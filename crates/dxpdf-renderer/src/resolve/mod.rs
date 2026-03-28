@@ -12,7 +12,7 @@ pub mod styles;
 use std::collections::HashMap;
 
 use dxpdf_docx_model::model::{
-    Document, NumId, ParagraphProperties, RelId, RunProperties, StyleId, Theme,
+    Block, Document, NoteId, NumId, ParagraphProperties, RelId, RunProperties, StyleId, Theme,
 };
 
 use self::numbering::ResolvedNumberingLevel;
@@ -43,6 +43,10 @@ pub struct ResolvedDocument {
     /// §17.7.4.17: the default paragraph style (w:default="1", type="paragraph").
     /// Applied to paragraphs that don't specify a style explicitly.
     pub default_paragraph_style_id: Option<StyleId>,
+    /// Footnote content keyed by note ID.
+    pub footnotes: HashMap<NoteId, Vec<Block>>,
+    /// Endnote content keyed by note ID.
+    pub endnotes: HashMap<NoteId, Vec<Block>>,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -72,6 +76,8 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         doc_defaults_run: doc.styles.doc_defaults_run.clone(),
         default_paragraph_style_id,
         theme: doc.theme.clone(),
+        footnotes: doc.footnotes.clone(),
+        endnotes: doc.endnotes.clone(),
     }
 }
 

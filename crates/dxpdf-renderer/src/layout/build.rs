@@ -39,10 +39,14 @@ const SPEC_DEFAULT_FONT_SIZE: Pt = Pt::new(10.0);
 
 // ── Context ─────────────────────────────────────────────────────────────────
 
-/// Immutable context threaded through the recursive tree walk.
+/// Context threaded through the recursive tree walk.
 pub struct BuildContext<'a> {
     pub measurer: &'a TextMeasurer,
     pub resolved: &'a ResolvedDocument,
+    /// Sequential footnote display number (1, 2, 3...).
+    pub footnote_counter: std::cell::Cell<u32>,
+    /// Sequential endnote display number (i, ii, iii...).
+    pub endnote_counter: std::cell::Cell<u32>,
 }
 
 impl BuildContext<'_> {
@@ -53,18 +57,92 @@ impl BuildContext<'_> {
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
+/// Built section output — layout blocks plus endnotes.
+pub struct BuiltSection {
+    pub blocks: Vec<LayoutBlock>,
+    /// Endnote content (display number, fragments, style) — rendered at document end.
+    pub endnotes: Vec<(String, Vec<Fragment>, ParagraphStyle)>,
+}
+
 /// Build layout blocks for one section by recursing into its block tree.
 pub fn build_section_blocks(
     section: &ResolvedSection,
     config: &PageConfig,
     ctx: &BuildContext,
-) -> Vec<LayoutBlock> {
+) -> BuiltSection {
     let mut pending_dropcap: Option<DropCapInfo> = None;
-    section
+    let blocks: Vec<LayoutBlock> = section
         .blocks
         .iter()
         .filter_map(|block| build_block(block, config.content_width(), ctx, &mut pending_dropcap))
-        .collect()
+        .collect();
+
+    // Collect endnotes (rendered at document end).
+    let mut endnotes = Vec::new();
+    collect_endnotes(ctx, &mut endnotes);
+
+    BuiltSection { blocks, endnotes }
+}
+
+/// Build note content (footnotes or endnotes) with a display number prefix.
+fn build_note_content(
+    _note_id_value: i64,
+    display_num: &str,
+    content: &[Block],
+    ctx: &BuildContext,
+) -> Vec<(String, Vec<Fragment>, ParagraphStyle)> {
+    let mut results = Vec::new();
+    for (i, block) in content.iter().enumerate() {
+        if let model::Block::Paragraph(p) = block {
+            let (mut frags, merged_props) = build_fragments(p, ctx, None, None);
+
+            // Prepend display number to the first paragraph.
+            if i == 0 && !frags.is_empty() {
+                let num_text = format!("{}  ", display_num);
+                let font = frags[0].font_props().cloned().unwrap_or_else(|| FontProps {
+                    family: std::rc::Rc::from("Times New Roman"),
+                    size: Pt::new(10.0),
+                    bold: false, italic: false, underline: false,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
+                });
+                let ref_size = font.size * 0.58;
+                let ref_font = FontProps { size: ref_size, ..font };
+                let (w, h, a) = ctx.measurer.measure(&num_text, &ref_font);
+                frags.insert(0, Fragment::Text {
+                    text: num_text,
+                    font: ref_font,
+                    color: RgbColor::BLACK,
+                    shading: None, border: None,
+                    width: w, trimmed_width: w,
+                    height: h, ascent: a,
+                    hyperlink_url: None,
+                    baseline_offset: -(font.size * 0.4),
+                });
+            }
+            let style = paragraph_style_from_props(&merged_props);
+            results.push((display_num.to_string(), frags, style));
+        }
+    }
+    results
+}
+
+/// Collect endnotes from the resolved document.
+fn collect_endnotes(
+    ctx: &BuildContext,
+    endnotes: &mut Vec<(String, Vec<Fragment>, ParagraphStyle)>,
+) {
+    let mut en_ids: Vec<_> = ctx.resolved.endnotes.keys()
+        .filter(|id| id.value() > 0)
+        .collect();
+    en_ids.sort_by_key(|id| id.value());
+    for (i, note_id) in en_ids.iter().enumerate() {
+        let display = crate::layout::fragment::to_roman_lower((i + 1) as u32);
+        if let Some(content) = ctx.resolved.endnotes.get(note_id) {
+            endnotes.extend(build_note_content(note_id.value(), &display, content, ctx));
+        }
+    }
 }
 
 /// Collect fragments from header/footer blocks.
@@ -179,10 +257,30 @@ fn build_paragraph_block(
     }
 
     let page_break_before = merged_props.page_break_before.unwrap_or(false);
+
+    // Collect footnotes referenced in this paragraph.
+    // The footnote_counter was already incremented during fragment collection,
+    // so we count backwards to get the display number for each reference.
+    let fn_refs: Vec<_> = p.content.iter()
+        .filter_map(|i| if let model::Inline::FootnoteRef(id) = i { Some(id) } else { None })
+        .collect();
+    let fn_base = ctx.footnote_counter.get() - fn_refs.len() as u32;
+    let mut para_footnotes = Vec::new();
+    for (i, note_id) in fn_refs.iter().enumerate() {
+        let display = format!("{}", fn_base + i as u32 + 1);
+        if let Some(content) = ctx.resolved.footnotes.get(note_id) {
+            let notes = build_note_content(note_id.value(), &display, content, ctx);
+            for (_, frags, style) in notes {
+                para_footnotes.push((frags, style));
+            }
+        }
+    }
+
     Some(LayoutBlock::Paragraph {
         fragments,
         style,
         page_break_before,
+        footnotes: para_footnotes,
     })
 }
 
@@ -243,6 +341,8 @@ fn build_fragments(
         ctx.measurer.measure(text, font)
     };
 
+    let mut fn_counter = ctx.footnote_counter.get();
+    let mut en_counter = ctx.endnote_counter.get();
     let mut fragments = collect_fragments(
         &para.content,
         &default_family,
@@ -252,7 +352,11 @@ fn build_fragments(
         &measure,
         Some(&ctx.resolved.styles),
         Some(&run_defaults),
+        &mut fn_counter,
+        &mut en_counter,
     );
+    ctx.footnote_counter.set(fn_counter);
+    ctx.endnote_counter.set(en_counter);
     populate_image_data(&mut fragments, ctx.media());
     populate_underline_metrics(&mut fragments, ctx.measurer);
 

@@ -18,6 +18,8 @@ pub enum LayoutBlock {
         style: ParagraphStyle,
         /// §17.3.1.23: force a page break before this paragraph.
         page_break_before: bool,
+        /// Footnotes referenced in this paragraph — rendered at page bottom.
+        footnotes: Vec<(Vec<Fragment>, ParagraphStyle)>,
     },
     Table {
         rows: Vec<TableRowInput>,
@@ -39,6 +41,7 @@ pub fn layout_section(
     blocks: &[LayoutBlock],
     config: &PageConfig,
     measure_text: super::paragraph::MeasureTextFn<'_>,
+    separator_indent: Pt,
     default_line_height: Pt,
 ) -> Vec<LayoutedPage> {
     let content_width = config.content_width();
@@ -53,10 +56,14 @@ pub fn layout_section(
     let mut pages: Vec<LayoutedPage> = Vec::new();
     let mut current_page = LayoutedPage::new(config.page_size);
     let mut cursor_y = config.margins.top;
-    let bottom = config.page_size.height - config.margins.bottom;
+    let page_bottom = config.page_size.height - config.margins.bottom;
+    // Effective bottom boundary — reduced by footnote height.
+    let mut bottom = page_bottom;
     // §17.4.58: active floating table that text wraps around.
     // (table_width, right_gap, float_y_start, float_y_end)
     let mut active_float: Option<(Pt, Pt, Pt, Pt)> = None;
+    // Footnotes collected for the current page.
+    let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
 
     for block in blocks {
         match block {
@@ -64,14 +71,20 @@ pub fn layout_section(
                 fragments,
                 style,
                 page_break_before,
+                footnotes,
             } => {
                 // §17.3.1.23: force a new page before this paragraph.
                 if *page_break_before && cursor_y > config.margins.top {
+                    if !page_footnotes.is_empty() {
+                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                        page_footnotes.clear();
+                    }
                     pages.push(std::mem::replace(
                         &mut current_page,
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    bottom = page_bottom;
                 }
 
                 // §17.4.58: if a floating table is active, set float_beside on
@@ -96,11 +109,16 @@ pub fn layout_section(
 
                 // Page break if paragraph doesn't fit
                 if cursor_y + para.size.height > bottom && cursor_y > config.margins.top {
+                    if !page_footnotes.is_empty() {
+                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                        page_footnotes.clear();
+                    }
                     pages.push(std::mem::replace(
                         &mut current_page,
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    bottom = page_bottom;
                     active_float = None;
                 }
 
@@ -112,6 +130,23 @@ pub fn layout_section(
                 }
 
                 cursor_y += para.size.height;
+
+                // Collect footnotes for this page and reserve space at bottom.
+                if !footnotes.is_empty() {
+                    let fn_constraints = super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
+                    let sep_height = Pt::new(4.0); // separator line + gap
+                    for (fn_frags, fn_style) in footnotes {
+                        let fn_para = super::paragraph::layout_paragraph(
+                            fn_frags, &fn_constraints, fn_style, default_line_height, measure_text,
+                        );
+                        // Only add separator space for the first footnote on this page.
+                        if page_footnotes.is_empty() {
+                            bottom -= sep_height;
+                        }
+                        bottom -= fn_para.size.height;
+                        page_footnotes.push((fn_frags, fn_style));
+                    }
+                }
             }
             LayoutBlock::Table {
                 rows,
@@ -141,11 +176,16 @@ pub fn layout_section(
                 // register as a float so subsequent text wraps around it.
                 if let Some((_, right_gap, bottom_gap)) = float_info {
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
+                        if !page_footnotes.is_empty() {
+                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            page_footnotes.clear();
+                        }
                         pages.push(std::mem::replace(
                             &mut current_page,
                             LayoutedPage::new(config.page_size),
                         ));
                         cursor_y = config.margins.top;
+                        bottom = page_bottom;
                     }
 
                     let float_y_start = cursor_y;
@@ -163,11 +203,16 @@ pub fn layout_section(
 
                 // Non-floating table: page break if table doesn't fit.
                 if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
+                    if !page_footnotes.is_empty() {
+                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                        page_footnotes.clear();
+                    }
                     pages.push(std::mem::replace(
                         &mut current_page,
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    bottom = page_bottom;
                 }
 
                 for mut cmd in table.commands {
@@ -181,10 +226,69 @@ pub fn layout_section(
         }
     }
 
+    // Render footnotes on the current (last) page.
+    if !page_footnotes.is_empty() {
+        render_page_footnotes(
+            &mut current_page, config, &page_footnotes,
+            default_line_height, measure_text, separator_indent,
+        );
+    }
+
     // Push the last page (even if empty — ensure at least one page)
     pages.push(current_page);
 
     pages
+}
+
+/// Render footnotes at the bottom of a page.
+fn render_page_footnotes(
+    page: &mut LayoutedPage,
+    config: &PageConfig,
+    footnotes: &[(&[Fragment], &ParagraphStyle)],
+    default_line_height: Pt,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
+    separator_indent: Pt,
+) {
+    use super::draw_command::DrawCommand;
+    use super::paragraph::layout_paragraph;
+
+    let content_width = config.content_width();
+    let constraints = super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
+    let page_bottom = config.page_size.height - config.margins.bottom;
+
+    // Layout all footnotes to compute total height.
+    let mut footnote_layouts = Vec::new();
+    let mut total_height = Pt::new(4.0); // separator + gap
+    for (frags, style) in footnotes {
+        let para = layout_paragraph(frags, &constraints, style, default_line_height, measure_text);
+        total_height += para.size.height;
+        footnote_layouts.push(para);
+    }
+
+    let footnote_top = page_bottom - total_height;
+
+    // §17.11.23: separator line positioned per default paragraph indent.
+    let sep_x = config.margins.left + separator_indent;
+    let sep_width = content_width * 0.33;
+    page.commands.push(DrawCommand::Line {
+        line: crate::geometry::PtLineSegment::new(
+            crate::geometry::PtOffset::new(sep_x, footnote_top),
+            crate::geometry::PtOffset::new(sep_x + sep_width, footnote_top),
+        ),
+        color: crate::resolve::color::RgbColor::BLACK,
+        width: Pt::new(0.5),
+    });
+
+    // Render footnote paragraphs.
+    let mut cursor_y = footnote_top + Pt::new(4.0);
+    for para in footnote_layouts {
+        for mut cmd in para.commands {
+            cmd.shift_y(cursor_y);
+            cmd.shift_x(config.margins.left);
+            page.commands.push(cmd);
+        }
+        cursor_y += para.size.height;
+    }
 }
 
 /// §17.4.28: compute the table's x offset based on alignment and indent.
@@ -243,6 +347,7 @@ mod tests {
             fragments: vec![text_frag(text, width, 14.0)],
             style: ParagraphStyle::default(),
             page_break_before: false,
+            footnotes: vec![],
         }
     }
 
@@ -257,7 +362,7 @@ mod tests {
 
     #[test]
     fn empty_blocks_produces_one_empty_page() {
-        let pages = layout_section(&[], &small_config(), None, Pt::new(14.0));
+        let pages = layout_section(&[], &small_config(), None, Pt::ZERO, Pt::new(14.0));
         assert_eq!(pages.len(), 1);
         assert!(pages[0].commands.is_empty());
     }
@@ -265,7 +370,7 @@ mod tests {
     #[test]
     fn single_paragraph_on_one_page() {
         let blocks = vec![para_block("hello", 30.0)];
-        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
 
         assert_eq!(pages.len(), 1);
         let text_count = pages[0]
@@ -280,7 +385,7 @@ mod tests {
     fn text_positioned_at_margins() {
         let blocks = vec![para_block("hello", 30.0)];
         let config = small_config();
-        let pages = layout_section(&blocks, &config, None, Pt::new(14.0));
+        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0));
 
         if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
             assert!(
@@ -300,7 +405,7 @@ mod tests {
         // Each paragraph: 14pt tall
         // 6 paragraphs = 84pt > 80pt → should break to 2 pages
         let blocks: Vec<_> = (0..6).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
 
         assert_eq!(pages.len(), 2, "should overflow to 2 pages");
 
@@ -328,7 +433,7 @@ mod tests {
     #[test]
     fn page_size_set_on_layouted_page() {
         let config = small_config();
-        let pages = layout_section(&[], &config, None, Pt::new(14.0));
+        let pages = layout_section(&[], &config, None, Pt::ZERO, Pt::new(14.0));
         assert_eq!(pages[0].page_size, config.page_size);
     }
 
@@ -337,7 +442,7 @@ mod tests {
         // 20 paragraphs at 14pt each = 280pt
         // Content area = 80pt → need 4 pages (80/14 = 5.7 paras per page)
         let blocks: Vec<_> = (0..20).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
 
         assert_eq!(pages.len(), 4);
     }
@@ -364,7 +469,7 @@ mod tests {
             float_info: None,
         }];
 
-        let pages = layout_section(&blocks, &small_config(), None, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
         assert_eq!(pages.len(), 1);
 
         let text_count = pages[0]
