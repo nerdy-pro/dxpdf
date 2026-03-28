@@ -294,8 +294,9 @@ fn build_paragraph_block(
                     baseline_offset: Pt::ZERO,
                 };
                 // Tab after label: advances to indent_left via the implicit
-                // tab stop. Fitting width = hanging - label_width so the
-                // fitter and renderer agree on consumed space.
+                // tab stop. Fitting width = hanging so that label + tab
+                // consume exactly the hanging indent space during fitting,
+                // leaving content_width for the body text.
                 let hanging = levels.get(level as usize)
                     .and_then(|l| l.indentation.as_ref())
                     .and_then(|ind| ind.first_line)
@@ -304,10 +305,9 @@ fn build_paragraph_block(
                         _ => Pt::ZERO,
                     })
                     .unwrap_or(Pt::ZERO);
-                let tab_fitting = (hanging - w).max(Pt::ZERO);
                 let tab_frag = Fragment::Tab {
                     line_height: h,
-                    fitting_width: Some(tab_fitting),
+                    fitting_width: Some(hanging),
                 };
                 fragments.insert(0, tab_frag);
                 fragments.insert(0, label_frag);
