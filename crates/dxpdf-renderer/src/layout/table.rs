@@ -156,8 +156,10 @@ pub fn layout_table(
                 layout_cell(&cell.blocks, cell_w, &cell.margins, default_line_height)
             };
 
-            // §17.4.85: Continue cells don't contribute to row height.
-            if !is_continue {
+            // §17.4.85: vertically merged cells (both Restart and Continue)
+            // don't contribute to individual row height. The merged content
+            // is distributed across the group by expand_rows_for_vmerge.
+            if cell.vertical_merge.is_none() {
                 max_height = max_height.max(layout.content_height + cell.margins.vertical());
             }
 
@@ -376,10 +378,15 @@ fn expand_rows_for_vmerge(
                 continue;
             }
 
-            // Expand last row if content overflows.
+            // Distribute overflow evenly across all rows in the merge group.
             let spanned: Pt = row_heights[row_idx..=last_merged_row].iter().copied().sum();
             if content_h > spanned {
-                row_heights[last_merged_row] += content_h - spanned;
+                let overflow = content_h - spanned;
+                let num_rows = (last_merged_row - row_idx + 1) as f32;
+                let per_row = overflow / num_rows;
+                for r in row_idx..=last_merged_row {
+                    row_heights[r] += per_row;
+                }
             }
         }
     }

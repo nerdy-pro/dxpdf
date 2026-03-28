@@ -46,26 +46,14 @@ pub fn layout_cell(
 
     let mut commands = Vec::new();
     let mut cursor_y = Pt::ZERO;
-    let mut is_first_para = true;
 
     for block in blocks {
         match block {
             CellBlock::Paragraph { fragments, style } => {
-                // §17.3.1.33: space_before of the first paragraph in a
-                // table cell is not rendered (absorbed by cell top margin).
-                let mut cell_style;
-                let effective_style = if is_first_para {
-                    is_first_para = false;
-                    cell_style = style.clone();
-                    cell_style.space_before = Pt::ZERO;
-                    &cell_style
-                } else {
-                    style
-                };
                 let para = layout_paragraph(
                     fragments,
                     &constraints,
-                    effective_style,
+                    style,
                     default_line_height,
                 );
                 for mut cmd in para.commands {
