@@ -34,6 +34,17 @@ pub enum FloatingImageY {
     RelativeToParagraph(Pt),
 }
 
+/// Side of a floating image.
+#[derive(Clone, Copy)]
+enum FloatSide { Left, Right }
+
+/// An active floating image that text wraps around.
+struct ActiveImageFloat {
+    side: FloatSide,
+    width: Pt,
+    y_end: Pt,
+}
+
 /// A block ready for layout — either a paragraph or a table.
 pub enum LayoutBlock {
     Paragraph {
@@ -89,6 +100,28 @@ pub fn layout_section(
     let mut active_float: Option<(Pt, Pt, Pt, Pt)> = None;
     // Footnotes collected for the current page.
     let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
+    // Active floating images for text wrapping.
+    // Pre-scan: register margin-aligned floats immediately since they appear
+    // at the top of the page regardless of which paragraph contains them.
+    let mut active_image_floats: Vec<ActiveImageFloat> = Vec::new();
+    for block in blocks {
+        if let LayoutBlock::Paragraph { floating_images, .. } = block {
+            for fi in floating_images {
+                let img_y = match fi.y {
+                    FloatingImageY::Absolute(y) => y,
+                    _ => continue, // paragraph-relative floats handled inline
+                };
+                let float_bottom = img_y + fi.size.height;
+                let is_left = fi.x < config.margins.left + content_width * 0.5;
+                let dist = Pt::new(9.0);
+                active_image_floats.push(ActiveImageFloat {
+                    side: if is_left { FloatSide::Left } else { FloatSide::Right },
+                    width: fi.size.width + dist,
+                    y_end: float_bottom + dist,
+                });
+            }
+        }
+    }
 
     for block in blocks {
         match block {
@@ -113,15 +146,46 @@ pub fn layout_section(
                     bottom = page_bottom;
                 }
 
-                // §17.4.58: if a floating table is active, set float_beside on
+                // §17.4.58: if a floating table is active, set float on
                 // the paragraph style so individual lines wrap around the float.
                 let mut effective_style = style.clone();
                 if let Some((fw, fg, _fy_start, fy_end)) = active_float {
                     if cursor_y < fy_end {
                         let float_remaining = fy_end - cursor_y;
-                        effective_style.float_beside = Some((fw + fg, float_remaining));
+                        effective_style.float_left = Some((fw + fg, float_remaining));
                     } else {
                         active_float = None;
+                    }
+                }
+
+                // Register paragraph-relative floating images inline.
+                // (Absolute/margin-aligned floats are pre-registered above.)
+                for fi in floating_images.iter() {
+                    if let FloatingImageY::RelativeToParagraph(offset) = fi.y {
+                        let float_bottom = cursor_y + offset + fi.size.height;
+                        let is_left = fi.x < config.margins.left + content_width * 0.5;
+                        let dist = Pt::new(9.0);
+                        active_image_floats.push(ActiveImageFloat {
+                            side: if is_left { FloatSide::Left } else { FloatSide::Right },
+                            width: fi.size.width + dist,
+                            y_end: float_bottom + dist,
+                        });
+                    }
+                }
+
+                // Apply active floating images for text wrapping.
+                active_image_floats.retain(|f| cursor_y < f.y_end);
+                for float in &active_image_floats {
+                    let remaining = float.y_end - cursor_y;
+                    match float.side {
+                        FloatSide::Left => {
+                            let existing = effective_style.float_left.map(|(w, _)| w).unwrap_or(Pt::ZERO);
+                            effective_style.float_left = Some((existing + float.width, remaining));
+                        }
+                        FloatSide::Right => {
+                            let existing = effective_style.float_right.map(|(w, _)| w).unwrap_or(Pt::ZERO);
+                            effective_style.float_right = Some((existing + float.width, remaining));
+                        }
                     }
                 }
 
@@ -157,7 +221,7 @@ pub fn layout_section(
 
                 cursor_y += para.size.height;
 
-                // §20.4.2.3: emit floating images anchored to this paragraph.
+                // §20.4.2.3: emit floating images (already registered above).
                 for fi in floating_images {
                     let img_y = match fi.y {
                         FloatingImageY::Absolute(y) => y,

@@ -41,10 +41,12 @@ pub struct ParagraphStyle {
     pub borders: Option<ParagraphBorderStyle>,
     /// §17.3.1.31: paragraph shading (background fill).
     pub shading: Option<RgbColor>,
-    /// §17.4.58: floating element beside this paragraph.
-    /// (float_width, remaining_float_height) — lines within this height get
-    /// narrower width; lines below get full width.
-    pub float_beside: Option<(Pt, Pt)>,
+    /// Floating element on the left side (text shifts right).
+    /// (reduction_width, remaining_float_height).
+    pub float_left: Option<(Pt, Pt)>,
+    /// Floating element on the right side (content area narrows).
+    /// (reduction_width, remaining_float_height).
+    pub float_right: Option<(Pt, Pt)>,
 }
 
 /// Resolved paragraph border style for rendering.
@@ -104,7 +106,8 @@ impl Default for ParagraphStyle {
             drop_cap: None,
             borders: None,
             shading: None,
-            float_beside: None,
+            float_left: None,
+            float_right: None,
         }
     }
 }
@@ -185,10 +188,9 @@ pub fn layout_paragraph(
     // Drop cap indent also reduces width for the first N lines.
     // §17.4.58: if a float is beside this paragraph, lines within the float
     // height use narrower width; lines below use full content_width.
-    let float_reduction = style
-        .float_beside
-        .map(|(fw, _)| fw)
-        .unwrap_or(Pt::ZERO);
+    let float_left_reduction = style.float_left.map(|(fw, _)| fw).unwrap_or(Pt::ZERO);
+    let float_right_reduction = style.float_right.map(|(fw, _)| fw).unwrap_or(Pt::ZERO);
+    let float_reduction = float_left_reduction + float_right_reduction;
     let narrow_width = (content_width - float_reduction).max(Pt::ZERO);
     let wide_width = content_width;
 
@@ -211,13 +213,18 @@ pub fn layout_paragraph(
         fragments
     };
 
-    // Fit lines: if float_beside is set, fit at narrow width first, then refit
+    // Fit lines: if a float is active, fit at narrow width first, then refit
     // remaining fragments at full width once past the float height.
     // Number of lines fit at narrow width (beside a float). Lines after this
     // index were fit at full width and should not get float_offset in rendering.
     let mut narrow_line_count: usize = usize::MAX; // no float = all lines treated uniformly
 
-    let lines = if let Some((_, float_remaining_height)) = style.float_beside {
+    let float_remaining_height = match (style.float_left, style.float_right) {
+        (Some((_, lh)), Some((_, rh))) => Some(lh.max(rh)),
+        (Some((_, h)), None) | (None, Some((_, h))) => Some(h),
+        (None, None) => None,
+    };
+    let lines = if let Some(float_remaining_height) = float_remaining_height {
         let mut all_lines = Vec::new();
         let narrow_lines = super::line::fit_lines_with_first(fragments, first_line_width, remaining_narrow);
 
@@ -345,11 +352,9 @@ pub fn layout_paragraph(
             Pt::ZERO
         };
 
-        // §17.4.58: lines beside the float get extra left indent.
-        // Use narrow_line_count (from fitting) to determine which lines are
-        // beside the float, ensuring fitting and rendering agree on the boundary.
-        let float_offset = if let Some((fw, _)) = style.float_beside {
-            if line_idx < narrow_line_count { fw } else { Pt::ZERO }
+        // §17.4.58: lines beside a left float get extra left indent.
+        let float_offset = if line_idx < narrow_line_count {
+            float_left_reduction
         } else {
             Pt::ZERO
         };
