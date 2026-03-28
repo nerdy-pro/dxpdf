@@ -379,7 +379,14 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
 
             TableRowInput {
                 cells,
-                min_height: row.properties.height.map(|h| Pt::from(h.value)),
+                height_rule: row.properties.height.map(|h| {
+                    use dxpdf_docx_model::model::HeightRule;
+                    use crate::layout::table::RowHeightRule;
+                    match h.rule {
+                        HeightRule::Exact => RowHeightRule::Exact(Pt::from(h.value)),
+                        _ => RowHeightRule::AtLeast(Pt::from(h.value)),
+                    }
+                }),
             }
         })
         .collect();
@@ -543,8 +550,26 @@ fn build_cell_blocks(
                     dlh,
                     built.border_config.as_ref(),
                 );
+                // §17.4.28: apply nested table alignment within the cell.
+                let align_offset = match built.alignment {
+                    Some(model::Alignment::Center) => {
+                        (inner_width - result.size.width) * 0.5
+                    }
+                    Some(model::Alignment::End) => {
+                        inner_width - result.size.width
+                    }
+                    _ => built.indent,
+                };
+                let commands = if align_offset != Pt::ZERO {
+                    result.commands.into_iter().map(|mut cmd| {
+                        cmd.shift_x(align_offset);
+                        cmd
+                    }).collect()
+                } else {
+                    result.commands
+                };
                 Some(CellBlock::NestedTable {
-                    commands: result.commands,
+                    commands,
                     size: result.size,
                 })
             }

@@ -12,11 +12,20 @@ use super::cell::{layout_cell, CellBlock, CellLayout};
 use super::draw_command::DrawCommand;
 use super::BoxConstraints;
 
+/// §17.4.81: row height rule.
+#[derive(Clone, Copy, Debug)]
+pub enum RowHeightRule {
+    /// Row height is at least this value; grows to fit content.
+    AtLeast(Pt),
+    /// Row height is exactly this value; content may clip.
+    Exact(Pt),
+}
+
 /// A table row for layout.
 pub struct TableRowInput {
     pub cells: Vec<TableCellInput>,
-    /// Minimum row height (from trHeight).
-    pub min_height: Option<Pt>,
+    /// §17.4.81: row height constraint.
+    pub height_rule: Option<RowHeightRule>,
 }
 
 /// A single cell for layout.
@@ -156,8 +165,14 @@ pub fn layout_table(
             grid_idx += span;
         }
 
-        if let Some(min_h) = row.min_height {
-            max_height = max_height.max(min_h);
+        match row.height_rule {
+            Some(RowHeightRule::AtLeast(min_h)) => {
+                max_height = max_height.max(min_h);
+            }
+            Some(RowHeightRule::Exact(h)) => {
+                max_height = h;
+            }
+            None => {}
         }
 
         row_heights.push(max_height);
@@ -608,7 +623,7 @@ mod tests {
     fn single_cell_table() {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("hello")],
-            min_height: None,
+            height_rule: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
@@ -629,11 +644,11 @@ mod tests {
         let rows = vec![
             TableRowInput {
                 cells: vec![simple_cell("a"), simple_cell("b")],
-                min_height: None,
+                height_rule: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
-                min_height: None,
+                height_rule: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
@@ -666,7 +681,7 @@ mod tests {
                     shading: None, cell_borders: None, vertical_merge: None,
                 },
             ],
-            min_height: None,
+            height_rule: None,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
@@ -679,7 +694,7 @@ mod tests {
     fn min_row_height_respected() {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("x")],
-            min_height: Some(Pt::new(40.0)),
+            height_rule: Some(RowHeightRule::AtLeast(Pt::new(40.0))),
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
@@ -700,7 +715,7 @@ mod tests {
                 shading: Some(RgbColor { r: 200, g: 200, b: 200 }),
                 cell_borders: None, vertical_merge: None,
             }],
-            min_height: None,
+            height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
@@ -717,7 +732,7 @@ mod tests {
     fn borders_emit_lines() {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("a"), simple_cell("b")],
-            min_height: None,
+            height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }));
@@ -744,7 +759,7 @@ mod tests {
                 grid_span: 2, // spans both columns
                 shading: None, cell_borders: None, vertical_merge: None,
             }],
-            min_height: None,
+            height_rule: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);
@@ -771,7 +786,7 @@ mod tests {
                 grid_span: 1,
                 shading: None, cell_borders: None, vertical_merge: None,
             }],
-            min_height: None,
+            height_rule: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None);

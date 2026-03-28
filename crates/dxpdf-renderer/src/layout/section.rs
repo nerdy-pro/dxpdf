@@ -352,7 +352,7 @@ mod tests {
                     grid_span: 1,
                     shading: None, cell_borders: None, vertical_merge: None,
                 }],
-                min_height: None,
+                height_rule: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,
