@@ -100,7 +100,9 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
             continue;
         }
 
-        // Fragment fits (or is the first on this line — allow oversized).
+        // If this is the first fragment on the line and it overflows,
+        // allow it (it will be the only fragment on this line). The
+        // paragraph renderer will clip/overflow as needed.
         line_width = new_width;
         line_height = line_height.max(frag.height());
         if let Fragment::Text { ascent, .. } = frag {

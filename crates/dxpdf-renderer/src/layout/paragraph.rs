@@ -171,6 +171,18 @@ pub fn layout_paragraph(
         narrow_width
     };
 
+    // Split oversized text fragments into per-character fragments so narrow
+    // table cells get character-level line breaking.
+    let min_avail = first_line_width.min(narrow_width).min(wide_width);
+    let split_fragments: Vec<Fragment>;
+    let effective_fragments: &[Fragment] = if min_avail > Pt::ZERO {
+        split_fragments = split_oversized_fragments(fragments, min_avail);
+        &split_fragments
+    } else {
+        fragments
+    };
+    let fragments = effective_fragments;
+
     // Fit lines: if float_beside is set, fit at narrow width first, then refit
     // remaining fragments at full width once past the float height.
     // Number of lines fit at narrow width (beside a float). Lines after this
@@ -551,6 +563,41 @@ pub fn layout_paragraph(
         commands,
         size: PtSize::new(constraints.max_width, total_height),
     }
+}
+
+/// Split text fragments that exceed `max_width` into per-character fragments.
+/// Non-text fragments and text fragments that fit are returned as-is.
+fn split_oversized_fragments(fragments: &[Fragment], max_width: Pt) -> Vec<Fragment> {
+    let mut result = Vec::with_capacity(fragments.len());
+    for frag in fragments {
+        match frag {
+            Fragment::Text { text, width, font, color, shading, border,
+                             height, ascent, hyperlink_url, baseline_offset, .. }
+                if *width > max_width && text.chars().count() > 1 =>
+            {
+                // Split into individual characters with uniform width estimate.
+                let chars: Vec<char> = text.chars().collect();
+                let per_char = *width / chars.len() as f32;
+                for ch in &chars {
+                    result.push(Fragment::Text {
+                        text: ch.to_string(),
+                        font: font.clone(),
+                        color: *color,
+                        shading: *shading,
+                        border: *border,
+                        width: per_char,
+                        trimmed_width: per_char,
+                        height: *height,
+                        ascent: *ascent,
+                        hyperlink_url: hyperlink_url.clone(),
+                        baseline_offset: *baseline_offset,
+                    });
+                }
+            }
+            _ => result.push(frag.clone()),
+        }
+    }
+    result
 }
 
 fn resolve_line_height(natural: Pt, rule: &LineSpacingRule) -> Pt {
