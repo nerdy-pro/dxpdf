@@ -533,8 +533,19 @@ fn build_cell_blocks(
     let dlh = default_line_height(ctx);
     content
         .iter()
-        .filter_map(|block| match block {
+        .enumerate()
+        .filter_map(|(i, block)| match block {
             Block::Paragraph(p) => {
+                // §17.4.66: every cell must end with a paragraph. When the
+                // last block is an empty paragraph following a table, it is
+                // structural — Word renders it with zero height.
+                if p.content.is_empty()
+                    && i > 0
+                    && matches!(content[i - 1], Block::Table(_))
+                    && i == content.len() - 1
+                {
+                    return None;
+                }
                 let (frags, merged_props) = build_fragments(p, ctx, table_style, Some(cond));
                 Some(CellBlock::Paragraph {
                     fragments: frags,
