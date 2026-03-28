@@ -34,17 +34,6 @@ pub enum FloatingImageY {
     RelativeToParagraph(Pt),
 }
 
-/// Side of a floating image.
-#[derive(Clone, Copy)]
-enum FloatSide { Left, Right }
-
-/// An active floating image that text wraps around.
-struct ActiveImageFloat {
-    side: FloatSide,
-    width: Pt,
-    y_end: Pt,
-}
-
 /// A block ready for layout — either a paragraph or a table.
 pub enum LayoutBlock {
     Paragraph {
@@ -95,35 +84,19 @@ pub fn layout_section(
     let page_bottom = config.page_size.height - config.margins.bottom;
     // Effective bottom boundary — reduced by footnote height.
     let mut bottom = page_bottom;
-    // §17.4.58: active floating table that text wraps around.
-    // (table_width, right_gap, float_y_start, float_y_end)
-    let mut active_float: Option<(Pt, Pt, Pt, Pt)> = None;
     // Footnotes collected for the current page.
     let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
-    // Active floating images for text wrapping.
-    // Pre-scan: register margin-aligned floats immediately since they appear
-    // at the top of the page regardless of which paragraph contains them.
-    let mut active_image_floats: Vec<ActiveImageFloat> = Vec::new();
-    for block in blocks {
-        if let LayoutBlock::Paragraph { floating_images, .. } = block {
-            for fi in floating_images {
-                let img_y = match fi.y {
-                    FloatingImageY::Absolute(y) => y,
-                    _ => continue, // paragraph-relative floats handled inline
-                };
-                let float_bottom = img_y + fi.size.height;
-                let is_left = fi.x < config.margins.left + content_width * 0.5;
-                let dist = Pt::new(9.0);
-                active_image_floats.push(ActiveImageFloat {
-                    side: if is_left { FloatSide::Left } else { FloatSide::Right },
-                    width: fi.size.width + dist,
-                    y_end: float_bottom + dist,
-                });
-            }
-        }
-    }
+    // Unified float tracking: tables + images.
+    let mut page_floats: Vec<super::float::ActiveFloat> = Vec::new();
+    // Per-page absolute float cache: absolute floats from paragraphs on the
+    // current page (including upcoming ones via forward scan). Reset on page break.
+    let mut current_page_abs_floats: Vec<super::float::ActiveFloat> = Vec::new();
+    // Index of the first block on the current page (for forward scanning).
+    let mut page_start_block: usize = 0;
+    // Whether we need to rescan absolute floats for this page.
+    let mut abs_floats_dirty = true;
 
-    for block in blocks {
+    for (block_idx, block) in blocks.iter().enumerate() {
         match block {
             LayoutBlock::Paragraph {
                 fragments,
@@ -144,50 +117,78 @@ pub fn layout_section(
                     ));
                     cursor_y = config.margins.top;
                     bottom = page_bottom;
+                    page_start_block = block_idx;
+                    abs_floats_dirty = true;
                 }
 
-                // §17.4.58: if a floating table is active, set float on
-                // the paragraph style so individual lines wrap around the float.
                 let mut effective_style = style.clone();
-                if let Some((fw, fg, _fy_start, fy_end)) = active_float {
-                    if cursor_y < fy_end {
-                        let float_remaining = fy_end - cursor_y;
-                        effective_style.float_left = Some((fw + fg, float_remaining));
-                    } else {
-                        active_float = None;
-                    }
-                }
 
-                // Register paragraph-relative floating images inline.
-                // (Absolute/margin-aligned floats are pre-registered above.)
+                // Register floating images (both relative and absolute).
                 for fi in floating_images.iter() {
-                    if let FloatingImageY::RelativeToParagraph(offset) = fi.y {
-                        let float_bottom = cursor_y + offset + fi.size.height;
-                        let is_left = fi.x < config.margins.left + content_width * 0.5;
-                        let dist = Pt::new(9.0);
-                        active_image_floats.push(ActiveImageFloat {
-                            side: if is_left { FloatSide::Left } else { FloatSide::Right },
-                            width: fi.size.width + dist,
-                            y_end: float_bottom + dist,
-                        });
-                    }
+                    let (y_start, y_end) = match fi.y {
+                        FloatingImageY::RelativeToParagraph(offset) => {
+                            (cursor_y + offset, cursor_y + offset + fi.size.height)
+                        }
+                        FloatingImageY::Absolute(img_y) => {
+                            (img_y, img_y + fi.size.height)
+                        }
+                    };
+                    let dist_h = Pt::new(9.0);
+                    page_floats.push(super::float::ActiveFloat {
+                        page_x: fi.x - dist_h,
+                        page_y_start: y_start,
+                        page_y_end: y_end,
+                        width: fi.size.width + dist_h * 2.0,
+                    });
                 }
 
-                // Apply active floating images for text wrapping.
-                active_image_floats.retain(|f| cursor_y < f.y_end);
-                for float in &active_image_floats {
-                    let remaining = float.y_end - cursor_y;
-                    match float.side {
-                        FloatSide::Left => {
-                            let existing = effective_style.float_left.map(|(w, _)| w).unwrap_or(Pt::ZERO);
-                            effective_style.float_left = Some((existing + float.width, remaining));
-                        }
-                        FloatSide::Right => {
-                            let existing = effective_style.float_right.map(|(w, _)| w).unwrap_or(Pt::ZERO);
-                            effective_style.float_right = Some((existing + float.width, remaining));
+                // Prune expired floats, then pass float context for per-line adjustment.
+                super::float::prune_floats(&mut page_floats, cursor_y);
+
+                // Forward-scan absolute floats from upcoming paragraphs on the
+                // current page. These may need to constrain text before the owning
+                // paragraph is processed. Only rescan when the page changes.
+                if abs_floats_dirty {
+                    current_page_abs_floats.clear();
+                    for (fi_idx, future_block) in blocks[page_start_block..].iter().enumerate() {
+                        if let LayoutBlock::Paragraph { floating_images: fi_list, page_break_before, .. } = future_block {
+                            // Stop scanning at the next explicit page break
+                            // (skip the first block since it may be the one that triggered the new page).
+                            if *page_break_before && fi_idx > 0 {
+                                break;
+                            }
+                            for fi in fi_list {
+                                if let FloatingImageY::Absolute(img_y) = fi.y {
+                                    let dist_h = Pt::new(9.0);
+                                    current_page_abs_floats.push(super::float::ActiveFloat {
+                                        page_x: fi.x - dist_h,
+                                        page_y_start: img_y,
+                                        page_y_end: img_y + fi.size.height,
+                                        width: fi.size.width + dist_h * 2.0,
+                                    });
+                                }
+                            }
                         }
                     }
+                    abs_floats_dirty = false;
                 }
+
+                // Merge page_floats with forward-scanned absolute floats (dedup).
+                let mut effective_floats = page_floats.clone();
+                for af in &current_page_abs_floats {
+                    let already_present = effective_floats.iter().any(|pf|
+                        (pf.page_x - af.page_x).raw().abs() < 0.1
+                        && (pf.page_y_start - af.page_y_start).raw().abs() < 0.1
+                        && (pf.page_y_end - af.page_y_end).raw().abs() < 0.1
+                    );
+                    if !already_present {
+                        effective_floats.push(af.clone());
+                    }
+                }
+                effective_style.page_floats = effective_floats;
+                effective_style.page_y = cursor_y;
+                effective_style.page_x = config.margins.left;
+                effective_style.page_content_width = content_width;
 
                 let para = layout_paragraph(
                     fragments,
@@ -209,7 +210,8 @@ pub fn layout_section(
                     ));
                     cursor_y = config.margins.top;
                     bottom = page_bottom;
-                    active_float = None;
+                    page_start_block = block_idx;
+                    abs_floats_dirty = true;
                 }
 
                 // Offset commands to absolute page position
@@ -290,6 +292,8 @@ pub fn layout_section(
                         ));
                         cursor_y = config.margins.top;
                         bottom = page_bottom;
+                        page_start_block = block_idx;
+                        abs_floats_dirty = true;
                     }
 
                     let float_y_start = cursor_y;
@@ -301,7 +305,13 @@ pub fn layout_section(
                         current_page.commands.push(cmd);
                     }
 
-                    active_float = Some((table.size.width, *right_gap, float_y_start, float_y_end));
+                    // Register as unified float for text wrapping.
+                    page_floats.push(super::float::ActiveFloat {
+                        page_x: table_x,
+                        page_y_start: float_y_start,
+                        page_y_end: float_y_end,
+                        width: table.size.width + *right_gap,
+                    });
                     continue;
                 }
 
@@ -317,6 +327,8 @@ pub fn layout_section(
                     ));
                     cursor_y = config.margins.top;
                     bottom = page_bottom;
+                    page_start_block = block_idx;
+                    abs_floats_dirty = true;
                 }
 
                 for mut cmd in table.commands {

@@ -1038,8 +1038,10 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
-        float_left: None,
-        float_right: None,
+        page_floats: Vec::new(),
+        page_y: crate::dimension::Pt::ZERO,
+        page_x: crate::dimension::Pt::ZERO,
+        page_content_width: crate::dimension::Pt::ZERO,
     }
 }
 

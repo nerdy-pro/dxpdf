@@ -9,6 +9,7 @@ use super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::BoxConstraints;
 
 /// A block of content ready for layout inside a cell.
+#[allow(clippy::large_enum_variant)]
 pub enum CellBlock {
     /// A paragraph with measured fragments.
     Paragraph {

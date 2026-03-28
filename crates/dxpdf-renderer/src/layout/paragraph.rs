@@ -41,12 +41,14 @@ pub struct ParagraphStyle {
     pub borders: Option<ParagraphBorderStyle>,
     /// §17.3.1.31: paragraph shading (background fill).
     pub shading: Option<RgbColor>,
-    /// Floating element on the left side (text shifts right).
-    /// (reduction_width, remaining_float_height).
-    pub float_left: Option<(Pt, Pt)>,
-    /// Floating element on the right side (content area narrows).
-    /// (reduction_width, remaining_float_height).
-    pub float_right: Option<(Pt, Pt)>,
+    /// Active floats for per-line width adjustment.
+    pub page_floats: Vec<super::float::ActiveFloat>,
+    /// Absolute y position of this paragraph on the page (for float overlap checks).
+    pub page_y: Pt,
+    /// Left margin x position (for float_adjustments computation).
+    pub page_x: Pt,
+    /// Total content width (for float_adjustments computation).
+    pub page_content_width: Pt,
 }
 
 /// Resolved paragraph border style for rendering.
@@ -106,8 +108,10 @@ impl Default for ParagraphStyle {
             drop_cap: None,
             borders: None,
             shading: None,
-            float_left: None,
-            float_right: None,
+            page_floats: Vec::new(),
+            page_y: Pt::ZERO,
+            page_x: Pt::ZERO,
+            page_content_width: Pt::ZERO,
         }
     }
 }
@@ -186,25 +190,11 @@ pub fn layout_paragraph(
     // §17.3.1.12: first-line indent adjusts the first line's available width.
     // Positive = narrower (indent), negative = wider (hanging indent).
     // Drop cap indent also reduces width for the first N lines.
-    // §17.4.58: if a float is beside this paragraph, lines within the float
-    // height use narrower width; lines below use full content_width.
-    let float_left_reduction = style.float_left.map(|(fw, _)| fw).unwrap_or(Pt::ZERO);
-    let float_right_reduction = style.float_right.map(|(fw, _)| fw).unwrap_or(Pt::ZERO);
-    let float_reduction = float_left_reduction + float_right_reduction;
-    let narrow_width = (content_width - float_reduction).max(Pt::ZERO);
-    let wide_width = content_width;
-
     let first_line_adjustment = style.indent_first_line + drop_cap_indent;
-    let first_line_width = (narrow_width - first_line_adjustment).max(Pt::ZERO);
-    let remaining_narrow = if drop_cap_indent > Pt::ZERO {
-        narrow_width - drop_cap_indent
-    } else {
-        narrow_width
-    };
 
     // Split oversized text fragments into per-character fragments so narrow
     // cells get character-level line breaking.
-    let min_avail = first_line_width.min(narrow_width).min(wide_width);
+    let min_avail = (content_width - first_line_adjustment).max(Pt::ZERO);
     let split_frags;
     let fragments = if min_avail > Pt::ZERO {
         split_frags = split_oversized_fragments(fragments, min_avail, measure_text);
@@ -213,65 +203,74 @@ pub fn layout_paragraph(
         fragments
     };
 
-    // Fit lines: if a float is active, fit at narrow width first, then refit
-    // remaining fragments at full width once past the float height.
-    // Number of lines fit at narrow width (beside a float). Lines after this
-    // index were fit at full width and should not get float_offset in rendering.
-    let mut narrow_line_count: usize = usize::MAX; // no float = all lines treated uniformly
+    // Per-line float adjustment: fit one line at a time, computing the available
+    // width for each line based on its absolute y position on the page.
+    // Each line stores its (float_left, float_right) adjustments for rendering.
+    let has_floats = !style.page_floats.is_empty();
 
-    let float_remaining_height = match (style.float_left, style.float_right) {
-        (Some((_, lh)), Some((_, rh))) => Some(lh.max(rh)),
-        (Some((_, h)), None) | (None, Some((_, h))) => Some(h),
-        (None, None) => None,
-    };
-    let lines = if let Some(float_remaining_height) = float_remaining_height {
-        let mut all_lines = Vec::new();
-        let narrow_lines = super::line::fit_lines_with_first(fragments, first_line_width, remaining_narrow);
+    struct LinePlacement {
+        line: super::line::FittedLine,
+        float_left: Pt,
+        float_right: Pt,
+    }
 
-        let mut accum_height = Pt::ZERO;
-        let mut last_narrow_end = fragments.len();
+    let line_placements: Vec<LinePlacement> = if has_floats {
+        let mut placements = Vec::new();
+        let mut frag_idx = 0;
+        let mut line_y = style.space_before;
 
-        for line in &narrow_lines {
-            let natural = if line.height > Pt::ZERO { line.height } else { default_line_height };
-            let lh = resolve_line_height(natural, &style.line_spacing);
-            // A line is beside the float if its TOP (accum_height) is within
-            // the float area. The line may extend past the float bottom — that's
-            // OK, the next line will be full-width.
-            if accum_height >= float_remaining_height {
-                last_narrow_end = line.start;
+        while frag_idx < fragments.len() {
+            let abs_y = style.page_y + line_y;
+            let (fl, fr) = super::float::float_adjustments(
+                &style.page_floats, abs_y, style.page_x, style.page_content_width,
+            );
+            let float_reduction = fl + fr;
+            let available = (content_width - float_reduction).max(Pt::ZERO);
+
+            let is_first = placements.is_empty();
+            let dc_adj = if placements.len() < drop_cap_lines { drop_cap_indent } else { Pt::ZERO };
+            let line_width = if is_first {
+                (available - first_line_adjustment).max(Pt::ZERO)
+            } else {
+                (available - dc_adj).max(Pt::ZERO)
+            };
+
+            // Fit one line at this width.
+            let remaining = &fragments[frag_idx..];
+            let fitted = super::line::fit_lines_with_first(remaining, line_width, line_width);
+            let fitted_line = if let Some(first) = fitted.into_iter().next() {
+                super::line::FittedLine {
+                    start: first.start + frag_idx,
+                    end: first.end + frag_idx,
+                    width: first.width,
+                    height: first.height,
+                    ascent: first.ascent,
+                    has_break: first.has_break,
+                }
+            } else {
                 break;
-            }
-            all_lines.push(super::line::FittedLine {
-                start: line.start,
-                end: line.end,
-                width: line.width,
-                height: line.height,
-                ascent: line.ascent,
-                has_break: line.has_break,
-            });
-            accum_height += lh;
-        }
+            };
 
-        narrow_line_count = all_lines.len();
+            let natural = if fitted_line.height > Pt::ZERO { fitted_line.height } else { default_line_height };
+            let lh = resolve_line_height(natural, &style.line_spacing);
 
-        // Refit remaining fragments at full width.
-        if last_narrow_end < fragments.len() {
-            let remaining_frags = &fragments[last_narrow_end..];
-            let wide_lines = super::line::fit_lines_with_first(remaining_frags, wide_width, wide_width);
-            for wl in wide_lines {
-                all_lines.push(super::line::FittedLine {
-                    start: wl.start + last_narrow_end,
-                    end: wl.end + last_narrow_end,
-                    width: wl.width,
-                    height: wl.height,
-                    ascent: wl.ascent,
-                    has_break: wl.has_break,
-                });
-            }
+            frag_idx = fitted_line.end;
+            placements.push(LinePlacement { line: fitted_line, float_left: fl, float_right: fr });
+            line_y += lh;
         }
-        all_lines
+        placements
     } else {
-        super::line::fit_lines_with_first(fragments, first_line_width, remaining_narrow)
+        // No floats — use standard line fitting.
+        let first_line_width = (content_width - first_line_adjustment).max(Pt::ZERO);
+        let remaining_width = if drop_cap_indent > Pt::ZERO {
+            content_width - drop_cap_indent
+        } else {
+            content_width
+        };
+        super::line::fit_lines_with_first(fragments, first_line_width, remaining_width)
+            .into_iter()
+            .map(|line| LinePlacement { line, float_left: Pt::ZERO, float_right: Pt::ZERO })
+            .collect()
     };
 
     let mut commands = Vec::new();
@@ -283,26 +282,21 @@ pub fn layout_paragraph(
     // Otherwise fall back to aligning with the Nth body line's baseline.
     let drop_cap_baseline_y = if let Some(ref dc) = style.drop_cap {
         if let Some(fh) = dc.frame_height {
-            // §17.3.1.11: frame-based positioning.
-            // Frame top = paragraph start. Word pre-computes the frame height
-            // (spacing.line) and position offset so that:
-            //   baseline = frame_top + frame_height + position_offset
-            // lands exactly on the Nth body line's baseline.
             let baseline = cursor_y + fh + dc.position_offset;
             Some(baseline)
         } else {
             // Fallback: align with Nth body line baseline.
             let n = dc.lines.max(1) as usize;
             let mut y = cursor_y;
-            for (i, fitted_line) in lines.iter().enumerate().take(n) {
-                let natural = if fitted_line.height > Pt::ZERO {
-                    fitted_line.height
+            for (i, lp) in line_placements.iter().enumerate().take(n) {
+                let natural = if lp.line.height > Pt::ZERO {
+                    lp.line.height
                 } else {
                     default_line_height
                 };
                 let lh = resolve_line_height(natural, &style.line_spacing);
                 if i == n - 1 {
-                    y += fitted_line.ascent;
+                    y += lp.line.ascent;
                     break;
                 }
                 y += lh;
@@ -344,7 +338,9 @@ pub fn layout_paragraph(
 
     let mut accum_line_height = Pt::ZERO;
 
-    for (line_idx, line) in lines.iter().enumerate() {
+    for (line_idx, lp) in line_placements.iter().enumerate() {
+        let line = &lp.line;
+
         // Drop cap lines get extra indent; after that, refit remaining lines at full width.
         let dc_offset = if line_idx < drop_cap_lines {
             drop_cap_indent
@@ -352,12 +348,8 @@ pub fn layout_paragraph(
             Pt::ZERO
         };
 
-        // §17.4.58: lines beside a left float get extra left indent.
-        let float_offset = if line_idx < narrow_line_count {
-            float_left_reduction
-        } else {
-            Pt::ZERO
-        };
+        // §17.4.58: per-line float left indent.
+        let float_offset = lp.float_left;
 
         let indent = if line_idx == 0 {
             style.indent_left + style.indent_first_line + dc_offset + float_offset
@@ -373,20 +365,17 @@ pub fn layout_paragraph(
         let line_height = resolve_line_height(natural_height, &style.line_spacing);
 
         // Alignment offset — computed relative to the line's available width.
-        // First line may be narrower (first-line indent), lines beside float are
-        // narrower, lines past float use full width.
-        let line_available = if float_offset > Pt::ZERO {
-            narrow_width
-        } else if line_idx == 0 {
-            first_line_width
+        let float_reduction = lp.float_left + lp.float_right;
+        let line_available = if line_idx == 0 {
+            (content_width - float_reduction - first_line_adjustment).max(Pt::ZERO)
         } else {
-            wide_width
+            (content_width - float_reduction - dc_offset).max(Pt::ZERO)
         };
         let remaining = (line_available - line.width).max(Pt::ZERO);
         let align_offset = match style.alignment {
             Alignment::Center => remaining * 0.5,
             Alignment::End => remaining,
-            Alignment::Both if !line.has_break && line_idx < lines.len() - 1 => Pt::ZERO, // justify handled separately
+            Alignment::Both if !line.has_break && line_idx < line_placements.len() - 1 => Pt::ZERO,
             _ => Pt::ZERO,
         };
 
@@ -647,7 +636,7 @@ pub fn layout_paragraph(
 
     // If no lines, still consume default height + spacing.
     // Apply the paragraph's line spacing rule to the default line height.
-    if lines.is_empty() {
+    if line_placements.is_empty() {
         let line_h = resolve_line_height(default_line_height, &style.line_spacing);
         cursor_y = style.space_before + line_h + style.space_after;
     }
