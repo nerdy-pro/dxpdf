@@ -23,6 +23,11 @@ pub struct FloatingImage {
     pub x: Pt,
     /// Resolved absolute y position on the page (may be relative to paragraph).
     pub y: FloatingImageY,
+    /// §20.4.2.18: wrapTopAndBottom — text only above/below, not beside.
+    pub wrap_top_and_bottom: bool,
+    /// §20.4.2.3 distL/distR: horizontal distance from surrounding text.
+    pub dist_left: Pt,
+    pub dist_right: Pt,
 }
 
 /// Vertical position for a floating image.
@@ -124,6 +129,8 @@ pub fn layout_section(
                 let mut effective_style = style.clone();
 
                 // Register floating images (both relative and absolute).
+                // §20.4.2.18: wrapTopAndBottom images are emitted immediately
+                // and cursor_y advances past them — they act as block spacers.
                 for fi in floating_images.iter() {
                     let (y_start, y_end) = match fi.y {
                         FloatingImageY::RelativeToParagraph(offset) => {
@@ -133,13 +140,29 @@ pub fn layout_section(
                             (img_y, img_y + fi.size.height)
                         }
                     };
-                    let dist_h = Pt::new(9.0);
-                    page_floats.push(super::float::ActiveFloat {
-                        page_x: fi.x - dist_h,
-                        page_y_start: y_start,
-                        page_y_end: y_end,
-                        width: fi.size.width + dist_h * 2.0,
-                    });
+                    if fi.wrap_top_and_bottom {
+                        // §20.4.2.18: emit the image now and advance past it.
+                        let img_y = match fi.y {
+                            FloatingImageY::Absolute(y) => y,
+                            FloatingImageY::RelativeToParagraph(offset) => cursor_y + offset,
+                        };
+                        current_page.commands.push(DrawCommand::Image {
+                            rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
+                            image_data: fi.image_data.clone(),
+                        });
+                        // Push cursor_y past the image so text starts below it.
+                        if y_end > cursor_y {
+                            cursor_y = y_end;
+                        }
+                    } else {
+                        // §20.4.2.3: use distL/distR for text distance from float.
+                        page_floats.push(super::float::ActiveFloat {
+                            page_x: fi.x - fi.dist_left,
+                            page_y_start: y_start,
+                            page_y_end: y_end,
+                            width: fi.size.width + fi.dist_left + fi.dist_right,
+                        });
+                    }
                 }
 
                 // Prune expired floats, then pass float context for per-line adjustment.
@@ -158,13 +181,15 @@ pub fn layout_section(
                                 break;
                             }
                             for fi in fi_list {
+                                if fi.wrap_top_and_bottom {
+                                    continue; // handled as block spacers, not floats
+                                }
                                 if let FloatingImageY::Absolute(img_y) = fi.y {
-                                    let dist_h = Pt::new(9.0);
                                     current_page_abs_floats.push(super::float::ActiveFloat {
-                                        page_x: fi.x - dist_h,
+                                        page_x: fi.x - fi.dist_left,
                                         page_y_start: img_y,
                                         page_y_end: img_y + fi.size.height,
-                                        width: fi.size.width + dist_h * 2.0,
+                                        width: fi.size.width + fi.dist_left + fi.dist_right,
                                     });
                                 }
                             }
@@ -224,7 +249,11 @@ pub fn layout_section(
                 cursor_y += para.size.height;
 
                 // §20.4.2.3: emit floating images (already registered above).
+                // wrapTopAndBottom images were already emitted before paragraph layout.
                 for fi in floating_images {
+                    if fi.wrap_top_and_bottom {
+                        continue;
+                    }
                     let img_y = match fi.y {
                         FloatingImageY::Absolute(y) => y,
                         FloatingImageY::RelativeToParagraph(offset) => {

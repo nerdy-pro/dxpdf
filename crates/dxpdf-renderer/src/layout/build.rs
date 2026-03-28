@@ -461,6 +461,9 @@ fn extract_floating_images(
                     size: crate::geometry::PtSize::new(w, h),
                     x,
                     y,
+                    wrap_top_and_bottom: matches!(anchor.wrap, dxpdf_docx_model::model::TextWrap::TopAndBottom { .. }),
+                    dist_left: Pt::from(anchor.distance.left),
+                    dist_right: Pt::from(anchor.distance.right),
                 });
             }
         }
