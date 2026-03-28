@@ -210,7 +210,23 @@ fn build_paragraph_block(
     ctx: &BuildContext,
     pending_dropcap: &mut Option<DropCapInfo>,
 ) -> Option<LayoutBlock> {
-    let (fragments, merged_props) = build_fragments(p, ctx, None, None);
+    let (mut fragments, merged_props) = build_fragments(p, ctx, None, None);
+
+    // Word suppresses Hyperlink character style (blue/underline) for ToC
+    // entries in print view. Strip visual hyperlink styling but keep the
+    // click annotation URL.
+    if p.style_id.as_ref()
+        .is_some_and(|id| id.as_str().starts_with("TOC") || id.as_str().starts_with("toc"))
+    {
+        for frag in &mut fragments {
+            if let Fragment::Text { font, color, hyperlink_url, .. } = frag {
+                if hyperlink_url.is_some() {
+                    *color = RgbColor::BLACK;
+                    font.underline = false;
+                }
+            }
+        }
+    }
 
     // §17.3.1.11: detect drop cap paragraph.
     let is_dropcap = merged_props

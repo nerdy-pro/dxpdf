@@ -366,8 +366,6 @@ where
                     dxpdf_docx_model::model::HyperlinkTarget::External(rel_id) => {
                         Some(rel_id.as_str())
                     }
-                    // Internal bookmarks use the anchor name as the hyperlink_url
-                    // prefixed with # to distinguish from external URLs.
                     dxpdf_docx_model::model::HyperlinkTarget::Internal { anchor } => {
                         Some(anchor.as_str())
                     }
