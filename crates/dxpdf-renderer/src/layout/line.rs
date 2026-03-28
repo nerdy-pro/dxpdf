@@ -270,6 +270,7 @@ mod tests {
             text_frag("text", 80.0),
             Fragment::Tab {
                 line_height: Pt::new(14.0),
+                fitting_width: None,
             },
             text_frag("more", 30.0),
         ];

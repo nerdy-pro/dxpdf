@@ -47,9 +47,6 @@ pub struct ParagraphStyle {
     pub page_y: Pt,
     /// Left margin x position (for float_adjustments computation).
     pub page_x: Pt,
-    /// List label present — first line width equals content_width (the hanging
-    /// indent space is consumed by the label, not added to text area).
-    pub has_list_label: bool,
     /// Total content width (for float_adjustments computation).
     pub page_content_width: Pt,
 }
@@ -111,7 +108,6 @@ impl Default for ParagraphStyle {
             drop_cap: None,
             borders: None,
             shading: None,
-            has_list_label: false,
             page_floats: Vec::new(),
             page_y: Pt::ZERO,
             page_x: Pt::ZERO,
@@ -194,13 +190,7 @@ pub fn layout_paragraph(
     // §17.3.1.12: first-line indent adjusts the first line's available width.
     // Positive = narrower (indent), negative = wider (hanging indent).
     // Drop cap indent also reduces width for the first N lines.
-    // For list paragraphs: the hanging indent space is consumed by the label
-    // fragments, so the first line width equals content_width (no widening).
-    let first_line_adjustment = if style.has_list_label {
-        drop_cap_indent
-    } else {
-        style.indent_first_line + drop_cap_indent
-    };
+    let first_line_adjustment = style.indent_first_line + drop_cap_indent;
 
     // Split oversized text fragments into per-character fragments so narrow
     // cells get character-level line breaking.

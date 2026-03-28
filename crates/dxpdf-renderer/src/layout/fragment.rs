@@ -61,6 +61,8 @@ pub enum Fragment {
     },
     Tab {
         line_height: Pt,
+        /// Override minimum width for line fitting (default: MIN_TAB_WIDTH).
+        fitting_width: Option<Pt>,
     },
     LineBreak {
         line_height: Pt,
@@ -76,7 +78,7 @@ impl Fragment {
         match self {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
-            Fragment::Tab { .. } => MIN_TAB_WIDTH,
+            Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
             Fragment::LineBreak { .. } | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
@@ -93,7 +95,7 @@ impl Fragment {
         match self {
             Fragment::Text { height, .. } => *height,
             Fragment::Image { size, .. } => size.height,
-            Fragment::Tab { line_height } | Fragment::LineBreak { line_height } => *line_height,
+            Fragment::Tab { line_height, .. } | Fragment::LineBreak { line_height } => *line_height,
             Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
@@ -337,6 +339,7 @@ where
             Inline::Tab => {
                 fragments.push(Fragment::Tab {
                     line_height: default_size,
+                    fitting_width: None,
                 });
             }
             Inline::LineBreak(_) => {

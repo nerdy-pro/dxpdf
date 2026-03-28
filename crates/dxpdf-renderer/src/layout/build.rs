@@ -215,7 +215,6 @@ fn build_paragraph_block(
     let (mut fragments, mut merged_props) = build_fragments(p, ctx, None, None);
 
     // §17.9.22: inject list label if paragraph has a numbering reference.
-    let mut has_list_label = false;
     if let Some(ref num_ref) = merged_props.numbering {
         let num_id = model::NumId::new(num_ref.num_id);
         let level = num_ref.level;
@@ -283,7 +282,7 @@ fn build_paragraph_block(
                 let (w, h, a) = ctx.measurer.measure(&label_text, &label_font);
                 let label_frag = Fragment::Text {
                     text: label_text,
-                    font: label_font.clone(),
+                    font: label_font,
                     color: default_color,
                     shading: None,
                     border: None,
@@ -294,18 +293,27 @@ fn build_paragraph_block(
                     hyperlink_url: None,
                     baseline_offset: Pt::ZERO,
                 };
-                // Tab fragment after label — aligns body text at the indent position.
+                // Tab after label: advances to indent_left via the implicit
+                // tab stop. Fitting width = hanging - label_width so the
+                // fitter and renderer agree on consumed space.
+                let hanging = levels.get(level as usize)
+                    .and_then(|l| l.indentation.as_ref())
+                    .and_then(|ind| ind.first_line)
+                    .map(|fl| match fl {
+                        model::FirstLineIndent::Hanging(v) => Pt::from(v),
+                        _ => Pt::ZERO,
+                    })
+                    .unwrap_or(Pt::ZERO);
+                let tab_fitting = (hanging - w).max(Pt::ZERO);
                 let tab_frag = Fragment::Tab {
                     line_height: h,
+                    fitting_width: Some(tab_fitting),
                 };
                 fragments.insert(0, tab_frag);
                 fragments.insert(0, label_frag);
-                has_list_label = true;
 
-                // Add an implicit tab stop at indent_left so the tab after the
-                // label lands at the hanging indent boundary, not at a default
-                // 36pt tab stop. The tab position is in the paragraph's x
-                // coordinate space (same as the rendering loop's x).
+                // Add implicit tab stop at numLvl.left so the tab lands
+                // at the body text position.
                 if let Some(lvl_left) = levels.get(level as usize)
                     .and_then(|l| l.indentation.as_ref())
                     .and_then(|ind| ind.start)
@@ -318,10 +326,7 @@ fn build_paragraph_block(
                 }
             }
 
-            // §17.9.3: numbering level indentation overrides paragraph style indentation.
             // §17.9.23: numbering level pPr overrides the paragraph style.
-            // The numbering level's left defines the text body position and
-            // its hanging defines the label offset (bullet at left - hanging).
             // Only the paragraph's direct ind overrides the numbering level.
             if let Some(lvl_ind) = levels.get(level as usize).and_then(|l| l.indentation.as_ref()) {
                 let mut ind = *lvl_ind;
@@ -430,7 +435,6 @@ fn build_paragraph_block(
     }
 
     let mut style = paragraph_style_from_props(&merged_props);
-    style.has_list_label = has_list_label;
 
     // Attach pending drop cap to this paragraph.
     if let Some(dc) = pending_dropcap.take() {
@@ -1171,7 +1175,6 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
-        has_list_label: false,
         page_floats: Vec::new(),
         page_y: crate::dimension::Pt::ZERO,
         page_x: crate::dimension::Pt::ZERO,
