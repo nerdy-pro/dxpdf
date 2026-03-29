@@ -232,8 +232,8 @@ pub fn layout_table(
             let b = &resolved_borders[row_idx][cell_ci];
             let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);
             let extra_right = (border_width(b.right) - cell.margins.right).max(Pt::ZERO);
-            let extra_top = (border_width(b.top) - cell.margins.top).max(Pt::ZERO);
-            let extra_bottom = (border_width(b.bottom) - cell.margins.bottom).max(Pt::ZERO);
+            let _extra_top = (border_width(b.top) - cell.margins.top).max(Pt::ZERO);
+            let _extra_bottom = (border_width(b.bottom) - cell.margins.bottom).max(Pt::ZERO);
             let layout_w = (cell_w - extra_left - extra_right).max(Pt::ZERO);
 
             let is_continue = cell.vertical_merge == Some(VerticalMergeState::Continue);
@@ -244,8 +244,11 @@ pub fn layout_table(
             };
 
             if cell.vertical_merge.is_none() {
+                // §17.4.38: borders are drawn inward from the cell edge (half-width
+                // offset). They don't expand the cell — only the cell margins and
+                // content height determine the row height.
                 max_height = max_height.max(
-                    layout.content_height + cell.margins.vertical() + extra_top + extra_bottom,
+                    layout.content_height + cell.margins.vertical(),
                 );
             }
 
