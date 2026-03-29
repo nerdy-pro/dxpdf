@@ -12,7 +12,8 @@ pub mod styles;
 use std::collections::HashMap;
 
 use dxpdf_docx_model::model::{
-    Block, Document, NoteId, NumId, ParagraphProperties, RelId, RunProperties, StyleId, Theme,
+    Block, Document, NoteId, NumId, NumPicBullet, NumPicBulletId, ParagraphProperties, RelId,
+    RunProperties, StyleId, Theme,
 };
 
 use self::numbering::ResolvedNumberingLevel;
@@ -34,6 +35,8 @@ pub struct ResolvedDocument {
     pub font_families: Vec<String>,
     /// Embedded media (images) — raw bytes keyed by relationship ID.
     pub media: HashMap<RelId, Vec<u8>>,
+    /// §17.9.21: picture bullet definitions keyed by numPicBulletId.
+    pub pic_bullets: HashMap<NumPicBulletId, NumPicBullet>,
     /// Theme (for color resolution during paint).
     pub theme: Option<Theme>,
     /// Document-level default paragraph properties (from docDefaults).
@@ -72,6 +75,7 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         numbering,
         font_families,
         media: doc.media.clone(),
+        pic_bullets: doc.numbering.pic_bullets.clone(),
         doc_defaults_paragraph: doc.styles.doc_defaults_paragraph.clone(),
         doc_defaults_run: doc.styles.doc_defaults_run.clone(),
         default_paragraph_style_id,

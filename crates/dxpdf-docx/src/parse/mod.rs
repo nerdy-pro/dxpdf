@@ -96,6 +96,22 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         }
     }
 
+    // §17.9.21: extract picture bullet images from numbering.xml relationships.
+    if let Some(num_rel) = doc_rels.find_by_type(&RelationshipType::Numbering) {
+        let num_path = zip::resolve_target(doc_dir, &num_rel.target);
+        let num_dir = zip::part_directory(&num_path);
+        let num_rels_path = zip::rels_path_for(&num_path);
+        if let Some(rels_data) = package.get_part(&num_rels_path) {
+            let num_rels = Relationships::parse(rels_data)?;
+            for rel in num_rels.filter_by_type(&RelationshipType::Image) {
+                let img_path = zip::resolve_target(num_dir, &rel.target);
+                if let Some(data) = package.take_part(&img_path) {
+                    media.insert(rel.id.clone(), data);
+                }
+            }
+        }
+    }
+
     // Phase 2c: Parse embedded fonts from fontTable
     let embedded_fonts = if let Some(ft_rel) = doc_rels.find_by_type(&RelationshipType::FontTable) {
         let ft_path = zip::resolve_target(doc_dir, &ft_rel.target);

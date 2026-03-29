@@ -11,7 +11,7 @@ use dxpdf_docx_model::model::{
 };
 
 use crate::dimension::Pt;
-use crate::geometry;
+use crate::geometry::{self, PtSize};
 use crate::layout::cell::CellBlock;
 use crate::layout::fragment::{collect_fragments, FontProps, Fragment};
 use crate::layout::measurer::TextMeasurer;
@@ -233,6 +233,55 @@ fn build_paragraph_block(
                 }
             }
 
+            let level_def = levels.get(level as usize);
+
+            // §17.9.10: check for picture bullet before text label.
+            let pic_bullet_injected = level_def
+                .and_then(|l| l.lvl_pic_bullet_id)
+                .and_then(|pic_id| ctx.resolved.pic_bullets.get(&pic_id))
+                .and_then(|bullet| {
+                    let rel_id = bullet.pict.as_ref()?
+                        .shapes.first()?
+                        .image_data.as_ref()?
+                        .rel_id.as_ref()?;
+                    let image_bytes = ctx.media().get(rel_id)?;
+                    // Size from VML shape style (width/height), default 9pt.
+                    let size = pic_bullet_size(bullet);
+                    let label_frag = Fragment::Image {
+                        size,
+                        rel_id: rel_id.as_str().to_string(),
+                        image_data: Some(image_bytes.as_slice().into()),
+                    };
+                    Some((label_frag, size.height))
+                });
+
+            if let Some((label_frag, label_height)) = pic_bullet_injected {
+                let hanging = level_def
+                    .and_then(|l| l.indentation.as_ref())
+                    .and_then(|ind| ind.first_line)
+                    .map(|fl| match fl {
+                        model::FirstLineIndent::Hanging(v) => Pt::from(v),
+                        _ => Pt::ZERO,
+                    })
+                    .unwrap_or(Pt::ZERO);
+                let tab_frag = Fragment::Tab {
+                    line_height: label_height,
+                    fitting_width: Some(hanging),
+                };
+                fragments.insert(0, tab_frag);
+                fragments.insert(0, label_frag);
+
+                if let Some(lvl_left) = level_def
+                    .and_then(|l| l.indentation.as_ref())
+                    .and_then(|ind| ind.start)
+                {
+                    merged_props.tabs.insert(0, dxpdf_docx_model::model::TabStop {
+                        position: lvl_left,
+                        alignment: dxpdf_docx_model::model::TabAlignment::Left,
+                        leader: dxpdf_docx_model::model::TabLeader::None,
+                    });
+                }
+            } else {
             let counters = ctx.list_counters.borrow();
             if let Some(label_text) = crate::resolve::numbering::format_list_label(
                 levels, level, &counters, num_id,
@@ -240,7 +289,6 @@ fn build_paragraph_block(
                 // Resolve label font from level run_properties or paragraph defaults.
                 let (default_family, default_size, default_color, _, _) =
                     resolve_paragraph_defaults(p, ctx.resolved);
-                let level_def = levels.get(level as usize);
                 let level_font_family = level_def
                     .and_then(|l| l.run_properties.as_ref())
                     .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
@@ -296,7 +344,7 @@ fn build_paragraph_block(
                 // tab stop. Fitting width = hanging so that label + tab
                 // consume exactly the hanging indent space during fitting,
                 // leaving content_width for the body text.
-                let hanging = levels.get(level as usize)
+                let hanging = level_def
                     .and_then(|l| l.indentation.as_ref())
                     .and_then(|ind| ind.first_line)
                     .map(|fl| match fl {
@@ -313,7 +361,7 @@ fn build_paragraph_block(
 
                 // Add implicit tab stop at numLvl.left so the tab lands
                 // at the body text position.
-                if let Some(lvl_left) = levels.get(level as usize)
+                if let Some(lvl_left) = level_def
                     .and_then(|l| l.indentation.as_ref())
                     .and_then(|ind| ind.start)
                 {
@@ -323,6 +371,7 @@ fn build_paragraph_block(
                         leader: dxpdf_docx_model::model::TabLeader::None,
                     });
                 }
+            }
             }
 
             // §17.9.23: numbering level pPr overrides the paragraph style.
@@ -1466,4 +1515,32 @@ fn populate_underline_metrics(fragments: &mut [Fragment], measurer: &TextMeasure
             }
         }
     }
+}
+
+/// Extract the display size for a picture bullet from its VML shape style.
+/// Falls back to 9pt × 9pt (common Word default for picture bullets).
+fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
+    use dxpdf_docx_model::model::VmlLengthUnit;
+
+    let default = PtSize::new(Pt::new(9.0), Pt::new(9.0));
+    let shape = match bullet.pict.as_ref().and_then(|p| p.shapes.first()) {
+        Some(s) => s,
+        None => return default,
+    };
+
+    let to_pt = |len: &dxpdf_docx_model::model::VmlLength| -> Pt {
+        let val = len.value as f32;
+        match len.unit {
+            VmlLengthUnit::Pt => Pt::new(val),
+            VmlLengthUnit::In => Pt::new(val * 72.0),
+            VmlLengthUnit::Cm => Pt::new(val * 28.3465),
+            VmlLengthUnit::Mm => Pt::new(val * 2.83465),
+            VmlLengthUnit::Px => Pt::new(val * 0.75),
+            _ => Pt::new(val),
+        }
+    };
+
+    let w = shape.style.width.as_ref().map(to_pt).unwrap_or(default.width);
+    let h = shape.style.height.as_ref().map(to_pt).unwrap_or(default.height);
+    PtSize::new(w, h)
 }
