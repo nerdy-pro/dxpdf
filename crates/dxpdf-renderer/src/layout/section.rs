@@ -115,6 +115,9 @@ pub fn layout_section(
     let mut page_start_block: usize = 0;
     // Whether we need to rescan absolute floats for this page.
     let mut abs_floats_dirty = true;
+    // Whether the current page is the first page of the section with no content yet.
+    // space_before is only suppressed here, not on overflow pages.
+    let mut first_on_section_page = true;
 
     // Column-aware constraint: use current column's width.
     let col_constraints = |col: usize| -> BoxConstraints {
@@ -151,16 +154,28 @@ pub fn layout_section(
                     bottom = page_bottom;
                     page_start_block = block_idx;
                     abs_floats_dirty = true;
+                    page_floats.clear();
                 }
 
                 let mut effective_style = style.clone();
+
+                // Log paragraph info.
+                let first_text = fragments.iter().find_map(|f| {
+                    if let Fragment::Text { text, .. } = f { Some(text.as_str()) } else { None }
+                }).unwrap_or("");
+                log::debug!(
+                    "[layout] block[{block_idx}] para style={:?} text={:?} cursor_y={:.1} col={current_col} floats={} fwd_floats={}",
+                    effective_style.style_id, &first_text[..first_text.len().min(30)],
+                    cursor_y.raw(), page_floats.len(), current_page_abs_floats.len()
+                );
 
                 // Save page state for potential keepNext rollback.
                 let cmds_before_para = current_page.commands.len();
                 let _cursor_before_para = cursor_y;
 
-                // §17.3.1.33: suppress space_before at the top of a page/column.
-                if cursor_y <= column_top {
+                // §17.3.1.33: suppress space_before at the top of a section's
+                // first page. On overflow pages, space_before is preserved.
+                if cursor_y <= column_top && first_on_section_page {
                     effective_style.space_before = Pt::ZERO;
                 }
                 // §17.3.1.9 / §17.3.1.33: spacing collapse must happen BEFORE
@@ -206,13 +221,18 @@ pub fn layout_section(
                         }
                     } else {
                         // §20.4.2.3: use distL/distR for text distance from float.
-                        page_floats.push(super::float::ActiveFloat {
+                        let float_entry = super::float::ActiveFloat {
                             page_x: fi.x - fi.dist_left,
                             page_y_start: y_start,
                             page_y_end: y_end,
                             width: fi.size.width + fi.dist_left + fi.dist_right,
                             source: super::float::FloatSource::Image,
-                        });
+                        };
+                        log::debug!(
+                            "[layout]   register image float: x={:.1} y={:.1}-{:.1} w={:.1}",
+                            float_entry.page_x.raw(), y_start.raw(), y_end.raw(), float_entry.width.raw()
+                        );
+                        page_floats.push(float_entry);
                     }
                 }
 
@@ -272,6 +292,14 @@ pub fn layout_section(
                         effective_floats.push(af.clone());
                     }
                 }
+                if !effective_floats.is_empty() {
+                    for (i, f) in effective_floats.iter().enumerate() {
+                        log::debug!(
+                            "[layout]   effective_float[{i}]: x={:.1} y={:.1}-{:.1} w={:.1} src={:?}",
+                            f.page_x.raw(), f.page_y_start.raw(), f.page_y_end.raw(), f.width.raw(), f.source
+                        );
+                    }
+                }
                 effective_style.page_floats = effective_floats;
                 effective_style.page_y = cursor_y;
                 effective_style.page_x = col_x(current_col);
@@ -301,6 +329,7 @@ pub fn layout_section(
                             bottom = page_bottom;
                             page_start_block = block_idx;
                             abs_floats_dirty = true;
+                    page_floats.clear();
                         }
                         cursor_y = column_top;
                         effective_style.page_x = col_x(current_col);
@@ -336,6 +365,7 @@ pub fn layout_section(
                             bottom = page_bottom;
                             page_start_block = block_idx;
                             abs_floats_dirty = true;
+                    page_floats.clear();
                         }
                         // Update para_start_y after page/column change so
                         // floating images use the correct position.
@@ -343,6 +373,10 @@ pub fn layout_section(
                     }
 
                     // Offset commands to absolute page position
+                    log::debug!(
+                        "[layout]   chunk[{chunk_idx}] placed at y={:.1} x={:.1} height={:.1}",
+                        cursor_y.raw(), col_x(current_col).raw(), para.size.height.raw()
+                    );
                     for mut cmd in para.commands {
                         cmd.shift_y(cursor_y);
                         cmd.shift_x(col_x(current_col));
@@ -400,9 +434,15 @@ pub fn layout_section(
                         bottom = page_bottom;
                         page_start_block = block_idx;
                         abs_floats_dirty = true;
+                    page_floats.clear();
 
                         // Re-layout the current paragraph on the new page.
-                        effective_style.space_before = Pt::ZERO; // top of page
+                        // Only suppress space_before at section start.
+                        if !first_on_section_page {
+                            // Restore original space_before for overflow pages.
+                        } else {
+                            effective_style.space_before = Pt::ZERO;
+                        }
                         let constraints = col_constraints(current_col);
                         effective_style.page_y = cursor_y;
                         effective_style.page_x = col_x(current_col);
@@ -421,6 +461,7 @@ pub fn layout_section(
                     }
                 }
 
+                first_on_section_page = false;
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -502,6 +543,7 @@ pub fn layout_section(
                         bottom = page_bottom;
                         page_start_block = block_idx;
                         abs_floats_dirty = true;
+                    page_floats.clear();
                     }
 
                     let float_y_start = cursor_y;
@@ -517,6 +559,10 @@ pub fn layout_section(
                         current_page.commands.push(cmd);
                     }
 
+                    log::debug!(
+                        "[layout]   register table float: x={:.1} y={:.1}-{:.1} w={:.1} block_idx={block_idx}",
+                        table_x.raw(), float_y_start.raw(), float_y_end.raw(), (table.size.width + *right_gap).raw()
+                    );
                     // §17.4.56: register as float for text wrapping.
                     // Table floats only wrap the owning paragraph, not subsequent ones.
                     page_floats.push(super::float::ActiveFloat {
@@ -545,6 +591,7 @@ pub fn layout_section(
                     bottom = page_bottom;
                     page_start_block = block_idx;
                     abs_floats_dirty = true;
+                    page_floats.clear();
                 }
 
                 for mut cmd in table.commands {
@@ -554,6 +601,7 @@ pub fn layout_section(
                 }
 
                 cursor_y += table.size.height;
+                first_on_section_page = false;
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
             }
