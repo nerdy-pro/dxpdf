@@ -402,30 +402,36 @@ pub fn layout_paragraph(
                     shading,
                     border,
                     width,
+                    ascent: frag_ascent,
+                    height: frag_height,
                     hyperlink_url,
                     baseline_offset,
                     text_offset,
                     ..
                 } => {
                     // §17.3.2.32: render run-level shading behind text.
+                    // Uses text bounds (ascent+descent), not full line height.
                     if let Some(bg_color) = shading {
+                        let text_top = cursor_y + line.ascent - *frag_ascent;
                         commands.push(DrawCommand::Rect {
                             rect: crate::geometry::PtRect::from_xywh(
                                 x,
-                                cursor_y,
+                                text_top,
                                 *width,
-                                line_height,
+                                *frag_height,
                             ),
                             color: *bg_color,
                         });
                     }
 
                     // §17.3.2.4: render run-level border (box around text).
+                    // Uses text bounds, not full line height.
                     if let Some(bdr) = border {
+                        let text_top = cursor_y + line.ascent - *frag_ascent;
                         let bx = x - bdr.space;
-                        let by = cursor_y;
+                        let by = text_top;
                         let bw = *width + bdr.space * 2.0;
-                        let bh = line_height;
+                        let bh = *frag_height;
                         let half = bdr.width * 0.5;
                         // Top
                         commands.push(DrawCommand::Line {

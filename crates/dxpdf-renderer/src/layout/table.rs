@@ -243,6 +243,14 @@ pub fn layout_table(
                 layout_cell(&cell.blocks, layout_w, &cell.margins, default_line_height, measure_text)
             };
 
+            log::debug!(
+                "[table] row[{row_idx}] cell[{cell_ci}] x={:.1} w={:.1} layout_w={:.1} content_h={:.1} margins=({:.1},{:.1},{:.1},{:.1}) borders=({},{},{},{}) span={}",
+                cell_x.raw(), cell_w.raw(), layout_w.raw(), layout.content_height.raw(),
+                cell.margins.top.raw(), cell.margins.right.raw(), cell.margins.bottom.raw(), cell.margins.left.raw(),
+                b.top.is_some(), b.right.is_some(), b.bottom.is_some(), b.left.is_some(),
+                span,
+            );
+
             if cell.vertical_merge.is_none() {
                 // §17.4.38: borders are drawn inward from the cell edge (half-width
                 // offset). They don't expand the cell — only the cell margins and
@@ -257,11 +265,18 @@ pub fn layout_table(
         }
 
         match row.height_rule {
-            Some(RowHeightRule::AtLeast(min_h)) => max_height = max_height.max(min_h),
-            Some(RowHeightRule::Exact(h)) => max_height = h,
+            Some(RowHeightRule::AtLeast(min_h)) => {
+                log::debug!("[table] row[{row_idx}] height_rule=AtLeast({:.1})", min_h.raw());
+                max_height = max_height.max(min_h);
+            }
+            Some(RowHeightRule::Exact(h)) => {
+                log::debug!("[table] row[{row_idx}] height_rule=Exact({:.1})", h.raw());
+                max_height = h;
+            }
             None => {}
         }
 
+        log::debug!("[table] row[{row_idx}] final_height={:.1}", max_height.raw());
         row_heights.push(max_height);
         row_cell_layouts.push(entries);
     }

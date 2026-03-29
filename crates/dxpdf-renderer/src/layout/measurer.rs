@@ -31,11 +31,11 @@ impl TextMeasurer {
 
         let (width, _bounds) = font.measure_str(text, None);
         let (_, metrics) = font.metrics();
-        // Line height = ascent + descent + leading.
-        // The leading (sTypoLineGap) provides the font's built-in inter-line
-        // spacing. Including it matches Word's line height computation for
-        // Auto line spacing.
-        let line_height = Pt::new(-metrics.ascent + metrics.descent + metrics.leading);
+        // §17.3.1.33: line height = ascent + descent (without leading).
+        // Word's Auto line spacing base is ascent+descent. The leading
+        // (sTypoLineGap) is NOT included — it would make table cells and
+        // single-spaced paragraphs too tall.
+        let line_height = Pt::new(-metrics.ascent + metrics.descent);
         let ascent = Pt::new(-metrics.ascent);
 
         (Pt::new(width), line_height, ascent)
@@ -74,6 +74,6 @@ impl TextMeasurer {
     pub fn default_line_height(&self, family: &str, size: Pt) -> Pt {
         let font = fonts::make_font(&self.font_mgr, family, size, false, false);
         let (_, metrics) = font.metrics();
-        Pt::new(-metrics.ascent + metrics.descent + metrics.leading)
+        Pt::new(-metrics.ascent + metrics.descent)
     }
 }
