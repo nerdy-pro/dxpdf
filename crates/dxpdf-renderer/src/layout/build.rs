@@ -137,8 +137,9 @@ fn collect_endnotes(
     ctx: &BuildContext,
     endnotes: &mut Vec<(String, Vec<Fragment>, ParagraphStyle)>,
 ) {
+    // IDs 0 and 1 are reserved for separator and continuation separator.
     let mut en_ids: Vec<_> = ctx.resolved.endnotes.keys()
-        .filter(|id| id.value() > 0)
+        .filter(|id| id.value() > 1)
         .collect();
     en_ids.sort_by_key(|id| id.value());
     for (i, note_id) in en_ids.iter().enumerate() {
