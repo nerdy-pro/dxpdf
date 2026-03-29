@@ -6,21 +6,18 @@
 
 use crate::dimension::Pt;
 
+use super::build::HeaderFooterContent;
 use super::draw_command::{DrawCommand, LayoutedPage};
-use super::fragment::Fragment;
 use super::page::PageConfig;
-use super::paragraph::{layout_paragraph, ParagraphStyle};
+use super::paragraph::layout_paragraph;
 use super::BoxConstraints;
 
 /// Render headers and footers onto already-laid-out pages.
-///
-/// `header_fragments` / `footer_fragments`: pre-collected fragments for the
-/// header/footer content. `page_number_field` is substituted into PAGE fields.
 pub fn render_headers_footers(
     pages: &mut [LayoutedPage],
     config: &PageConfig,
-    header_fragments: Option<&[Fragment]>,
-    footer_fragments: Option<&[Fragment]>,
+    header: Option<&HeaderFooterContent>,
+    footer: Option<&HeaderFooterContent>,
     default_line_height: Pt,
 ) {
     let content_width = config.content_width();
@@ -28,16 +25,26 @@ pub fn render_headers_footers(
     for page in pages.iter_mut() {
 
         // Header
-        if let Some(frags) = header_fragments {
-            let constraints = BoxConstraints::tight_width(content_width, config.margins.top);
-            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height, None);
+        if let Some(hf) = header {
+            if hf.fragments.is_empty() {
+                continue;
+            }
+            let (layout_width, offset_x, offset_y) = if let Some((abs_x, abs_y)) = hf.absolute_position {
+                // VML absolute positioning: use the text box width from VML
+                // and position at the absolute page coordinates.
+                (content_width, abs_x, abs_y)
+            } else {
+                (content_width, config.margins.left, config.header_margin)
+            };
 
-            let header_y = config.header_margin;
+            let constraints = BoxConstraints::tight_width(layout_width, config.margins.top);
+            let para = layout_paragraph(&hf.fragments, &constraints, &hf.style, default_line_height, None);
+
             let mut header_cmds: Vec<DrawCommand> = para
                 .commands
                 .into_iter()
                 .map(|mut cmd| {
-                    cmd.shift(config.margins.left, header_y);
+                    cmd.shift(offset_x, offset_y);
                     cmd
                 })
                 .collect();
@@ -48,9 +55,12 @@ pub fn render_headers_footers(
         }
 
         // Footer
-        if let Some(frags) = footer_fragments {
+        if let Some(hf) = footer {
+            if hf.fragments.is_empty() {
+                continue;
+            }
             let constraints = BoxConstraints::tight_width(content_width, config.margins.bottom);
-            let para = layout_paragraph(frags, &constraints, &ParagraphStyle::default(), default_line_height, None);
+            let para = layout_paragraph(&hf.fragments, &constraints, &hf.style, default_line_height, None);
 
             let footer_y = config.page_size.height - config.footer_margin - para.size.height;
             for mut cmd in para.commands {
@@ -65,9 +75,18 @@ pub fn render_headers_footers(
 mod tests {
     use super::*;
     use crate::geometry::{PtEdgeInsets, PtOffset, PtSize};
-    use crate::layout::fragment::FontProps;
+    use crate::layout::fragment::{FontProps, Fragment};
+    use crate::layout::paragraph::ParagraphStyle;
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
+
+    fn make_hf(frags: Vec<Fragment>) -> HeaderFooterContent {
+        HeaderFooterContent {
+            fragments: frags,
+            style: ParagraphStyle::default(),
+            absolute_position: None,
+        }
+    }
 
     fn text_frag(text: &str) -> Fragment {
         Fragment::Text {
@@ -133,8 +152,8 @@ mod tests {
         });
 
         let config = test_config();
-        let header_frags = vec![text_frag("Header")];
-        render_headers_footers(&mut pages, &config, Some(&header_frags), None, Pt::new(14.0));
+        let header = make_hf(vec![text_frag("Header")]);
+        render_headers_footers(&mut pages, &config, Some(&header), None, Pt::new(14.0));
 
         assert!(pages[0].commands.len() > 1);
         // First command should be the header text
@@ -149,8 +168,8 @@ mod tests {
         let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
 
         let config = test_config();
-        let footer_frags = vec![text_frag("Footer")];
-        render_headers_footers(&mut pages, &config, None, Some(&footer_frags), Pt::new(14.0));
+        let footer = make_hf(vec![text_frag("Footer")]);
+        render_headers_footers(&mut pages, &config, None, Some(&footer), Pt::new(14.0));
 
         assert_eq!(pages[0].commands.len(), 1);
         if let DrawCommand::Text { text, position, .. } = &pages[0].commands[0] {
@@ -167,8 +186,8 @@ mod tests {
         ];
 
         let config = test_config();
-        let header_frags = vec![text_frag("H")];
-        render_headers_footers(&mut pages, &config, Some(&header_frags), None, Pt::new(14.0));
+        let header = make_hf(vec![text_frag("H")]);
+        render_headers_footers(&mut pages, &config, Some(&header), None, Pt::new(14.0));
 
         // Both pages should have header
         for page in &pages {
@@ -181,8 +200,8 @@ mod tests {
     fn header_positioned_at_header_margin() {
         let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
         let config = test_config();
-        let header_frags = vec![text_frag("H")];
-        render_headers_footers(&mut pages, &config, Some(&header_frags), None, Pt::new(14.0));
+        let header = make_hf(vec![text_frag("H")]);
+        render_headers_footers(&mut pages, &config, Some(&header), None, Pt::new(14.0));
 
         if let DrawCommand::Text { position, .. } = &pages[0].commands[0] {
             // Header y should be near header_margin (36) + ascent

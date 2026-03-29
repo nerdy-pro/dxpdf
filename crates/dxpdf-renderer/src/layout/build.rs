@@ -150,23 +150,106 @@ fn collect_endnotes(
     }
 }
 
-/// Collect fragments from header/footer blocks.
+/// Collected header/footer content with layout metadata.
+pub struct HeaderFooterContent {
+    pub fragments: Vec<Fragment>,
+    pub style: ParagraphStyle,
+    /// Absolute page-relative position from a VML text box, if present.
+    pub absolute_position: Option<(Pt, Pt)>,
+}
+
+/// Collect fragments from header/footer blocks, preserving paragraph style
+/// and VML absolute positioning.
 pub fn collect_fragments_from_blocks(
     blocks: &[Block],
     ctx: &BuildContext,
-) -> Vec<Fragment> {
-    blocks
-        .iter()
-        .filter_map(|block| {
-            if let Block::Paragraph(p) = block {
-                let (frags, _) = build_fragments(p, ctx, None, None);
-                Some(frags)
-            } else {
-                None
+) -> HeaderFooterContent {
+    let mut all_fragments = Vec::new();
+    let mut style = ParagraphStyle::default();
+    let mut absolute_position: Option<(Pt, Pt)> = None;
+
+    for block in blocks {
+        if let Block::Paragraph(p) = block {
+            let (frags, props) = build_fragments(p, ctx, None, None);
+            if all_fragments.is_empty() {
+                style = paragraph_style_from_props(&props);
             }
-        })
-        .flatten()
-        .collect()
+            // Check for VML absolute positioning in Pict inlines.
+            // The Pict may be directly in the paragraph or inside an
+            // AlternateContent fallback.
+            if absolute_position.is_none() {
+                for inline in &p.content {
+                    if let Some(pos) = find_vml_absolute_position(inline) {
+                        absolute_position = Some(pos);
+                        break;
+                    }
+                }
+            }
+            all_fragments.extend(frags);
+        }
+    }
+
+    HeaderFooterContent {
+        fragments: all_fragments,
+        style,
+        absolute_position,
+    }
+}
+
+/// Search an inline (and AlternateContent fallback) for a VML text box with
+/// absolute positioning.
+fn find_vml_absolute_position(inline: &model::Inline) -> Option<(Pt, Pt)> {
+    match inline {
+        model::Inline::Pict(pict) => find_vml_pos_in_pict(pict),
+        model::Inline::AlternateContent(ac) => {
+            if let Some(ref fallback) = ac.fallback {
+                for inner in fallback {
+                    if let Some(pos) = find_vml_absolute_position(inner) {
+                        return Some(pos);
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn find_vml_pos_in_pict(pict: &model::Pict) -> Option<(Pt, Pt)> {
+    for shape in &pict.shapes {
+        if shape.text_box.is_some() {
+            if let Some(pos) = vml_absolute_position(&shape.style) {
+                return Some(pos);
+            }
+        }
+    }
+    None
+}
+
+/// Extract absolute page-relative position from a VML shape style, in points.
+fn vml_absolute_position(style: &model::VmlStyle) -> Option<(Pt, Pt)> {
+    use dxpdf_docx_model::model::CssPosition;
+    if style.position != Some(CssPosition::Absolute) {
+        return None;
+    }
+    let x = style.margin_left.map(vml_length_to_pt)?;
+    let y = style.margin_top.map(vml_length_to_pt)?;
+    Some((x, y))
+}
+
+/// Convert a VML CSS length to points.
+fn vml_length_to_pt(len: model::VmlLength) -> Pt {
+    use dxpdf_docx_model::model::VmlLengthUnit;
+    let value = len.value as f32;
+    Pt::new(match len.unit {
+        VmlLengthUnit::Pt => value,
+        VmlLengthUnit::In => value * 72.0,
+        VmlLengthUnit::Cm => value * 72.0 / 2.54,
+        VmlLengthUnit::Mm => value * 72.0 / 25.4,
+        VmlLengthUnit::Px => value * 0.75, // 96dpi → 72pt/in
+        VmlLengthUnit::None => value / 914400.0 * 72.0, // bare number = EMU
+        _ => value, // Em, Percent — fallback to raw value
+    })
 }
 
 /// Default line height derived from document-level font settings.

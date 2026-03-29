@@ -20,14 +20,24 @@ pub struct ResolvedSection {
 pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
     let mut sections = Vec::new();
     let mut current_blocks = Vec::new();
+    // §17.10.5: sections without explicit header/footer refs inherit from
+    // the previous section.
+    let mut prev_header: Option<Vec<Block>> = None;
+    let mut prev_footer: Option<Vec<Block>> = None;
 
     for block in &doc.body {
         match block {
             Block::SectionBreak(props) => {
+                let header = resolve_header(doc, &props.header_refs.default)
+                    .or_else(|| prev_header.clone());
+                let footer = resolve_footer(doc, &props.footer_refs.default)
+                    .or_else(|| prev_footer.clone());
+                prev_header.clone_from(&header);
+                prev_footer.clone_from(&footer);
                 sections.push(ResolvedSection {
                     blocks: std::mem::take(&mut current_blocks),
-                    header: resolve_header(doc, &props.header_refs.default),
-                    footer: resolve_footer(doc, &props.footer_refs.default),
+                    header,
+                    footer,
                     properties: *props.clone(),
                 });
             }
@@ -38,10 +48,14 @@ pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
     }
 
     // Final section uses Document.final_section.
+    let header = resolve_header(doc, &doc.final_section.header_refs.default)
+        .or_else(|| prev_header);
+    let footer = resolve_footer(doc, &doc.final_section.footer_refs.default)
+        .or_else(|| prev_footer);
     sections.push(ResolvedSection {
         blocks: current_blocks,
-        header: resolve_header(doc, &doc.final_section.header_refs.default),
-        footer: resolve_footer(doc, &doc.final_section.footer_refs.default),
+        header,
+        footer,
         properties: doc.final_section.clone(),
     });
 

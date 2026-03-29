@@ -97,13 +97,13 @@ pub fn layout_document(
         all_endnotes.extend(built.endnotes);
 
         // Render headers/footers onto each page.
-        let header_frags = section.header.as_ref()
+        let header_content = section.header.as_ref()
             .map(|blocks| collect_fragments_from_blocks(blocks, &ctx));
-        let footer_frags = section.footer.as_ref()
+        let footer_content = section.footer.as_ref()
             .map(|blocks| collect_fragments_from_blocks(blocks, &ctx));
         render_headers_footers(
             &mut pages, &config,
-            header_frags.as_deref(), footer_frags.as_deref(),
+            header_content.as_ref(), footer_content.as_ref(),
             dlh,
         );
 

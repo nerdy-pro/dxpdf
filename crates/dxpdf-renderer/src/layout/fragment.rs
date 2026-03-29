@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use dxpdf_docx_model::model::{FieldCharType, Inline, RunProperties, VerticalAlign};
+use dxpdf_docx_model::model::{Block, FieldCharType, Inline, RunProperties, VerticalAlign};
 
 use crate::dimension::Pt;
 use crate::geometry::PtSize;
@@ -548,8 +548,33 @@ where
                     text_offset: Pt::ZERO,
                 });
             }
-            // Not yet handled — skip silently
-            Inline::Pict(_) => {}
+            Inline::Pict(pict) => {
+                // Render text content from VML text box shapes inline.
+                // Does not handle absolute positioning — text appears inline
+                // with the surrounding paragraph.
+                for shape in &pict.shapes {
+                    if let Some(ref text_box) = shape.text_box {
+                        for block in &text_box.content {
+                            if let Block::Paragraph(p) = block {
+                                let para_run_defaults = p.mark_run_properties.as_ref();
+                                let mut sub = collect_fragments(
+                                    &p.content,
+                                    default_family,
+                                    default_size,
+                                    default_color,
+                                    hyperlink_url,
+                                    measure_text,
+                                    resolved_styles,
+                                    para_run_defaults,
+                                    footnote_counter,
+                                    endnote_counter,
+                                );
+                                fragments.append(&mut sub);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
