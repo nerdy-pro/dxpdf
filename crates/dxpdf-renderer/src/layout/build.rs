@@ -246,11 +246,10 @@ fn build_paragraph_block(
                     .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
                     .unwrap_or("");
 
-                // Remap PUA codepoints from legacy Symbol/Wingdings encoding to
-                // Unicode equivalents so standard fonts can render them.
-                // Symbol mapping: unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
-                // Wingdings mapping: standard Microsoft Wingdings-to-Unicode table.
-                let (label_text, label_family) = remap_symbol_bullets(
+                // Remap PUA codepoints from legacy Symbol/Wingdings encoding
+                // to standard Unicode per official mapping tables, and use
+                // a standard font. This is portable across all platforms.
+                let (label_text, label_family) = remap_legacy_font_chars(
                     &label_text, level_font_family, &default_family,
                 );
                 let label_family: std::rc::Rc<str> = std::rc::Rc::from(label_family.as_str());
@@ -1309,18 +1308,22 @@ fn populate_image_data(
     }
 }
 
-/// Remap PUA codepoints from legacy Symbol/Wingdings encoding to Unicode.
+/// Remap PUA codepoints (0xF0xx) from legacy Symbol/Wingdings encoding
+/// to standard Unicode, and return a portable font to render them with.
 ///
-/// Symbol font mapping per unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt.
-/// Wingdings mapping per the standard Microsoft Wingdings-to-Unicode table.
+/// OOXML stores Symbol/Wingdings characters as PUA codepoints. These are
+/// not portable across platforms — different OS font versions have different
+/// cmap coverage. The standard approach (used by LibreOffice, Google Docs)
+/// is to remap to Unicode equivalents from the official mapping tables:
+/// - Symbol: unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
+/// - Wingdings: standard Microsoft Wingdings-to-Unicode mapping
 ///
-/// Returns the remapped text and the font family to use for rendering.
-fn remap_symbol_bullets(text: &str, font_family: &str, fallback_family: &str) -> (String, String) {
+/// Returns (remapped_text, font_family).
+fn remap_legacy_font_chars(text: &str, font_family: &str, fallback_family: &str) -> (String, String) {
     let is_symbol = font_family.eq_ignore_ascii_case("Symbol");
     let is_wingdings = font_family.eq_ignore_ascii_case("Wingdings");
 
     if !is_symbol && !is_wingdings {
-        // Not a legacy symbol font — use as-is.
         let family = if font_family.is_empty() { fallback_family } else { font_family };
         return (text.to_string(), family.to_string());
     }
@@ -1328,22 +1331,115 @@ fn remap_symbol_bullets(text: &str, font_family: &str, fallback_family: &str) ->
     let remapped: String = text.chars().map(|ch| {
         let code = ch as u32;
         if is_symbol && (0xF020..=0xF0FF).contains(&code) {
-            // Symbol font: offset 0xF000 from encoding position.
+            // Symbol font PUA mapping per unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
             match code {
-                0xF0B7 => '\u{2022}', // BULLET
+                0xF020 => '\u{0020}', // SPACE
+                0xF021 => '\u{0021}', // EXCLAMATION MARK
+                0xF025 => '\u{0025}', // PERCENT SIGN
+                0xF028 => '\u{0028}', // LEFT PARENTHESIS
+                0xF029 => '\u{0029}', // RIGHT PARENTHESIS
+                0xF02B => '\u{002B}', // PLUS SIGN
+                0xF02E => '\u{002E}', // FULL STOP
+                0xF030..=0xF039 => char::from_u32(code - 0xF000).unwrap_or(ch), // DIGITS
+                0xF03C => '\u{003C}', // LESS-THAN SIGN
+                0xF03D => '\u{003D}', // EQUALS SIGN
+                0xF03E => '\u{003E}', // GREATER-THAN SIGN
+                0xF05B => '\u{005B}', // LEFT SQUARE BRACKET
+                0xF05D => '\u{005D}', // RIGHT SQUARE BRACKET
+                0xF07B => '\u{007B}', // LEFT CURLY BRACKET
+                0xF07C => '\u{007C}', // VERTICAL LINE
+                0xF07D => '\u{007D}', // RIGHT CURLY BRACKET
+                0xF07E => '\u{223C}', // TILDE OPERATOR
+                0xF0A0 => '\u{20AC}', // EURO SIGN
+                0xF0A5 => '\u{221E}', // INFINITY
+                0xF0A7 => '\u{2663}', // BLACK CLUB SUIT
                 0xF0A8 => '\u{2666}', // BLACK DIAMOND SUIT
+                0xF0A9 => '\u{2665}', // BLACK HEART SUIT
+                0xF0AA => '\u{2660}', // BLACK SPADE SUIT
+                0xF0AB => '\u{2194}', // LEFT RIGHT ARROW
+                0xF0AC => '\u{2190}', // LEFTWARDS ARROW
+                0xF0AD => '\u{2191}', // UPWARDS ARROW
+                0xF0AE => '\u{2192}', // RIGHTWARDS ARROW
+                0xF0AF => '\u{2193}', // DOWNWARDS ARROW
                 0xF0B0 => '\u{00B0}', // DEGREE SIGN
-                0xF0D7 => '\u{00D7}', // MULTIPLICATION SIGN
                 0xF0B1 => '\u{00B1}', // PLUS-MINUS SIGN
-                _ => ch, // keep as-is for unmapped
+                0xF0B2 => '\u{2033}', // DOUBLE PRIME
+                0xF0B3 => '\u{2265}', // GREATER-THAN OR EQUAL TO
+                0xF0B4 => '\u{00D7}', // MULTIPLICATION SIGN
+                0xF0B5 => '\u{221D}', // PROPORTIONAL TO
+                0xF0B7 => '\u{2022}', // BULLET
+                0xF0B8 => '\u{00F7}', // DIVISION SIGN
+                0xF0B9 => '\u{2260}', // NOT EQUAL TO
+                0xF0BA => '\u{2261}', // IDENTICAL TO
+                0xF0BB => '\u{2248}', // ALMOST EQUAL TO
+                0xF0BC => '\u{2026}', // HORIZONTAL ELLIPSIS
+                0xF0C0 => '\u{2135}', // ALEF SYMBOL
+                0xF0C1 => '\u{2111}', // BLACK-LETTER CAPITAL I
+                0xF0C2 => '\u{211C}', // BLACK-LETTER CAPITAL R
+                0xF0C3 => '\u{2118}', // SCRIPT CAPITAL P
+                0xF0C5 => '\u{2297}', // CIRCLED TIMES
+                0xF0C6 => '\u{2295}', // CIRCLED PLUS
+                0xF0C7 => '\u{2205}', // EMPTY SET
+                0xF0C8 => '\u{2229}', // INTERSECTION
+                0xF0C9 => '\u{222A}', // UNION
+                0xF0CB => '\u{2283}', // SUPERSET OF
+                0xF0CC => '\u{2287}', // SUPERSET OF OR EQUAL TO
+                0xF0CD => '\u{2284}', // NOT A SUBSET OF
+                0xF0CE => '\u{2282}', // SUBSET OF
+                0xF0CF => '\u{2286}', // SUBSET OF OR EQUAL TO
+                0xF0D0 => '\u{2208}', // ELEMENT OF
+                0xF0D1 => '\u{2209}', // NOT AN ELEMENT OF
+                0xF0D5 => '\u{220F}', // N-ARY PRODUCT
+                0xF0D6 => '\u{221A}', // SQUARE ROOT
+                0xF0D7 => '\u{22C5}', // DOT OPERATOR
+                0xF0D8 => '\u{00AC}', // NOT SIGN
+                0xF0D9 => '\u{2227}', // LOGICAL AND
+                0xF0DA => '\u{2228}', // LOGICAL OR
+                0xF0E0 => '\u{21D0}', // LEFTWARDS DOUBLE ARROW
+                0xF0E1 => '\u{21D1}', // UPWARDS DOUBLE ARROW
+                0xF0E2 => '\u{21D2}', // RIGHTWARDS DOUBLE ARROW
+                0xF0E3 => '\u{21D3}', // DOWNWARDS DOUBLE ARROW
+                0xF0E4 => '\u{21D4}', // LEFT RIGHT DOUBLE ARROW
+                0xF0E5 => '\u{2329}', // LEFT-POINTING ANGLE BRACKET
+                0xF0F1 => '\u{232A}', // RIGHT-POINTING ANGLE BRACKET
+                0xF0F2 => '\u{222B}', // INTEGRAL
+                _ => ch,
             }
         } else if is_wingdings && (0xF020..=0xF0FF).contains(&code) {
+            // Wingdings PUA mapping per Microsoft Wingdings-to-Unicode table
             match code {
-                0xF0A7 => '\u{25AA}', // BLACK SMALL SQUARE
-                0xF0D8 => '\u{2794}', // HEAVY WIDE-HEADED RIGHTWARDS ARROW
-                0xF0FC => '\u{2714}', // HEAVY CHECK MARK
-                0xF076 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
+                0xF021 => '\u{270E}', // LOWER RIGHT PENCIL
+                0xF022 => '\u{2702}', // BLACK SCISSORS
+                0xF023 => '\u{2701}', // UPPER BLADE SCISSORS
+                0xF028 => '\u{1F4CB}',// CLIPBOARD (may need supplementary)
+                0xF029 => '\u{1F4CB}',// CLIPBOARD
+                0xF041 => '\u{FE4E}', // WAVY LOW LINE (approximate)
+                0xF046 => '\u{1F44D}',// THUMBS UP SIGN
+                0xF04C => '\u{2639}', // WHITE FROWNING FACE
+                0xF04A => '\u{263A}', // WHITE SMILING FACE
                 0xF06C => '\u{25CF}', // BLACK CIRCLE
+                0xF06D => '\u{274D}', // SHADOWED WHITE CIRCLE
+                0xF06E => '\u{25A0}', // BLACK SQUARE
+                0xF06F => '\u{25A1}', // WHITE SQUARE
+                0xF070 => '\u{25A1}', // WHITE SQUARE (alt)
+                0xF071 => '\u{2751}', // LOWER RIGHT SHADOWED WHITE SQUARE
+                0xF072 => '\u{2752}', // UPPER RIGHT SHADOWED WHITE SQUARE
+                0xF073 => '\u{25C6}', // BLACK DIAMOND
+                0xF074 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
+                0xF076 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
+                0xF09F => '\u{2708}', // AIRPLANE
+                0xF0A1 => '\u{270C}', // VICTORY HAND
+                0xF0A4 => '\u{261C}', // WHITE LEFT POINTING INDEX
+                0xF0A5 => '\u{261E}', // WHITE RIGHT POINTING INDEX
+                0xF0A7 => '\u{25AA}', // BLACK SMALL SQUARE
+                0xF0A8 => '\u{25FB}', // WHITE MEDIUM SQUARE
+                0xF0D5 => '\u{232B}', // ERASE TO THE LEFT
+                0xF0D8 => '\u{27A2}', // THREE-D TOP-LIGHTED RIGHTWARDS ARROWHEAD
+                0xF0E8 => '\u{2B22}', // BLACK HEXAGON (approximate)
+                0xF0F0 => '\u{2B1A}', // DOTTED SQUARE (approximate)
+                0xF0FC => '\u{2714}', // HEAVY CHECK MARK
+                0xF0FB => '\u{2718}', // HEAVY BALLOT X
+                0xF0FE => '\u{2612}', // BALLOT BOX WITH X (approximate)
                 _ => ch,
             }
         } else {
@@ -1351,7 +1447,11 @@ fn remap_symbol_bullets(text: &str, font_family: &str, fallback_family: &str) ->
         }
     }).collect();
 
-    // Use a standard font for the Unicode equivalents.
+    // After PUA→Unicode remapping, the original Symbol/Wingdings font
+    // cannot render the standard Unicode codepoints (legacy fonts lack
+    // Unicode cmaps). Use the document's fallback font for the remapped
+    // glyphs — standard Unicode bullets (U+2022, U+25AA) are in most
+    // text fonts.
     (remapped, fallback_family.to_string())
 }
 
