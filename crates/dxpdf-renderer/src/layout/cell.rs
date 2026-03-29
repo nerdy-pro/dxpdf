@@ -1,84 +1,48 @@
-//! Cell layout — narrows constraints by cell margins, lays out child paragraphs.
+//! Cell layout — narrows constraints by cell margins, lays out child blocks.
+//!
+//! Uses the shared `stack_blocks` function from `section.rs` so that table
+//! cells get the same features as body content (floating images, spacing
+//! collapse, contextual spacing, etc.).
 
 use crate::dimension::Pt;
 use crate::geometry::PtEdgeInsets;
 
-use super::draw_command::DrawCommand;
-use super::fragment::Fragment;
-use super::paragraph::{layout_paragraph, ParagraphStyle};
-use super::BoxConstraints;
-
-/// A block of content ready for layout inside a cell.
-#[allow(clippy::large_enum_variant)]
-pub enum CellBlock {
-    /// A paragraph with measured fragments.
-    Paragraph {
-        fragments: Vec<Fragment>,
-        style: ParagraphStyle,
-    },
-    /// A pre-rendered nested table (draw commands + size).
-    NestedTable {
-        commands: Vec<DrawCommand>,
-        size: crate::geometry::PtSize,
-    },
-}
+use super::section::{LayoutBlock, stack_blocks};
 
 /// Result of laying out a cell.
 #[derive(Debug)]
 pub struct CellLayout {
     /// Draw commands relative to the cell's top-left origin.
-    pub commands: Vec<DrawCommand>,
+    pub commands: Vec<super::draw_command::DrawCommand>,
     /// Content height (without margins).
     pub content_height: Pt,
 }
 
-/// Lay out paragraphs inside a table cell.
+/// Lay out blocks inside a table cell.
 ///
 /// Receives the full cell width (from column sizing), deflates by margins,
-/// lays out each paragraph sequentially, returns total content height.
+/// lays out each block sequentially using `stack_blocks`, returns total
+/// content height.
 pub fn layout_cell(
-    blocks: &[CellBlock],
+    blocks: &[LayoutBlock],
     cell_width: Pt,
     margins: &PtEdgeInsets,
     default_line_height: Pt,
     measure_text: super::paragraph::MeasureTextFn<'_>,
 ) -> CellLayout {
     let content_width = (cell_width - margins.horizontal()).max(Pt::ZERO);
-    let constraints = BoxConstraints::tight_width(content_width, Pt::INFINITY);
 
-    let mut commands = Vec::new();
-    let mut cursor_y = Pt::ZERO;
+    let result = stack_blocks(blocks, content_width, default_line_height, measure_text);
 
-    for block in blocks {
-        match block {
-            CellBlock::Paragraph { fragments, style } => {
-                let para = layout_paragraph(
-                    fragments,
-                    &constraints,
-                    style,
-                    default_line_height,
-                    measure_text,
-                );
-                for mut cmd in para.commands {
-                    cmd.shift(margins.left, margins.top + cursor_y);
-                    commands.push(cmd);
-                }
-                cursor_y += para.size.height;
-            }
-            CellBlock::NestedTable { commands: table_cmds, size } => {
-                for cmd in table_cmds {
-                    let mut cmd = cmd.clone();
-                    cmd.shift(margins.left, margins.top + cursor_y);
-                    commands.push(cmd);
-                }
-                cursor_y += size.height;
-            }
-        }
-    }
+    // Shift all commands by cell margins.
+    let commands = result.commands.into_iter().map(|mut cmd| {
+        cmd.shift(margins.left, margins.top);
+        cmd
+    }).collect();
 
     CellLayout {
         commands,
-        content_height: cursor_y,
+        content_height: result.height,
     }
 }
 
@@ -86,7 +50,9 @@ pub fn layout_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fragment::FontProps;
+    use crate::layout::draw_command::DrawCommand;
+    use crate::layout::fragment::{FontProps, Fragment};
+    use crate::layout::paragraph::ParagraphStyle;
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
 
@@ -110,10 +76,13 @@ mod tests {
         }
     }
 
-    fn simple_block(text: &str, width: f32) -> CellBlock {
-        CellBlock::Paragraph {
+    fn simple_block(text: &str, width: f32) -> LayoutBlock {
+        LayoutBlock::Paragraph {
             fragments: vec![text_frag(text, width)],
             style: ParagraphStyle::default(),
+            page_break_before: false,
+            footnotes: vec![],
+            floating_images: vec![],
         }
     }
 
@@ -168,9 +137,12 @@ mod tests {
     fn margins_narrow_available_width() {
         // Cell is 100 wide, margins eat 60 (left=30, right=30), leaving 40 for content
         // Two fragments of 30 each = 60 > 40, so they should wrap
-        let blocks = vec![CellBlock::Paragraph {
+        let blocks = vec![LayoutBlock::Paragraph {
             fragments: vec![text_frag("aa ", 30.0), text_frag("bb", 30.0)],
             style: ParagraphStyle::default(),
+            page_break_before: false,
+            footnotes: vec![],
+            floating_images: vec![],
         }];
         let margins = PtEdgeInsets::new(Pt::ZERO, Pt::new(30.0), Pt::ZERO, Pt::new(30.0));
         let result = layout_cell(&blocks, Pt::new(100.0), &margins, Pt::new(14.0), None);

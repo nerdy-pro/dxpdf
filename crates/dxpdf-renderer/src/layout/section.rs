@@ -751,7 +751,6 @@ fn table_x_offset(
 mod tests {
     use super::*;
     use crate::geometry::{PtEdgeInsets, PtSize};
-    use crate::layout::cell::CellBlock;
     use crate::layout::draw_command::DrawCommand;
     use crate::layout::fragment::FontProps;
     use crate::layout::table::TableCellInput;
@@ -891,9 +890,12 @@ mod tests {
         let blocks = vec![LayoutBlock::Table {
             rows: vec![TableRowInput {
                 cells: vec![TableCellInput {
-                    blocks: vec![CellBlock::Paragraph {
+                    blocks: vec![LayoutBlock::Paragraph {
                         fragments: vec![text_frag("cell", 30.0, 14.0)],
                         style: ParagraphStyle::default(),
+                        page_break_before: false,
+                        footnotes: vec![],
+                        floating_images: vec![],
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,

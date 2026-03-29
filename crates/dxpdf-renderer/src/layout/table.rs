@@ -8,7 +8,7 @@ use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::resolve::color::RgbColor;
 
-use super::cell::{layout_cell, CellBlock, CellLayout};
+use super::cell::{layout_cell, CellLayout};
 use super::draw_command::DrawCommand;
 use super::BoxConstraints;
 
@@ -38,7 +38,7 @@ pub enum CellVAlign {
 
 /// A single cell for layout.
 pub struct TableCellInput {
-    pub blocks: Vec<CellBlock>,
+    pub blocks: Vec<super::section::LayoutBlock>,
     pub margins: PtEdgeInsets,
     /// Number of grid columns this cell spans (gridSpan, default 1).
     pub grid_span: u32,
@@ -602,9 +602,12 @@ mod tests {
 
     fn simple_cell(text: &str) -> TableCellInput {
         TableCellInput {
-            blocks: vec![CellBlock::Paragraph {
+            blocks: vec![LayoutBlock::Paragraph {
                 fragments: vec![text_frag(text, 30.0)],
                 style: ParagraphStyle::default(),
+                page_break_before: false,
+                footnotes: vec![],
+                floating_images: vec![],
             }],
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,
@@ -713,9 +716,12 @@ mod tests {
             cells: vec![
                 simple_cell("short"),
                 TableCellInput {
-                    blocks: vec![CellBlock::Paragraph {
+                    blocks: vec![LayoutBlock::Paragraph {
                         fragments: vec![text_frag("long ", 60.0), text_frag("text", 60.0)],
                         style: ParagraphStyle::default(),
+                        page_break_before: false,
+                        footnotes: vec![],
+                        floating_images: vec![],
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
@@ -747,9 +753,12 @@ mod tests {
     fn cell_shading_emits_rect() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock::Paragraph {
+                blocks: vec![LayoutBlock::Paragraph {
                     fragments: vec![text_frag("x", 10.0)],
                     style: ParagraphStyle::default(),
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![],
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
@@ -792,9 +801,10 @@ mod tests {
     fn grid_span_widens_cell() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock::Paragraph {
+                blocks: vec![LayoutBlock::Paragraph {
                     fragments: vec![text_frag("spanning", 30.0)],
                     style: ParagraphStyle::default(),
+                    page_break_before: false, footnotes: vec![], floating_images: vec![],
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 2, // spans both columns
@@ -819,9 +829,10 @@ mod tests {
     fn cell_margins_affect_layout() {
         let rows = vec![TableRowInput {
             cells: vec![TableCellInput {
-                blocks: vec![CellBlock::Paragraph {
+                blocks: vec![LayoutBlock::Paragraph {
                     fragments: vec![text_frag("text", 30.0)],
                     style: ParagraphStyle::default(),
+                    page_break_before: false, footnotes: vec![], floating_images: vec![],
                 }],
                 margins: PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0)),
                 grid_span: 1,

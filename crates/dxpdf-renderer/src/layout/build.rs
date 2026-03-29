@@ -12,7 +12,6 @@ use dxpdf_docx_model::model::{
 
 use crate::dimension::Pt;
 use crate::geometry::{self, PtSize};
-use crate::layout::cell::CellBlock;
 use crate::layout::fragment::{collect_fragments, FontProps, Fragment};
 use crate::layout::measurer::TextMeasurer;
 use crate::layout::page::PageConfig;
@@ -23,7 +22,7 @@ use crate::layout::paragraph::TabStopDef;
 use crate::layout::section::LayoutBlock;
 use crate::layout::table::{
     CellBorderConfig, CellBorderOverride, TableBorderConfig, TableBorderLine, TableBorderStyle,
-    TableCellInput, TableRowInput, compute_column_widths, layout_table,
+    TableCellInput, TableRowInput, compute_column_widths,
 };
 use crate::resolve::color::{ColorContext, RgbColor, resolve_color};
 use crate::resolve::conditional::{CellConditionalFormatting, resolve_cell_conditional};
@@ -272,7 +271,7 @@ fn build_block(
     pending_dropcap: &mut Option<DropCapInfo>,
 ) -> Option<LayoutBlock> {
     match block {
-        Block::Paragraph(p) => build_paragraph_block(p, ctx, pending_dropcap),
+        Block::Paragraph(p) => build_paragraph_block(p, ctx, pending_dropcap, None, None),
         Block::Table(t) => {
             let built = build_table(t, available_width, ctx);
             Some(LayoutBlock::Table {
@@ -290,14 +289,17 @@ fn build_block(
 
 // ── Paragraph building ──────────────────────────────────────────────────────
 
-/// Build a top-level paragraph into a layout block.
-/// Handles drop cap detection (§17.3.1.11).
+/// Build a paragraph into a layout block.
+/// Handles drop cap detection (§17.3.1.11), list labels, floating images.
+/// For table cells, pass `table_style` and `cond` to apply table formatting cascade.
 fn build_paragraph_block(
     p: &Paragraph,
     ctx: &BuildContext,
     pending_dropcap: &mut Option<DropCapInfo>,
+    table_style: Option<&ResolvedStyle>,
+    cond: Option<&CellConditionalFormatting>,
 ) -> Option<LayoutBlock> {
-    let (mut fragments, mut merged_props) = build_fragments(p, ctx, None, None);
+    let (mut fragments, mut merged_props) = build_fragments(p, ctx, table_style, cond);
 
     // §17.9.22: inject list label if paragraph has a numbering reference.
     if let Some(ref num_ref) = merged_props.numbering {
@@ -614,7 +616,9 @@ fn build_paragraph_block(
     }
 
     // §20.4.2.3: extract floating (anchor) images from this paragraph.
-    let floating_images = extract_floating_images(p, ctx);
+    // In cell context, positions are cell-relative instead of page-relative.
+    let cell_context = table_style.is_some();
+    let floating_images = extract_floating_images(p, ctx, cell_context);
 
     Some(LayoutBlock::Paragraph {
         fragments,
@@ -626,9 +630,12 @@ fn build_paragraph_block(
 }
 
 /// Extract floating (anchor) images from a paragraph's inlines.
+/// When `cell_context` is true, positions are resolved relative to the cell
+/// origin (0,0) instead of the page margins.
 fn extract_floating_images(
     para: &Paragraph,
     ctx: &BuildContext,
+    cell_context: bool,
 ) -> Vec<crate::layout::section::FloatingImage> {
     use dxpdf_docx_model::model::{ImagePlacement, AnchorPosition, AnchorRelativeFrom, AnchorAlignment, Inline};
     use crate::layout::section::{FloatingImage, FloatingImageY};
@@ -680,11 +687,14 @@ fn extract_floating_images(
                 let h = Pt::from(img.extent.height);
 
                 // Resolve horizontal position.
-                // TODO: get actual page config here. For now use US Letter defaults.
-                let page_width = Pt::new(612.0);
-                let margin_left = Pt::new(72.0);
-                let margin_right = Pt::new(72.0);
-                let content_width = page_width - margin_left - margin_right;
+                // In cell context, positions are relative to the cell origin.
+                let (page_width, margin_left, margin_right) = if cell_context {
+                    (Pt::ZERO, Pt::ZERO, Pt::ZERO)
+                } else {
+                    // TODO: get actual page config here. For now use US Letter defaults.
+                    (Pt::new(612.0), Pt::new(72.0), Pt::new(72.0))
+                };
+                let content_width = if cell_context { Pt::ZERO } else { page_width - margin_left - margin_right };
 
                 let x = match &anchor.horizontal_position {
                     AnchorPosition::Offset { relative_from, offset } => {
@@ -713,20 +723,25 @@ fn extract_floating_images(
                 // Resolve vertical position.
                 let y = match &anchor.vertical_position {
                     AnchorPosition::Offset { relative_from, offset } => {
-                        let margin_top = Pt::new(72.0);
-                        match relative_from {
-                            AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
-                            AnchorRelativeFrom::Margin => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
-                            AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
-                                FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                        let margin_top = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
+                        if cell_context {
+                            // In cell context, all positions are relative to cell origin.
+                            FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                        } else {
+                            match relative_from {
+                                AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
+                                AnchorRelativeFrom::Margin => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
+                                AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
+                                    FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                                }
+                                _ => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
                             }
-                            _ => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
                         }
                     }
                     AnchorPosition::Align { relative_from, alignment } => {
-                        let margin_top = Pt::new(72.0);
-                        let page_height = Pt::new(792.0);
-                        let margin_bottom = Pt::new(72.0);
+                        let margin_top = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
+                        let page_height = if cell_context { Pt::ZERO } else { Pt::new(792.0) };
+                        let margin_bottom = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
                         let (area_top, area_height) = match relative_from {
                             AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
                             AnchorRelativeFrom::Margin => (margin_top, page_height - margin_top - margin_bottom),
@@ -1141,12 +1156,12 @@ fn build_cell_blocks(
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
-) -> Vec<CellBlock> {
-    let dlh = default_line_height(ctx);
-    content
-        .iter()
-        .enumerate()
-        .filter_map(|(i, block)| match block {
+) -> Vec<LayoutBlock> {
+    let mut blocks = Vec::new();
+    let mut pending_dropcap: Option<DropCapInfo> = None;
+
+    for (i, block) in content.iter().enumerate() {
+        match block {
             Block::Paragraph(p) => {
                 // §17.4.66: every cell must end with a paragraph. When the
                 // last block is an empty paragraph following a table, it is
@@ -1156,56 +1171,38 @@ fn build_cell_blocks(
                     && matches!(content[i - 1], Block::Table(_))
                     && i == content.len() - 1
                 {
-                    return None;
+                    continue;
                 }
-                let (frags, merged_props) = build_fragments(p, ctx, table_style, Some(cond));
-                // Split oversized text fragments into per-character fragments
-                // so narrow table cells get character-level line breaking.
-                let frags = split_oversized_fragments(frags, inner_width, ctx);
-                Some(CellBlock::Paragraph {
-                    fragments: frags,
-                    style: paragraph_style_from_props(&merged_props),
-                })
+                if let Some(lb) = build_paragraph_block(
+                    p, ctx, &mut pending_dropcap,
+                    table_style, Some(cond),
+                ) {
+                    // Split oversized text fragments for narrow cells.
+                    let lb = if let LayoutBlock::Paragraph { fragments, style, page_break_before, footnotes, floating_images } = lb {
+                        let fragments = split_oversized_fragments(fragments, inner_width, ctx);
+                        LayoutBlock::Paragraph { fragments, style, page_break_before, footnotes, floating_images }
+                    } else {
+                        lb
+                    };
+                    blocks.push(lb);
+                }
             }
             Block::Table(nested_t) => {
                 let built = build_table(nested_t, inner_width, ctx);
-                let measure_fn = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
-                    ctx.measurer.measure(text, font)
-                };
-                let result = layout_table(
-                    &built.rows,
-                    &built.col_widths,
-                    &crate::layout::BoxConstraints::unbounded(),
-                    dlh,
-                    built.border_config.as_ref(),
-                    Some(&measure_fn),
-                );
-                // §17.4.28: apply nested table alignment within the cell.
-                let align_offset = match built.alignment {
-                    Some(model::Alignment::Center) => {
-                        (inner_width - result.size.width) * 0.5
-                    }
-                    Some(model::Alignment::End) => {
-                        inner_width - result.size.width
-                    }
-                    _ => built.indent,
-                };
-                let commands = if align_offset != Pt::ZERO {
-                    result.commands.into_iter().map(|mut cmd| {
-                        cmd.shift_x(align_offset);
-                        cmd
-                    }).collect()
-                } else {
-                    result.commands
-                };
-                Some(CellBlock::NestedTable {
-                    commands,
-                    size: result.size,
-                })
+                blocks.push(LayoutBlock::Table {
+                    rows: built.rows,
+                    col_widths: built.col_widths,
+                    border_config: built.border_config,
+                    indent: built.indent,
+                    alignment: built.alignment,
+                    float_info: built.float_info,
+                });
             }
-            _ => None,
-        })
-        .collect()
+            _ => {}
+        }
+    }
+
+    blocks
 }
 
 // ── Paragraph property resolution ───────────────────────────────────────────
