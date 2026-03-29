@@ -665,10 +665,6 @@ pub fn stack_blocks(
             } => {
                 let mut effective_style = style.clone();
 
-                // §17.3.1.33: suppress space_before at the top.
-                if cursor_y <= Pt::ZERO {
-                    effective_style.space_before = Pt::ZERO;
-                }
                 // Spacing collapse.
                 if effective_style.contextual_spacing
                     && effective_style.style_id.is_some()

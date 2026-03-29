@@ -290,6 +290,7 @@ pub fn layout_table(
 
     for (row_idx, entries) in row_cell_layouts.iter().enumerate() {
         let row_height = row_heights[row_idx];
+        log::debug!("[table] emit row[{row_idx}] y={:.1} height={:.1}", cursor_y.raw(), row_height.raw());
 
         for (cell_ci, (entry, cell_input)) in
             entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
@@ -320,14 +321,35 @@ pub fn layout_table(
                 content_commands.push(cmd);
             }
 
+            // §17.4.38: compute border gap below this row.
+            // The bottom border occupies space between rows, so pass the
+            // effective height (row + border gap) to emit_cell_borders so
+            // the bottom border is drawn at the gap center.
+            let bottom_border_gap = if row_idx + 1 < num_rows {
+                border_width(b.bottom)
+            } else {
+                Pt::ZERO
+            };
             emit_cell_borders(
                 &mut border_commands,
                 CellBorders { top: b.top, bottom: b.bottom, left: b.left, right: b.right },
-                entry.cell_x, entry.cell_w, cursor_y, row_height,
+                entry.cell_x, entry.cell_w, cursor_y, row_height + bottom_border_gap,
             );
         }
 
         cursor_y += row_height;
+
+        // §17.4.38: border between this row and the next occupies space.
+        if row_idx + 1 < num_rows {
+            let mut max_border_w = Pt::ZERO;
+            for cell_ci in 0..entries.len() {
+                let bw = border_width(resolved_borders[row_idx][cell_ci].bottom);
+                if bw > max_border_w {
+                    max_border_w = bw;
+                }
+            }
+            cursor_y += max_border_w;
+        }
     }
 
     commands.append(&mut content_commands);
