@@ -106,7 +106,7 @@ mod tests {
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO,
+            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }
     }
 

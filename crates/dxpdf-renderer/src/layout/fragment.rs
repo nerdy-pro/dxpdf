@@ -53,6 +53,10 @@ pub enum Fragment {
         ascent: Pt,
         hyperlink_url: Option<String>,
         baseline_offset: Pt,
+        /// Horizontal offset for drawing text within the fragment width.
+        /// Used for right/center-justified list labels where the text is
+        /// positioned within a wider fragment. Default: Pt::ZERO.
+        text_offset: Pt,
     },
     Image {
         size: PtSize,
@@ -332,6 +336,7 @@ where
                             ascent: a,
                             hyperlink_url: hyperlink_url.map(String::from),
                             baseline_offset,
+                            text_offset: Pt::ZERO,
                         });
                     }
                 }
@@ -463,6 +468,7 @@ where
                     ascent: a,
                     hyperlink_url: hyperlink_url.map(String::from),
                     baseline_offset: Pt::ZERO,
+                    text_offset: Pt::ZERO,
                 });
             }
             // Bookmark target — emit as zero-width named destination.
@@ -507,6 +513,7 @@ where
                     ascent: a,
                     hyperlink_url: None,
                     baseline_offset,
+                    text_offset: Pt::ZERO,
                 });
             }
             // §17.11.2: endnote reference — render as superscript Roman numeral.
@@ -538,6 +545,7 @@ where
                     ascent: a,
                     hyperlink_url: None,
                     baseline_offset,
+                    text_offset: Pt::ZERO,
                 });
             }
             // Not yet handled — skip silently

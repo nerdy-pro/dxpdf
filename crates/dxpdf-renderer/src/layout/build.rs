@@ -122,6 +122,7 @@ fn build_note_content(
                     height: h, ascent: a,
                     hyperlink_url: None,
                     baseline_offset: -(font.size * 0.4),
+                    text_offset: Pt::ZERO,
                 });
             }
             let style = paragraph_style_from_props(&merged_props);
@@ -327,19 +328,6 @@ fn build_paragraph_block(
                     underline_thickness: Pt::ZERO,
                 };
                 let (w, h, a) = ctx.measurer.measure(&label_text, &label_font);
-                let label_frag = Fragment::Text {
-                    text: label_text,
-                    font: label_font,
-                    color: default_color,
-                    shading: None,
-                    border: None,
-                    width: w,
-                    trimmed_width: w,
-                    height: h,
-                    ascent: a,
-                    hyperlink_url: None,
-                    baseline_offset: Pt::ZERO,
-                };
                 // Tab after label: advances to indent_left via the implicit
                 // tab stop. Fitting width = hanging so that label + tab
                 // consume exactly the hanging indent space during fitting,
@@ -352,19 +340,50 @@ fn build_paragraph_block(
                         _ => Pt::ZERO,
                     })
                     .unwrap_or(Pt::ZERO);
+                // §17.9.7: lvlJc controls label justification within the
+                // hanging indent area. The label fragment occupies `w`
+                // points but the text is drawn at `text_offset` within it.
+                // The tab then advances from `w` to the indent tab stop,
+                // producing a natural gap = hanging − w.
+                let jc = level_def.and_then(|l| l.justification);
+                let text_offset = match jc {
+                    Some(dxpdf_docx_model::model::Alignment::End) => -w,
+                    Some(dxpdf_docx_model::model::Alignment::Center) => w * -0.5,
+                    _ => Pt::ZERO,
+                };
+                // The label fragment width is the text width only.
+                // text_offset shifts where the text is drawn (for right/
+                // center justification) but x advances by w, leaving
+                // room for the tab to fill hanging − w to the stop.
+                let label_width = w;
+                let label_frag = Fragment::Text {
+                    text: label_text,
+                    font: label_font.clone(),
+                    color: default_color,
+                    shading: None,
+                    border: None,
+                    width: label_width,
+                    trimmed_width: label_width,
+                    height: h,
+                    ascent: a,
+                    hyperlink_url: None,
+                    baseline_offset: Pt::ZERO,
+                    text_offset,
+                };
+                let tab_fitting = (hanging - label_width).max(Pt::ZERO);
                 let tab_frag = Fragment::Tab {
                     line_height: h,
-                    fitting_width: Some(hanging),
+                    fitting_width: Some(tab_fitting),
                 };
                 fragments.insert(0, tab_frag);
                 fragments.insert(0, label_frag);
 
                 // Add implicit tab stop at numLvl.left so the tab lands
                 // at the body text position.
-                if let Some(lvl_left) = level_def
+                let lvl_left = level_def
                     .and_then(|l| l.indentation.as_ref())
-                    .and_then(|ind| ind.start)
-                {
+                    .and_then(|ind| ind.start);
+                if let Some(lvl_left) = lvl_left {
                     merged_props.tabs.insert(0, dxpdf_docx_model::model::TabStop {
                         position: lvl_left,
                         alignment: dxpdf_docx_model::model::TabAlignment::Left,
@@ -1331,6 +1350,7 @@ fn split_oversized_fragments(
                             ascent: a,
                             hyperlink_url: hyperlink_url.clone(),
                             baseline_offset: *baseline_offset,
+                            text_offset: Pt::ZERO,
                         });
                     }
                 }

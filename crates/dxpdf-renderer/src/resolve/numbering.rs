@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use dxpdf_docx_model::model::{
-    NumberFormat, NumberingDefinitions, NumberingLevelDefinition, NumId, NumPicBulletId,
+    Alignment, NumberFormat, NumberingDefinitions, NumberingLevelDefinition, NumId, NumPicBulletId,
     RunProperties, Indentation,
 };
 
@@ -18,6 +18,8 @@ pub struct ResolvedNumberingLevel {
     /// §17.9.3: paragraph indentation from the numbering level definition.
     /// When present, overrides the paragraph style's indentation.
     pub indentation: Option<Indentation>,
+    /// §17.9.7: justification of the numbering symbol (left, center, right).
+    pub justification: Option<Alignment>,
     /// §17.9.10: reference to a picture bullet definition.
     pub lvl_pic_bullet_id: Option<NumPicBulletId>,
 }
@@ -64,6 +66,7 @@ fn resolve_level(def: &NumberingLevelDefinition) -> ResolvedNumberingLevel {
         start: def.start.unwrap_or(1),
         run_properties: def.run_properties.clone(),
         indentation: def.indentation,
+        justification: def.justification,
         lvl_pic_bullet_id: def.lvl_pic_bullet_id,
     }
 }

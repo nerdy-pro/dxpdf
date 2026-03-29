@@ -394,6 +394,7 @@ pub fn layout_paragraph(
                     width,
                     hyperlink_url,
                     baseline_offset,
+                    text_offset,
                     ..
                 } => {
                     // §17.3.2.32: render run-level shading behind text.
@@ -452,7 +453,7 @@ pub fn layout_paragraph(
 
                     let y = cursor_y + line.ascent + *baseline_offset;
                     commands.push(DrawCommand::Text {
-                        position: PtOffset::new(x, y),
+                        position: PtOffset::new(x + *text_offset, y),
                         text: text.clone(),
                         font_family: font.family.clone(),
                         char_spacing: font.char_spacing,
@@ -686,6 +687,7 @@ fn split_oversized_fragments(
                         ascent: a,
                         hyperlink_url: hyperlink_url.clone(),
                         baseline_offset: *baseline_offset,
+                        text_offset: Pt::ZERO,
                     });
                 }
             }
@@ -816,7 +818,7 @@ mod tests {
             height: Pt::new(14.0),
             ascent: Pt::new(10.0),
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO,
+            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }
     }
 
