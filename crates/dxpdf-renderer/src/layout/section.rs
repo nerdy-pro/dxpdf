@@ -888,7 +888,7 @@ mod tests {
     use super::*;
     use crate::geometry::{PtEdgeInsets, PtSize};
     use crate::layout::draw_command::DrawCommand;
-    use crate::layout::fragment::FontProps;
+    use crate::layout::fragment::{FontProps, TextMetrics};
     use crate::layout::table::TableCellInput;
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
@@ -906,8 +906,7 @@ mod tests {
             },
             color: RgbColor::BLACK,
             width: Pt::new(width), trimmed_width: Pt::new(width),
-            height: Pt::new(height),
-            ascent: Pt::new(height * 0.7),
+            metrics: TextMetrics { ascent: Pt::new(height * 0.7), descent: Pt::new(height * 0.3) },
             hyperlink_url: None,
             shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }

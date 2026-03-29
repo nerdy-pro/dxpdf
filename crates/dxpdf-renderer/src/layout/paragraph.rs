@@ -149,7 +149,7 @@ pub struct ParagraphLayout {
 }
 
 /// Optional text measurement callback for accurate per-character splitting.
-pub type MeasureTextFn<'a> = Option<&'a dyn Fn(&str, &super::fragment::FontProps) -> (Pt, Pt, Pt)>;
+pub type MeasureTextFn<'a> = Option<&'a dyn Fn(&str, &super::fragment::FontProps) -> (Pt, super::fragment::TextMetrics)>;
 
 /// Lay out a paragraph: fit fragments into lines, apply alignment and spacing.
 ///
@@ -402,8 +402,7 @@ pub fn layout_paragraph(
                     shading,
                     border,
                     width,
-                    ascent: frag_ascent,
-                    height: frag_height,
+                    metrics,
                     hyperlink_url,
                     baseline_offset,
                     text_offset,
@@ -412,13 +411,13 @@ pub fn layout_paragraph(
                     // §17.3.2.32: render run-level shading behind text.
                     // Uses text bounds (ascent+descent), not full line height.
                     if let Some(bg_color) = shading {
-                        let text_top = cursor_y + line.ascent - *frag_ascent;
+                        let text_top = cursor_y + line.ascent - metrics.ascent;
                         commands.push(DrawCommand::Rect {
                             rect: crate::geometry::PtRect::from_xywh(
                                 x,
                                 text_top,
                                 *width,
-                                *frag_height,
+                                metrics.height(),
                             ),
                             color: *bg_color,
                         });
@@ -427,11 +426,11 @@ pub fn layout_paragraph(
                     // §17.3.2.4: render run-level border (box around text).
                     // Uses text bounds, not full line height.
                     if let Some(bdr) = border {
-                        let text_top = cursor_y + line.ascent - *frag_ascent;
+                        let text_top = cursor_y + line.ascent - metrics.ascent;
                         let bx = x - bdr.space;
                         let by = text_top;
                         let bw = *width + bdr.space * 2.0;
-                        let bh = *frag_height;
+                        let bh = metrics.height();
                         let half = bdr.width * 0.5;
                         // Top
                         commands.push(DrawCommand::Line {
@@ -685,17 +684,17 @@ fn split_oversized_fragments(
     for frag in fragments {
         match frag {
             Fragment::Text { text, width, font, color, shading, border,
-                             height, ascent, hyperlink_url, baseline_offset, .. }
+                             metrics, hyperlink_url, baseline_offset, .. }
                 if *width > max_width && text.chars().count() > 1 =>
             {
                 any_split = true;
                 for ch in text.chars() {
                     let ch_str = ch.to_string();
-                    let (w, h, a) = if let Some(m) = measure {
+                    let (w, char_metrics) = if let Some(m) = measure {
                         m(&ch_str, font)
                     } else {
                         let per_char = *width / text.chars().count() as f32;
-                        (per_char, *height, *ascent)
+                        (per_char, *metrics)
                     };
                     result.push(Fragment::Text {
                         text: ch_str,
@@ -705,8 +704,7 @@ fn split_oversized_fragments(
                         border: *border,
                         width: w,
                         trimmed_width: w,
-                        height: h,
-                        ascent: a,
+                        metrics: char_metrics,
                         hyperlink_url: hyperlink_url.clone(),
                         baseline_offset: *baseline_offset,
                         text_offset: Pt::ZERO,
@@ -818,7 +816,7 @@ fn resolve_line_height(natural: Pt, rule: &LineSpacingRule) -> Pt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fragment::FontProps;
+    use crate::layout::fragment::{FontProps, TextMetrics};
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
 
@@ -837,8 +835,7 @@ mod tests {
             },
             color: RgbColor::BLACK,
             width: Pt::new(width), trimmed_width: Pt::new(width),
-            height: Pt::new(14.0),
-            ascent: Pt::new(10.0),
+            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
             hyperlink_url: None,
             shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }

@@ -105,8 +105,8 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         // paragraph renderer will clip/overflow as needed.
         line_width = new_width;
         line_height = line_height.max(frag.height());
-        if let Fragment::Text { ascent, .. } = frag {
-            line_ascent = line_ascent.max(*ascent);
+        if let Fragment::Text { metrics, .. } = frag {
+            line_ascent = line_ascent.max(metrics.ascent);
         }
 
         // Track break opportunity: only after fragments that end with whitespace,
@@ -148,10 +148,10 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> (Pt, Pt, P
         width += frag.width();
         height = height.max(frag.height());
         if let Fragment::Text {
-            ascent: a, ..
+            metrics, ..
         } = frag
         {
-            ascent = ascent.max(*a);
+            ascent = ascent.max(metrics.ascent);
         }
     }
     (width, height, ascent)
@@ -160,7 +160,7 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> (Pt, Pt, P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::fragment::FontProps;
+    use crate::layout::fragment::{FontProps, TextMetrics};
     use std::rc::Rc;
     use crate::resolve::color::RgbColor;
 
@@ -177,8 +177,7 @@ mod tests {
             },
             color: RgbColor::BLACK,
             width: Pt::new(width), trimmed_width: Pt::new(width),
-            height: Pt::new(14.0),
-            ascent: Pt::new(10.0),
+            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
             hyperlink_url: None,
             shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }
@@ -296,8 +295,7 @@ mod tests {
                 },
                 color: RgbColor::BLACK,
                 width: Pt::new(20.0), trimmed_width: Pt::new(20.0),
-                height: Pt::new(12.0),
-                ascent: Pt::new(9.0),
+                metrics: TextMetrics { ascent: Pt::new(9.0), descent: Pt::new(3.0) },
                 hyperlink_url: None,
                 shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
             },
@@ -313,8 +311,7 @@ mod tests {
                 },
                 color: RgbColor::BLACK,
                 width: Pt::new(30.0), trimmed_width: Pt::new(30.0),
-                height: Pt::new(28.0),
-                ascent: Pt::new(22.0),
+                metrics: TextMetrics { ascent: Pt::new(22.0), descent: Pt::new(6.0) },
                 hyperlink_url: None,
                 shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
             },

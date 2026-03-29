@@ -51,7 +51,7 @@ pub fn layout_cell(
 mod tests {
     use super::*;
     use crate::layout::draw_command::DrawCommand;
-    use crate::layout::fragment::{FontProps, Fragment};
+    use crate::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::layout::paragraph::ParagraphStyle;
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
@@ -69,8 +69,7 @@ mod tests {
             },
             color: RgbColor::BLACK,
             width: Pt::new(width), trimmed_width: Pt::new(width),
-            height: Pt::new(14.0),
-            ascent: Pt::new(10.0),
+            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
             hyperlink_url: None,
             shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }

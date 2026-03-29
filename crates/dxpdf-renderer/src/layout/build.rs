@@ -111,14 +111,14 @@ fn build_note_content(
                 });
                 let ref_size = font.size * 0.58;
                 let ref_font = FontProps { size: ref_size, ..font };
-                let (w, h, a) = ctx.measurer.measure(&num_text, &ref_font);
+                let (w, m) = ctx.measurer.measure(&num_text, &ref_font);
                 frags.insert(0, Fragment::Text {
                     text: num_text,
                     font: ref_font,
                     color: RgbColor::BLACK,
                     shading: None, border: None,
                     width: w, trimmed_width: w,
-                    height: h, ascent: a,
+                    metrics: m,
                     hyperlink_url: None,
                     baseline_offset: -(font.size * 0.4),
                     text_offset: Pt::ZERO,
@@ -413,7 +413,8 @@ fn build_paragraph_block(
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
                 };
-                let (w, h, a) = ctx.measurer.measure(&label_text, &label_font);
+                let (w, m) = ctx.measurer.measure(&label_text, &label_font);
+                let h = m.height();
                 // Tab after label: advances to indent_left via the implicit
                 // tab stop. Fitting width = hanging so that label + tab
                 // consume exactly the hanging indent space during fitting,
@@ -450,8 +451,7 @@ fn build_paragraph_block(
                     border: None,
                     width: label_width,
                     trimmed_width: label_width,
-                    height: h,
-                    ascent: a,
+                    metrics: m,
                     hyperlink_url: None,
                     baseline_offset: Pt::ZERO,
                     text_offset,
@@ -533,7 +533,7 @@ fn build_paragraph_block(
         let ascent: Pt = fragments
             .iter()
             .map(|f| match f {
-                Fragment::Text { ascent, .. } => *ascent,
+                Fragment::Text { metrics, .. } => metrics.ascent,
                 _ => Pt::ZERO,
             })
             .fold(Pt::ZERO, Pt::max);
@@ -832,7 +832,7 @@ fn build_fragments(
         }
     }
 
-    let measure = |text: &str, font: &FontProps| -> (Pt, Pt, Pt) {
+    let measure = |text: &str, font: &FontProps| -> (Pt, crate::layout::fragment::TextMetrics) {
         ctx.measurer.measure(text, font)
     };
 
@@ -1439,7 +1439,7 @@ fn split_oversized_fragments(
                 // Re-measure each character individually.
                 for ch in text.chars() {
                     let ch_str = ch.to_string();
-                    let (w, h, a) = ctx.measurer.measure(&ch_str, font);
+                    let (w, m) = ctx.measurer.measure(&ch_str, font);
                     if let Fragment::Text {
                         color, shading, border, hyperlink_url,
                         baseline_offset, ..
@@ -1453,8 +1453,7 @@ fn split_oversized_fragments(
                             border: *border,
                             width: w,
                             trimmed_width: w,
-                            height: h,
-                            ascent: a,
+                            metrics: m,
                             hyperlink_url: hyperlink_url.clone(),
                             baseline_offset: *baseline_offset,
                             text_offset: Pt::ZERO,

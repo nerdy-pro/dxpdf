@@ -118,7 +118,7 @@ pub fn layout_document(
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
         let built = build_section_blocks(section, &config, &ctx);
-        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
+        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
             measurer.measure(text, font)
         };
 
@@ -172,7 +172,7 @@ pub fn layout_document(
 
     // Render endnotes on a new page at the end of the document.
     if !all_endnotes.is_empty() {
-        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
+        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
             measurer.measure(text, font)
         };
         let mut endnote_page = LayoutedPage::new(last_config.page_size);

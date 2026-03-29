@@ -25,6 +25,23 @@ pub struct FontProps {
     pub underline_thickness: Pt,
 }
 
+/// Font metrics for a specific font at a specific size.
+/// Evaluated once by the measurer and carried through the pipeline.
+#[derive(Clone, Copy, Debug)]
+pub struct TextMetrics {
+    /// Distance from baseline to top of glyphs (positive upward).
+    pub ascent: Pt,
+    /// Distance from baseline to bottom of glyphs (positive downward).
+    pub descent: Pt,
+}
+
+impl TextMetrics {
+    /// Total text height (ascent + descent).
+    pub fn height(&self) -> Pt {
+        self.ascent + self.descent
+    }
+}
+
 /// §17.3.2.4: run-level border for rendering.
 #[derive(Clone, Copy, Debug)]
 pub struct FragmentBorder {
@@ -49,8 +66,8 @@ pub enum Fragment {
         /// Width excluding trailing whitespace (used for line-break overflow checking).
         /// Trailing whitespace is allowed to hang past the margin per Word behavior.
         trimmed_width: Pt,
-        height: Pt,
-        ascent: Pt,
+        /// Font metrics (ascent + descent = text height).
+        metrics: TextMetrics,
         hyperlink_url: Option<String>,
         baseline_offset: Pt,
         /// Horizontal offset for drawing text within the fragment width.
@@ -99,7 +116,7 @@ impl Fragment {
 
     pub fn height(&self) -> Pt {
         match self {
-            Fragment::Text { height, .. } => *height,
+            Fragment::Text { metrics, .. } => metrics.height(),
             Fragment::Image { size, .. } => size.height,
             Fragment::Tab { line_height, .. } | Fragment::LineBreak { line_height } => *line_height,
             Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
@@ -241,7 +258,7 @@ pub fn collect_fragments<F>(
     endnote_counter: &mut u32,
 ) -> Vec<Fragment>
 where
-    F: Fn(&str, &FontProps) -> (Pt, Pt, Pt), // (width, height, ascent)
+    F: Fn(&str, &FontProps) -> (Pt, TextMetrics), // (width, metrics)
 {
     let mut fragments = Vec::new();
     let mut field_depth: i32 = 0; // tracks nested complex field state
@@ -289,14 +306,14 @@ where
                 // These ratios are documented in the OpenXML SDK reference.
                 let mut baseline_offset = match effective_props.vertical_align {
                     Some(VerticalAlign::Superscript) => {
-                        let (_, _, base_ascent) = measure_text("X", &font);
+                        let (_, base_m) = measure_text("X", &font);
                         font.size = font.size * 0.58;
-                        -(base_ascent * 0.33)
+                        -(base_m.ascent * 0.33)
                     }
                     Some(VerticalAlign::Subscript) => {
-                        let (_, base_height, _) = measure_text("X", &font);
+                        let (_, base_m) = measure_text("X", &font);
                         font.size = font.size * 0.58;
-                        base_height * 0.08
+                        base_m.height() * 0.08
                     }
                     _ => Pt::ZERO,
                 };
@@ -317,7 +334,7 @@ where
                     // can break between words. Whitespace is kept as a trailing
                     // part of the preceding word (e.g., "hello " + "world").
                     for word in split_into_words(&tr.text) {
-                        let (w, h, a) = measure_text(word, &font);
+                        let (w, m) = measure_text(word, &font);
                         // Measure trimmed width for overflow checking.
                         // Trailing whitespace is allowed to hang past the margin.
                         let trimmed = word.trim_end();
@@ -334,8 +351,7 @@ where
                             border,
                             width: w,
                             trimmed_width: tw,
-                            height: h,
-                            ascent: a,
+                            metrics: m,
                             hyperlink_url: hyperlink_url.map(String::from),
                             baseline_offset,
                             text_offset: Pt::ZERO,
@@ -459,7 +475,7 @@ where
                 };
                 let ch = char::from_u32(sym.char_code as u32).unwrap_or('\u{FFFD}');
                 let text = ch.to_string();
-                let (w, h, a) = measure_text(&text, &font);
+                let (w, m) = measure_text(&text, &font);
                 fragments.push(Fragment::Text {
                     text,
                     font,
@@ -468,8 +484,7 @@ where
                     border: None,
                     width: w,
                     trimmed_width: w,
-                    height: h,
-                    ascent: a,
+                    metrics: m,
                     hyperlink_url: hyperlink_url.map(String::from),
                     baseline_offset: Pt::ZERO,
                     text_offset: Pt::ZERO,
@@ -502,7 +517,7 @@ where
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
                 };
-                let (w, h, a) = measure_text(&num_text, &ref_font);
+                let (w, m) = measure_text(&num_text, &ref_font);
                 // Superscript baseline offset: raise by ~40% of the full-size ascent.
                 let baseline_offset = -(default_size * 0.4);
                 fragments.push(Fragment::Text {
@@ -513,8 +528,7 @@ where
                     border: None,
                     width: w,
                     trimmed_width: w,
-                    height: h,
-                    ascent: a,
+                    metrics: m,
                     hyperlink_url: None,
                     baseline_offset,
                     text_offset: Pt::ZERO,
@@ -535,7 +549,7 @@ where
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
                 };
-                let (w, h, a) = measure_text(&num_text, &ref_font);
+                let (w, m) = measure_text(&num_text, &ref_font);
                 let baseline_offset = -(default_size * 0.4);
                 fragments.push(Fragment::Text {
                     text: num_text,
@@ -545,8 +559,7 @@ where
                     border: None,
                     width: w,
                     trimmed_width: w,
-                    height: h,
-                    ascent: a,
+                    metrics: m,
                     hyperlink_url: None,
                     baseline_offset,
                     text_offset: Pt::ZERO,
@@ -591,12 +604,11 @@ mod tests {
     use dxpdf_docx_model::dimension::{Dimension, HalfPoints};
     use dxpdf_docx_model::model::*;
 
-    /// Dummy measurer: width = text.len() * 6.0, height = 12.0, ascent = 10.0
-    fn dummy_measure(text: &str, _font: &FontProps) -> (Pt, Pt, Pt) {
+    /// Dummy measurer: width = text.len() * 6.0, ascent = 10.0, descent = 2.0
+    fn dummy_measure(text: &str, _font: &FontProps) -> (Pt, TextMetrics) {
         (
             Pt::new(text.len() as f32 * 6.0),
-            Pt::new(12.0),
-            Pt::new(10.0),
+            TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(2.0) },
         )
     }
 

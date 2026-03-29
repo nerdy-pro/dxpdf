@@ -75,7 +75,7 @@ pub fn render_headers_footers(
 mod tests {
     use super::*;
     use crate::geometry::{PtEdgeInsets, PtOffset, PtSize};
-    use crate::layout::fragment::{FontProps, Fragment};
+    use crate::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::layout::paragraph::ParagraphStyle;
     use crate::resolve::color::RgbColor;
     use std::rc::Rc;
@@ -101,8 +101,7 @@ mod tests {
             },
             color: RgbColor::BLACK,
             width: Pt::new(40.0), trimmed_width: Pt::new(40.0),
-            height: Pt::new(12.0),
-            ascent: Pt::new(9.0),
+            metrics: TextMetrics { ascent: Pt::new(9.0), descent: Pt::new(3.0) },
             hyperlink_url: None,
             shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
         }
