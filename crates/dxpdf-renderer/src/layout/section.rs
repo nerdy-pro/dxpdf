@@ -215,14 +215,13 @@ pub fn layout_section(
                     }
                 }
                 // §17.3.1.9: contextual spacing — when enabled and both
-                // paragraphs share the same style, collapse space_before with
-                // the previous paragraph's space_after (use max, not sum).
+                // paragraphs share the same style, suppress both the previous
+                // paragraph's space_after and this paragraph's space_before.
                 if effective_style.contextual_spacing
                     && effective_style.style_id.is_some()
                     && effective_style.style_id == prev_style_id
                 {
-                    let collapse = prev_space_after.min(effective_style.space_before);
-                    cursor_y -= collapse;
+                    cursor_y -= prev_space_after + effective_style.space_before;
                 }
 
                 effective_style.page_floats = effective_floats;
