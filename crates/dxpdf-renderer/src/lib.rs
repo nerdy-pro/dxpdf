@@ -92,6 +92,7 @@ pub fn layout_document(
     let ctx = BuildContext {
         measurer: &measurer,
         resolved,
+        page_config: std::cell::RefCell::new(PageConfig::default()),
         footnote_counter: std::cell::Cell::new(0),
         endnote_counter: std::cell::Cell::new(0),
         list_counters: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -117,6 +118,7 @@ pub fn layout_document(
 
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
+        *ctx.page_config.borrow_mut() = config.clone();
         let built = build_section_blocks(section, &config, &ctx);
         let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
             measurer.measure(text, font)

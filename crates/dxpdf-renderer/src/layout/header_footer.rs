@@ -49,6 +49,18 @@ pub fn render_headers_footers(
                 })
                 .collect();
 
+            // Render floating images from the header.
+            for fi in &hf.floating_images {
+                let img_y = match fi.y {
+                    super::section::FloatingImageY::Absolute(y) => y,
+                    super::section::FloatingImageY::RelativeToParagraph(offset) => offset_y + offset,
+                };
+                header_cmds.push(DrawCommand::Image {
+                    rect: crate::geometry::PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
+                    image_data: fi.image_data.clone(),
+                });
+            }
+
             // Prepend header commands before body content
             header_cmds.append(&mut page.commands);
             page.commands = header_cmds;

@@ -43,6 +43,8 @@ const SPEC_DEFAULT_FONT_SIZE: Pt = Pt::new(10.0);
 pub struct BuildContext<'a> {
     pub measurer: &'a TextMeasurer,
     pub resolved: &'a ResolvedDocument,
+    /// Page configuration for the current section.
+    pub page_config: std::cell::RefCell<crate::layout::page::PageConfig>,
     /// Sequential footnote display number (1, 2, 3...).
     pub footnote_counter: std::cell::Cell<u32>,
     /// Sequential endnote display number (i, ii, iii...).
@@ -155,6 +157,8 @@ pub struct HeaderFooterContent {
     pub style: ParagraphStyle,
     /// Absolute page-relative position from a VML text box, if present.
     pub absolute_position: Option<(Pt, Pt)>,
+    /// Floating (anchor) images from header/footer paragraphs.
+    pub floating_images: Vec<crate::layout::section::FloatingImage>,
 }
 
 /// Collect fragments from header/footer blocks, preserving paragraph style
@@ -164,6 +168,7 @@ pub fn collect_fragments_from_blocks(
     ctx: &BuildContext,
 ) -> HeaderFooterContent {
     let mut all_fragments = Vec::new();
+    let mut all_floating_images = Vec::new();
     let mut style = ParagraphStyle::default();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
@@ -174,8 +179,6 @@ pub fn collect_fragments_from_blocks(
                 style = paragraph_style_from_props(&props);
             }
             // Check for VML absolute positioning in Pict inlines.
-            // The Pict may be directly in the paragraph or inside an
-            // AlternateContent fallback.
             if absolute_position.is_none() {
                 for inline in &p.content {
                     if let Some(pos) = find_vml_absolute_position(inline) {
@@ -184,6 +187,9 @@ pub fn collect_fragments_from_blocks(
                     }
                 }
             }
+            // Extract floating (anchor) images from header paragraphs.
+            let floats = extract_floating_images(p, ctx, false);
+            all_floating_images.extend(floats);
             all_fragments.extend(frags);
         }
     }
@@ -192,6 +198,7 @@ pub fn collect_fragments_from_blocks(
         fragments: all_fragments,
         style,
         absolute_position,
+        floating_images: all_floating_images,
     }
 }
 
@@ -685,14 +692,14 @@ fn extract_floating_images(
 
                 let w = Pt::from(img.extent.width);
                 let h = Pt::from(img.extent.height);
+                let pc = ctx.page_config.borrow();
 
                 // Resolve horizontal position.
                 // In cell context, positions are relative to the cell origin.
                 let (page_width, margin_left, margin_right) = if cell_context {
                     (Pt::ZERO, Pt::ZERO, Pt::ZERO)
                 } else {
-                    // TODO: get actual page config here. For now use US Letter defaults.
-                    (Pt::new(612.0), Pt::new(72.0), Pt::new(72.0))
+                    (pc.page_size.width, pc.margins.left, pc.margins.right)
                 };
                 let content_width = if cell_context { Pt::ZERO } else { page_width - margin_left - margin_right };
 
@@ -723,7 +730,7 @@ fn extract_floating_images(
                 // Resolve vertical position.
                 let y = match &anchor.vertical_position {
                     AnchorPosition::Offset { relative_from, offset } => {
-                        let margin_top = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
+                        let margin_top = if cell_context { Pt::ZERO } else { pc.margins.top };
                         if cell_context {
                             // In cell context, all positions are relative to cell origin.
                             FloatingImageY::RelativeToParagraph(Pt::from(*offset))
@@ -731,6 +738,14 @@ fn extract_floating_images(
                             match relative_from {
                                 AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
                                 AnchorRelativeFrom::Margin => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
+                                // §20.4.2.11: topMargin — offset from page top.
+                                AnchorRelativeFrom::TopMargin => FloatingImageY::Absolute(Pt::from(*offset)),
+                                // §20.4.2.11: bottomMargin — offset from bottom margin edge.
+                                AnchorRelativeFrom::BottomMargin => {
+                                    let page_height = pc.page_size.height;
+                                    let margin_bottom = pc.margins.bottom;
+                                    FloatingImageY::Absolute(page_height - margin_bottom + Pt::from(*offset))
+                                }
                                 AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
                                     FloatingImageY::RelativeToParagraph(Pt::from(*offset))
                                 }
@@ -739,12 +754,16 @@ fn extract_floating_images(
                         }
                     }
                     AnchorPosition::Align { relative_from, alignment } => {
-                        let margin_top = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
-                        let page_height = if cell_context { Pt::ZERO } else { Pt::new(792.0) };
-                        let margin_bottom = if cell_context { Pt::ZERO } else { Pt::new(72.0) };
+                        let margin_top = if cell_context { Pt::ZERO } else { pc.margins.top };
+                        let page_height = if cell_context { Pt::ZERO } else { pc.page_size.height };
+                        let margin_bottom = if cell_context { Pt::ZERO } else { pc.margins.bottom };
                         let (area_top, area_height) = match relative_from {
                             AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
                             AnchorRelativeFrom::Margin => (margin_top, page_height - margin_top - margin_bottom),
+                            // §20.4.2.11: topMargin = area from page top to top margin edge.
+                            AnchorRelativeFrom::TopMargin => (Pt::ZERO, margin_top),
+                            // §20.4.2.11: bottomMargin = area from bottom margin edge to page bottom.
+                            AnchorRelativeFrom::BottomMargin => (page_height - margin_bottom, margin_bottom),
                             _ => (margin_top, page_height - margin_top - margin_bottom),
                         };
                         let y_pos = match alignment {
