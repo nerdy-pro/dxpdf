@@ -575,12 +575,16 @@ pub fn layout_paragraph(
 
     // §17.3.1.24: paragraph border and shading coordinate system.
     // Borders sit at the paragraph indent edges. The border `space` is the
-    // distance inward from the border to the text. Shading fills the area
-    // enclosed by the borders.
+    // distance between the border line and the text content. Top/bottom
+    // border space expands the bordered area vertically.
+    let border_space_top = style.borders.as_ref()
+        .and_then(|b| b.top.as_ref()).map(|b| b.space).unwrap_or(Pt::ZERO);
+    let border_space_bottom = style.borders.as_ref()
+        .and_then(|b| b.bottom.as_ref()).map(|b| b.space).unwrap_or(Pt::ZERO);
     let para_left = style.indent_left;
     let para_right = constraints.max_width - style.indent_right;
-    let para_top = style.space_before;
-    let para_bottom = cursor_y;
+    let para_top = style.space_before - border_space_top;
+    let para_bottom = cursor_y + border_space_bottom;
 
     // §17.3.1.31: render paragraph shading (fills the border area).
     if let Some(bg_color) = style.shading {
@@ -639,6 +643,8 @@ pub fn layout_paragraph(
         }
     }
 
+    // §17.3.1.24: bottom border space adds to paragraph height.
+    cursor_y += border_space_bottom;
     cursor_y += style.space_after;
 
     // If no lines, still consume default height + spacing.
