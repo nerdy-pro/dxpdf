@@ -227,8 +227,9 @@ pub fn layout_paragraph(
 
         while frag_idx < fragments.len() {
             let abs_y = style.page_y + line_y;
-            let (fl, fr) = super::float::float_adjustments(
-                &style.page_floats, abs_y, style.page_x, style.page_content_width,
+            let (fl, fr) = super::float::float_adjustments_with_height(
+                &style.page_floats, abs_y, default_line_height,
+                style.page_x, style.page_content_width,
             );
             let float_reduction = fl + fr;
             let available = (content_width - float_reduction).max(Pt::ZERO);
@@ -559,7 +560,7 @@ pub fn layout_paragraph(
 
                     x = new_x;
                 }
-                Fragment::LineBreak { .. } => {}
+                Fragment::LineBreak { .. } | Fragment::ColumnBreak => {}
                 Fragment::Bookmark { name } => {
                     commands.push(DrawCommand::NamedDestination {
                         position: PtOffset::new(x, cursor_y),

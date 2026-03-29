@@ -114,6 +114,7 @@ mod tests {
             margins: PtEdgeInsets::new(Pt::new(72.0), Pt::new(72.0), Pt::new(72.0), Pt::new(72.0)),
             header_margin: Pt::new(36.0),
             footer_margin: Pt::new(36.0),
+            columns: vec![crate::layout::page::ColumnGeometry { x_offset: Pt::ZERO, width: Pt::new(468.0) }],
         }
     }
 

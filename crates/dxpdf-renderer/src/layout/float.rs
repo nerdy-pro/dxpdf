@@ -37,17 +37,33 @@ impl ActiveFloat {
 /// due to active floating images.
 ///
 /// Returns (indent_left, indent_right) — additional indentation to avoid floats.
+/// `line_y` is the top of the line, `line_height` is the line's height.
+/// A line overlaps a float if any part of the line's vertical range intersects
+/// the float's vertical range.
 pub fn float_adjustments(
     floats: &[ActiveFloat],
     line_y: Pt,
     page_x: Pt,
     content_width: Pt,
 ) -> (Pt, Pt) {
+    float_adjustments_with_height(floats, line_y, Pt::ZERO, page_x, content_width)
+}
+
+/// Like `float_adjustments` but with explicit line height for overlap checking.
+pub fn float_adjustments_with_height(
+    floats: &[ActiveFloat],
+    line_y: Pt,
+    line_height: Pt,
+    page_x: Pt,
+    content_width: Pt,
+) -> (Pt, Pt) {
     let mut indent_left = Pt::ZERO;
     let mut indent_right = Pt::ZERO;
+    let line_bottom = line_y + line_height;
 
     for float in floats {
-        if !float.overlaps_y(line_y) {
+        // Check if any part of the line overlaps the float vertically.
+        if line_bottom <= float.page_y_start || line_y >= float.page_y_end {
             continue;
         }
 

@@ -71,6 +71,8 @@ pub enum Fragment {
     LineBreak {
         line_height: Pt,
     },
+    /// §17.3.3.1: column break — forces content to the next column.
+    ColumnBreak,
     /// Named destination (bookmark target) — zero-width marker.
     Bookmark {
         name: String,
@@ -83,7 +85,7 @@ impl Fragment {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
-            Fragment::LineBreak { .. } | Fragment::Bookmark { .. } => Pt::ZERO,
+            Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
@@ -100,12 +102,12 @@ impl Fragment {
             Fragment::Text { height, .. } => *height,
             Fragment::Image { size, .. } => size.height,
             Fragment::Tab { line_height, .. } | Fragment::LineBreak { line_height } => *line_height,
-            Fragment::Bookmark { .. } => Pt::ZERO,
+            Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
     pub fn is_line_break(&self) -> bool {
-        matches!(self, Fragment::LineBreak { .. })
+        matches!(self, Fragment::LineBreak { .. } | Fragment::ColumnBreak)
     }
 
     /// Get font properties if this is a text fragment.
@@ -352,11 +354,13 @@ where
                     line_height: default_size,
                 });
             }
-            Inline::PageBreak | Inline::ColumnBreak => {
-                // Treated as line breaks in fragment collection
+            Inline::PageBreak => {
                 fragments.push(Fragment::LineBreak {
                     line_height: default_size,
                 });
+            }
+            Inline::ColumnBreak => {
+                fragments.push(Fragment::ColumnBreak);
             }
             Inline::Image(img) => {
                 // Only render INLINE images as fragments.

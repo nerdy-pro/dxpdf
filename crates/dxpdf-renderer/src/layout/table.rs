@@ -190,13 +190,24 @@ pub fn layout_table(
                     resolved_borders[row_idx][cell_ci + 1].left = None;
                 }
                 if row_idx + 1 < num_rows {
-                    let grid_col = grid_indices[row_idx][cell_ci];
-                    if let Some(below_ci) = cell_index_at_grid_col(&rows[row_idx + 1], grid_col) {
-                        let bottom = resolved_borders[row_idx][cell_ci].bottom;
-                        let top = resolved_borders[row_idx + 1][below_ci].top;
-                        let winner = resolve_border_conflict(bottom, top);
-                        resolved_borders[row_idx][cell_ci].bottom = winner;
-                        resolved_borders[row_idx + 1][below_ci].top = None;
+                    // Resolve bottom/top border conflicts for ALL grid columns
+                    // spanned by this cell (not just the first).
+                    let start_grid = grid_indices[row_idx][cell_ci];
+                    let span = rows[row_idx].cells[cell_ci].grid_span.max(1) as usize;
+                    let mut resolved_once = false;
+                    for gc in start_grid..start_grid + span {
+                        if let Some(below_ci) = cell_index_at_grid_col(&rows[row_idx + 1], gc) {
+                            if !resolved_once {
+                                // First spanned column: full conflict resolution.
+                                let bottom = resolved_borders[row_idx][cell_ci].bottom;
+                                let top = resolved_borders[row_idx + 1][below_ci].top;
+                                let winner = resolve_border_conflict(bottom, top);
+                                resolved_borders[row_idx][cell_ci].bottom = winner;
+                                resolved_once = true;
+                            }
+                            // Suppress top border for ALL cells below the span.
+                            resolved_borders[row_idx + 1][below_ci].top = None;
+                        }
                     }
                 }
             }

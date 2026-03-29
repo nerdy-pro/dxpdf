@@ -1,6 +1,6 @@
 //! Page configuration — convert section properties to layout-ready config.
 
-use dxpdf_docx_model::model::SectionProperties;
+use dxpdf_docx_model::model::{Columns, SectionProperties};
 
 use crate::dimension::Pt;
 use crate::geometry::{PtEdgeInsets, PtSize};
@@ -12,22 +12,35 @@ const SPEC_DEFAULT_PAGE_HEIGHT: Pt = Pt::new(792.0);
 /// §17.6.11: default page margin when w:pgMar is absent (1 inch = 1440 twips).
 const SPEC_DEFAULT_MARGIN: Pt = Pt::new(72.0);
 
-/// Page layout configuration in points.
+/// A single column's layout geometry.
 #[derive(Debug, Clone, Copy)]
+pub struct ColumnGeometry {
+    /// X offset of this column relative to the left page margin.
+    pub x_offset: Pt,
+    /// Available text width within this column.
+    pub width: Pt,
+}
+
+/// Page layout configuration in points.
+#[derive(Debug, Clone)]
 pub struct PageConfig {
     pub page_size: PtSize,
     pub margins: PtEdgeInsets,
     pub header_margin: Pt,
     pub footer_margin: Pt,
+    /// §17.6.4: column layout. Single-element vec for normal single-column.
+    pub columns: Vec<ColumnGeometry>,
 }
 
 impl Default for PageConfig {
     fn default() -> Self {
+        let content_width = SPEC_DEFAULT_PAGE_WIDTH - SPEC_DEFAULT_MARGIN - SPEC_DEFAULT_MARGIN;
         Self {
             page_size: PtSize::new(SPEC_DEFAULT_PAGE_WIDTH, SPEC_DEFAULT_PAGE_HEIGHT),
             margins: PtEdgeInsets::new(SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN),
             header_margin: SPEC_DEFAULT_MARGIN / 2.0,
             footer_margin: SPEC_DEFAULT_MARGIN / 2.0,
+            columns: vec![ColumnGeometry { x_offset: Pt::ZERO, width: content_width }],
         }
     }
 }
@@ -67,6 +80,10 @@ impl PageConfig {
             }
         }
 
+        // §17.6.4: compute column geometry.
+        let content_width = cfg.page_size.width - cfg.margins.left - cfg.margins.right;
+        cfg.columns = compute_columns(content_width, &sect.columns);
+
         cfg
     }
 
@@ -75,10 +92,51 @@ impl PageConfig {
         self.page_size.width - self.margins.left - self.margins.right
     }
 
+    /// Number of columns in this section.
+    pub fn num_columns(&self) -> usize {
+        self.columns.len()
+    }
+
     /// Available height for body content (page height minus top and bottom margins).
     pub fn content_height(&self) -> Pt {
         self.page_size.height - self.margins.top - self.margins.bottom
     }
+}
+
+/// §17.6.4: compute column geometry from section column properties.
+fn compute_columns(content_width: Pt, columns: &Option<Columns>) -> Vec<ColumnGeometry> {
+    let cols = match columns {
+        Some(c) if c.count.unwrap_or(1) > 1 => c,
+        _ => return vec![ColumnGeometry { x_offset: Pt::ZERO, width: content_width }],
+    };
+
+    let num = cols.count.unwrap_or(1) as usize;
+    let default_space = cols.space.map(Pt::from).unwrap_or(Pt::new(36.0)); // 720tw = 0.5in
+
+    // Use individual column definitions if provided and not equal_width.
+    if !cols.columns.is_empty() && cols.equal_width != Some(true) {
+        let mut result = Vec::with_capacity(cols.columns.len());
+        let mut x = Pt::ZERO;
+        for (i, col_def) in cols.columns.iter().enumerate() {
+            let w = col_def.width.map(Pt::from).unwrap_or(content_width / num as f32);
+            result.push(ColumnGeometry { x_offset: x, width: w });
+            if i < cols.columns.len() - 1 {
+                let gap = col_def.space.map(Pt::from).unwrap_or(default_space);
+                x += w + gap;
+            }
+        }
+        return result;
+    }
+
+    // Equal-width columns.
+    let total_gap = default_space * (num as f32 - 1.0);
+    let col_width = (content_width - total_gap) / num as f32;
+    let mut result = Vec::with_capacity(num);
+    for i in 0..num {
+        let x = (col_width + default_space) * i as f32;
+        result.push(ColumnGeometry { x_offset: x, width: col_width });
+    }
+    result
 }
 
 #[cfg(test)]

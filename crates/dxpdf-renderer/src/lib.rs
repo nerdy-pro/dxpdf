@@ -28,6 +28,33 @@ use crate::resolve::ResolvedDocument;
 
 /// Render a parsed DOCX document to PDF bytes.
 ///
+/// Estimate the cursor_y position from the last page's draw commands.
+/// Used to determine where a continuous section should start on the page.
+fn estimate_cursor_y(page: &layout::draw_command::LayoutedPage, config: &layout::page::PageConfig) -> dimension::Pt {
+    let mut max_y = config.margins.top;
+    for cmd in &page.commands {
+        let bottom = match cmd {
+            layout::draw_command::DrawCommand::Text { position, font_size, .. } => {
+                position.y + *font_size
+            }
+            layout::draw_command::DrawCommand::Image { rect, .. } => {
+                rect.origin.y + rect.size.height
+            }
+            layout::draw_command::DrawCommand::Rect { rect, .. } => {
+                rect.origin.y + rect.size.height
+            }
+            layout::draw_command::DrawCommand::Line { line, .. } => {
+                line.end.y
+            }
+            _ => continue,
+        };
+        if bottom > max_y {
+            max_y = bottom;
+        }
+    }
+    max_y
+}
+
 /// Full pipeline: resolve → preload fonts → layout → paint.
 pub fn render(doc: &Document) -> Result<Vec<u8>, error::RenderError> {
     let font_mgr = skia_safe::FontMgr::new();
@@ -85,13 +112,25 @@ pub fn layout_document(
         })
         .unwrap_or(dimension::Pt::ZERO);
 
+    // §17.6.22: track continuation state for `Continuous` section breaks.
+    let mut pending_continuation: Option<layout::section::ContinuationState> = None;
+
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
         let built = build_section_blocks(section, &config, &ctx);
         let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, dimension::Pt, dimension::Pt) {
             measurer.measure(text, font)
         };
-        let mut pages = layout_section(&built.blocks, &config, Some(&measure_fn), separator_indent, dlh);
+
+        // §17.6.22: continuous sections continue on the current page.
+        let continuation = if section.properties.section_type == Some(dxpdf_docx_model::model::SectionType::Continuous) {
+            pending_continuation.take()
+        } else {
+            pending_continuation = None;
+            None
+        };
+
+        let mut pages = layout_section(&built.blocks, &config, Some(&measure_fn), separator_indent, dlh, continuation);
 
         // Collect endnotes for rendering at document end.
         all_endnotes.extend(built.endnotes);
@@ -108,6 +147,26 @@ pub fn layout_document(
         );
 
         last_config = config;
+
+        // Check if the NEXT section is continuous — if so, save the last page
+        // as continuation state instead of appending it.
+        // (We peek ahead by checking the section index.)
+        let next_is_continuous = {
+            let section_idx = resolved.sections.iter().position(|s| std::ptr::eq(s, section));
+            section_idx.and_then(|i| resolved.sections.get(i + 1))
+                .is_some_and(|next| next.properties.section_type == Some(dxpdf_docx_model::model::SectionType::Continuous))
+        };
+
+        if next_is_continuous && !pages.is_empty() {
+            let last_page = pages.pop().unwrap();
+            // Estimate cursor_y from the last command on the page.
+            let cursor_y = estimate_cursor_y(&last_page, &last_config);
+            pending_continuation = Some(layout::section::ContinuationState {
+                page: last_page,
+                cursor_y,
+            });
+        }
+
         all_pages.append(&mut pages);
     }
 

@@ -66,29 +66,41 @@ pub enum LayoutBlock {
     },
 }
 
+/// §17.6.22: continuation state for `Continuous` section breaks.
+/// Allows a new section to continue on the current page.
+pub struct ContinuationState {
+    pub page: LayoutedPage,
+    pub cursor_y: Pt,
+}
+
 /// Lay out a sequence of blocks into pages.
+///
+/// If `continuation` is provided, the section starts on the given page at the
+/// given cursor_y (for `SectionType::Continuous` sections).
 pub fn layout_section(
     blocks: &[LayoutBlock],
     config: &PageConfig,
     measure_text: super::paragraph::MeasureTextFn<'_>,
     separator_indent: Pt,
     default_line_height: Pt,
+    continuation: Option<ContinuationState>,
 ) -> Vec<LayoutedPage> {
     let content_width = config.content_width();
-    let content_height = config.content_height();
-    let constraints = BoxConstraints::new(
-        Pt::ZERO,
-        content_width,
-        Pt::ZERO,
-        content_height,
-    );
+    let num_cols = config.num_columns();
 
     let mut pages: Vec<LayoutedPage> = Vec::new();
-    let mut current_page = LayoutedPage::new(config.page_size);
-    let mut cursor_y = config.margins.top;
+    let (mut current_page, mut cursor_y) = match continuation {
+        Some(c) => (c.page, c.cursor_y),
+        None => (LayoutedPage::new(config.page_size.clone()), config.margins.top),
+    };
     let page_bottom = config.page_size.height - config.margins.bottom;
     // Effective bottom boundary — reduced by footnote height.
     let mut bottom = page_bottom;
+    // §17.6.4: current column index (0-based).
+    let mut current_col: usize = 0;
+    // §17.6.4: y position where columns start on the current page.
+    // On a continuation page, columns start at cursor_y; on fresh pages, at margins.top.
+    let mut column_top = cursor_y;
     // Footnotes collected for the current page.
     let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
     // §17.3.1.9: track previous paragraph for contextual spacing collapsing.
@@ -103,6 +115,15 @@ pub fn layout_section(
     let mut page_start_block: usize = 0;
     // Whether we need to rescan absolute floats for this page.
     let mut abs_floats_dirty = true;
+
+    // Column-aware constraint: use current column's width.
+    let col_constraints = |col: usize| -> BoxConstraints {
+        let col_width = config.columns[col].width;
+        BoxConstraints::new(Pt::ZERO, col_width, Pt::ZERO, config.content_height())
+    };
+    let col_x = |col: usize| -> Pt {
+        config.margins.left + config.columns[col].x_offset
+    };
 
     for (block_idx, block) in blocks.iter().enumerate() {
         match block {
@@ -124,6 +145,8 @@ pub fn layout_section(
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    column_top = config.margins.top;
+                    current_col = 0;
                     prev_space_after = Pt::ZERO;
                     bottom = page_bottom;
                     page_start_block = block_idx;
@@ -132,13 +155,32 @@ pub fn layout_section(
 
                 let mut effective_style = style.clone();
 
+                // §17.3.1.33: suppress space_before at the top of a page/column.
+                if cursor_y <= column_top {
+                    effective_style.space_before = Pt::ZERO;
+                }
+                // §17.3.1.9 / §17.3.1.33: spacing collapse must happen BEFORE
+                // float registration so float y coordinates match actual paragraph position.
+                if effective_style.contextual_spacing
+                    && effective_style.style_id.is_some()
+                    && effective_style.style_id == prev_style_id
+                {
+                    cursor_y -= prev_space_after + effective_style.space_before;
+                } else {
+                    let collapse = prev_space_after.min(effective_style.space_before);
+                    cursor_y -= collapse;
+                }
+
                 // Register floating images (both relative and absolute).
                 // §20.4.2.18: wrapTopAndBottom images are emitted immediately
                 // and cursor_y advances past them — they act as block spacers.
+                // §20.4.2.10: paragraph-relative floats use the content area
+                // top (after space_before), not the total paragraph box top.
+                let content_top = cursor_y + effective_style.space_before;
                 for fi in floating_images.iter() {
                     let (y_start, y_end) = match fi.y {
                         FloatingImageY::RelativeToParagraph(offset) => {
-                            (cursor_y + offset, cursor_y + offset + fi.size.height)
+                            (content_top + offset, content_top + offset + fi.size.height)
                         }
                         FloatingImageY::Absolute(img_y) => {
                             (img_y, img_y + fi.size.height)
@@ -148,7 +190,7 @@ pub fn layout_section(
                         // §20.4.2.18: emit the image now and advance past it.
                         let img_y = match fi.y {
                             FloatingImageY::Absolute(y) => y,
-                            FloatingImageY::RelativeToParagraph(offset) => cursor_y + offset,
+                            FloatingImageY::RelativeToParagraph(offset) => content_top + offset,
                         };
                         current_page.commands.push(DrawCommand::Image {
                             rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
@@ -214,53 +256,86 @@ pub fn layout_section(
                         effective_floats.push(af.clone());
                     }
                 }
-                // §17.3.1.9: contextual spacing — when enabled and both
-                // paragraphs share the same style, suppress both the previous
-                // paragraph's space_after and this paragraph's space_before.
-                if effective_style.contextual_spacing
-                    && effective_style.style_id.is_some()
-                    && effective_style.style_id == prev_style_id
-                {
-                    cursor_y -= prev_space_after + effective_style.space_before;
-                }
-
                 effective_style.page_floats = effective_floats;
                 effective_style.page_y = cursor_y;
-                effective_style.page_x = config.margins.left;
-                effective_style.page_content_width = content_width;
+                effective_style.page_x = col_x(current_col);
+                effective_style.page_content_width = config.columns[current_col].width;
 
-                let para = layout_paragraph(
-                    fragments,
-                    &constraints,
-                    &effective_style,
-                    default_line_height,
-                    measure_text,
-                );
+                // §17.6.4: split paragraph at column breaks for multi-column layout.
+                let frag_chunks = split_at_column_breaks(fragments);
+                let mut para_start_y = cursor_y;
 
-                // Page break if paragraph doesn't fit
-                if cursor_y + para.size.height > bottom && cursor_y > config.margins.top {
-                    if !page_footnotes.is_empty() {
-                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
-                        page_footnotes.clear();
+                for (chunk_idx, chunk) in frag_chunks.iter().enumerate() {
+                    // Advance to next column for chunks after a column break.
+                    if chunk_idx > 0 {
+                        if current_col + 1 < num_cols {
+                            current_col += 1;
+                        } else {
+                            // All columns full — new page, reset to column 0.
+                            if !page_footnotes.is_empty() {
+                                render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                                page_footnotes.clear();
+                            }
+                            pages.push(std::mem::replace(
+                                &mut current_page,
+                                LayoutedPage::new(config.page_size.clone()),
+                            ));
+                            current_col = 0;
+                            column_top = config.margins.top;
+                            bottom = page_bottom;
+                            page_start_block = block_idx;
+                            abs_floats_dirty = true;
+                        }
+                        cursor_y = column_top;
+                        effective_style.page_x = col_x(current_col);
+                        effective_style.page_content_width = config.columns[current_col].width;
                     }
-                    pages.push(std::mem::replace(
-                        &mut current_page,
-                        LayoutedPage::new(config.page_size),
-                    ));
-                    cursor_y = config.margins.top;
-                    bottom = page_bottom;
-                    page_start_block = block_idx;
-                    abs_floats_dirty = true;
+
+                    let constraints = col_constraints(current_col);
+                    let para = layout_paragraph(
+                        chunk,
+                        &constraints,
+                        &effective_style,
+                        default_line_height,
+                        measure_text,
+                    );
+
+                    // Column/page overflow: advance column, then page.
+                    if cursor_y + para.size.height > bottom && cursor_y > column_top {
+                        if current_col + 1 < num_cols {
+                            current_col += 1;
+                            cursor_y = column_top;
+                        } else {
+                            if !page_footnotes.is_empty() {
+                                render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                                page_footnotes.clear();
+                            }
+                            pages.push(std::mem::replace(
+                                &mut current_page,
+                                LayoutedPage::new(config.page_size.clone()),
+                            ));
+                            cursor_y = config.margins.top;
+                            column_top = config.margins.top;
+                            current_col = 0;
+                            bottom = page_bottom;
+                            page_start_block = block_idx;
+                            abs_floats_dirty = true;
+                        }
+                        // Update para_start_y after page/column change so
+                        // floating images use the correct position.
+                        para_start_y = cursor_y;
+                    }
+
+                    // Offset commands to absolute page position
+                    for mut cmd in para.commands {
+                        cmd.shift_y(cursor_y);
+                        cmd.shift_x(col_x(current_col));
+                        current_page.commands.push(cmd);
+                    }
+
+                    cursor_y += para.size.height;
                 }
 
-                // Offset commands to absolute page position
-                for mut cmd in para.commands {
-                    cmd.shift_y(cursor_y);
-                    cmd.shift_x(config.margins.left);
-                    current_page.commands.push(cmd);
-                }
-
-                cursor_y += para.size.height;
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -273,7 +348,7 @@ pub fn layout_section(
                     let img_y = match fi.y {
                         FloatingImageY::Absolute(y) => y,
                         FloatingImageY::RelativeToParagraph(offset) => {
-                            cursor_y - para.size.height + offset
+                            para_start_y + effective_style.space_before + offset
                         }
                     };
                     current_page.commands.push(DrawCommand::Image {
@@ -310,7 +385,7 @@ pub fn layout_section(
                 let table = layout_table(
                     rows,
                     col_widths,
-                    &constraints,
+                    &col_constraints(current_col),
                     default_line_height,
                     border_config.as_ref(),
                     measure_text,
@@ -336,6 +411,8 @@ pub fn layout_section(
                             LayoutedPage::new(config.page_size),
                         ));
                         cursor_y = config.margins.top;
+                        column_top = config.margins.top;
+                        current_col = 0;
                         prev_space_after = Pt::ZERO;
                         bottom = page_bottom;
                         page_start_block = block_idx;
@@ -372,6 +449,8 @@ pub fn layout_section(
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    column_top = config.margins.top;
+                    current_col = 0;
                     bottom = page_bottom;
                     page_start_block = block_idx;
                     abs_floats_dirty = true;
@@ -405,6 +484,25 @@ pub fn layout_section(
 }
 
 /// Render footnotes at the bottom of a page.
+/// Split a fragment slice at `Fragment::ColumnBreak` markers.
+/// Returns a vec of slices; the column break fragments themselves are excluded.
+fn split_at_column_breaks(fragments: &[Fragment]) -> Vec<&[Fragment]> {
+    let has_break = fragments.iter().any(|f| matches!(f, Fragment::ColumnBreak));
+    if !has_break {
+        return vec![fragments];
+    }
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    for (i, frag) in fragments.iter().enumerate() {
+        if matches!(frag, Fragment::ColumnBreak) {
+            chunks.push(&fragments[start..i]);
+            start = i + 1;
+        }
+    }
+    chunks.push(&fragments[start..]);
+    chunks
+}
+
 fn render_page_footnotes(
     page: &mut LayoutedPage,
     config: &PageConfig,
@@ -517,17 +615,19 @@ mod tests {
     }
 
     fn small_config() -> PageConfig {
+        use crate::layout::page::ColumnGeometry;
         PageConfig {
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
             footer_margin: Pt::new(5.0),
+            columns: vec![ColumnGeometry { x_offset: Pt::ZERO, width: Pt::new(180.0) }],
         }
     }
 
     #[test]
     fn empty_blocks_produces_one_empty_page() {
-        let pages = layout_section(&[], &small_config(), None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&[], &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
         assert_eq!(pages.len(), 1);
         assert!(pages[0].commands.is_empty());
     }
@@ -535,7 +635,7 @@ mod tests {
     #[test]
     fn single_paragraph_on_one_page() {
         let blocks = vec![para_block("hello", 30.0)];
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
 
         assert_eq!(pages.len(), 1);
         let text_count = pages[0]
@@ -550,7 +650,7 @@ mod tests {
     fn text_positioned_at_margins() {
         let blocks = vec![para_block("hello", 30.0)];
         let config = small_config();
-        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
 
         if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
             assert!(
@@ -570,7 +670,7 @@ mod tests {
         // Each paragraph: 14pt tall
         // 6 paragraphs = 84pt > 80pt → should break to 2 pages
         let blocks: Vec<_> = (0..6).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
 
         assert_eq!(pages.len(), 2, "should overflow to 2 pages");
 
@@ -598,7 +698,7 @@ mod tests {
     #[test]
     fn page_size_set_on_layouted_page() {
         let config = small_config();
-        let pages = layout_section(&[], &config, None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&[], &config, None, Pt::ZERO, Pt::new(14.0), None);
         assert_eq!(pages[0].page_size, config.page_size);
     }
 
@@ -607,7 +707,7 @@ mod tests {
         // 20 paragraphs at 14pt each = 280pt
         // Content area = 80pt → need 4 pages (80/14 = 5.7 paras per page)
         let blocks: Vec<_> = (0..20).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
 
         assert_eq!(pages.len(), 4);
     }
@@ -634,7 +734,7 @@ mod tests {
             float_info: None,
         }];
 
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0));
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
         assert_eq!(pages.len(), 1);
 
         let text_count = pages[0]
