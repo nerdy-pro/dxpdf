@@ -41,6 +41,10 @@ pub struct ParagraphStyle {
     pub borders: Option<ParagraphBorderStyle>,
     /// §17.3.1.31: paragraph shading (background fill).
     pub shading: Option<RgbColor>,
+    /// §17.3.1.9: suppress spacing between paragraphs of the same style.
+    pub contextual_spacing: bool,
+    /// Style ID for contextual spacing comparison.
+    pub style_id: Option<dxpdf_docx_model::model::StyleId>,
     /// Active floats for per-line width adjustment.
     pub page_floats: Vec<super::float::ActiveFloat>,
     /// Absolute y position of this paragraph on the page (for float overlap checks).
@@ -108,6 +112,8 @@ impl Default for ParagraphStyle {
             drop_cap: None,
             borders: None,
             shading: None,
+            contextual_spacing: false,
+            style_id: None,
             page_floats: Vec::new(),
             page_y: Pt::ZERO,
             page_x: Pt::ZERO,

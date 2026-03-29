@@ -586,6 +586,7 @@ fn build_paragraph_block(
     }
 
     let mut style = paragraph_style_from_props(&merged_props);
+    style.style_id = p.style_id.clone();
 
     // Attach pending drop cap to this paragraph.
     if let Some(dc) = pending_dropcap.take() {
@@ -1292,9 +1293,17 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         })
         .unwrap_or(Pt::ZERO);
 
-    let space_before = props.spacing.and_then(|s| s.before).map(Pt::from).unwrap_or(Pt::ZERO);
-    // §17.3.1.33: space after defaults to 0 when not specified in the cascade.
-    let space_after = props.spacing.and_then(|s| s.after).map(Pt::from).unwrap_or(Pt::ZERO);
+    // §17.3.1.33: when autoSpacing is true, use 14pt instead of explicit value.
+    let space_before = if props.spacing.and_then(|s| s.before_auto_spacing) == Some(true) {
+        Pt::new(14.0)
+    } else {
+        props.spacing.and_then(|s| s.before).map(Pt::from).unwrap_or(Pt::ZERO)
+    };
+    let space_after = if props.spacing.and_then(|s| s.after_auto_spacing) == Some(true) {
+        Pt::new(14.0)
+    } else {
+        props.spacing.and_then(|s| s.after).map(Pt::from).unwrap_or(Pt::ZERO)
+    };
 
     // §17.3.1.33: line spacing defaults to single (auto, 240 twips = 1.0x).
     let line_spacing = props
@@ -1326,6 +1335,8 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
+        contextual_spacing: props.contextual_spacing.unwrap_or(false),
+        style_id: None, // set by caller when available
         page_floats: Vec::new(),
         page_y: crate::dimension::Pt::ZERO,
         page_x: crate::dimension::Pt::ZERO,

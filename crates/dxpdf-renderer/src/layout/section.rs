@@ -91,6 +91,9 @@ pub fn layout_section(
     let mut bottom = page_bottom;
     // Footnotes collected for the current page.
     let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
+    // §17.3.1.9: track previous paragraph for contextual spacing collapsing.
+    let mut prev_space_after = Pt::ZERO;
+    let mut prev_style_id: Option<dxpdf_docx_model::model::StyleId> = None;
     // Unified float tracking: tables + images.
     let mut page_floats: Vec<super::float::ActiveFloat> = Vec::new();
     // Per-page absolute float cache: absolute floats from paragraphs on the
@@ -121,6 +124,7 @@ pub fn layout_section(
                         LayoutedPage::new(config.page_size),
                     ));
                     cursor_y = config.margins.top;
+                    prev_space_after = Pt::ZERO;
                     bottom = page_bottom;
                     page_start_block = block_idx;
                     abs_floats_dirty = true;
@@ -210,6 +214,17 @@ pub fn layout_section(
                         effective_floats.push(af.clone());
                     }
                 }
+                // §17.3.1.9: contextual spacing — when enabled and both
+                // paragraphs share the same style, collapse space_before with
+                // the previous paragraph's space_after (use max, not sum).
+                if effective_style.contextual_spacing
+                    && effective_style.style_id.is_some()
+                    && effective_style.style_id == prev_style_id
+                {
+                    let collapse = prev_space_after.min(effective_style.space_before);
+                    cursor_y -= collapse;
+                }
+
                 effective_style.page_floats = effective_floats;
                 effective_style.page_y = cursor_y;
                 effective_style.page_x = config.margins.left;
@@ -247,6 +262,8 @@ pub fn layout_section(
                 }
 
                 cursor_y += para.size.height;
+                prev_space_after = effective_style.space_after;
+                prev_style_id = effective_style.style_id.clone();
 
                 // §20.4.2.3: emit floating images (already registered above).
                 // wrapTopAndBottom images were already emitted before paragraph layout.
@@ -320,6 +337,7 @@ pub fn layout_section(
                             LayoutedPage::new(config.page_size),
                         ));
                         cursor_y = config.margins.top;
+                        prev_space_after = Pt::ZERO;
                         bottom = page_bottom;
                         page_start_block = block_idx;
                         abs_floats_dirty = true;
@@ -367,6 +385,8 @@ pub fn layout_section(
                 }
 
                 cursor_y += table.size.height;
+                prev_space_after = Pt::ZERO;
+                prev_style_id = None;
             }
         }
     }
