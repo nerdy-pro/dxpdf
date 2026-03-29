@@ -155,6 +155,10 @@ pub fn layout_section(
 
                 let mut effective_style = style.clone();
 
+                // Save page state for potential keepNext rollback.
+                let cmds_before_para = current_page.commands.len();
+                let _cursor_before_para = cursor_y;
+
                 // §17.3.1.33: suppress space_before at the top of a page/column.
                 if cursor_y <= column_top {
                     effective_style.space_before = Pt::ZERO;
@@ -207,6 +211,7 @@ pub fn layout_section(
                             page_y_start: y_start,
                             page_y_end: y_end,
                             width: fi.size.width + fi.dist_left + fi.dist_right,
+                            source: super::float::FloatSource::Image,
                         });
                     }
                 }
@@ -236,6 +241,7 @@ pub fn layout_section(
                                         page_y_start: img_y,
                                         page_y_end: img_y + fi.size.height,
                                         width: fi.size.width + fi.dist_left + fi.dist_right,
+                                        source: super::float::FloatSource::Image,
                                     });
                                 }
                             }
@@ -245,8 +251,18 @@ pub fn layout_section(
                 }
 
                 // Merge page_floats with forward-scanned absolute floats (dedup).
+                // Only include forward-scanned floats whose y range starts
+                // above or at the current cursor — floats below shouldn't
+                // affect paragraphs above them.
                 let mut effective_floats = page_floats.clone();
                 for af in &current_page_abs_floats {
+                    // Only include forward-scanned floats that start above or
+                    // at the current paragraph position. Floats that start below
+                    // the cursor belong to later paragraphs and shouldn't affect
+                    // the current one.
+                    if af.page_y_start > cursor_y + effective_style.space_before {
+                        continue;
+                    }
                     let already_present = effective_floats.iter().any(|pf|
                         (pf.page_x - af.page_x).raw().abs() < 0.1
                         && (pf.page_y_start - af.page_y_start).raw().abs() < 0.1
@@ -336,6 +352,75 @@ pub fn layout_section(
                     cursor_y += para.size.height;
                 }
 
+                // §17.3.1.14: keepNext — if this paragraph has keep_next,
+                // check if the next block fits on the same page. If not,
+                // push both to the next page by undoing this paragraph's
+                // placement and inserting a page break.
+                if effective_style.keep_next
+                    && cursor_y > column_top
+                    && block_idx + 1 < blocks.len()
+                    && num_cols <= 1 // skip for multi-column (too complex)
+                {
+                    let next_fits = match &blocks[block_idx + 1] {
+                        LayoutBlock::Paragraph { fragments: next_frags, style: next_style, .. } => {
+                            // Speculatively lay out the next paragraph to check height.
+                            let mut next_eff = next_style.clone();
+                            // Collapse spacing between current and next.
+                            let next_collapse = effective_style.space_after.min(next_eff.space_before);
+                            let next_cursor = cursor_y - next_collapse;
+                            let next_constraints = col_constraints(current_col);
+                            next_eff.page_y = next_cursor;
+                            next_eff.page_x = col_x(current_col);
+                            next_eff.page_content_width = config.columns[current_col].width;
+                            let next_para = layout_paragraph(
+                                next_frags, &next_constraints, &next_eff,
+                                default_line_height, measure_text,
+                            );
+                            // Check if at least the first line fits.
+                            next_cursor + next_para.size.height <= bottom
+                        }
+                        LayoutBlock::Table { .. } => true, // don't keepNext with tables
+                    };
+
+                    if !next_fits {
+                        // Undo this paragraph: remove its commands from the page.
+                        current_page.commands.truncate(cmds_before_para);
+                        // Push page break.
+                        if !page_footnotes.is_empty() {
+                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            page_footnotes.clear();
+                        }
+                        pages.push(std::mem::replace(
+                            &mut current_page,
+                            LayoutedPage::new(config.page_size.clone()),
+                        ));
+                        cursor_y = config.margins.top;
+                        column_top = config.margins.top;
+                        current_col = 0;
+                        bottom = page_bottom;
+                        page_start_block = block_idx;
+                        abs_floats_dirty = true;
+
+                        // Re-layout the current paragraph on the new page.
+                        effective_style.space_before = Pt::ZERO; // top of page
+                        let constraints = col_constraints(current_col);
+                        effective_style.page_y = cursor_y;
+                        effective_style.page_x = col_x(current_col);
+                        effective_style.page_content_width = config.columns[current_col].width;
+                        effective_style.page_floats = Vec::new();
+                        let para = layout_paragraph(
+                            fragments, &constraints, &effective_style,
+                            default_line_height, measure_text,
+                        );
+                        for mut cmd in para.commands {
+                            cmd.shift_y(cursor_y);
+                            cmd.shift_x(col_x(current_col));
+                            current_page.commands.push(cmd);
+                        }
+                        cursor_y += para.size.height;
+                    }
+                }
+
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -400,7 +485,7 @@ pub fn layout_section(
 
                 // §17.4.58: floating table — render at current position and
                 // register as a float so subsequent text wraps around it.
-                if let Some((_, right_gap, bottom_gap)) = float_info {
+                if let Some((_, right_gap, _bottom_gap)) = float_info {
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                         if !page_footnotes.is_empty() {
                             render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
@@ -420,7 +505,11 @@ pub fn layout_section(
                     }
 
                     let float_y_start = cursor_y;
-                    let float_y_end = cursor_y + table.size.height + *bottom_gap;
+                    // §17.4.56: float y_end uses only the table's visual height.
+                    // The bottom_gap is distance from text, not part of the float
+                    // region — it prevents text from getting too close but doesn't
+                    // extend the wrapping zone.
+                    let float_y_end = cursor_y + table.size.height;
 
                     for mut cmd in table.commands {
                         cmd.shift_y(cursor_y);
@@ -428,12 +517,14 @@ pub fn layout_section(
                         current_page.commands.push(cmd);
                     }
 
-                    // Register as unified float for text wrapping.
+                    // §17.4.56: register as float for text wrapping.
+                    // Table floats only wrap the owning paragraph, not subsequent ones.
                     page_floats.push(super::float::ActiveFloat {
                         page_x: table_x,
                         page_y_start: float_y_start,
                         page_y_end: float_y_end,
                         width: table.size.width + *right_gap,
+                        source: super::float::FloatSource::Table { owner_block_idx: block_idx },
                     });
                     continue;
                 }
@@ -570,6 +661,7 @@ pub fn stack_blocks(
                             page_y_start: y_start,
                             page_y_end: y_end,
                             width: fi.size.width + fi.dist_left + fi.dist_right,
+                            source: super::float::FloatSource::Image,
                         });
                     }
                 }

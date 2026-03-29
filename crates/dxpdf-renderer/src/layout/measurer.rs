@@ -32,9 +32,9 @@ impl TextMeasurer {
         let (width, _bounds) = font.measure_str(text, None);
         let (_, metrics) = font.metrics();
         // Line height = ascent + descent + leading.
-        // §17.3.1.33: auto line spacing multiplies this base.
-        // Leading is the font's internal line gap (OS/2 sTypoLineGap or
-        // hhea lineGap), representing inter-line spacing built into the font.
+        // The leading (sTypoLineGap) provides the font's built-in inter-line
+        // spacing. Including it matches Word's line height computation for
+        // Auto line spacing.
         let line_height = Pt::new(-metrics.ascent + metrics.descent + metrics.leading);
         let ascent = Pt::new(-metrics.ascent);
 

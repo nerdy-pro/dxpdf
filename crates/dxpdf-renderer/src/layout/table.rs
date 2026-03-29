@@ -578,6 +578,7 @@ mod tests {
     use super::*;
     use crate::layout::fragment::{FontProps, Fragment};
     use crate::layout::paragraph::ParagraphStyle;
+    use crate::layout::section::LayoutBlock;
     use std::rc::Rc;
 
     fn text_frag(text: &str, width: f32) -> Fragment {

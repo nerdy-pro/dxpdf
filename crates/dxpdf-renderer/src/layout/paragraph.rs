@@ -41,6 +41,8 @@ pub struct ParagraphStyle {
     pub borders: Option<ParagraphBorderStyle>,
     /// §17.3.1.31: paragraph shading (background fill).
     pub shading: Option<RgbColor>,
+    /// §17.3.1.14: keep this paragraph on the same page as the next.
+    pub keep_next: bool,
     /// §17.3.1.9: suppress spacing between paragraphs of the same style.
     pub contextual_spacing: bool,
     /// Style ID for contextual spacing comparison.
@@ -112,6 +114,7 @@ impl Default for ParagraphStyle {
             drop_cap: None,
             borders: None,
             shading: None,
+            keep_next: false,
             contextual_spacing: false,
             style_id: None,
             page_floats: Vec::new(),

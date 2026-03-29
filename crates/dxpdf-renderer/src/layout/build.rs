@@ -1346,6 +1346,7 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
         shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
+        keep_next: props.keep_next.unwrap_or(false),
         contextual_spacing: props.contextual_spacing.unwrap_or(false),
         style_id: None, // set by caller when available
         page_floats: Vec::new(),

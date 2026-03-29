@@ -1,9 +1,24 @@
-//! Floating image layout — positioned outside the normal flow.
+//! Floating element layout — positioned outside the normal flow.
 
 use crate::dimension::Pt;
 use crate::geometry::PtRect;
 
-/// A floating image that affects text layout on the current page.
+/// §17.4.56 / §20.4.2: source of a floating element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSource {
+    /// §20.4.2: floating image — wraps text for all overlapping lines.
+    Image,
+    /// §17.4.56: floating table — only wraps text for the paragraph that
+    /// was active when the table was encountered. Subsequent paragraphs
+    /// clear below the table.
+    Table {
+        /// Block index of the paragraph that owns this floating table.
+        /// Only this paragraph (and earlier ones) should wrap around it.
+        owner_block_idx: usize,
+    },
+}
+
+/// A floating element that affects text layout on the current page.
 #[derive(Debug, Clone)]
 pub struct ActiveFloat {
     /// Absolute x position on page.
@@ -14,6 +29,8 @@ pub struct ActiveFloat {
     pub page_y_end: Pt,
     /// Width of the float.
     pub width: Pt,
+    /// Source of this float (image vs table).
+    pub source: FloatSource,
 }
 
 impl ActiveFloat {
@@ -113,6 +130,7 @@ mod tests {
             page_y_start: Pt::new(80.0),
             page_y_end: Pt::new(200.0),
             width: Pt::new(100.0),
+            source: FloatSource::Image,
         }];
         let (l, r) = float_adjustments(&floats, Pt::new(100.0), Pt::new(72.0), Pt::new(468.0));
         assert_eq!(l.raw(), 100.0, "push right by float width");
@@ -126,6 +144,7 @@ mod tests {
             page_y_start: Pt::new(80.0),
             page_y_end: Pt::new(200.0),
             width: Pt::new(100.0),
+            source: FloatSource::Image,
         }];
         let (l, r) = float_adjustments(&floats, Pt::new(100.0), Pt::new(72.0), Pt::new(468.0));
         assert_eq!(l.raw(), 0.0);
@@ -139,6 +158,7 @@ mod tests {
             page_y_start: Pt::new(200.0),
             page_y_end: Pt::new(300.0),
             width: Pt::new(100.0),
+            source: FloatSource::Image,
         }];
         let (l, r) = float_adjustments(&floats, Pt::new(100.0), Pt::new(72.0), Pt::new(468.0));
         assert_eq!(l.raw(), 0.0, "line is above float");
@@ -153,12 +173,14 @@ mod tests {
                 page_y_start: Pt::new(0.0),
                 page_y_end: Pt::new(100.0),
                 width: Pt::new(50.0),
+            source: FloatSource::Image,
             },
             ActiveFloat {
                 page_x: Pt::ZERO,
                 page_y_start: Pt::new(0.0),
                 page_y_end: Pt::new(300.0),
                 width: Pt::new(50.0),
+            source: FloatSource::Image,
             },
         ];
         prune_floats(&mut floats, Pt::new(150.0));
@@ -172,6 +194,7 @@ mod tests {
             page_y_start: Pt::new(100.0),
             page_y_end: Pt::new(200.0),
             width: Pt::new(50.0),
+            source: FloatSource::Image,
         };
         assert!(!f.overlaps_y(Pt::new(99.0)));
         assert!(f.overlaps_y(Pt::new(100.0)));
