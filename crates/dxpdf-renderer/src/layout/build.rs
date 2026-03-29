@@ -373,7 +373,7 @@ fn build_paragraph_block(
             ) {
                 // Resolve label font from level run_properties or paragraph defaults.
                 let (default_family, default_size, default_color, _, _) =
-                    resolve_paragraph_defaults(p, ctx.resolved);
+                    resolve_paragraph_defaults(p, ctx.resolved, false);
                 let level_font_family = level_def
                     .and_then(|l| l.run_properties.as_ref())
                     .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
@@ -767,22 +767,29 @@ fn build_fragments(
     table_style: Option<&ResolvedStyle>,
     cond: Option<&CellConditionalFormatting>,
 ) -> (Vec<Fragment>, model::ParagraphProperties) {
-    // Clone paragraph for table style / conditional merge.
-    let mut effective_para = para.clone();
+    // Clone paragraph for style resolution.
+    let effective_para = para.clone();
 
-    // §17.7.2: table style paragraph properties as base.
-    if let Some(ts) = table_style {
-        merge_paragraph_properties(&mut effective_para.properties, &ts.paragraph);
-    }
-    // §17.7.6: conditional paragraph overrides.
+    // §17.7.2: resolve paragraph defaults (direct → paragraph style).
+    // Doc defaults are deferred so table style/conditional can be inserted
+    // between paragraph style and doc defaults in the cascade.
+    let (default_family, mut default_size, mut default_color, mut merged_props, mut run_defaults) =
+        resolve_paragraph_defaults(&effective_para, ctx.resolved, table_style.is_some());
+
+    // §17.7.2: table conditional formatting — lower priority than paragraph style.
     if let Some(c) = cond {
         if let Some(ref pp) = c.paragraph_properties {
-            merge_paragraph_properties(&mut effective_para.properties, pp);
+            merge_paragraph_properties(&mut merged_props, pp);
         }
     }
-
-    let (default_family, mut default_size, mut default_color, merged_props, mut run_defaults) =
-        resolve_paragraph_defaults(&effective_para, ctx.resolved);
+    // §17.7.2: table style paragraph properties — lower priority than conditional.
+    if let Some(ts) = table_style {
+        merge_paragraph_properties(&mut merged_props, &ts.paragraph);
+    }
+    // §17.7.2: doc defaults — lowest priority, deferred from resolve_paragraph_defaults.
+    if table_style.is_some() {
+        merge_paragraph_properties(&mut merged_props, &ctx.resolved.doc_defaults_paragraph);
+    }
 
     // §17.7.2: table style run properties override Normal.
     if let Some(ts) = table_style {
@@ -1207,9 +1214,14 @@ fn build_cell_blocks(
 /// Cascade: direct → style → doc defaults.
 ///
 /// Returns (font_family, font_size, color, merged_paragraph_props, run_defaults).
+///
+/// When `defer_doc_defaults` is true, doc defaults are NOT merged into the
+/// paragraph properties — the caller is responsible for merging them after
+/// inserting table style / conditional formatting in the cascade.
 fn resolve_paragraph_defaults(
     para: &Paragraph,
     resolved: &ResolvedDocument,
+    defer_doc_defaults: bool,
 ) -> (String, Pt, RgbColor, model::ParagraphProperties, model::RunProperties) {
     let mut para_props = para.properties.clone();
     let mut run_defaults = resolved.doc_defaults_run.clone();
@@ -1242,8 +1254,10 @@ fn resolve_paragraph_defaults(
         }
     }
 
-    // Always merge doc defaults as lowest-priority fallback.
-    merge_paragraph_properties(&mut para_props, &resolved.doc_defaults_paragraph);
+    // Merge doc defaults as lowest-priority fallback (unless deferred for table cascade).
+    if !defer_doc_defaults {
+        merge_paragraph_properties(&mut para_props, &resolved.doc_defaults_paragraph);
+    }
 
     // Style's run font overrides document-level default.
     if let Some(f) = effective_font(&run_defaults.fonts) {
