@@ -222,7 +222,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            text: text.into(),
+            content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
         }))
     }

@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use dxpdf_docx_model::model::{Block, FieldCharType, Inline, RunProperties, VerticalAlign};
+use dxpdf_docx_model::model::{Block, FieldCharType, Inline, RunElement, RunProperties, VerticalAlign};
 
 use crate::dimension::Pt;
 use crate::geometry::PtSize;
@@ -238,6 +238,49 @@ fn split_into_words(text: &str) -> Vec<&str> {
     words
 }
 
+/// Split text into word-level fragments and push to the output vec.
+#[allow(clippy::too_many_arguments)]
+fn emit_text_fragments<F>(
+    text: &str,
+    font: &FontProps,
+    color: RgbColor,
+    shading: Option<RgbColor>,
+    border: Option<FragmentBorder>,
+    hyperlink_url: Option<&str>,
+    measure_text: &F,
+    baseline_offset: Pt,
+    fragments: &mut Vec<Fragment>,
+)
+where
+    F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
+{
+    if text.is_empty() {
+        return;
+    }
+    for word in split_into_words(text) {
+        let (w, m) = measure_text(word, font);
+        let trimmed = word.trim_end();
+        let tw = if trimmed.len() < word.len() {
+            measure_text(trimmed, font).0
+        } else {
+            w
+        };
+        fragments.push(Fragment::Text {
+            text: word.to_string(),
+            font: font.clone(),
+            color,
+            shading,
+            border,
+            width: w,
+            trimmed_width: tw,
+            metrics: m,
+            hyperlink_url: hyperlink_url.map(String::from),
+            baseline_offset,
+            text_offset: Pt::ZERO,
+        });
+    }
+}
+
 /// §17.16.4.1: context for evaluating dynamic fields (PAGE, NUMPAGES).
 #[derive(Clone, Copy, Default)]
 pub struct FieldContext {
@@ -323,7 +366,6 @@ where
     // Emitted = substitution was rendered, skip remaining result TextRuns until End.
     let mut field_sub_pending: Option<String> = None;
     let mut field_sub_emitted = false;
-
     for inline in inlines {
         match inline {
             Inline::TextRun(tr) => {
@@ -401,63 +443,46 @@ where
                 });
 
                 // §17.16.19: if a field substitution is pending, use the
-                // substituted text with this TextRun's resolved formatting
-                // (MERGEFORMAT — first result run provides the style).
-                let text_source: std::borrow::Cow<str> = if let Some(sub) = field_sub_pending.take() {
+                // substituted text with this TextRun's resolved formatting.
+                if field_sub_pending.is_some() {
+                    let sub = field_sub_pending.take().unwrap();
                     field_sub_emitted = true;
-                    sub.into()
+                    emit_text_fragments(
+                        &sub, &font, color, shading, border, hyperlink_url,
+                        measure_text, baseline_offset, &mut fragments,
+                    );
                 } else {
-                    tr.text.as_str().into()
-                };
-
-                if !text_source.is_empty() {
-                    // Split text into word-level fragments so the line fitter
-                    // can break between words. Whitespace is kept as a trailing
-                    // part of the preceding word (e.g., "hello " + "world").
-                    for word in split_into_words(&text_source) {
-                        let (w, m) = measure_text(word, &font);
-                        // Measure trimmed width for overflow checking.
-                        // Trailing whitespace is allowed to hang past the margin.
-                        let trimmed = word.trim_end();
-                        let tw = if trimmed.len() < word.len() {
-                            measure_text(trimmed, &font).0
-                        } else {
-                            w
-                        };
-                        fragments.push(Fragment::Text {
-                            text: word.to_string(),
-                            font: font.clone(),
-                            color,
-                            shading,
-                            border,
-                            width: w,
-                            trimmed_width: tw,
-                            metrics: m,
-                            hyperlink_url: hyperlink_url.map(String::from),
-                            baseline_offset,
-                            text_offset: Pt::ZERO,
-                        });
+                    for element in &tr.content {
+                        match element {
+                            RunElement::Text(text) => {
+                                emit_text_fragments(
+                                    text, &font, color, shading, border, hyperlink_url,
+                                    measure_text, baseline_offset, &mut fragments,
+                                );
+                            }
+                            RunElement::Tab => {
+                                fragments.push(Fragment::Tab {
+                                    line_height: font.size,
+                                    fitting_width: None,
+                                });
+                            }
+                            RunElement::LineBreak(_) => {
+                                fragments.push(Fragment::LineBreak {
+                                    line_height: font.size,
+                                });
+                            }
+                            RunElement::PageBreak => {
+                                fragments.push(Fragment::LineBreak {
+                                    line_height: font.size,
+                                });
+                            }
+                            RunElement::ColumnBreak => {
+                                fragments.push(Fragment::ColumnBreak);
+                            }
+                            RunElement::LastRenderedPageBreak => {}
+                        }
                     }
                 }
-            }
-            Inline::Tab => {
-                fragments.push(Fragment::Tab {
-                    line_height: default_size,
-                    fitting_width: None,
-                });
-            }
-            Inline::LineBreak(_) => {
-                fragments.push(Fragment::LineBreak {
-                    line_height: default_size,
-                });
-            }
-            Inline::PageBreak => {
-                fragments.push(Fragment::LineBreak {
-                    line_height: default_size,
-                });
-            }
-            Inline::ColumnBreak => {
-                fragments.push(Fragment::ColumnBreak);
             }
             Inline::Image(img) => {
                 // Only render INLINE images as fragments.
@@ -610,8 +635,7 @@ where
             | Inline::Separator
             | Inline::ContinuationSeparator
             | Inline::FootnoteRefMark
-            | Inline::EndnoteRefMark
-            | Inline::LastRenderedPageBreak => {}
+            | Inline::EndnoteRefMark => {}
             // §17.11.12: footnote reference — render as superscript number.
             Inline::FootnoteRef(_note_id) => {
                 *footnote_counter += 1;
@@ -729,7 +753,7 @@ mod tests {
         Inline::TextRun(Box::new(TextRun {
             style_id: None,
             properties: RunProperties::default(),
-            text: text.into(),
+            content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
         }))
     }
@@ -745,7 +769,7 @@ mod tests {
                 font_size: Some(Dimension::<HalfPoints>::new(size)),
                 ..Default::default()
             },
-            text: text.into(),
+            content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
         }))
     }
@@ -775,7 +799,12 @@ mod tests {
 
     #[test]
     fn tab_produces_tab_fragment() {
-        let inlines = vec![Inline::Tab];
+        let inlines = vec![Inline::TextRun(Box::new(TextRun {
+            style_id: None,
+            properties: RunProperties::default(),
+            content: vec![RunElement::Tab],
+            rsids: RevisionIds::default(),
+        }))];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
@@ -784,7 +813,12 @@ mod tests {
 
     #[test]
     fn line_break_produces_break_fragment() {
-        let inlines = vec![Inline::LineBreak(BreakKind::TextWrapping)];
+        let inlines = vec![Inline::TextRun(Box::new(TextRun {
+            style_id: None,
+            properties: RunProperties::default(),
+            content: vec![RunElement::LineBreak(BreakKind::TextWrapping)],
+            rsids: RevisionIds::default(),
+        }))];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
@@ -857,7 +891,7 @@ mod tests {
             Inline::ContinuationSeparator,
             Inline::FootnoteRefMark,
             Inline::EndnoteRefMark,
-            Inline::LastRenderedPageBreak,
+            // LastRenderedPageBreak is now inside RunElement, not Inline
         ];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
@@ -889,7 +923,7 @@ mod tests {
         let inlines = vec![Inline::TextRun(Box::new(TextRun {
             style_id: None,
             properties: RunProperties::default(),
-            text: String::new(),
+            content: vec![RunElement::Text(String::new())],
             rsids: RevisionIds::default(),
         }))];
         let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);

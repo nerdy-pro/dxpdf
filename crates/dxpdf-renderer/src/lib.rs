@@ -309,7 +309,7 @@ mod tests {
             content: vec![Inline::TextRun(Box::new(TextRun {
                 style_id: None,
                 properties: RunProperties::default(),
-                text: text.to_string(),
+                content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
             }))],
             rsids: ParagraphRevisionIds::default(),

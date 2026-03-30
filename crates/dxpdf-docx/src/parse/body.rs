@@ -255,8 +255,26 @@ fn parse_run(
 ) -> Result<()> {
     let mut run_props = RunProperties::default();
     let mut char_style_id: Option<StyleId> = None;
-    let mut texts = Vec::new();
-    let mut pending_inlines: Vec<Inline> = Vec::new();
+    // Run elements (text, breaks, tabs) that share this run's properties.
+    let mut elements: Vec<RunElement> = Vec::new();
+
+    /// Flush accumulated run elements into a TextRun and push to content.
+    fn flush_run(
+        elements: &mut Vec<RunElement>,
+        style_id: &Option<StyleId>,
+        props: &RunProperties,
+        rsids: &RevisionIds,
+        content: &mut Vec<Inline>,
+    ) {
+        if !elements.is_empty() {
+            content.push(Inline::TextRun(Box::new(TextRun {
+                style_id: style_id.clone(),
+                properties: props.clone(),
+                content: std::mem::take(elements),
+                rsids: *rsids,
+            })));
+        }
+    }
 
     loop {
         match xml::next_event(reader, buf)? {
@@ -270,28 +288,28 @@ fn parse_run(
                         char_style_id = sid;
                     }
                     b"t" | b"delText" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let text = xml::read_text_content(reader, buf)?;
-                        texts.push(text);
+                        elements.push(RunElement::Text(text));
                     }
+                    // Non-run inlines: flush current run elements, then push separately.
                     b"instrText" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         let text = xml::read_text_content(reader, buf)?;
-                        pending_inlines.push(Inline::InstrText(text));
+                        content.push(Inline::InstrText(text));
                     }
                     b"drawing" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(img) = parse_drawing(reader, buf)? {
-                            pending_inlines.push(Inline::Image(Box::new(img)));
+                            content.push(Inline::Image(Box::new(img)));
                         }
                     }
                     b"pict" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::Pict(parse_pict(reader, buf)?));
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::Pict(parse_pict(reader, buf)?));
                     }
                     b"AlternateContent" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::AlternateContent(
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::AlternateContent(
                             parse_alternate_content(reader, buf)?,
                         ));
                     }
@@ -302,19 +320,14 @@ fn parse_run(
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
-                    b"rPr" => {
-                        // Empty rPr — no child elements, no properties to parse.
-                    }
-                    b"tab" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::Tab);
-                    }
+                    b"rPr" => {}
+                    // Run-level elements: accumulate in the current run.
+                    b"tab" => elements.push(RunElement::Tab),
                     b"br" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
                         let br_type = xml::optional_attr(e, b"type")?;
                         match br_type.as_deref() {
-                            Some("page") => pending_inlines.push(Inline::PageBreak),
-                            Some("column") => pending_inlines.push(Inline::ColumnBreak),
+                            Some("page") => elements.push(RunElement::PageBreak),
+                            Some("column") => elements.push(RunElement::ColumnBreak),
                             _ => {
                                 let clear = match xml::optional_attr(e, b"clear")?.as_deref() {
                                     Some("left") => BreakClear::Left,
@@ -327,55 +340,50 @@ fn parse_run(
                                 } else {
                                     BreakKind::TextWrapping
                                 };
-                                pending_inlines.push(Inline::LineBreak(kind));
+                                elements.push(RunElement::LineBreak(kind));
                             }
                         }
                     }
-                    b"cr" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::LineBreak(BreakKind::TextWrapping));
-                    }
-                    b"lastRenderedPageBreak" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::LastRenderedPageBreak);
-                    }
+                    b"cr" => elements.push(RunElement::LineBreak(BreakKind::TextWrapping)),
+                    b"lastRenderedPageBreak" => elements.push(RunElement::LastRenderedPageBreak),
+                    // Non-run inlines: flush, then push separately.
                     b"sym" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         let font = xml::optional_attr(e, b"font")?.unwrap_or_default();
                         let char_str = xml::optional_attr(e, b"char")?.unwrap_or_default();
                         let char_code = u16::from_str_radix(&char_str, 16).unwrap_or(0);
-                        pending_inlines.push(Inline::Symbol(Symbol { font, char_code }));
+                        content.push(Inline::Symbol(Symbol { font, char_code }));
                     }
                     b"footnoteReference" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            pending_inlines.push(Inline::FootnoteRef(NoteId::new(id)));
+                            content.push(Inline::FootnoteRef(NoteId::new(id)));
                         }
                     }
                     b"endnoteReference" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            pending_inlines.push(Inline::EndnoteRef(NoteId::new(id)));
+                            content.push(Inline::EndnoteRef(NoteId::new(id)));
                         }
                     }
                     b"separator" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::Separator);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::Separator);
                     }
                     b"continuationSeparator" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::ContinuationSeparator);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::ContinuationSeparator);
                     }
                     b"footnoteRef" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::FootnoteRefMark);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::FootnoteRefMark);
                     }
                     b"endnoteRef" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
-                        pending_inlines.push(Inline::EndnoteRefMark);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::EndnoteRefMark);
                     }
                     b"fldChar" => {
-                        flush_text(&mut texts, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
                         let field_char_type = match xml::optional_attr(e, b"fldCharType")?
                             .as_deref()
                         {
@@ -396,7 +404,7 @@ fn parse_run(
                                 });
                             }
                         };
-                        pending_inlines.push(Inline::FieldChar(FieldChar {
+                        content.push(Inline::FieldChar(FieldChar {
                             field_char_type,
                             dirty: xml::optional_attr_bool(e, b"dirty")?,
                             fld_lock: xml::optional_attr_bool(e, b"fldLock")?,
@@ -411,54 +419,17 @@ fn parse_run(
         }
     }
 
-    flush_text_owned(&mut texts, char_style_id, run_props, &run_rsids, content);
-    content.extend(pending_inlines);
+    // Flush remaining run elements.
+    if !elements.is_empty() {
+        content.push(Inline::TextRun(Box::new(TextRun {
+            style_id: char_style_id,
+            properties: run_props,
+            content: elements,
+            rsids: run_rsids,
+        })));
+    }
 
     Ok(())
-}
-
-/// Flush accumulated text into a `TextRun`, cloning properties (mid-run flush).
-fn flush_text(
-    texts: &mut Vec<String>,
-    style_id: &Option<StyleId>,
-    props: &RunProperties,
-    rsids: &RevisionIds,
-    content: &mut Vec<Inline>,
-) {
-    if texts.is_empty() {
-        return;
-    }
-    let combined: String = texts.drain(..).collect();
-    if !combined.is_empty() {
-        content.push(Inline::TextRun(Box::new(TextRun {
-            style_id: style_id.clone(),
-            properties: props.clone(),
-            text: combined,
-            rsids: *rsids,
-        })));
-    }
-}
-
-/// Flush accumulated text into a `TextRun`, taking ownership of properties (end-of-run flush).
-fn flush_text_owned(
-    texts: &mut Vec<String>,
-    style_id: Option<StyleId>,
-    props: RunProperties,
-    rsids: &RevisionIds,
-    content: &mut Vec<Inline>,
-) {
-    if texts.is_empty() {
-        return;
-    }
-    let combined: String = texts.drain(..).collect();
-    if !combined.is_empty() {
-        content.push(Inline::TextRun(Box::new(TextRun {
-            style_id,
-            properties: props,
-            text: combined,
-            rsids: *rsids,
-        })));
-    }
 }
 
 // ── Hyperlink ────────────────────────────────────────────────────────────────

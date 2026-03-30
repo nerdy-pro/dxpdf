@@ -100,7 +100,11 @@ fn collect_text(blocks: &[Block]) -> String {
             Block::Paragraph(p) => {
                 for inline in &p.content {
                     if let Inline::TextRun(run) = inline {
-                        out.push_str(&run.text);
+                        for elem in &run.content {
+                            if let RunElement::Text(t) = elem {
+                                out.push_str(t);
+                            }
+                        }
                     }
                 }
                 out.push('\n');

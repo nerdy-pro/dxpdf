@@ -146,7 +146,15 @@ fn dump(name: &str, doc: &Document) {
                 .iter()
                 .filter_map(|i| {
                     if let Inline::TextRun(r) = i {
-                        Some(r.text.as_str())
+                        Some(
+                            r.content
+                                .iter()
+                                .filter_map(|e| match e {
+                                    RunElement::Text(t) => Some(t.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<String>(),
+                        )
                     } else {
                         None
                     }
@@ -172,10 +180,9 @@ fn dump(name: &str, doc: &Document) {
             break;
         }
         if let Block::Paragraph(p) = block {
-            let has_text = p
-                .content
-                .iter()
-                .any(|i| matches!(i, Inline::TextRun(r) if !r.text.trim().is_empty()));
+            let has_text = p.content.iter().any(|i| {
+                matches!(i, Inline::TextRun(r) if r.content.iter().any(|e| matches!(e, RunElement::Text(t) if !t.trim().is_empty())))
+            });
             if !has_text {
                 continue;
             }
@@ -260,9 +267,16 @@ fn count_body(blocks: &[Block]) -> (usize, usize, usize, usize, usize, usize, us
                             }
                         }
                         Inline::Field(_) => fields += 1,
-                        Inline::Tab => tabs += 1,
-                        Inline::LineBreak(_) | Inline::PageBreak | Inline::ColumnBreak => {
-                            breaks += 1
+                        Inline::TextRun(r) => {
+                            for elem in &r.content {
+                                match elem {
+                                    RunElement::Tab => tabs += 1,
+                                    RunElement::LineBreak(_)
+                                    | RunElement::PageBreak
+                                    | RunElement::ColumnBreak => breaks += 1,
+                                    _ => {}
+                                }
+                            }
                         }
                         _ => {}
                     }

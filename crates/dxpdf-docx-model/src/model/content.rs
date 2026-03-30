@@ -22,16 +22,22 @@ pub enum Block {
 
 // ── Inline content ───────────────────────────────────────────────────────────
 
+/// A child element within a `<w:r>` run. All elements in a run share
+/// the same `RunProperties` (font, size, color, etc.).
 #[derive(Clone, Debug)]
-pub enum Inline {
-    TextRun(Box<TextRun>),
+pub enum RunElement {
+    Text(String),
     Tab,
     LineBreak(BreakKind),
     ColumnBreak,
     PageBreak,
-    /// §17.3.3.13: position where the previous application rendered a page break.
-    /// This is a rendering hint, not a content break.
+    /// §17.3.3.13: rendering hint, not a content break.
     LastRenderedPageBreak,
+}
+
+#[derive(Clone, Debug)]
+pub enum Inline {
+    TextRun(Box<TextRun>),
     Image(Box<Image>),
     FootnoteRef(NoteId),
     EndnoteRef(NoteId),
@@ -85,7 +91,9 @@ pub struct TextRun {
     /// Character style ID reference (e.g., "Hyperlink"). Resolve via `Document.styles`.
     pub style_id: Option<StyleId>,
     pub properties: RunProperties,
-    pub text: String,
+    /// Children of this run: text segments, breaks, and tabs.
+    /// All share the run's properties.
+    pub content: Vec<RunElement>,
     pub rsids: RevisionIds,
 }
 
