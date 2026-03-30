@@ -284,7 +284,7 @@ fn measure_table_rows(
 
     // Compute border gaps and assemble measured rows.
     let measured_rows: Vec<MeasuredRow> = row_cell_layouts.into_iter()
-        .zip(resolved_borders.into_iter())
+        .zip(resolved_borders)
         .zip(row_heights.iter())
         .enumerate()
         .map(|(row_idx, ((entries, borders), &height))| {
@@ -306,6 +306,7 @@ fn measure_table_rows(
 /// as its top edge. Used for page-split tables where the measured top borders were
 /// suppressed (adjacent table collapse) or resolved away (conflict resolution),
 /// but the continuation slice still needs a visible top boundary.
+#[allow(clippy::too_many_arguments)]
 fn emit_table_rows(
     measured: &MeasuredTable,
     rows: &[TableRowInput],
@@ -433,6 +434,7 @@ pub struct TableSlice {
 /// §17.4.1: `cantSplit` rows are kept together (moved to next page if needed).
 ///
 /// Returns one `TableSlice` per page.
+#[allow(clippy::too_many_arguments)]
 pub fn layout_table_paginated(
     rows: &[TableRowInput],
     col_widths: &[Pt],

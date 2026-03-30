@@ -5,18 +5,9 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("ZIP error: {0}")]
-    Zip(#[from] zip::result::ZipError),
-
-    #[error("XML error: {0}")]
-    Xml(#[from] quick_xml::Error),
-
-    #[error("XML attribute error: {0}")]
-    XmlAttr(#[from] quick_xml::events::attributes::AttrError),
-
-    #[error("Missing required file in archive: {0}")]
-    MissingEntry(String),
+    #[error("Parse error: {0}")]
+    Parse(#[from] dxpdf_docx::error::ParseError),
 
     #[error("Render error: {0}")]
-    Render(String),
+    Render(#[from] dxpdf_renderer::error::RenderError),
 }

@@ -49,9 +49,9 @@ pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
 
     // Final section uses Document.final_section.
     let header = resolve_header(doc, &doc.final_section.header_refs.default)
-        .or_else(|| prev_header);
+        .or(prev_header);
     let footer = resolve_footer(doc, &doc.final_section.footer_refs.default)
-        .or_else(|| prev_footer);
+        .or(prev_footer);
     sections.push(ResolvedSection {
         blocks: current_blocks,
         header,

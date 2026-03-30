@@ -107,7 +107,7 @@ pub fn layout_section(
     let mut pages: Vec<LayoutedPage> = Vec::new();
     let (mut current_page, mut cursor_y) = match continuation {
         Some(c) => (c.page, c.cursor_y),
-        None => (LayoutedPage::new(config.page_size.clone()), config.margins.top),
+        None => (LayoutedPage::new(config.page_size), config.margins.top),
     };
     let page_bottom = config.page_size.height - config.margins.bottom;
     // Effective bottom boundary — reduced by footnote height.
@@ -374,7 +374,7 @@ pub fn layout_section(
                             }
                             pages.push(std::mem::replace(
                                 &mut current_page,
-                                LayoutedPage::new(config.page_size.clone()),
+                                LayoutedPage::new(config.page_size),
                             ));
                             current_col = 0;
                             column_top = config.margins.top;
@@ -409,7 +409,7 @@ pub fn layout_section(
                             }
                             pages.push(std::mem::replace(
                                 &mut current_page,
-                                LayoutedPage::new(config.page_size.clone()),
+                                LayoutedPage::new(config.page_size),
                             ));
                             cursor_y = config.margins.top;
                             column_top = config.margins.top;
@@ -478,7 +478,7 @@ pub fn layout_section(
                         }
                         pages.push(std::mem::replace(
                             &mut current_page,
-                            LayoutedPage::new(config.page_size.clone()),
+                            LayoutedPage::new(config.page_size),
                         ));
                         cursor_y = config.margins.top;
                         column_top = config.margins.top;

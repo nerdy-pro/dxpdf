@@ -22,6 +22,7 @@ use super::section::stack_blocks;
 /// rebuilt per-page so that field values (PAGE, NUMPAGES) are correct.
 /// `page_base` is the 0-based index of the first page in `pages` within
 /// the overall document (for multi-section PAGE numbering).
+#[allow(clippy::too_many_arguments)]
 pub fn render_headers_footers(
     pages: &mut [LayoutedPage],
     config: &PageConfig,

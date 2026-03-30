@@ -368,12 +368,12 @@ name = "dxpdf"
 version = "0.1.5"
 dependencies = [
  "clap",
- "dxpdf-model",
+ "criterion",
+ "dxpdf-docx",
+ "dxpdf-renderer",
  "env_logger",
  "log",
  "pyo3",
- "quick-xml",
- "skia-safe",
  "tempfile",
  "thiserror",
  "zip",
@@ -403,13 +403,6 @@ dependencies = [
 [[package]]
 name = "dxpdf-field"
 version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "dxpdf-model"
-version = "0.1.5"
 dependencies = [
  "thiserror",
 ]
