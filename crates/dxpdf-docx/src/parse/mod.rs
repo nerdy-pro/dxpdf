@@ -253,7 +253,10 @@ fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::zip::Relationships) {
     }
 }
 
-fn resolve_hyperlinks_in_inlines(inlines: &mut [dxpdf_docx_model::model::Inline], rels: &crate::zip::Relationships) {
+fn resolve_hyperlinks_in_inlines(
+    inlines: &mut [dxpdf_docx_model::model::Inline],
+    rels: &crate::zip::Relationships,
+) {
     use dxpdf_docx_model::model::{HyperlinkTarget, Inline, RelId};
 
     for inline in inlines {

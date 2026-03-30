@@ -10,7 +10,10 @@ pub enum FieldParseError {
     /// A switch character (`\x`) was found but the letter is missing or invalid.
     InvalidSwitch { position: usize, found: String },
     /// A required argument is missing (e.g., REF without a bookmark name).
-    MissingArgument { field_type: String, argument: String },
+    MissingArgument {
+        field_type: String,
+        argument: String,
+    },
     /// A numeric value could not be parsed (e.g., SYMBOL with non-numeric code).
     InvalidNumber { value: String, reason: String },
     /// An IF field has an invalid or missing comparison operator.
@@ -33,7 +36,10 @@ impl fmt::Display for FieldParseError {
                 field_type,
                 argument,
             } => {
-                write!(f, "{field_type} field missing required argument: {argument}")
+                write!(
+                    f,
+                    "{field_type} field missing required argument: {argument}"
+                )
             }
             Self::InvalidNumber { value, reason } => {
                 write!(f, "invalid number '{value}': {reason}")

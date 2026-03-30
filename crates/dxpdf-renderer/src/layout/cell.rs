@@ -7,7 +7,7 @@
 use crate::dimension::Pt;
 use crate::geometry::PtEdgeInsets;
 
-use super::section::{LayoutBlock, stack_blocks};
+use super::section::{stack_blocks, LayoutBlock};
 
 /// Result of laying out a cell.
 #[derive(Debug)]
@@ -35,17 +35,20 @@ pub fn layout_cell(
     let result = stack_blocks(blocks, content_width, default_line_height, measure_text);
 
     // Shift all commands by cell margins.
-    let commands = result.commands.into_iter().map(|mut cmd| {
-        cmd.shift(margins.left, margins.top);
-        cmd
-    }).collect();
+    let commands = result
+        .commands
+        .into_iter()
+        .map(|mut cmd| {
+            cmd.shift(margins.left, margins.top);
+            cmd
+        })
+        .collect();
 
     CellLayout {
         commands,
         content_height: result.height,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -65,13 +68,22 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                char_spacing: Pt::ZERO,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width), trimmed_width: Pt::new(width),
-            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
+            width: Pt::new(width),
+            trimmed_width: Pt::new(width),
+            metrics: TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(4.0),
+            },
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+            text_offset: Pt::ZERO,
         }
     }
 
@@ -116,10 +128,10 @@ mod tests {
     fn margins_offset_content() {
         let blocks = vec![simple_block("text", 30.0)];
         let margins = PtEdgeInsets::new(
-            Pt::new(5.0),   // top
-            Pt::new(10.0),  // right
-            Pt::new(5.0),   // bottom
-            Pt::new(10.0),  // left
+            Pt::new(5.0),  // top
+            Pt::new(10.0), // right
+            Pt::new(5.0),  // bottom
+            Pt::new(10.0), // left
         );
         let result = layout_cell(&blocks, Pt::new(200.0), &margins, Pt::new(14.0), None);
 
@@ -152,10 +164,7 @@ mod tests {
 
     #[test]
     fn two_paragraphs_stack_vertically() {
-        let blocks = vec![
-            simple_block("first", 30.0),
-            simple_block("second", 40.0),
-        ];
+        let blocks = vec![simple_block("first", 30.0), simple_block("second", 40.0)];
         let result = layout_cell(
             &blocks,
             Pt::new(200.0),

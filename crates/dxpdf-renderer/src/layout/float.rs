@@ -174,14 +174,14 @@ mod tests {
                 page_y_end: Pt::new(100.0),
                 width: Pt::new(50.0),
                 source: FloatSource::Image,
-                },
+            },
             ActiveFloat {
                 page_x: Pt::ZERO,
                 page_y_start: Pt::new(0.0),
                 page_y_end: Pt::new(300.0),
                 width: Pt::new(50.0),
                 source: FloatSource::Image,
-                },
+            },
         ];
         prune_floats(&mut floats, Pt::new(150.0));
         assert_eq!(floats.len(), 1, "first float pruned, second still active");

@@ -3,8 +3,8 @@
 use crate::dimension::{Dimension, Twips};
 
 use super::formatting::{
-    Alignment, CnfStyle, HeightRule, ParagraphBorders, Shading, TabStop, TableAnchor,
-    TableXAlign, TableYAlign, TextAlignment,
+    Alignment, CnfStyle, HeightRule, ParagraphBorders, Shading, TabStop, TableAnchor, TableXAlign,
+    TableYAlign, TextAlignment,
 };
 use super::identifiers::{ParagraphRevisionIds, StyleId};
 use super::run_properties::RunProperties;

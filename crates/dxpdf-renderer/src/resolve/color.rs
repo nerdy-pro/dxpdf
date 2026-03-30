@@ -78,13 +78,27 @@ mod tests {
     #[test]
     fn rgb_from_u32_mixed() {
         let c = rgb_from_u32(0x1A2B3C);
-        assert_eq!(c, RgbColor { r: 0x1A, g: 0x2B, b: 0x3C });
+        assert_eq!(
+            c,
+            RgbColor {
+                r: 0x1A,
+                g: 0x2B,
+                b: 0x3C
+            }
+        );
     }
 
     #[test]
     fn resolve_color_rgb_passes_through() {
         let c = resolve_color(Color::Rgb(0x336699), ColorContext::Text);
-        assert_eq!(c, RgbColor { r: 0x33, g: 0x66, b: 0x99 });
+        assert_eq!(
+            c,
+            RgbColor {
+                r: 0x33,
+                g: 0x66,
+                b: 0x99
+            }
+        );
     }
 
     #[test]
@@ -106,7 +120,14 @@ mod tests {
             ..Default::default()
         };
         let c = resolve_theme_color(ThemeColorIndex::Accent1, &scheme);
-        assert_eq!(c, RgbColor { r: 0x44, g: 0x72, b: 0xC4 });
+        assert_eq!(
+            c,
+            RgbColor {
+                r: 0x44,
+                g: 0x72,
+                b: 0xC4
+            }
+        );
     }
 
     #[test]
@@ -126,6 +147,13 @@ mod tests {
             ..Default::default()
         };
         let c = resolve_theme_color(ThemeColorIndex::Hyperlink, &scheme);
-        assert_eq!(c, RgbColor { r: 0x05, g: 0x63, b: 0xC1 });
+        assert_eq!(
+            c,
+            RgbColor {
+                r: 0x05,
+                g: 0x63,
+                b: 0xC1
+            }
+        );
     }
 }

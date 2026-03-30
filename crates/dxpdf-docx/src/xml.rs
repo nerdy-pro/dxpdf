@@ -67,12 +67,10 @@ pub fn optional_attr(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<S
 pub fn optional_attr_i64(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<i64>> {
     match find_attr(elem, attr_name)? {
         Some(bytes) => {
-            let s = std::str::from_utf8(&bytes).map_err(|e| {
-                ParseError::InvalidAttributeValue {
-                    attr: String::from_utf8_lossy(attr_name).into_owned(),
-                    value: String::from_utf8_lossy(&bytes).into_owned(),
-                    reason: e.to_string(),
-                }
+            let s = std::str::from_utf8(&bytes).map_err(|e| ParseError::InvalidAttributeValue {
+                attr: String::from_utf8_lossy(attr_name).into_owned(),
+                value: String::from_utf8_lossy(&bytes).into_owned(),
+                reason: e.to_string(),
             })?;
             Ok(Some(s.parse::<i64>()?))
         }
@@ -84,12 +82,10 @@ pub fn optional_attr_i64(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Opti
 pub fn optional_attr_u32(elem: &BytesStart<'_>, attr_name: &[u8]) -> Result<Option<u32>> {
     match find_attr(elem, attr_name)? {
         Some(bytes) => {
-            let s = std::str::from_utf8(&bytes).map_err(|e| {
-                ParseError::InvalidAttributeValue {
-                    attr: String::from_utf8_lossy(attr_name).into_owned(),
-                    value: String::from_utf8_lossy(&bytes).into_owned(),
-                    reason: e.to_string(),
-                }
+            let s = std::str::from_utf8(&bytes).map_err(|e| ParseError::InvalidAttributeValue {
+                attr: String::from_utf8_lossy(attr_name).into_owned(),
+                value: String::from_utf8_lossy(&bytes).into_owned(),
+                reason: e.to_string(),
             })?;
             Ok(Some(s.parse::<u32>()?))
         }

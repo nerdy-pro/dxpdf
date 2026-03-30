@@ -5,12 +5,12 @@
 
 use dxpdf_docx_model::model::Alignment;
 
-use crate::dimension::Pt;
-use crate::geometry::{PtOffset, PtSize};
-use crate::resolve::color::RgbColor;
 use super::draw_command::DrawCommand;
 use super::fragment::Fragment;
 use super::BoxConstraints;
+use crate::dimension::Pt;
+use crate::geometry::{PtOffset, PtSize};
+use crate::resolve::color::RgbColor;
 
 /// §17.3.1.38: a resolved tab stop for layout.
 #[derive(Clone, Debug)]
@@ -149,7 +149,8 @@ pub struct ParagraphLayout {
 }
 
 /// Optional text measurement callback for accurate per-character splitting.
-pub type MeasureTextFn<'a> = Option<&'a dyn Fn(&str, &super::fragment::FontProps) -> (Pt, super::fragment::TextMetrics)>;
+pub type MeasureTextFn<'a> =
+    Option<&'a dyn Fn(&str, &super::fragment::FontProps) -> (Pt, super::fragment::TextMetrics)>;
 
 /// Lay out a paragraph: fit fragments into lines, apply alignment and spacing.
 ///
@@ -231,14 +232,21 @@ pub fn layout_paragraph(
         while frag_idx < fragments.len() {
             let abs_y = style.page_y + line_y;
             let (fl, fr) = super::float::float_adjustments_with_height(
-                &style.page_floats, abs_y, default_line_height,
-                style.page_x, style.page_content_width,
+                &style.page_floats,
+                abs_y,
+                default_line_height,
+                style.page_x,
+                style.page_content_width,
             );
             let float_reduction = fl + fr;
             let available = (content_width - float_reduction).max(Pt::ZERO);
 
             let is_first = placements.is_empty();
-            let dc_adj = if placements.len() < drop_cap_lines { drop_cap_indent } else { Pt::ZERO };
+            let dc_adj = if placements.len() < drop_cap_lines {
+                drop_cap_indent
+            } else {
+                Pt::ZERO
+            };
             let line_width = if is_first {
                 (available - first_line_adjustment).max(Pt::ZERO)
             } else {
@@ -262,12 +270,24 @@ pub fn layout_paragraph(
                 break;
             };
 
-            let natural = if fitted_line.height > Pt::ZERO { fitted_line.height } else { default_line_height };
-            let text_h = if fitted_line.text_height > Pt::ZERO { fitted_line.text_height } else { default_line_height };
+            let natural = if fitted_line.height > Pt::ZERO {
+                fitted_line.height
+            } else {
+                default_line_height
+            };
+            let text_h = if fitted_line.text_height > Pt::ZERO {
+                fitted_line.text_height
+            } else {
+                default_line_height
+            };
             let lh = resolve_line_height(natural, text_h, &style.line_spacing);
 
             frag_idx = fitted_line.end;
-            placements.push(LinePlacement { line: fitted_line, float_left: fl, float_right: fr });
+            placements.push(LinePlacement {
+                line: fitted_line,
+                float_left: fl,
+                float_right: fr,
+            });
             line_y += lh;
         }
         placements
@@ -281,7 +301,11 @@ pub fn layout_paragraph(
         };
         super::line::fit_lines_with_first(fragments, first_line_width, remaining_width)
             .into_iter()
-            .map(|line| LinePlacement { line, float_left: Pt::ZERO, float_right: Pt::ZERO })
+            .map(|line| LinePlacement {
+                line,
+                float_left: Pt::ZERO,
+                float_right: Pt::ZERO,
+            })
             .collect()
     };
 
@@ -301,8 +325,16 @@ pub fn layout_paragraph(
             let n = dc.lines.max(1) as usize;
             let mut y = cursor_y;
             for (i, lp) in line_placements.iter().enumerate().take(n) {
-                let natural = if lp.line.height > Pt::ZERO { lp.line.height } else { default_line_height };
-                let text_h = if lp.line.text_height > Pt::ZERO { lp.line.text_height } else { default_line_height };
+                let natural = if lp.line.height > Pt::ZERO {
+                    lp.line.height
+                } else {
+                    default_line_height
+                };
+                let text_h = if lp.line.text_height > Pt::ZERO {
+                    lp.line.text_height
+                } else {
+                    default_line_height
+                };
                 let lh = resolve_line_height(natural, text_h, &style.line_spacing);
                 if i == n - 1 {
                     y += lp.line.ascent;
@@ -366,8 +398,16 @@ pub fn layout_paragraph(
             style.indent_left + dc_offset + float_offset
         };
 
-        let natural_height = if line.height > Pt::ZERO { line.height } else { default_line_height };
-        let text_height = if line.text_height > Pt::ZERO { line.text_height } else { default_line_height };
+        let natural_height = if line.height > Pt::ZERO {
+            line.height
+        } else {
+            default_line_height
+        };
+        let text_height = if line.text_height > Pt::ZERO {
+            line.text_height
+        } else {
+            default_line_height
+        };
         let line_height = resolve_line_height(natural_height, text_height, &style.line_spacing);
 
         // Alignment offset — computed relative to the line's available width.
@@ -434,7 +474,8 @@ pub fn layout_paragraph(
                                 PtOffset::new(bx, by + half),
                                 PtOffset::new(bx + bw, by + half),
                             ),
-                            color: bdr.color, width: bdr.width,
+                            color: bdr.color,
+                            width: bdr.width,
                         });
                         // Bottom
                         commands.push(DrawCommand::Line {
@@ -442,7 +483,8 @@ pub fn layout_paragraph(
                                 PtOffset::new(bx, by + bh - half),
                                 PtOffset::new(bx + bw, by + bh - half),
                             ),
-                            color: bdr.color, width: bdr.width,
+                            color: bdr.color,
+                            width: bdr.width,
                         });
                         // Left
                         commands.push(DrawCommand::Line {
@@ -450,7 +492,8 @@ pub fn layout_paragraph(
                                 PtOffset::new(bx + half, by),
                                 PtOffset::new(bx + half, by + bh),
                             ),
-                            color: bdr.color, width: bdr.width,
+                            color: bdr.color,
+                            width: bdr.width,
                         });
                         // Right
                         commands.push(DrawCommand::Line {
@@ -458,7 +501,8 @@ pub fn layout_paragraph(
                                 PtOffset::new(bx + bw - half, by),
                                 PtOffset::new(bx + bw - half, by + bh),
                             ),
-                            color: bdr.color, width: bdr.width,
+                            color: bdr.color,
+                            width: bdr.width,
                         });
                     }
 
@@ -475,12 +519,17 @@ pub fn layout_paragraph(
                     });
 
                     if let Some(url) = hyperlink_url {
-                        let rect = crate::geometry::PtRect::from_xywh(
-                            x, cursor_y, *width, line_height,
-                        );
-                        if url.starts_with("http://") || url.starts_with("https://")
-                            || url.starts_with("mailto:") || url.starts_with("ftp://") {
-                            commands.push(DrawCommand::LinkAnnotation { rect, url: url.clone() });
+                        let rect =
+                            crate::geometry::PtRect::from_xywh(x, cursor_y, *width, line_height);
+                        if url.starts_with("http://")
+                            || url.starts_with("https://")
+                            || url.starts_with("mailto:")
+                            || url.starts_with("ftp://")
+                        {
+                            commands.push(DrawCommand::LinkAnnotation {
+                                rect,
+                                url: url.clone(),
+                            });
                         } else {
                             // Internal bookmark link.
                             commands.push(DrawCommand::InternalLink {
@@ -563,9 +612,14 @@ pub fn layout_paragraph(
                     // Emit leader characters between tab start and tab position.
                     if let Some(ts) = tab_stop {
                         emit_tab_leader(
-                            &mut commands, ts.leader, x, new_x,
-                            cursor_y + line.ascent, line_height,
-                            measure_text, default_line_height,
+                            &mut commands,
+                            ts.leader,
+                            x,
+                            new_x,
+                            cursor_y + line.ascent,
+                            line_height,
+                            measure_text,
+                            default_line_height,
                         );
                     }
 
@@ -589,10 +643,18 @@ pub fn layout_paragraph(
     // Borders sit at the paragraph indent edges. The border `space` is the
     // distance between the border line and the text content. Top/bottom
     // border space expands the bordered area vertically.
-    let border_space_top = style.borders.as_ref()
-        .and_then(|b| b.top.as_ref()).map(|b| b.space).unwrap_or(Pt::ZERO);
-    let border_space_bottom = style.borders.as_ref()
-        .and_then(|b| b.bottom.as_ref()).map(|b| b.space).unwrap_or(Pt::ZERO);
+    let border_space_top = style
+        .borders
+        .as_ref()
+        .and_then(|b| b.top.as_ref())
+        .map(|b| b.space)
+        .unwrap_or(Pt::ZERO);
+    let border_space_bottom = style
+        .borders
+        .as_ref()
+        .and_then(|b| b.bottom.as_ref())
+        .map(|b| b.space)
+        .unwrap_or(Pt::ZERO);
     let para_left = style.indent_left;
     let para_right = constraints.max_width - style.indent_right;
     let para_top = style.space_before - border_space_top;
@@ -600,15 +662,18 @@ pub fn layout_paragraph(
 
     // §17.3.1.31: render paragraph shading (fills the border area).
     if let Some(bg_color) = style.shading {
-        commands.insert(0, DrawCommand::Rect {
-            rect: crate::geometry::PtRect::from_xywh(
-                para_left,
-                para_top,
-                para_right - para_left,
-                para_bottom - para_top,
-            ),
-            color: bg_color,
-        });
+        commands.insert(
+            0,
+            DrawCommand::Rect {
+                rect: crate::geometry::PtRect::from_xywh(
+                    para_left,
+                    para_top,
+                    para_right - para_left,
+                    para_bottom - para_top,
+                ),
+                color: bg_color,
+            },
+        );
     }
 
     // §17.3.1.24: render paragraph borders at the indent edges.
@@ -662,11 +727,17 @@ pub fn layout_paragraph(
     // If no lines, still consume default height + spacing.
     // Apply the paragraph's line spacing rule to the default line height.
     if line_placements.is_empty() {
-        let line_h = resolve_line_height(default_line_height, default_line_height, &style.line_spacing);
+        let line_h = resolve_line_height(
+            default_line_height,
+            default_line_height,
+            &style.line_spacing,
+        );
         cursor_y = style.space_before + line_h + style.space_after;
     }
 
-    let total_height = constraints.constrain(PtSize::new(constraints.max_width, cursor_y)).height;
+    let total_height = constraints
+        .constrain(PtSize::new(constraints.max_width, cursor_y))
+        .height;
 
     ParagraphLayout {
         commands,
@@ -686,10 +757,18 @@ fn split_oversized_fragments(
     let mut any_split = false;
     for frag in fragments {
         match frag {
-            Fragment::Text { text, width, font, color, shading, border,
-                             metrics, hyperlink_url, baseline_offset, .. }
-                if *width > max_width && text.chars().count() > 1 =>
-            {
+            Fragment::Text {
+                text,
+                width,
+                font,
+                color,
+                shading,
+                border,
+                metrics,
+                hyperlink_url,
+                baseline_offset,
+                ..
+            } if *width > max_width && text.chars().count() > 1 => {
                 any_split = true;
                 for ch in text.chars() {
                     let ch_str = ch.to_string();
@@ -717,14 +796,20 @@ fn split_oversized_fragments(
             _ => result.push(frag.clone()),
         }
     }
-    if !any_split { return fragments.to_vec(); }
+    if !any_split {
+        return fragments.to_vec();
+    }
     result
 }
 
 /// §17.3.1.37: find the next tab stop position greater than `current_x`.
 /// Returns (position, optional tab stop definition).
 /// If no custom tab stop matches, uses default tab stops every 36pt (0.5 inch).
-fn find_next_tab_stop(current_x: Pt, tabs: &[TabStopDef], line_width: Pt) -> (Pt, Option<&TabStopDef>) {
+fn find_next_tab_stop(
+    current_x: Pt,
+    tabs: &[TabStopDef],
+    line_width: Pt,
+) -> (Pt, Option<&TabStopDef>) {
     // §17.15.1.25: default tab stop interval is 36pt (0.5 inch).
     const DEFAULT_TAB_INTERVAL: f32 = 36.0;
 
@@ -745,8 +830,10 @@ fn find_next_tab_stop(current_x: Pt, tabs: &[TabStopDef], line_width: Pt) -> (Pt
 fn emit_tab_leader(
     commands: &mut Vec<DrawCommand>,
     leader: dxpdf_docx_model::model::TabLeader,
-    x_start: Pt, x_end: Pt,
-    baseline_y: Pt, _line_height: Pt,
+    x_start: Pt,
+    x_end: Pt,
+    baseline_y: Pt,
+    _line_height: Pt,
     measure_text: MeasureTextFn<'_>,
     default_line_height: Pt,
 ) {
@@ -771,9 +858,12 @@ fn emit_tab_leader(
     let leader_font = super::fragment::FontProps {
         family: std::rc::Rc::from("Times New Roman"),
         size: default_line_height.min(Pt::new(12.0)),
-        bold: false, italic: false, underline: false,
+        bold: false,
+        italic: false,
+        underline: false,
         char_spacing: Pt::ZERO,
-        underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+        underline_position: Pt::ZERO,
+        underline_thickness: Pt::ZERO,
     };
 
     let char_width = if let Some(m) = measure_text {
@@ -803,7 +893,8 @@ fn emit_tab_leader(
         font_family: leader_font.family,
         char_spacing: Pt::ZERO,
         font_size: leader_font.size,
-        bold: false, italic: false,
+        bold: false,
+        italic: false,
         color: crate::resolve::color::RgbColor::BLACK,
     });
 }
@@ -848,18 +939,22 @@ mod tests {
                 underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width), trimmed_width: Pt::new(width),
-            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
+            width: Pt::new(width),
+            trimmed_width: Pt::new(width),
+            metrics: TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(4.0),
+            },
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+            text_offset: Pt::ZERO,
         }
     }
 
     fn body_constraints(width: f32) -> BoxConstraints {
-        BoxConstraints::new(
-            Pt::ZERO, Pt::new(width),
-            Pt::ZERO, Pt::new(1000.0),
-        )
+        BoxConstraints::new(Pt::ZERO, Pt::new(width), Pt::ZERO, Pt::new(1000.0))
     }
 
     #[test]
@@ -900,7 +995,13 @@ mod tests {
             alignment: Alignment::Center,
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(100.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 40.0); // (100 - 20) / 2
@@ -914,7 +1015,13 @@ mod tests {
             alignment: Alignment::End,
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(100.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(100.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 80.0); // 100 - 20
@@ -928,7 +1035,13 @@ mod tests {
             indent_left: Pt::new(36.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 36.0);
@@ -937,15 +1050,18 @@ mod tests {
 
     #[test]
     fn first_line_indent() {
-        let frags = vec![
-            text_frag("first ", 40.0),
-            text_frag("second", 40.0),
-        ];
+        let frags = vec![text_frag("first ", 40.0), text_frag("second", 40.0)];
         let style = ParagraphStyle {
             indent_first_line: Pt::new(24.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
             assert_eq!(position.x.raw(), 24.0, "first line indented");
@@ -960,14 +1076,23 @@ mod tests {
             space_after: Pt::new(8.0),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         // Height should be: space_before(10) + line_height(14) + space_after(8) = 32
         assert_eq!(result.size.height.raw(), 32.0);
 
         // Text y should include space_before
         if let DrawCommand::Text { position, .. } = &result.commands[0] {
-            assert!(position.y.raw() >= 10.0, "y should account for space_before");
+            assert!(
+                position.y.raw() >= 10.0,
+                "y should account for space_before"
+            );
         }
     }
 
@@ -991,7 +1116,13 @@ mod tests {
             line_spacing: LineSpacingRule::AtLeast(Pt::new(10.0)),
             ..Default::default()
         };
-        let result = layout_paragraph(&frags, &body_constraints(400.0), &style, Pt::new(14.0), None);
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &style,
+            Pt::new(14.0),
+            None,
+        );
 
         // Natural height is 14, at-least is 10 → should be 14
         assert_eq!(result.size.height.raw(), 14.0);
@@ -1026,8 +1157,14 @@ mod tests {
     #[test]
     fn resolve_line_height_auto_text_only() {
         // Text-only line: multiplier applies to text_height.
-        assert_eq!(resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.0)).raw(), 14.0);
-        assert_eq!(resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.5)).raw(), 21.0);
+        assert_eq!(
+            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.0)).raw(),
+            14.0
+        );
+        assert_eq!(
+            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.5)).raw(),
+            21.0
+        );
     }
 
     #[test]
@@ -1049,7 +1186,12 @@ mod tests {
     #[test]
     fn resolve_line_height_exact_overrides() {
         assert_eq!(
-            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Exact(Pt::new(20.0))).raw(),
+            resolve_line_height(
+                Pt::new(14.0),
+                Pt::new(14.0),
+                &LineSpacingRule::Exact(Pt::new(20.0))
+            )
+            .raw(),
             20.0
         );
     }
@@ -1057,12 +1199,22 @@ mod tests {
     #[test]
     fn resolve_line_height_at_least() {
         assert_eq!(
-            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
+            resolve_line_height(
+                Pt::new(14.0),
+                Pt::new(14.0),
+                &LineSpacingRule::AtLeast(Pt::new(10.0))
+            )
+            .raw(),
             14.0,
             "natural > minimum"
         );
         assert_eq!(
-            resolve_line_height(Pt::new(8.0), Pt::new(8.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
+            resolve_line_height(
+                Pt::new(8.0),
+                Pt::new(8.0),
+                &LineSpacingRule::AtLeast(Pt::new(10.0))
+            )
+            .raw(),
             10.0,
             "minimum > natural"
         );

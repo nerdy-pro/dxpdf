@@ -16,35 +16,30 @@ pub enum FieldValue {
 /// Evaluate a parsed field instruction against a context.
 pub fn evaluate(instr: &FieldInstruction, ctx: &FieldContext) -> FieldValue {
     match instr {
-        FieldInstruction::Page { switches } => {
-            match ctx.page_number {
-                Some(n) => format_result(n.to_string(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::Page { switches } => match ctx.page_number {
+            Some(n) => format_result(n.to_string(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::NumPages { switches } => {
-            match ctx.total_pages {
-                Some(n) => format_result(n.to_string(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::NumPages { switches } => match ctx.total_pages {
+            Some(n) => format_result(n.to_string(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::Section { switches } => {
-            match ctx.section_number {
-                Some(n) => format_result(n.to_string(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::Section { switches } => match ctx.section_number {
+            Some(n) => format_result(n.to_string(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::SectionPages { switches } => {
-            match ctx.section_pages {
-                Some(n) => format_result(n.to_string(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::SectionPages { switches } => match ctx.section_pages {
+            Some(n) => format_result(n.to_string(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::Date { format: _, switches } => {
+        FieldInstruction::Date {
+            format: _,
+            switches,
+        } => {
             match &ctx.date {
                 Some(date) => {
                     let formatted = if let Some(pattern) = &switches.date_format {
@@ -59,40 +54,38 @@ pub fn evaluate(instr: &FieldInstruction, ctx: &FieldContext) -> FieldValue {
             }
         }
 
-        FieldInstruction::Time { format: _, switches } => {
-            match &ctx.time {
-                Some(time) => {
-                    let formatted = if let Some(pattern) = &switches.date_format {
-                        format::format_time(time, pattern)
-                    } else {
-                        format::format_time(time, "h:mm AM/PM")
-                    };
-                    format_result(formatted, switches)
-                }
-                None => FieldValue::Unevaluable,
+        FieldInstruction::Time {
+            format: _,
+            switches,
+        } => match &ctx.time {
+            Some(time) => {
+                let formatted = if let Some(pattern) = &switches.date_format {
+                    format::format_time(time, pattern)
+                } else {
+                    format::format_time(time, "h:mm AM/PM")
+                };
+                format_result(formatted, switches)
             }
-        }
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::Author { format: _, switches } => {
-            match ctx.document_properties.get("author") {
-                Some(author) => format_result(author.clone(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::Author {
+            format: _,
+            switches,
+        } => match ctx.document_properties.get("author") {
+            Some(author) => format_result(author.clone(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::Title { switches } => {
-            match ctx.document_properties.get("title") {
-                Some(title) => format_result(title.clone(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::Title { switches } => match ctx.document_properties.get("title") {
+            Some(title) => format_result(title.clone(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
-        FieldInstruction::Subject { switches } => {
-            match ctx.document_properties.get("subject") {
-                Some(subject) => format_result(subject.clone(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+        FieldInstruction::Subject { switches } => match ctx.document_properties.get("subject") {
+            Some(subject) => format_result(subject.clone(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::FileName { path, switches } => {
             let value = if *path {
@@ -112,50 +105,44 @@ pub fn evaluate(instr: &FieldInstruction, ctx: &FieldContext) -> FieldValue {
             paragraph_number,
             hyperlink: _,
             switches,
-        } => {
-            match ctx.bookmarks.get(bookmark) {
-                Some(loc) => {
-                    let text = if *footnote_ref {
-                        loc.note_ref.as_deref().unwrap_or("").to_string()
-                    } else if *paragraph_number {
-                        loc.paragraph_number.as_deref().unwrap_or("").to_string()
-                    } else {
-                        loc.text.as_deref().unwrap_or("").to_string()
-                    };
-                    format_result(text, switches)
-                }
-                None => FieldValue::Unevaluable,
+        } => match ctx.bookmarks.get(bookmark) {
+            Some(loc) => {
+                let text = if *footnote_ref {
+                    loc.note_ref.as_deref().unwrap_or("").to_string()
+                } else if *paragraph_number {
+                    loc.paragraph_number.as_deref().unwrap_or("").to_string()
+                } else {
+                    loc.text.as_deref().unwrap_or("").to_string()
+                };
+                format_result(text, switches)
             }
-        }
+            None => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::PageRef {
             bookmark,
             hyperlink: _,
             switches,
-        } => {
-            match ctx.bookmarks.get(bookmark) {
-                Some(loc) => match loc.page {
-                    Some(page) => format_result(page.to_string(), switches),
-                    None => FieldValue::Unevaluable,
-                },
+        } => match ctx.bookmarks.get(bookmark) {
+            Some(loc) => match loc.page {
+                Some(page) => format_result(page.to_string(), switches),
                 None => FieldValue::Unevaluable,
-            }
-        }
+            },
+            None => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::NoteRef {
             bookmark,
             superscript: _,
             hyperlink: _,
             switches,
-        } => {
-            match ctx.bookmarks.get(bookmark) {
-                Some(loc) => match &loc.note_ref {
-                    Some(nr) => format_result(nr.clone(), switches),
-                    None => FieldValue::Unevaluable,
-                },
+        } => match ctx.bookmarks.get(bookmark) {
+            Some(loc) => match &loc.note_ref {
+                Some(nr) => format_result(nr.clone(), switches),
                 None => FieldValue::Unevaluable,
-            }
-        }
+            },
+            None => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::Hyperlink { target, .. } => {
             // Hyperlinks produce their target as text — the display text
@@ -211,22 +198,20 @@ pub fn evaluate(instr: &FieldInstruction, ctx: &FieldContext) -> FieldValue {
             text_before,
             text_after,
             switches,
-        } => {
-            match ctx.merge_data.as_ref().and_then(|d| d.get(name.as_str())) {
-                Some(value) if !value.is_empty() => {
-                    let mut result = String::new();
-                    if let Some(before) = text_before {
-                        result.push_str(before);
-                    }
-                    result.push_str(value);
-                    if let Some(after) = text_after {
-                        result.push_str(after);
-                    }
-                    format_result(result, switches)
+        } => match ctx.merge_data.as_ref().and_then(|d| d.get(name.as_str())) {
+            Some(value) if !value.is_empty() => {
+                let mut result = String::new();
+                if let Some(before) = text_before {
+                    result.push_str(before);
                 }
-                _ => FieldValue::Unevaluable,
+                result.push_str(value);
+                if let Some(after) = text_after {
+                    result.push_str(after);
+                }
+                format_result(result, switches)
             }
-        }
+            _ => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::DocProperty { name, switches } => {
             // Try case-insensitive lookup
@@ -243,22 +228,20 @@ pub fn evaluate(instr: &FieldInstruction, ctx: &FieldContext) -> FieldValue {
         }
 
         FieldInstruction::Symbol {
-            char_code, font: _, switches,
-        } => {
-            match char::from_u32(*char_code) {
-                Some(ch) => format_result(ch.to_string(), switches),
-                None => FieldValue::Unevaluable,
-            }
-        }
+            char_code,
+            font: _,
+            switches,
+        } => match char::from_u32(*char_code) {
+            Some(ch) => format_result(ch.to_string(), switches),
+            None => FieldValue::Unevaluable,
+        },
 
         FieldInstruction::IncludePicture { .. } => {
             // Picture inclusion requires image loading — unevaluable at field level.
             FieldValue::Unevaluable
         }
 
-        FieldInstruction::Eq { equation, switches } => {
-            format_result(equation.clone(), switches)
-        }
+        FieldInstruction::Eq { equation, switches } => format_result(equation.clone(), switches),
 
         FieldInstruction::Unknown { .. } => FieldValue::Unevaluable,
     }
@@ -361,10 +344,7 @@ mod tests {
             format: None,
             switches: sw(),
         };
-        assert_eq!(
-            evaluate(&instr, &ctx),
-            FieldValue::Text("3/24/2026".into())
-        );
+        assert_eq!(evaluate(&instr, &ctx), FieldValue::Text("3/24/2026".into()));
     }
 
     #[test]
@@ -402,10 +382,7 @@ mod tests {
             format: None,
             switches: sw(),
         };
-        assert_eq!(
-            evaluate(&instr, &ctx),
-            FieldValue::Text("2:30 PM".into())
-        );
+        assert_eq!(evaluate(&instr, &ctx), FieldValue::Text("2:30 PM".into()));
     }
 
     #[test]
@@ -418,10 +395,7 @@ mod tests {
             format: None,
             switches: sw(),
         };
-        assert_eq!(
-            evaluate(&instr, &ctx),
-            FieldValue::Text("Jane Doe".into())
-        );
+        assert_eq!(evaluate(&instr, &ctx), FieldValue::Text("Jane Doe".into()));
     }
 
     #[test]
@@ -538,10 +512,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        assert_eq!(
-            evaluate(&instr, &ctx),
-            FieldValue::Text("JANE DOE".into())
-        );
+        assert_eq!(evaluate(&instr, &ctx), FieldValue::Text("JANE DOE".into()));
     }
 
     #[test]

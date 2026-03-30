@@ -150,8 +150,7 @@ impl RelationshipType {
             Self::Hyperlink
         } else if uri.ends_with("/comments") {
             Self::Comments
-        } else if uri.ends_with("/core-properties") || uri.ends_with("/metadata/core-properties")
-        {
+        } else if uri.ends_with("/core-properties") || uri.ends_with("/metadata/core-properties") {
             Self::CoreProperties
         } else if uri.ends_with("/extended-properties") {
             Self::ExtendedProperties

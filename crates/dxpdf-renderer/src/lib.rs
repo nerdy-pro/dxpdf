@@ -19,34 +19,37 @@ pub mod skia_conv;
 
 use dxpdf_docx_model::model::Document;
 
-use dxpdf_docx_model::model::Block;
-use crate::layout::build::{BuildContext, build_section_blocks, default_line_height};
+use crate::layout::build::{build_section_blocks, default_line_height, BuildContext};
 use crate::layout::draw_command::LayoutedPage;
 use crate::layout::header_footer::render_headers_footers;
 use crate::layout::page::PageConfig;
 use crate::layout::section::layout_section;
 use crate::resolve::ResolvedDocument;
+use dxpdf_docx_model::model::Block;
 
 /// Render a parsed DOCX document to PDF bytes.
 ///
 /// Estimate the cursor_y position from the last page's draw commands.
 /// Used to determine where a continuous section should start on the page.
-fn estimate_cursor_y(page: &layout::draw_command::LayoutedPage, config: &layout::page::PageConfig) -> dimension::Pt {
+fn estimate_cursor_y(
+    page: &layout::draw_command::LayoutedPage,
+    config: &layout::page::PageConfig,
+) -> dimension::Pt {
     let mut max_y = config.margins.top;
     for cmd in &page.commands {
         let bottom = match cmd {
-            layout::draw_command::DrawCommand::Text { position, font_size, .. } => {
-                position.y + *font_size
-            }
+            layout::draw_command::DrawCommand::Text {
+                position,
+                font_size,
+                ..
+            } => position.y + *font_size,
             layout::draw_command::DrawCommand::Image { rect, .. } => {
                 rect.origin.y + rect.size.height
             }
             layout::draw_command::DrawCommand::Rect { rect, .. } => {
                 rect.origin.y + rect.size.height
             }
-            layout::draw_command::DrawCommand::Line { line, .. } => {
-                line.end.y
-            }
+            layout::draw_command::DrawCommand::Line { line, .. } => line.end.y,
             _ => continue,
         };
         if bottom > max_y {
@@ -113,7 +116,9 @@ pub fn layout_document(
     let mut section_hf: Vec<SectionHfInfo> = Vec::new();
 
     // §17.11.23: footnote separator indent from default paragraph style.
-    let separator_indent = resolved.default_paragraph_style_id.as_ref()
+    let separator_indent = resolved
+        .default_paragraph_style_id
+        .as_ref()
         .and_then(|id| resolved.styles.get(id))
         .and_then(|s| s.paragraph.indentation)
         .and_then(|ind| ind.first_line)
@@ -131,24 +136,38 @@ pub fn layout_document(
         // §17.6.2: if header/footer content extends past the body margin,
         // push the body start down (or bottom up) so content doesn't overlap.
         let config = adjust_margins_for_header_footer(
-            PageConfig::from_section(&section.properties), section, &ctx, dlh,
+            PageConfig::from_section(&section.properties),
+            section,
+            &ctx,
+            dlh,
         );
 
         *ctx.page_config.borrow_mut() = config.clone();
         let built = build_section_blocks(section, &config, &ctx);
-        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
+        let measure_fn = |text: &str,
+                          font: &layout::fragment::FontProps|
+         -> (dimension::Pt, layout::fragment::TextMetrics) {
             measurer.measure(text, font)
         };
 
         // §17.6.22: continuous sections continue on the current page.
-        let continuation = if section.properties.section_type == Some(dxpdf_docx_model::model::SectionType::Continuous) {
+        let continuation = if section.properties.section_type
+            == Some(dxpdf_docx_model::model::SectionType::Continuous)
+        {
             pending_continuation.take()
         } else {
             pending_continuation = None;
             None
         };
 
-        let mut pages = layout_section(&built.blocks, &config, Some(&measure_fn), separator_indent, dlh, continuation);
+        let mut pages = layout_section(
+            &built.blocks,
+            &config,
+            Some(&measure_fn),
+            separator_indent,
+            dlh,
+            continuation,
+        );
 
         // Collect endnotes for rendering at document end.
         all_endnotes.extend(built.endnotes);
@@ -159,9 +178,16 @@ pub fn layout_document(
         // as continuation state instead of appending it.
         // (Peek ahead by checking the section index.)
         let next_is_continuous = {
-            let section_idx = resolved.sections.iter().position(|s| std::ptr::eq(s, section));
-            section_idx.and_then(|i| resolved.sections.get(i + 1))
-                .is_some_and(|next| next.properties.section_type == Some(dxpdf_docx_model::model::SectionType::Continuous))
+            let section_idx = resolved
+                .sections
+                .iter()
+                .position(|s| std::ptr::eq(s, section));
+            section_idx
+                .and_then(|i| resolved.sections.get(i + 1))
+                .is_some_and(|next| {
+                    next.properties.section_type
+                        == Some(dxpdf_docx_model::model::SectionType::Continuous)
+                })
         };
 
         if next_is_continuous && !pages.is_empty() {
@@ -190,37 +216,50 @@ pub fn layout_document(
         render_headers_footers(
             &mut all_pages[info.page_range.clone()],
             &info.config,
-            info.header_blocks, info.footer_blocks,
-            &ctx, dlh, info.page_range.start, total_pages,
+            info.header_blocks,
+            info.footer_blocks,
+            &ctx,
+            dlh,
+            info.page_range.start,
+            total_pages,
         );
     }
 
     // Render endnotes on a new page at the end of the document.
     if !all_endnotes.is_empty() {
-        let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
+        let measure_fn = |text: &str,
+                          font: &layout::fragment::FontProps|
+         -> (dimension::Pt, layout::fragment::TextMetrics) {
             measurer.measure(text, font)
         };
         let mut endnote_page = LayoutedPage::new(last_config.page_size);
         let content_width = last_config.content_width();
-        let constraints = layout::BoxConstraints::tight_width(content_width, dimension::Pt::INFINITY);
+        let constraints =
+            layout::BoxConstraints::tight_width(content_width, dimension::Pt::INFINITY);
         let mut cursor_y = last_config.margins.top;
 
         // Separator line.
         let sep_width = content_width * 0.33;
         let sep_x = last_config.margins.left + separator_indent;
-        endnote_page.commands.push(layout::draw_command::DrawCommand::Line {
-            line: crate::geometry::PtLineSegment::new(
-                crate::geometry::PtOffset::new(sep_x, cursor_y),
-                crate::geometry::PtOffset::new(sep_x + sep_width, cursor_y),
-            ),
-            color: crate::resolve::color::RgbColor::BLACK,
-            width: dimension::Pt::new(0.5),
-        });
+        endnote_page
+            .commands
+            .push(layout::draw_command::DrawCommand::Line {
+                line: crate::geometry::PtLineSegment::new(
+                    crate::geometry::PtOffset::new(sep_x, cursor_y),
+                    crate::geometry::PtOffset::new(sep_x + sep_width, cursor_y),
+                ),
+                color: crate::resolve::color::RgbColor::BLACK,
+                width: dimension::Pt::new(0.5),
+            });
         cursor_y += dimension::Pt::new(4.0);
 
         for (_, frags, style) in &all_endnotes {
             let para = layout::paragraph::layout_paragraph(
-                frags, &constraints, style, dlh, Some(&measure_fn),
+                frags,
+                &constraints,
+                style,
+                dlh,
+                Some(&measure_fn),
             );
             for mut cmd in para.commands {
                 cmd.shift_y(cursor_y);
@@ -252,9 +291,8 @@ fn adjust_margins_for_header_footer(
     if let Some(ref blocks) = section.header {
         let hf = layout::build::build_header_footer_content(blocks, ctx);
         if !hf.blocks.is_empty() {
-            let result = layout::section::stack_blocks(
-                &hf.blocks, content_width, default_line_height, None,
-            );
+            let result =
+                layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
             let header_bottom = config.header_margin + result.height;
             if header_bottom > config.margins.top {
                 config.margins.top = header_bottom;
@@ -265,9 +303,8 @@ fn adjust_margins_for_header_footer(
     if let Some(ref blocks) = section.footer {
         let hf = layout::build::build_header_footer_content(blocks, ctx);
         if !hf.blocks.is_empty() {
-            let result = layout::section::stack_blocks(
-                &hf.blocks, content_width, default_line_height, None,
-            );
+            let result =
+                layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
             let footer_top = config.footer_margin + result.height;
             if footer_top > config.margins.bottom {
                 config.margins.bottom = footer_top;

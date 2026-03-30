@@ -1005,8 +1005,7 @@ fn parse_font_set(e: &BytesStart<'_>) -> Result<FontSet> {
         high_ansi: xml::optional_attr(e, b"hAnsi")?,
         east_asian: xml::optional_attr(e, b"eastAsia")?,
         complex_script: xml::optional_attr(e, b"cs")?,
-        ascii_theme: xml::optional_attr(e, b"asciiTheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
+        ascii_theme: xml::optional_attr(e, b"asciiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
         high_ansi_theme: xml::optional_attr(e, b"hAnsiTheme")?
             .and_then(|v| parse_theme_font_ref(&v)),
         east_asian_theme: xml::optional_attr(e, b"eastAsiaTheme")?
@@ -1144,11 +1143,20 @@ fn parse_table_look(e: &BytesStart<'_>) -> Result<TableLook> {
     let no_v_band = xml::optional_attr_bool(e, b"noVBand")?;
 
     // If individual attributes are present, use them directly.
-    if first_row.is_some() || last_row.is_some() || first_column.is_some()
-        || last_column.is_some() || no_h_band.is_some() || no_v_band.is_some()
+    if first_row.is_some()
+        || last_row.is_some()
+        || first_column.is_some()
+        || last_column.is_some()
+        || no_h_band.is_some()
+        || no_v_band.is_some()
     {
         return Ok(TableLook {
-            first_row, last_row, first_column, last_column, no_h_band, no_v_band,
+            first_row,
+            last_row,
+            first_column,
+            last_column,
+            no_h_band,
+            no_v_band,
         });
     }
 

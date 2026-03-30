@@ -2,21 +2,13 @@
 #[derive(Clone, Debug, PartialEq)]
 pub enum FieldInstruction {
     /// PAGE — current page number (§17.16.5.52).
-    Page {
-        switches: CommonSwitches,
-    },
+    Page { switches: CommonSwitches },
     /// NUMPAGES — total page count (§17.16.5.51).
-    NumPages {
-        switches: CommonSwitches,
-    },
+    NumPages { switches: CommonSwitches },
     /// SECTION — current section number (§17.16.5.66).
-    Section {
-        switches: CommonSwitches,
-    },
+    Section { switches: CommonSwitches },
     /// SECTIONPAGES — pages in current section (§17.16.5.67).
-    SectionPages {
-        switches: CommonSwitches,
-    },
+    SectionPages { switches: CommonSwitches },
     /// DATE — current date (§17.16.5.13).
     Date {
         format: Option<String>,
@@ -33,13 +25,9 @@ pub enum FieldInstruction {
         switches: CommonSwitches,
     },
     /// TITLE — document title (§17.16.5.77).
-    Title {
-        switches: CommonSwitches,
-    },
+    Title { switches: CommonSwitches },
     /// SUBJECT — document subject (§17.16.5.72).
-    Subject {
-        switches: CommonSwitches,
-    },
+    Subject { switches: CommonSwitches },
     /// FILENAME — document file name (§17.16.5.18).
     FileName {
         /// `\p` — include full path.
@@ -152,10 +140,7 @@ pub enum FieldInstruction {
         switches: CommonSwitches,
     },
     /// An unrecognized but syntactically valid field type.
-    Unknown {
-        field_type: String,
-        raw: String,
-    },
+    Unknown { field_type: String, raw: String },
 }
 
 /// Common formatting switches shared by most field types (§17.16.4.1).

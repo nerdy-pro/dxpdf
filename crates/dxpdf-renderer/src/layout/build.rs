@@ -15,17 +15,17 @@ use crate::geometry::{self, PtSize};
 use crate::layout::fragment::{collect_fragments, FontProps, Fragment};
 use crate::layout::measurer::TextMeasurer;
 use crate::layout::page::PageConfig;
+use crate::layout::paragraph::TabStopDef;
 use crate::layout::paragraph::{
     BorderLine, DropCapInfo, LineSpacingRule, ParagraphBorderStyle, ParagraphStyle,
 };
-use crate::layout::paragraph::TabStopDef;
 use crate::layout::section::LayoutBlock;
 use crate::layout::table::{
-    CellBorderConfig, CellBorderOverride, TableBorderConfig, TableBorderLine, TableBorderStyle,
-    TableCellInput, TableRowInput, compute_column_widths,
+    compute_column_widths, CellBorderConfig, CellBorderOverride, TableBorderConfig,
+    TableBorderLine, TableBorderStyle, TableCellInput, TableRowInput,
 };
-use crate::resolve::color::{ColorContext, RgbColor, resolve_color};
-use crate::resolve::conditional::{CellConditionalFormatting, resolve_cell_conditional};
+use crate::resolve::color::{resolve_color, ColorContext, RgbColor};
+use crate::resolve::conditional::{resolve_cell_conditional, CellConditionalFormatting};
 use crate::resolve::fonts::effective_font;
 use crate::resolve::properties::{merge_paragraph_properties, merge_run_properties};
 use crate::resolve::sections::ResolvedSection;
@@ -109,25 +109,35 @@ fn build_note_content(
                 let font = frags[0].font_props().cloned().unwrap_or_else(|| FontProps {
                     family: std::rc::Rc::from("Times New Roman"),
                     size: Pt::new(10.0),
-                    bold: false, italic: false, underline: false,
+                    bold: false,
+                    italic: false,
+                    underline: false,
                     char_spacing: Pt::ZERO,
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
                 });
                 let ref_size = font.size * 0.58;
-                let ref_font = FontProps { size: ref_size, ..font };
+                let ref_font = FontProps {
+                    size: ref_size,
+                    ..font
+                };
                 let (w, m) = ctx.measurer.measure(&num_text, &ref_font);
-                frags.insert(0, Fragment::Text {
-                    text: num_text,
-                    font: ref_font,
-                    color: RgbColor::BLACK,
-                    shading: None, border: None,
-                    width: w, trimmed_width: w,
-                    metrics: m,
-                    hyperlink_url: None,
-                    baseline_offset: -(font.size * 0.4),
-                    text_offset: Pt::ZERO,
-                });
+                frags.insert(
+                    0,
+                    Fragment::Text {
+                        text: num_text,
+                        font: ref_font,
+                        color: RgbColor::BLACK,
+                        shading: None,
+                        border: None,
+                        width: w,
+                        trimmed_width: w,
+                        metrics: m,
+                        hyperlink_url: None,
+                        baseline_offset: -(font.size * 0.4),
+                        text_offset: Pt::ZERO,
+                    },
+                );
             }
             let style = paragraph_style_from_props(&merged_props);
             results.push((display_num.to_string(), frags, style));
@@ -142,7 +152,10 @@ fn collect_endnotes(
     endnotes: &mut Vec<(String, Vec<Fragment>, ParagraphStyle)>,
 ) {
     // IDs 0 and 1 are reserved for separator and continuation separator.
-    let mut en_ids: Vec<_> = ctx.resolved.endnotes.keys()
+    let mut en_ids: Vec<_> = ctx
+        .resolved
+        .endnotes
+        .keys()
         .filter(|id| id.value() > 1)
         .collect();
     en_ids.sort_by_key(|id| id.value());
@@ -169,10 +182,7 @@ pub struct HeaderFooterContent {
 /// Produces `LayoutBlock` entries for both paragraphs and tables, and
 /// extracts floating images separately (they are positioned page-relative
 /// rather than stack-relative).
-pub fn build_header_footer_content(
-    blocks: &[Block],
-    ctx: &BuildContext,
-) -> HeaderFooterContent {
+pub fn build_header_footer_content(blocks: &[Block], ctx: &BuildContext) -> HeaderFooterContent {
     let mut layout_blocks = Vec::new();
     let mut all_floating_images = Vec::new();
     let mut absolute_position: Option<(Pt, Pt)> = None;
@@ -295,7 +305,7 @@ fn vml_length_to_pt(len: model::VmlLength) -> Pt {
         VmlLengthUnit::Mm => value * 72.0 / 25.4,
         VmlLengthUnit::Px => value * 0.75, // 96dpi → 72pt/in
         VmlLengthUnit::None => value / 914400.0 * 72.0, // bare number = EMU
-        _ => value, // Em, Percent — fallback to raw value
+        _ => value,                        // Em, Percent — fallback to raw value
     })
 }
 
@@ -376,10 +386,15 @@ fn build_paragraph_block(
                 .and_then(|l| l.lvl_pic_bullet_id)
                 .and_then(|pic_id| ctx.resolved.pic_bullets.get(&pic_id))
                 .and_then(|bullet| {
-                    let rel_id = bullet.pict.as_ref()?
-                        .shapes.first()?
-                        .image_data.as_ref()?
-                        .rel_id.as_ref()?;
+                    let rel_id = bullet
+                        .pict
+                        .as_ref()?
+                        .shapes
+                        .first()?
+                        .image_data
+                        .as_ref()?
+                        .rel_id
+                        .as_ref()?;
                     let image_bytes = ctx.media().get(rel_id)?;
                     // Size from VML shape style (width/height), default 9pt.
                     let size = pic_bullet_size(bullet);
@@ -411,126 +426,134 @@ fn build_paragraph_block(
                     .and_then(|l| l.indentation.as_ref())
                     .and_then(|ind| ind.start)
                 {
-                    merged_props.tabs.insert(0, dxpdf_docx_model::model::TabStop {
-                        position: lvl_left,
-                        alignment: dxpdf_docx_model::model::TabAlignment::Left,
-                        leader: dxpdf_docx_model::model::TabLeader::None,
-                    });
+                    merged_props.tabs.insert(
+                        0,
+                        dxpdf_docx_model::model::TabStop {
+                            position: lvl_left,
+                            alignment: dxpdf_docx_model::model::TabAlignment::Left,
+                            leader: dxpdf_docx_model::model::TabLeader::None,
+                        },
+                    );
                 }
             } else {
-            let counters = ctx.list_counters.borrow();
-            if let Some(label_text) = crate::resolve::numbering::format_list_label(
-                levels, level, &counters, num_id,
-            ) {
-                // Resolve label font from level run_properties or paragraph defaults.
-                let (default_family, default_size, default_color, _, _) =
-                    resolve_paragraph_defaults(p, ctx.resolved, false);
-                let level_font_family = level_def
-                    .and_then(|l| l.run_properties.as_ref())
-                    .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
-                    .unwrap_or("");
+                let counters = ctx.list_counters.borrow();
+                if let Some(label_text) =
+                    crate::resolve::numbering::format_list_label(levels, level, &counters, num_id)
+                {
+                    // Resolve label font from level run_properties or paragraph defaults.
+                    let (default_family, default_size, default_color, _, _) =
+                        resolve_paragraph_defaults(p, ctx.resolved, false);
+                    let level_font_family = level_def
+                        .and_then(|l| l.run_properties.as_ref())
+                        .and_then(|rp| crate::resolve::fonts::effective_font(&rp.fonts))
+                        .unwrap_or("");
 
-                // Remap PUA codepoints from legacy Symbol/Wingdings encoding
-                // to standard Unicode per official mapping tables, and use
-                // a standard font. This is portable across all platforms.
-                let (label_text, label_family) = remap_legacy_font_chars(
-                    &label_text, level_font_family, &default_family,
-                );
-                let label_family: std::rc::Rc<str> = std::rc::Rc::from(label_family.as_str());
+                    // Remap PUA codepoints from legacy Symbol/Wingdings encoding
+                    // to standard Unicode per official mapping tables, and use
+                    // a standard font. This is portable across all platforms.
+                    let (label_text, label_family) =
+                        remap_legacy_font_chars(&label_text, level_font_family, &default_family);
+                    let label_family: std::rc::Rc<str> = std::rc::Rc::from(label_family.as_str());
 
-                let label_size = level_def
-                    .and_then(|l| l.run_properties.as_ref())
-                    .and_then(|rp| rp.font_size)
-                    .map(Pt::from)
-                    .unwrap_or(default_size);
-                let label_bold = level_def
-                    .and_then(|l| l.run_properties.as_ref())
-                    .and_then(|rp| rp.bold)
-                    .unwrap_or(false);
-                let label_italic = level_def
-                    .and_then(|l| l.run_properties.as_ref())
-                    .and_then(|rp| rp.italic)
-                    .unwrap_or(false);
+                    let label_size = level_def
+                        .and_then(|l| l.run_properties.as_ref())
+                        .and_then(|rp| rp.font_size)
+                        .map(Pt::from)
+                        .unwrap_or(default_size);
+                    let label_bold = level_def
+                        .and_then(|l| l.run_properties.as_ref())
+                        .and_then(|rp| rp.bold)
+                        .unwrap_or(false);
+                    let label_italic = level_def
+                        .and_then(|l| l.run_properties.as_ref())
+                        .and_then(|rp| rp.italic)
+                        .unwrap_or(false);
 
-                let label_font = FontProps {
-                    family: label_family,
-                    size: label_size,
-                    bold: label_bold,
-                    italic: label_italic,
-                    underline: false,
-                    char_spacing: Pt::ZERO,
-                    underline_position: Pt::ZERO,
-                    underline_thickness: Pt::ZERO,
-                };
-                let (w, m) = ctx.measurer.measure(&label_text, &label_font);
-                let h = m.height();
-                // Tab after label: advances to indent_left via the implicit
-                // tab stop. Fitting width = hanging so that label + tab
-                // consume exactly the hanging indent space during fitting,
-                // leaving content_width for the body text.
-                let hanging = level_def
-                    .and_then(|l| l.indentation.as_ref())
-                    .and_then(|ind| ind.first_line)
-                    .map(|fl| match fl {
-                        model::FirstLineIndent::Hanging(v) => Pt::from(v),
+                    let label_font = FontProps {
+                        family: label_family,
+                        size: label_size,
+                        bold: label_bold,
+                        italic: label_italic,
+                        underline: false,
+                        char_spacing: Pt::ZERO,
+                        underline_position: Pt::ZERO,
+                        underline_thickness: Pt::ZERO,
+                    };
+                    let (w, m) = ctx.measurer.measure(&label_text, &label_font);
+                    let h = m.height();
+                    // Tab after label: advances to indent_left via the implicit
+                    // tab stop. Fitting width = hanging so that label + tab
+                    // consume exactly the hanging indent space during fitting,
+                    // leaving content_width for the body text.
+                    let hanging = level_def
+                        .and_then(|l| l.indentation.as_ref())
+                        .and_then(|ind| ind.first_line)
+                        .map(|fl| match fl {
+                            model::FirstLineIndent::Hanging(v) => Pt::from(v),
+                            _ => Pt::ZERO,
+                        })
+                        .unwrap_or(Pt::ZERO);
+                    // §17.9.7: lvlJc controls label justification within the
+                    // hanging indent area. The label fragment occupies `w`
+                    // points but the text is drawn at `text_offset` within it.
+                    // The tab then advances from `w` to the indent tab stop,
+                    // producing a natural gap = hanging − w.
+                    let jc = level_def.and_then(|l| l.justification);
+                    let text_offset = match jc {
+                        Some(dxpdf_docx_model::model::Alignment::End) => -w,
+                        Some(dxpdf_docx_model::model::Alignment::Center) => w * -0.5,
                         _ => Pt::ZERO,
-                    })
-                    .unwrap_or(Pt::ZERO);
-                // §17.9.7: lvlJc controls label justification within the
-                // hanging indent area. The label fragment occupies `w`
-                // points but the text is drawn at `text_offset` within it.
-                // The tab then advances from `w` to the indent tab stop,
-                // producing a natural gap = hanging − w.
-                let jc = level_def.and_then(|l| l.justification);
-                let text_offset = match jc {
-                    Some(dxpdf_docx_model::model::Alignment::End) => -w,
-                    Some(dxpdf_docx_model::model::Alignment::Center) => w * -0.5,
-                    _ => Pt::ZERO,
-                };
-                // The label fragment width is the text width only.
-                // text_offset shifts where the text is drawn (for right/
-                // center justification) but x advances by w, leaving
-                // room for the tab to fill hanging − w to the stop.
-                let label_width = w;
-                let label_frag = Fragment::Text {
-                    text: label_text,
-                    font: label_font.clone(),
-                    color: default_color,
-                    shading: None,
-                    border: None,
-                    width: label_width,
-                    trimmed_width: label_width,
-                    metrics: m,
-                    hyperlink_url: None,
-                    baseline_offset: Pt::ZERO,
-                    text_offset,
-                };
-                let tab_fitting = (hanging - label_width).max(Pt::ZERO);
-                let tab_frag = Fragment::Tab {
-                    line_height: h,
-                    fitting_width: Some(tab_fitting),
-                };
-                fragments.insert(0, tab_frag);
-                fragments.insert(0, label_frag);
+                    };
+                    // The label fragment width is the text width only.
+                    // text_offset shifts where the text is drawn (for right/
+                    // center justification) but x advances by w, leaving
+                    // room for the tab to fill hanging − w to the stop.
+                    let label_width = w;
+                    let label_frag = Fragment::Text {
+                        text: label_text,
+                        font: label_font.clone(),
+                        color: default_color,
+                        shading: None,
+                        border: None,
+                        width: label_width,
+                        trimmed_width: label_width,
+                        metrics: m,
+                        hyperlink_url: None,
+                        baseline_offset: Pt::ZERO,
+                        text_offset,
+                    };
+                    let tab_fitting = (hanging - label_width).max(Pt::ZERO);
+                    let tab_frag = Fragment::Tab {
+                        line_height: h,
+                        fitting_width: Some(tab_fitting),
+                    };
+                    fragments.insert(0, tab_frag);
+                    fragments.insert(0, label_frag);
 
-                // Add implicit tab stop at numLvl.left so the tab lands
-                // at the body text position.
-                let lvl_left = level_def
-                    .and_then(|l| l.indentation.as_ref())
-                    .and_then(|ind| ind.start);
-                if let Some(lvl_left) = lvl_left {
-                    merged_props.tabs.insert(0, dxpdf_docx_model::model::TabStop {
-                        position: lvl_left,
-                        alignment: dxpdf_docx_model::model::TabAlignment::Left,
-                        leader: dxpdf_docx_model::model::TabLeader::None,
-                    });
+                    // Add implicit tab stop at numLvl.left so the tab lands
+                    // at the body text position.
+                    let lvl_left = level_def
+                        .and_then(|l| l.indentation.as_ref())
+                        .and_then(|ind| ind.start);
+                    if let Some(lvl_left) = lvl_left {
+                        merged_props.tabs.insert(
+                            0,
+                            dxpdf_docx_model::model::TabStop {
+                                position: lvl_left,
+                                alignment: dxpdf_docx_model::model::TabAlignment::Left,
+                                leader: dxpdf_docx_model::model::TabLeader::None,
+                            },
+                        );
+                    }
                 }
-            }
             }
 
             // §17.9.23: numbering level pPr overrides the paragraph style.
             // Only the paragraph's direct ind overrides the numbering level.
-            if let Some(lvl_ind) = levels.get(level as usize).and_then(|l| l.indentation.as_ref()) {
+            if let Some(lvl_ind) = levels
+                .get(level as usize)
+                .and_then(|l| l.indentation.as_ref())
+            {
                 let mut ind = *lvl_ind;
                 if let Some(direct) = p.properties.indentation {
                     if let Some(start) = direct.start {
@@ -551,11 +574,18 @@ fn build_paragraph_block(
     // Word suppresses Hyperlink character style (blue/underline) for ToC
     // entries in print view. Strip visual hyperlink styling but keep the
     // click annotation URL.
-    if p.style_id.as_ref()
+    if p.style_id
+        .as_ref()
         .is_some_and(|id| id.as_str().starts_with("TOC") || id.as_str().starts_with("toc"))
     {
         for frag in &mut fragments {
-            if let Fragment::Text { font, color, hyperlink_url, .. } = frag {
+            if let Fragment::Text {
+                font,
+                color,
+                hyperlink_url,
+                ..
+            } = frag
+            {
                 if hyperlink_url.is_some() {
                     *color = RgbColor::BLACK;
                     font.underline = false;
@@ -568,9 +598,7 @@ fn build_paragraph_block(
     let is_dropcap = merged_props
         .frame_properties
         .and_then(|fp| fp.drop_cap)
-        .is_some_and(|dc| {
-            matches!(dc, model::DropCap::Drop | model::DropCap::Margin)
-        });
+        .is_some_and(|dc| matches!(dc, model::DropCap::Drop | model::DropCap::Margin));
 
     if is_dropcap {
         let drop_cap_lines = merged_props
@@ -597,9 +625,13 @@ fn build_paragraph_block(
             .is_some_and(|dc| matches!(dc, model::DropCap::Margin));
         // The drop cap paragraph's own indent determines the x position.
         // This includes indent_left + indent_first_line from the cascade.
-        let dc_indent_left = merged_props.indentation
-            .and_then(|i| i.start).map(Pt::from).unwrap_or(Pt::ZERO);
-        let dc_indent_first = merged_props.indentation
+        let dc_indent_left = merged_props
+            .indentation
+            .and_then(|i| i.start)
+            .map(Pt::from)
+            .unwrap_or(Pt::ZERO);
+        let dc_indent_first = merged_props
+            .indentation
             .and_then(|i| i.first_line)
             .map(|fl| match fl {
                 model::FirstLineIndent::FirstLine(v) => Pt::from(v),
@@ -608,16 +640,20 @@ fn build_paragraph_block(
             })
             .unwrap_or(Pt::ZERO);
         // §17.3.1.33: frame height from drop cap paragraph's exact line spacing.
-        let frame_height = merged_props.spacing
+        let frame_height = merged_props
+            .spacing
             .and_then(|s| s.line)
             .and_then(|ls| match ls {
                 model::LineSpacing::Exact(v) => Some(Pt::from(v)),
                 _ => None,
             });
         // §17.3.2.19: position offset from the drop cap run.
-        let position_offset = fragments.first()
+        let position_offset = fragments
+            .first()
             .and_then(|f| match f {
-                Fragment::Text { baseline_offset, .. } => Some(*baseline_offset),
+                Fragment::Text {
+                    baseline_offset, ..
+                } => Some(*baseline_offset),
                 _ => None,
             })
             .unwrap_or(Pt::ZERO);
@@ -649,8 +685,16 @@ fn build_paragraph_block(
     // Collect footnotes referenced in this paragraph.
     // The footnote_counter was already incremented during fragment collection,
     // so we count backwards to get the display number for each reference.
-    let fn_refs: Vec<_> = p.content.iter()
-        .filter_map(|i| if let model::Inline::FootnoteRef(id) = i { Some(id) } else { None })
+    let fn_refs: Vec<_> = p
+        .content
+        .iter()
+        .filter_map(|i| {
+            if let model::Inline::FootnoteRef(id) = i {
+                Some(id)
+            } else {
+                None
+            }
+        })
         .collect();
     let fn_base = ctx.footnote_counter.get() - fn_refs.len() as u32;
     let mut para_footnotes = Vec::new();
@@ -686,12 +730,17 @@ fn extract_floating_images(
     ctx: &BuildContext,
     cell_context: bool,
 ) -> Vec<crate::layout::section::FloatingImage> {
-    use dxpdf_docx_model::model::{ImagePlacement, AnchorPosition, AnchorRelativeFrom, AnchorAlignment, Inline};
     use crate::layout::section::{FloatingImage, FloatingImageY};
+    use dxpdf_docx_model::model::{
+        AnchorAlignment, AnchorPosition, AnchorRelativeFrom, ImagePlacement, Inline,
+    };
 
     let mut images = Vec::new();
 
-    fn find_anchor_images<'a>(inlines: &'a [Inline], out: &mut Vec<&'a dxpdf_docx_model::model::Image>) {
+    fn find_anchor_images<'a>(
+        inlines: &'a [Inline],
+        out: &mut Vec<&'a dxpdf_docx_model::model::Image>,
+    ) {
         for inline in inlines {
             match inline {
                 Inline::Image(img) => {
@@ -719,7 +768,10 @@ fn extract_floating_images(
             let rel_id = match crate::resolve::images::extract_image_rel_id(img) {
                 Some(id) => id,
                 None => {
-                    eprintln!("  -> no rel_id, graphic.is_some()={}", img.graphic.is_some());
+                    eprintln!(
+                        "  -> no rel_id, graphic.is_some()={}",
+                        img.graphic.is_some()
+                    );
                     continue;
                 }
             };
@@ -727,108 +779,159 @@ fn extract_floating_images(
             let image_data = match ctx.resolved.media.get(rel_id) {
                 Some(bytes) => std::rc::Rc::from(bytes.as_slice()),
                 None => {
-                    eprintln!("Anchor image: rel_id={} NOT FOUND in media (media has {} entries)", rel_id.as_str(), ctx.resolved.media.len());
+                    eprintln!(
+                        "Anchor image: rel_id={} NOT FOUND in media (media has {} entries)",
+                        rel_id.as_str(),
+                        ctx.resolved.media.len()
+                    );
                     continue;
                 }
             };
 
-                let w = Pt::from(img.extent.width);
-                let h = Pt::from(img.extent.height);
-                let pc = ctx.page_config.borrow();
+            let w = Pt::from(img.extent.width);
+            let h = Pt::from(img.extent.height);
+            let pc = ctx.page_config.borrow();
 
-                // Resolve horizontal position.
-                // In cell context, positions are relative to the cell origin.
-                let (page_width, margin_left, margin_right) = if cell_context {
-                    (Pt::ZERO, Pt::ZERO, Pt::ZERO)
-                } else {
-                    (pc.page_size.width, pc.margins.left, pc.margins.right)
-                };
-                let content_width = if cell_context { Pt::ZERO } else { page_width - margin_left - margin_right };
+            // Resolve horizontal position.
+            // In cell context, positions are relative to the cell origin.
+            let (page_width, margin_left, margin_right) = if cell_context {
+                (Pt::ZERO, Pt::ZERO, Pt::ZERO)
+            } else {
+                (pc.page_size.width, pc.margins.left, pc.margins.right)
+            };
+            let content_width = if cell_context {
+                Pt::ZERO
+            } else {
+                page_width - margin_left - margin_right
+            };
 
-                let x = match &anchor.horizontal_position {
-                    AnchorPosition::Offset { relative_from, offset } => {
-                        let base = match relative_from {
-                            AnchorRelativeFrom::Page => Pt::ZERO,
-                            AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => margin_left,
-                            _ => margin_left,
-                        };
-                        base + Pt::from(*offset)
-                    }
-                    AnchorPosition::Align { relative_from, alignment } => {
-                        let (area_left, area_width) = match relative_from {
-                            AnchorRelativeFrom::Page => (Pt::ZERO, page_width),
-                            AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => (margin_left, content_width),
-                            _ => (margin_left, content_width),
-                        };
-                        match alignment {
-                            AnchorAlignment::Left => area_left,
-                            AnchorAlignment::Right => area_left + area_width - w,
-                            AnchorAlignment::Center => area_left + (area_width - w) * 0.5,
-                            _ => area_left,
+            let x = match &anchor.horizontal_position {
+                AnchorPosition::Offset {
+                    relative_from,
+                    offset,
+                } => {
+                    let base = match relative_from {
+                        AnchorRelativeFrom::Page => Pt::ZERO,
+                        AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => margin_left,
+                        _ => margin_left,
+                    };
+                    base + Pt::from(*offset)
+                }
+                AnchorPosition::Align {
+                    relative_from,
+                    alignment,
+                } => {
+                    let (area_left, area_width) = match relative_from {
+                        AnchorRelativeFrom::Page => (Pt::ZERO, page_width),
+                        AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => {
+                            (margin_left, content_width)
                         }
+                        _ => (margin_left, content_width),
+                    };
+                    match alignment {
+                        AnchorAlignment::Left => area_left,
+                        AnchorAlignment::Right => area_left + area_width - w,
+                        AnchorAlignment::Center => area_left + (area_width - w) * 0.5,
+                        _ => area_left,
                     }
-                };
+                }
+            };
 
-                // Resolve vertical position.
-                let y = match &anchor.vertical_position {
-                    AnchorPosition::Offset { relative_from, offset } => {
-                        let margin_top = if cell_context { Pt::ZERO } else { pc.margins.top };
-                        if cell_context {
-                            // In cell context, all positions are relative to cell origin.
-                            FloatingImageY::RelativeToParagraph(Pt::from(*offset))
-                        } else {
-                            match relative_from {
-                                AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
-                                AnchorRelativeFrom::Margin => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
-                                // §20.4.2.11: topMargin — offset from page top.
-                                AnchorRelativeFrom::TopMargin => FloatingImageY::Absolute(Pt::from(*offset)),
-                                // §20.4.2.11: bottomMargin — offset from bottom margin edge.
-                                AnchorRelativeFrom::BottomMargin => {
-                                    let page_height = pc.page_size.height;
-                                    let margin_bottom = pc.margins.bottom;
-                                    FloatingImageY::Absolute(page_height - margin_bottom + Pt::from(*offset))
-                                }
-                                AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
-                                    FloatingImageY::RelativeToParagraph(Pt::from(*offset))
-                                }
-                                _ => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
+            // Resolve vertical position.
+            let y = match &anchor.vertical_position {
+                AnchorPosition::Offset {
+                    relative_from,
+                    offset,
+                } => {
+                    let margin_top = if cell_context {
+                        Pt::ZERO
+                    } else {
+                        pc.margins.top
+                    };
+                    if cell_context {
+                        // In cell context, all positions are relative to cell origin.
+                        FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                    } else {
+                        match relative_from {
+                            AnchorRelativeFrom::Page => FloatingImageY::Absolute(Pt::from(*offset)),
+                            AnchorRelativeFrom::Margin => {
+                                FloatingImageY::Absolute(margin_top + Pt::from(*offset))
                             }
+                            // §20.4.2.11: topMargin — offset from page top.
+                            AnchorRelativeFrom::TopMargin => {
+                                FloatingImageY::Absolute(Pt::from(*offset))
+                            }
+                            // §20.4.2.11: bottomMargin — offset from bottom margin edge.
+                            AnchorRelativeFrom::BottomMargin => {
+                                let page_height = pc.page_size.height;
+                                let margin_bottom = pc.margins.bottom;
+                                FloatingImageY::Absolute(
+                                    page_height - margin_bottom + Pt::from(*offset),
+                                )
+                            }
+                            AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line => {
+                                FloatingImageY::RelativeToParagraph(Pt::from(*offset))
+                            }
+                            _ => FloatingImageY::Absolute(margin_top + Pt::from(*offset)),
                         }
                     }
-                    AnchorPosition::Align { relative_from, alignment } => {
-                        let margin_top = if cell_context { Pt::ZERO } else { pc.margins.top };
-                        let page_height = if cell_context { Pt::ZERO } else { pc.page_size.height };
-                        let margin_bottom = if cell_context { Pt::ZERO } else { pc.margins.bottom };
-                        let (area_top, area_height) = match relative_from {
-                            AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
-                            AnchorRelativeFrom::Margin => (margin_top, page_height - margin_top - margin_bottom),
-                            // §20.4.2.11: topMargin = area from page top to top margin edge.
-                            AnchorRelativeFrom::TopMargin => (Pt::ZERO, margin_top),
-                            // §20.4.2.11: bottomMargin = area from bottom margin edge to page bottom.
-                            AnchorRelativeFrom::BottomMargin => (page_height - margin_bottom, margin_bottom),
-                            _ => (margin_top, page_height - margin_top - margin_bottom),
-                        };
-                        let y_pos = match alignment {
-                            AnchorAlignment::Top => area_top,
-                            AnchorAlignment::Bottom => area_top + area_height - h,
-                            AnchorAlignment::Center => area_top + (area_height - h) * 0.5,
-                            _ => area_top,
-                        };
-                        FloatingImageY::Absolute(y_pos)
-                    }
-                };
+                }
+                AnchorPosition::Align {
+                    relative_from,
+                    alignment,
+                } => {
+                    let margin_top = if cell_context {
+                        Pt::ZERO
+                    } else {
+                        pc.margins.top
+                    };
+                    let page_height = if cell_context {
+                        Pt::ZERO
+                    } else {
+                        pc.page_size.height
+                    };
+                    let margin_bottom = if cell_context {
+                        Pt::ZERO
+                    } else {
+                        pc.margins.bottom
+                    };
+                    let (area_top, area_height) = match relative_from {
+                        AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
+                        AnchorRelativeFrom::Margin => {
+                            (margin_top, page_height - margin_top - margin_bottom)
+                        }
+                        // §20.4.2.11: topMargin = area from page top to top margin edge.
+                        AnchorRelativeFrom::TopMargin => (Pt::ZERO, margin_top),
+                        // §20.4.2.11: bottomMargin = area from bottom margin edge to page bottom.
+                        AnchorRelativeFrom::BottomMargin => {
+                            (page_height - margin_bottom, margin_bottom)
+                        }
+                        _ => (margin_top, page_height - margin_top - margin_bottom),
+                    };
+                    let y_pos = match alignment {
+                        AnchorAlignment::Top => area_top,
+                        AnchorAlignment::Bottom => area_top + area_height - h,
+                        AnchorAlignment::Center => area_top + (area_height - h) * 0.5,
+                        _ => area_top,
+                    };
+                    FloatingImageY::Absolute(y_pos)
+                }
+            };
 
-                images.push(FloatingImage {
-                    image_data,
-                    size: crate::geometry::PtSize::new(w, h),
-                    x,
-                    y,
-                    wrap_top_and_bottom: matches!(anchor.wrap, dxpdf_docx_model::model::TextWrap::TopAndBottom { .. }),
-                    dist_left: Pt::from(anchor.distance.left),
-                    dist_right: Pt::from(anchor.distance.right),
-                });
-            }
+            images.push(FloatingImage {
+                image_data,
+                size: crate::geometry::PtSize::new(w, h),
+                x,
+                y,
+                wrap_top_and_bottom: matches!(
+                    anchor.wrap,
+                    dxpdf_docx_model::model::TextWrap::TopAndBottom { .. }
+                ),
+                dist_left: Pt::from(anchor.distance.left),
+                dist_right: Pt::from(anchor.distance.right),
+            });
         }
+    }
 
     images
 }
@@ -1012,8 +1115,14 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
                 .enumerate()
                 .map(|(col_idx, cell)| {
                     let cond = resolve_cell_conditional(
-                        row_idx, col_idx, num_rows, num_cells,
-                        tbl_look, style_overrides, row_band_size, col_band_size,
+                        row_idx,
+                        col_idx,
+                        num_rows,
+                        num_cells,
+                        tbl_look,
+                        style_overrides,
+                        row_band_size,
+                        col_band_size,
                     );
 
                     // Compute available width for nested content.
@@ -1036,8 +1145,13 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
                     let inner_width = (cell_width - cell_margins_h).max(Pt::ZERO);
 
                     build_table_cell(
-                        cell, &t.properties, raw_table_style, style_cell_margins,
-                        &cond, inner_width, ctx,
+                        cell,
+                        &t.properties,
+                        raw_table_style,
+                        style_cell_margins,
+                        &cond,
+                        inner_width,
+                        ctx,
                     )
                 })
                 .collect();
@@ -1045,8 +1159,8 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
             TableRowInput {
                 cells,
                 height_rule: row.properties.height.map(|h| {
-                    use dxpdf_docx_model::model::HeightRule;
                     use crate::layout::table::RowHeightRule;
+                    use dxpdf_docx_model::model::HeightRule;
                     match h.rule {
                         HeightRule::Exact => RowHeightRule::Exact(Pt::from(h.value)),
                         _ => RowHeightRule::AtLeast(Pt::from(h.value)),
@@ -1059,15 +1173,11 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         .collect();
 
     // §17.4.38: resolve table borders from direct properties or table style.
-    let tbl_borders = t
-        .properties
-        .borders
-        .as_ref()
-        .or_else(|| {
-            raw_table_style
-                .and_then(|s| s.table.as_ref())
-                .and_then(|tp| tp.borders.as_ref())
-        });
+    let tbl_borders = t.properties.borders.as_ref().or_else(|| {
+        raw_table_style
+            .and_then(|s| s.table.as_ref())
+            .and_then(|tp| tp.borders.as_ref())
+    });
     let border_config = tbl_borders.map(convert_table_border_config);
 
     // §17.4.58: floating table positioning.
@@ -1079,7 +1189,9 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
             // §17.4.59: tblpY — absolute Y offset from the vertical anchor.
             y_offset: pos.y.map(Pt::from).unwrap_or(Pt::ZERO),
             // §17.4.58: default vertical anchor is "text".
-            vert_anchor: pos.vert_anchor.unwrap_or(dxpdf_docx_model::model::TableAnchor::Text),
+            vert_anchor: pos
+                .vert_anchor
+                .unwrap_or(dxpdf_docx_model::model::TableAnchor::Text),
         }
     });
 
@@ -1096,13 +1208,20 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
     );
     let indent = match t.properties.indent {
         Some(model::TableMeasure::Twips(tw)) => Pt::from(tw),
-        _ if is_full_width && is_left_aligned => {
-            -default_cell_margins.map(|m| Pt::from(m.left)).unwrap_or(Pt::ZERO)
-        }
+        _ if is_full_width && is_left_aligned => -default_cell_margins
+            .map(|m| Pt::from(m.left))
+            .unwrap_or(Pt::ZERO),
         _ => Pt::ZERO,
     };
 
-    BuiltTable { rows, col_widths, border_config, indent, alignment: t.properties.alignment, float_info }
+    BuiltTable {
+        rows,
+        col_widths,
+        border_config,
+        indent,
+        alignment: t.properties.alignment,
+        float_info,
+    }
 }
 
 /// Build a single table cell: resolve content blocks, margins, shading, borders.
@@ -1110,7 +1229,9 @@ fn build_table_cell(
     cell: &TableCell,
     table_props: &model::TableProperties,
     table_style: Option<&ResolvedStyle>,
-    style_cell_margins: Option<dxpdf_docx_model::geometry::EdgeInsets<dxpdf_docx_model::dimension::Twips>>,
+    style_cell_margins: Option<
+        dxpdf_docx_model::geometry::EdgeInsets<dxpdf_docx_model::dimension::Twips>,
+    >,
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
@@ -1123,8 +1244,10 @@ fn build_table_cell(
         .or(style_cell_margins)
         .map(|m| {
             geometry::PtEdgeInsets::new(
-                Pt::from(m.top), Pt::from(m.right),
-                Pt::from(m.bottom), Pt::from(m.left),
+                Pt::from(m.top),
+                Pt::from(m.right),
+                Pt::from(m.bottom),
+                Pt::from(m.left),
             )
         })
         .unwrap_or(geometry::PtEdgeInsets::ZERO);
@@ -1156,28 +1279,34 @@ fn build_table_cell(
             Some(CellBorderConfig {
                 top: convert_cell_border_override(&db.top)
                     .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.top))),
-                bottom: convert_cell_border_override(&db.bottom)
-                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.bottom))),
+                bottom: convert_cell_border_override(&db.bottom).or_else(|| {
+                    cond_borders.and_then(|cb| convert_cell_border_override(&cb.bottom))
+                }),
                 left: convert_cell_border_override(&db.left)
                     .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.left))),
-                right: convert_cell_border_override(&db.right)
-                    .or_else(|| cond_borders.and_then(|cb| convert_cell_border_override(&cb.right))),
+                right: convert_cell_border_override(&db.right).or_else(|| {
+                    cond_borders.and_then(|cb| convert_cell_border_override(&cb.right))
+                }),
             })
         }
-        (None, Some(cb)) => {
-            Some(CellBorderConfig {
-                top: convert_cell_border_override(&cb.top),
-                bottom: convert_cell_border_override(&cb.bottom),
-                left: convert_cell_border_override(&cb.left),
-                right: convert_cell_border_override(&cb.right),
-            })
-        }
+        (None, Some(cb)) => Some(CellBorderConfig {
+            top: convert_cell_border_override(&cb.top),
+            bottom: convert_cell_border_override(&cb.bottom),
+            left: convert_cell_border_override(&cb.left),
+            right: convert_cell_border_override(&cb.right),
+        }),
         (None, None) => None,
     };
 
     // §17.4.84: vertical alignment — direct cell, conditional, or default top.
-    let valign = cell.properties.vertical_align
-        .or_else(|| cond.cell_properties.as_ref().and_then(|tcp| tcp.vertical_align))
+    let valign = cell
+        .properties
+        .vertical_align
+        .or_else(|| {
+            cond.cell_properties
+                .as_ref()
+                .and_then(|tcp| tcp.vertical_align)
+        })
         .map(|va| match va {
             model::CellVerticalAlign::Bottom => crate::layout::table::CellVAlign::Bottom,
             model::CellVerticalAlign::Center => crate::layout::table::CellVAlign::Center,
@@ -1193,7 +1322,8 @@ fn build_table_cell(
             _ => Pt::ZERO,
         }
     };
-    let border_inset_h = cell_borders.as_ref()
+    let border_inset_h = cell_borders
+        .as_ref()
         .map(|cb| {
             let bl = (border_w(&cb.left) - cell_margins.left).max(Pt::ZERO);
             let br = (border_w(&cb.right) - cell_margins.right).max(Pt::ZERO);
@@ -1246,14 +1376,26 @@ fn build_cell_blocks(
                 {
                     continue;
                 }
-                if let Some(lb) = build_paragraph_block(
-                    p, ctx, &mut pending_dropcap,
-                    table_style, Some(cond),
-                ) {
+                if let Some(lb) =
+                    build_paragraph_block(p, ctx, &mut pending_dropcap, table_style, Some(cond))
+                {
                     // Split oversized text fragments for narrow cells.
-                    let lb = if let LayoutBlock::Paragraph { fragments, style, page_break_before, footnotes, floating_images } = lb {
+                    let lb = if let LayoutBlock::Paragraph {
+                        fragments,
+                        style,
+                        page_break_before,
+                        footnotes,
+                        floating_images,
+                    } = lb
+                    {
                         let fragments = split_oversized_fragments(fragments, inner_width, ctx);
-                        LayoutBlock::Paragraph { fragments, style, page_break_before, footnotes, floating_images }
+                        LayoutBlock::Paragraph {
+                            fragments,
+                            style,
+                            page_break_before,
+                            footnotes,
+                            floating_images,
+                        }
                     } else {
                         lb
                     };
@@ -1293,7 +1435,13 @@ fn resolve_paragraph_defaults(
     para: &Paragraph,
     resolved: &ResolvedDocument,
     defer_doc_defaults: bool,
-) -> (String, Pt, RgbColor, model::ParagraphProperties, model::RunProperties) {
+) -> (
+    String,
+    Pt,
+    RgbColor,
+    model::ParagraphProperties,
+    model::RunProperties,
+) {
     let mut para_props = para.properties.clone();
     let mut run_defaults = resolved.doc_defaults_run.clone();
 
@@ -1341,7 +1489,13 @@ fn resolve_paragraph_defaults(
         default_color = resolve_color(c, ColorContext::Text);
     }
 
-    (default_family, default_size, default_color, para_props, run_defaults)
+    (
+        default_family,
+        default_size,
+        default_color,
+        para_props,
+        run_defaults,
+    )
 }
 
 // ── Conversion helpers ──────────────────────────────────────────────────────
@@ -1366,8 +1520,16 @@ fn doc_font_size(ctx: &BuildContext) -> Pt {
 
 /// Convert a model paragraph properties into a layout ParagraphStyle.
 fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphStyle {
-    let indent_left = props.indentation.and_then(|i| i.start).map(Pt::from).unwrap_or(Pt::ZERO);
-    let indent_right = props.indentation.and_then(|i| i.end).map(Pt::from).unwrap_or(Pt::ZERO);
+    let indent_left = props
+        .indentation
+        .and_then(|i| i.start)
+        .map(Pt::from)
+        .unwrap_or(Pt::ZERO);
+    let indent_right = props
+        .indentation
+        .and_then(|i| i.end)
+        .map(Pt::from)
+        .unwrap_or(Pt::ZERO);
     let indent_first_line = props
         .indentation
         .and_then(|i| i.first_line)
@@ -1382,12 +1544,20 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
     let space_before = if props.spacing.and_then(|s| s.before_auto_spacing) == Some(true) {
         Pt::new(14.0)
     } else {
-        props.spacing.and_then(|s| s.before).map(Pt::from).unwrap_or(Pt::ZERO)
+        props
+            .spacing
+            .and_then(|s| s.before)
+            .map(Pt::from)
+            .unwrap_or(Pt::ZERO)
     };
     let space_after = if props.spacing.and_then(|s| s.after_auto_spacing) == Some(true) {
         Pt::new(14.0)
     } else {
-        props.spacing.and_then(|s| s.after).map(Pt::from).unwrap_or(Pt::ZERO)
+        props
+            .spacing
+            .and_then(|s| s.after)
+            .map(Pt::from)
+            .unwrap_or(Pt::ZERO)
     };
 
     // §17.3.1.33: line spacing defaults to single (auto, 240 twips = 1.0x).
@@ -1403,7 +1573,9 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
 
     // §17.3.1.38: convert tab stops to layout format.
     // Clear entries are directives consumed during style merging, not layout stops.
-    let tabs: Vec<TabStopDef> = props.tabs.iter()
+    let tabs: Vec<TabStopDef> = props
+        .tabs
+        .iter()
         .filter(|t| t.alignment != model::TabAlignment::Clear)
         .map(|t| TabStopDef {
             position: Pt::from(t.position),
@@ -1423,7 +1595,10 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         tabs,
         drop_cap: None,
         borders: resolve_paragraph_borders(props),
-        shading: props.shading.as_ref().map(|s| resolve_color(s.fill, ColorContext::Background)),
+        shading: props
+            .shading
+            .as_ref()
+            .map(|s| resolve_color(s.fill, ColorContext::Background)),
         keep_next: props.keep_next.unwrap_or(false),
         contextual_spacing: props.contextual_spacing.unwrap_or(false),
         style_id: None, // set by caller when available
@@ -1435,9 +1610,7 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
 }
 
 /// §17.3.1.24: resolve paragraph borders.
-fn resolve_paragraph_borders(
-    props: &model::ParagraphProperties,
-) -> Option<ParagraphBorderStyle> {
+fn resolve_paragraph_borders(props: &model::ParagraphProperties) -> Option<ParagraphBorderStyle> {
     let pbdr = props.borders.as_ref()?;
 
     let convert = |b: &model::Border| -> BorderLine {
@@ -1455,7 +1628,11 @@ fn resolve_paragraph_borders(
         right: pbdr.right.as_ref().map(convert),
     };
 
-    if style.top.is_some() || style.bottom.is_some() || style.left.is_some() || style.right.is_some() {
+    if style.top.is_some()
+        || style.bottom.is_some()
+        || style.left.is_some()
+        || style.right.is_some()
+    {
         Some(style)
     } else {
         None
@@ -1521,16 +1698,20 @@ fn split_oversized_fragments(
     let mut result = Vec::with_capacity(fragments.len());
     for frag in fragments {
         match &frag {
-            Fragment::Text { text, width, font, .. }
-                if *width > max_width && text.chars().count() > 1 =>
-            {
+            Fragment::Text {
+                text, width, font, ..
+            } if *width > max_width && text.chars().count() > 1 => {
                 // Re-measure each character individually.
                 for ch in text.chars() {
                     let ch_str = ch.to_string();
                     let (w, m) = ctx.measurer.measure(&ch_str, font);
                     if let Fragment::Text {
-                        color, shading, border, hyperlink_url,
-                        baseline_offset, ..
+                        color,
+                        shading,
+                        border,
+                        hyperlink_url,
+                        baseline_offset,
+                        ..
                     } = &frag
                     {
                         result.push(Fragment::Text {
@@ -1556,12 +1737,12 @@ fn split_oversized_fragments(
 }
 
 /// Populate image data on Fragment::Image fragments from the media map.
-fn populate_image_data(
-    fragments: &mut [Fragment],
-    media: &HashMap<model::RelId, Vec<u8>>,
-) {
+fn populate_image_data(fragments: &mut [Fragment], media: &HashMap<model::RelId, Vec<u8>>) {
     for frag in fragments.iter_mut() {
-        if let Fragment::Image { rel_id, image_data, .. } = frag {
+        if let Fragment::Image {
+            rel_id, image_data, ..
+        } = frag
+        {
             if image_data.is_none() {
                 if let Some(bytes) = media.get(&model::RelId::new(rel_id.as_str())) {
                     *image_data = Some(bytes.as_slice().into());
@@ -1582,133 +1763,144 @@ fn populate_image_data(
 /// - Wingdings: standard Microsoft Wingdings-to-Unicode mapping
 ///
 /// Returns (remapped_text, font_family).
-fn remap_legacy_font_chars(text: &str, font_family: &str, fallback_family: &str) -> (String, String) {
+fn remap_legacy_font_chars(
+    text: &str,
+    font_family: &str,
+    fallback_family: &str,
+) -> (String, String) {
     let is_symbol = font_family.eq_ignore_ascii_case("Symbol");
     let is_wingdings = font_family.eq_ignore_ascii_case("Wingdings");
 
     if !is_symbol && !is_wingdings {
-        let family = if font_family.is_empty() { fallback_family } else { font_family };
+        let family = if font_family.is_empty() {
+            fallback_family
+        } else {
+            font_family
+        };
         return (text.to_string(), family.to_string());
     }
 
-    let remapped: String = text.chars().map(|ch| {
-        let code = ch as u32;
-        if is_symbol && (0xF020..=0xF0FF).contains(&code) {
-            // Symbol font PUA mapping per unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
-            match code {
-                0xF020 => '\u{0020}', // SPACE
-                0xF021 => '\u{0021}', // EXCLAMATION MARK
-                0xF025 => '\u{0025}', // PERCENT SIGN
-                0xF028 => '\u{0028}', // LEFT PARENTHESIS
-                0xF029 => '\u{0029}', // RIGHT PARENTHESIS
-                0xF02B => '\u{002B}', // PLUS SIGN
-                0xF02E => '\u{002E}', // FULL STOP
-                0xF030..=0xF039 => char::from_u32(code - 0xF000).unwrap_or(ch), // DIGITS
-                0xF03C => '\u{003C}', // LESS-THAN SIGN
-                0xF03D => '\u{003D}', // EQUALS SIGN
-                0xF03E => '\u{003E}', // GREATER-THAN SIGN
-                0xF05B => '\u{005B}', // LEFT SQUARE BRACKET
-                0xF05D => '\u{005D}', // RIGHT SQUARE BRACKET
-                0xF07B => '\u{007B}', // LEFT CURLY BRACKET
-                0xF07C => '\u{007C}', // VERTICAL LINE
-                0xF07D => '\u{007D}', // RIGHT CURLY BRACKET
-                0xF07E => '\u{223C}', // TILDE OPERATOR
-                0xF0A0 => '\u{20AC}', // EURO SIGN
-                0xF0A5 => '\u{221E}', // INFINITY
-                0xF0A7 => '\u{2663}', // BLACK CLUB SUIT
-                0xF0A8 => '\u{2666}', // BLACK DIAMOND SUIT
-                0xF0A9 => '\u{2665}', // BLACK HEART SUIT
-                0xF0AA => '\u{2660}', // BLACK SPADE SUIT
-                0xF0AB => '\u{2194}', // LEFT RIGHT ARROW
-                0xF0AC => '\u{2190}', // LEFTWARDS ARROW
-                0xF0AD => '\u{2191}', // UPWARDS ARROW
-                0xF0AE => '\u{2192}', // RIGHTWARDS ARROW
-                0xF0AF => '\u{2193}', // DOWNWARDS ARROW
-                0xF0B0 => '\u{00B0}', // DEGREE SIGN
-                0xF0B1 => '\u{00B1}', // PLUS-MINUS SIGN
-                0xF0B2 => '\u{2033}', // DOUBLE PRIME
-                0xF0B3 => '\u{2265}', // GREATER-THAN OR EQUAL TO
-                0xF0B4 => '\u{00D7}', // MULTIPLICATION SIGN
-                0xF0B5 => '\u{221D}', // PROPORTIONAL TO
-                0xF0B7 => '\u{2022}', // BULLET
-                0xF0B8 => '\u{00F7}', // DIVISION SIGN
-                0xF0B9 => '\u{2260}', // NOT EQUAL TO
-                0xF0BA => '\u{2261}', // IDENTICAL TO
-                0xF0BB => '\u{2248}', // ALMOST EQUAL TO
-                0xF0BC => '\u{2026}', // HORIZONTAL ELLIPSIS
-                0xF0C0 => '\u{2135}', // ALEF SYMBOL
-                0xF0C1 => '\u{2111}', // BLACK-LETTER CAPITAL I
-                0xF0C2 => '\u{211C}', // BLACK-LETTER CAPITAL R
-                0xF0C3 => '\u{2118}', // SCRIPT CAPITAL P
-                0xF0C5 => '\u{2297}', // CIRCLED TIMES
-                0xF0C6 => '\u{2295}', // CIRCLED PLUS
-                0xF0C7 => '\u{2205}', // EMPTY SET
-                0xF0C8 => '\u{2229}', // INTERSECTION
-                0xF0C9 => '\u{222A}', // UNION
-                0xF0CB => '\u{2283}', // SUPERSET OF
-                0xF0CC => '\u{2287}', // SUPERSET OF OR EQUAL TO
-                0xF0CD => '\u{2284}', // NOT A SUBSET OF
-                0xF0CE => '\u{2282}', // SUBSET OF
-                0xF0CF => '\u{2286}', // SUBSET OF OR EQUAL TO
-                0xF0D0 => '\u{2208}', // ELEMENT OF
-                0xF0D1 => '\u{2209}', // NOT AN ELEMENT OF
-                0xF0D5 => '\u{220F}', // N-ARY PRODUCT
-                0xF0D6 => '\u{221A}', // SQUARE ROOT
-                0xF0D7 => '\u{22C5}', // DOT OPERATOR
-                0xF0D8 => '\u{00AC}', // NOT SIGN
-                0xF0D9 => '\u{2227}', // LOGICAL AND
-                0xF0DA => '\u{2228}', // LOGICAL OR
-                0xF0E0 => '\u{21D0}', // LEFTWARDS DOUBLE ARROW
-                0xF0E1 => '\u{21D1}', // UPWARDS DOUBLE ARROW
-                0xF0E2 => '\u{21D2}', // RIGHTWARDS DOUBLE ARROW
-                0xF0E3 => '\u{21D3}', // DOWNWARDS DOUBLE ARROW
-                0xF0E4 => '\u{21D4}', // LEFT RIGHT DOUBLE ARROW
-                0xF0E5 => '\u{2329}', // LEFT-POINTING ANGLE BRACKET
-                0xF0F1 => '\u{232A}', // RIGHT-POINTING ANGLE BRACKET
-                0xF0F2 => '\u{222B}', // INTEGRAL
-                _ => ch,
+    let remapped: String = text
+        .chars()
+        .map(|ch| {
+            let code = ch as u32;
+            if is_symbol && (0xF020..=0xF0FF).contains(&code) {
+                // Symbol font PUA mapping per unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
+                match code {
+                    0xF020 => '\u{0020}',                                           // SPACE
+                    0xF021 => '\u{0021}', // EXCLAMATION MARK
+                    0xF025 => '\u{0025}', // PERCENT SIGN
+                    0xF028 => '\u{0028}', // LEFT PARENTHESIS
+                    0xF029 => '\u{0029}', // RIGHT PARENTHESIS
+                    0xF02B => '\u{002B}', // PLUS SIGN
+                    0xF02E => '\u{002E}', // FULL STOP
+                    0xF030..=0xF039 => char::from_u32(code - 0xF000).unwrap_or(ch), // DIGITS
+                    0xF03C => '\u{003C}', // LESS-THAN SIGN
+                    0xF03D => '\u{003D}', // EQUALS SIGN
+                    0xF03E => '\u{003E}', // GREATER-THAN SIGN
+                    0xF05B => '\u{005B}', // LEFT SQUARE BRACKET
+                    0xF05D => '\u{005D}', // RIGHT SQUARE BRACKET
+                    0xF07B => '\u{007B}', // LEFT CURLY BRACKET
+                    0xF07C => '\u{007C}', // VERTICAL LINE
+                    0xF07D => '\u{007D}', // RIGHT CURLY BRACKET
+                    0xF07E => '\u{223C}', // TILDE OPERATOR
+                    0xF0A0 => '\u{20AC}', // EURO SIGN
+                    0xF0A5 => '\u{221E}', // INFINITY
+                    0xF0A7 => '\u{2663}', // BLACK CLUB SUIT
+                    0xF0A8 => '\u{2666}', // BLACK DIAMOND SUIT
+                    0xF0A9 => '\u{2665}', // BLACK HEART SUIT
+                    0xF0AA => '\u{2660}', // BLACK SPADE SUIT
+                    0xF0AB => '\u{2194}', // LEFT RIGHT ARROW
+                    0xF0AC => '\u{2190}', // LEFTWARDS ARROW
+                    0xF0AD => '\u{2191}', // UPWARDS ARROW
+                    0xF0AE => '\u{2192}', // RIGHTWARDS ARROW
+                    0xF0AF => '\u{2193}', // DOWNWARDS ARROW
+                    0xF0B0 => '\u{00B0}', // DEGREE SIGN
+                    0xF0B1 => '\u{00B1}', // PLUS-MINUS SIGN
+                    0xF0B2 => '\u{2033}', // DOUBLE PRIME
+                    0xF0B3 => '\u{2265}', // GREATER-THAN OR EQUAL TO
+                    0xF0B4 => '\u{00D7}', // MULTIPLICATION SIGN
+                    0xF0B5 => '\u{221D}', // PROPORTIONAL TO
+                    0xF0B7 => '\u{2022}', // BULLET
+                    0xF0B8 => '\u{00F7}', // DIVISION SIGN
+                    0xF0B9 => '\u{2260}', // NOT EQUAL TO
+                    0xF0BA => '\u{2261}', // IDENTICAL TO
+                    0xF0BB => '\u{2248}', // ALMOST EQUAL TO
+                    0xF0BC => '\u{2026}', // HORIZONTAL ELLIPSIS
+                    0xF0C0 => '\u{2135}', // ALEF SYMBOL
+                    0xF0C1 => '\u{2111}', // BLACK-LETTER CAPITAL I
+                    0xF0C2 => '\u{211C}', // BLACK-LETTER CAPITAL R
+                    0xF0C3 => '\u{2118}', // SCRIPT CAPITAL P
+                    0xF0C5 => '\u{2297}', // CIRCLED TIMES
+                    0xF0C6 => '\u{2295}', // CIRCLED PLUS
+                    0xF0C7 => '\u{2205}', // EMPTY SET
+                    0xF0C8 => '\u{2229}', // INTERSECTION
+                    0xF0C9 => '\u{222A}', // UNION
+                    0xF0CB => '\u{2283}', // SUPERSET OF
+                    0xF0CC => '\u{2287}', // SUPERSET OF OR EQUAL TO
+                    0xF0CD => '\u{2284}', // NOT A SUBSET OF
+                    0xF0CE => '\u{2282}', // SUBSET OF
+                    0xF0CF => '\u{2286}', // SUBSET OF OR EQUAL TO
+                    0xF0D0 => '\u{2208}', // ELEMENT OF
+                    0xF0D1 => '\u{2209}', // NOT AN ELEMENT OF
+                    0xF0D5 => '\u{220F}', // N-ARY PRODUCT
+                    0xF0D6 => '\u{221A}', // SQUARE ROOT
+                    0xF0D7 => '\u{22C5}', // DOT OPERATOR
+                    0xF0D8 => '\u{00AC}', // NOT SIGN
+                    0xF0D9 => '\u{2227}', // LOGICAL AND
+                    0xF0DA => '\u{2228}', // LOGICAL OR
+                    0xF0E0 => '\u{21D0}', // LEFTWARDS DOUBLE ARROW
+                    0xF0E1 => '\u{21D1}', // UPWARDS DOUBLE ARROW
+                    0xF0E2 => '\u{21D2}', // RIGHTWARDS DOUBLE ARROW
+                    0xF0E3 => '\u{21D3}', // DOWNWARDS DOUBLE ARROW
+                    0xF0E4 => '\u{21D4}', // LEFT RIGHT DOUBLE ARROW
+                    0xF0E5 => '\u{2329}', // LEFT-POINTING ANGLE BRACKET
+                    0xF0F1 => '\u{232A}', // RIGHT-POINTING ANGLE BRACKET
+                    0xF0F2 => '\u{222B}', // INTEGRAL
+                    _ => ch,
+                }
+            } else if is_wingdings && (0xF020..=0xF0FF).contains(&code) {
+                // Wingdings PUA mapping per Microsoft Wingdings-to-Unicode table
+                match code {
+                    0xF021 => '\u{270E}',  // LOWER RIGHT PENCIL
+                    0xF022 => '\u{2702}',  // BLACK SCISSORS
+                    0xF023 => '\u{2701}',  // UPPER BLADE SCISSORS
+                    0xF028 => '\u{1F4CB}', // CLIPBOARD (may need supplementary)
+                    0xF029 => '\u{1F4CB}', // CLIPBOARD
+                    0xF041 => '\u{FE4E}',  // WAVY LOW LINE (approximate)
+                    0xF046 => '\u{1F44D}', // THUMBS UP SIGN
+                    0xF04C => '\u{2639}',  // WHITE FROWNING FACE
+                    0xF04A => '\u{263A}',  // WHITE SMILING FACE
+                    0xF06C => '\u{25CF}',  // BLACK CIRCLE
+                    0xF06D => '\u{274D}',  // SHADOWED WHITE CIRCLE
+                    0xF06E => '\u{25A0}',  // BLACK SQUARE
+                    0xF06F => '\u{25A1}',  // WHITE SQUARE
+                    0xF070 => '\u{25A1}',  // WHITE SQUARE (alt)
+                    0xF071 => '\u{2751}',  // LOWER RIGHT SHADOWED WHITE SQUARE
+                    0xF072 => '\u{2752}',  // UPPER RIGHT SHADOWED WHITE SQUARE
+                    0xF073 => '\u{25C6}',  // BLACK DIAMOND
+                    0xF074 => '\u{2756}',  // BLACK DIAMOND MINUS WHITE X
+                    0xF076 => '\u{2756}',  // BLACK DIAMOND MINUS WHITE X
+                    0xF09F => '\u{2708}',  // AIRPLANE
+                    0xF0A1 => '\u{270C}',  // VICTORY HAND
+                    0xF0A4 => '\u{261C}',  // WHITE LEFT POINTING INDEX
+                    0xF0A5 => '\u{261E}',  // WHITE RIGHT POINTING INDEX
+                    0xF0A7 => '\u{25AA}',  // BLACK SMALL SQUARE
+                    0xF0A8 => '\u{25FB}',  // WHITE MEDIUM SQUARE
+                    0xF0D5 => '\u{232B}',  // ERASE TO THE LEFT
+                    0xF0D8 => '\u{27A2}',  // THREE-D TOP-LIGHTED RIGHTWARDS ARROWHEAD
+                    0xF0E8 => '\u{2B22}',  // BLACK HEXAGON (approximate)
+                    0xF0F0 => '\u{2B1A}',  // DOTTED SQUARE (approximate)
+                    0xF0FC => '\u{2714}',  // HEAVY CHECK MARK
+                    0xF0FB => '\u{2718}',  // HEAVY BALLOT X
+                    0xF0FE => '\u{2612}',  // BALLOT BOX WITH X (approximate)
+                    _ => ch,
+                }
+            } else {
+                ch
             }
-        } else if is_wingdings && (0xF020..=0xF0FF).contains(&code) {
-            // Wingdings PUA mapping per Microsoft Wingdings-to-Unicode table
-            match code {
-                0xF021 => '\u{270E}', // LOWER RIGHT PENCIL
-                0xF022 => '\u{2702}', // BLACK SCISSORS
-                0xF023 => '\u{2701}', // UPPER BLADE SCISSORS
-                0xF028 => '\u{1F4CB}',// CLIPBOARD (may need supplementary)
-                0xF029 => '\u{1F4CB}',// CLIPBOARD
-                0xF041 => '\u{FE4E}', // WAVY LOW LINE (approximate)
-                0xF046 => '\u{1F44D}',// THUMBS UP SIGN
-                0xF04C => '\u{2639}', // WHITE FROWNING FACE
-                0xF04A => '\u{263A}', // WHITE SMILING FACE
-                0xF06C => '\u{25CF}', // BLACK CIRCLE
-                0xF06D => '\u{274D}', // SHADOWED WHITE CIRCLE
-                0xF06E => '\u{25A0}', // BLACK SQUARE
-                0xF06F => '\u{25A1}', // WHITE SQUARE
-                0xF070 => '\u{25A1}', // WHITE SQUARE (alt)
-                0xF071 => '\u{2751}', // LOWER RIGHT SHADOWED WHITE SQUARE
-                0xF072 => '\u{2752}', // UPPER RIGHT SHADOWED WHITE SQUARE
-                0xF073 => '\u{25C6}', // BLACK DIAMOND
-                0xF074 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
-                0xF076 => '\u{2756}', // BLACK DIAMOND MINUS WHITE X
-                0xF09F => '\u{2708}', // AIRPLANE
-                0xF0A1 => '\u{270C}', // VICTORY HAND
-                0xF0A4 => '\u{261C}', // WHITE LEFT POINTING INDEX
-                0xF0A5 => '\u{261E}', // WHITE RIGHT POINTING INDEX
-                0xF0A7 => '\u{25AA}', // BLACK SMALL SQUARE
-                0xF0A8 => '\u{25FB}', // WHITE MEDIUM SQUARE
-                0xF0D5 => '\u{232B}', // ERASE TO THE LEFT
-                0xF0D8 => '\u{27A2}', // THREE-D TOP-LIGHTED RIGHTWARDS ARROWHEAD
-                0xF0E8 => '\u{2B22}', // BLACK HEXAGON (approximate)
-                0xF0F0 => '\u{2B1A}', // DOTTED SQUARE (approximate)
-                0xF0FC => '\u{2714}', // HEAVY CHECK MARK
-                0xF0FB => '\u{2718}', // HEAVY BALLOT X
-                0xF0FE => '\u{2612}', // BALLOT BOX WITH X (approximate)
-                _ => ch,
-            }
-        } else {
-            ch
-        }
-    }).collect();
+        })
+        .collect();
 
     // After PUA→Unicode remapping, the original Symbol/Wingdings font
     // cannot render the standard Unicode codepoints (legacy fonts lack
@@ -1754,7 +1946,17 @@ fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
         }
     };
 
-    let w = shape.style.width.as_ref().map(to_pt).unwrap_or(default.width);
-    let h = shape.style.height.as_ref().map(to_pt).unwrap_or(default.height);
+    let w = shape
+        .style
+        .width
+        .as_ref()
+        .map(to_pt)
+        .unwrap_or(default.width);
+    let h = shape
+        .style
+        .height
+        .as_ref()
+        .map(to_pt)
+        .unwrap_or(default.height);
     PtSize::new(w, h)
 }

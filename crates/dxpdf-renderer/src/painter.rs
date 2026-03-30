@@ -44,7 +44,9 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                     "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
                     &text[..text.len().min(30)],
                     font.typeface().family_name(),
-                    font_size.raw(), bold, italic,
+                    font_size.raw(),
+                    bold,
+                    italic,
                 );
                 let mut paint = Paint::default();
                 paint.set_anti_alias(true);

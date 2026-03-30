@@ -19,7 +19,11 @@ impl TextMeasurer {
 
     /// Measure a text string with the given font properties.
     /// Returns (width, TextMetrics).
-    pub fn measure(&self, text: &str, font_props: &FontProps) -> (Pt, super::fragment::TextMetrics) {
+    pub fn measure(
+        &self,
+        text: &str,
+        font_props: &FontProps,
+    ) -> (Pt, super::fragment::TextMetrics) {
         let font = fonts::make_font(
             &self.font_mgr,
             &font_props.family,
@@ -67,7 +71,8 @@ impl TextMeasurer {
         if raw_pos.is_none() || raw_thick.is_none() {
             log::warn!(
                 "font '{}' ({:?}) missing underline metrics, using descent as fallback",
-                font_props.family, font_props.size
+                font_props.family,
+                font_props.size
             );
         }
         let position = Pt::new(-raw_pos.unwrap_or(metrics.descent));

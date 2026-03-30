@@ -51,7 +51,10 @@ pub fn parse_embedded_fonts(
 
         let font_path = crate::zip::resolve_target(font_table_dir, &rel.target);
         let font_data = package.take_part(&font_path).ok_or_else(|| {
-            ParseError::MissingPart(format!("font file '{font_path}' for '{}'", embed_ref.family))
+            ParseError::MissingPart(format!(
+                "font file '{font_path}' for '{}'",
+                embed_ref.family
+            ))
         })?;
 
         let key_bytes = parse_font_key(&embed_ref.font_key)?;
@@ -133,8 +136,8 @@ fn parse_font_element(
                         });
                     }
                     // §17.8.3: known child elements we skip.
-                    b"panose1" | b"charset" | b"family" | b"pitch" | b"sig"
-                    | b"altName" | b"notTrueType" => {}
+                    b"panose1" | b"charset" | b"family" | b"pitch" | b"sig" | b"altName"
+                    | b"notTrueType" => {}
                     other => {
                         log::warn!(
                             "fontTable/<w:font name={family:?}>: unexpected empty element <{}>",
@@ -149,8 +152,13 @@ fn parse_font_element(
                 // Known child elements that have content — skip their subtree.
                 if !matches!(
                     local,
-                    b"panose1" | b"charset" | b"family" | b"pitch" | b"sig"
-                        | b"altName" | b"notTrueType"
+                    b"panose1"
+                        | b"charset"
+                        | b"family"
+                        | b"pitch"
+                        | b"sig"
+                        | b"altName"
+                        | b"notTrueType"
                 ) {
                     log::warn!(
                         "fontTable/<w:font name={family:?}>: unexpected start element <{}>",
@@ -232,8 +240,10 @@ mod tests {
 
     #[test]
     fn deobfuscate_round_trip() {
-        let key = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10];
+        let key = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10,
+        ];
         let original = vec![0xAA; 64];
         let obfuscated = deobfuscate_font(original.clone(), &key);
         // First 32 bytes should be XOR'd

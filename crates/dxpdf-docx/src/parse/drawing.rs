@@ -100,16 +100,14 @@ pub fn parse_inline_image(
 
 /// §20.4.2.7 / §20.1.7.3: parse `cx`, `cy` into `Size<Emu>`.
 fn parse_positive_size_2d(e: &BytesStart<'_>) -> Result<Size<Emu>> {
-    let cx = xml::optional_attr_i64(e, b"cx")?
-        .ok_or_else(|| ParseError::MissingAttribute {
-            element: "extent".into(),
-            attr: "cx".into(),
-        })?;
-    let cy = xml::optional_attr_i64(e, b"cy")?
-        .ok_or_else(|| ParseError::MissingAttribute {
-            element: "extent".into(),
-            attr: "cy".into(),
-        })?;
+    let cx = xml::optional_attr_i64(e, b"cx")?.ok_or_else(|| ParseError::MissingAttribute {
+        element: "extent".into(),
+        attr: "cx".into(),
+    })?;
+    let cy = xml::optional_attr_i64(e, b"cy")?.ok_or_else(|| ParseError::MissingAttribute {
+        element: "extent".into(),
+        attr: "cy".into(),
+    })?;
     Ok(Size::new(Dimension::new(cx), Dimension::new(cy)))
 }
 
@@ -176,8 +174,7 @@ fn parse_cnv_graphic_frame_pr(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"graphicFrameLocks" => {
-                        locks.no_change_aspect =
-                            xml::optional_attr_bool(e, b"noChangeAspect")?;
+                        locks.no_change_aspect = xml::optional_attr_bool(e, b"noChangeAspect")?;
                         locks.no_drilldown = xml::optional_attr_bool(e, b"noDrilldown")?;
                         locks.no_grp = xml::optional_attr_bool(e, b"noGrp")?;
                         locks.no_move = xml::optional_attr_bool(e, b"noMove")?;
@@ -187,9 +184,7 @@ fn parse_cnv_graphic_frame_pr(
                     _ => xml::warn_unsupported_element("cNvGraphicFramePr", local),
                 }
             }
-            Event::End(ref e)
-                if xml::local_name(e.name().as_ref()) == b"cNvGraphicFramePr" =>
-            {
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"cNvGraphicFramePr" => {
                 break
             }
             Event::Eof => return Err(xml::unexpected_eof(b"cNvGraphicFramePr")),
@@ -203,10 +198,7 @@ fn parse_cnv_graphic_frame_pr(
 // ── a:graphic / a:graphicData (§20.1.2.2.16, §20.1.2.2.17) ────────────────
 
 /// Parse `a:graphic` → `a:graphicData` → content.
-fn parse_graphic(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Option<GraphicContent>> {
+fn parse_graphic(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option<GraphicContent>> {
     let mut content = None;
 
     loop {
@@ -247,8 +239,7 @@ fn parse_graphic_data(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"pic" => {
-                        content =
-                            Some(GraphicContent::Picture(parse_picture(reader, buf)?));
+                        content = Some(GraphicContent::Picture(parse_picture(reader, buf)?));
                     }
                     b"wsp" => {
                         content = Some(GraphicContent::WordProcessingShape(
@@ -292,8 +283,7 @@ fn parse_word_processing_shape(
                         cnv_pr = Some(parse_cnv_pr(e, reader, buf)?);
                     }
                     b"spPr" => {
-                        shape_properties =
-                            Some(parse_shape_properties(e, reader, buf)?);
+                        shape_properties = Some(parse_shape_properties(e, reader, buf)?);
                     }
                     b"bodyPr" => {
                         body_pr = Some(parse_body_properties(e, reader, buf)?);
@@ -346,8 +336,11 @@ fn parse_wsp_txbx(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<B
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"txbxContent" => {
-                        let (content, _) =
-                            crate::parse::body::parse_block_content_public(reader, buf, b"txbxContent")?;
+                        let (content, _) = crate::parse::body::parse_block_content_public(
+                            reader,
+                            buf,
+                            b"txbxContent",
+                        )?;
                         blocks = content;
                     }
                     _ => {
@@ -566,10 +559,7 @@ fn parse_nv_pic_pr(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<NvPi
         child: "pic:cNvPr".into(),
     })?;
 
-    Ok(NvPicProperties {
-        cnv_pr,
-        cnv_pic_pr,
-    })
+    Ok(NvPicProperties { cnv_pr, cnv_pic_pr })
 }
 
 /// §20.1.2.2.8: parse `pic:cNvPr` attributes only.
@@ -717,11 +707,7 @@ fn parse_blip_attrs(e: &BytesStart<'_>) -> Result<Blip> {
     })
 }
 
-fn parse_blip(
-    e: &BytesStart<'_>,
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Blip> {
+fn parse_blip(e: &BytesStart<'_>, reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Blip> {
     let blip = parse_blip_attrs(e)?;
     // Children are extension lists (extLst) — skip them.
     xml::skip_to_end(reader, buf, b"blip")?;
@@ -894,16 +880,18 @@ fn parse_transform_2d(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"off" => {
-                        let x = xml::optional_attr_i64(e, b"x")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                        let x = xml::optional_attr_i64(e, b"x")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "a:off".into(),
                                 attr: "x".into(),
-                            })?;
-                        let y = xml::optional_attr_i64(e, b"y")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                            }
+                        })?;
+                        let y = xml::optional_attr_i64(e, b"y")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "a:off".into(),
                                 attr: "y".into(),
-                            })?;
+                            }
+                        })?;
                         offset = Some(Offset::new(Dimension::new(x), Dimension::new(y)));
                     }
                     b"ext" => {
@@ -934,11 +922,10 @@ fn parse_preset_geometry(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
 ) -> Result<PresetGeometryDef> {
-    let prst = xml::optional_attr(start, b"prst")?
-        .ok_or_else(|| ParseError::MissingAttribute {
-            element: "a:prstGeom".into(),
-            attr: "prst".into(),
-        })?;
+    let prst = xml::optional_attr(start, b"prst")?.ok_or_else(|| ParseError::MissingAttribute {
+        element: "a:prstGeom".into(),
+        attr: "prst".into(),
+    })?;
     let preset = parse_preset_shape_type(&prst);
     let mut adjust_values = Vec::new();
 
@@ -977,10 +964,7 @@ fn parse_preset_geometry(
     })
 }
 
-fn parse_geom_guide_list(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Vec<GeomGuide>> {
+fn parse_geom_guide_list(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<GeomGuide>> {
     let mut guides = Vec::new();
 
     loop {
@@ -1303,26 +1287,28 @@ pub fn parse_anchor_image(
         Dimension::new(dist_l),
     );
     let use_simple_pos = xml::optional_attr_bool(e, b"simplePos")?;
-    let relative_height = xml::optional_attr_u32(e, b"relativeHeight")?
-        .ok_or_else(|| ParseError::MissingAttribute {
+    let relative_height = xml::optional_attr_u32(e, b"relativeHeight")?.ok_or_else(|| {
+        ParseError::MissingAttribute {
             element: "wp:anchor".into(),
             attr: "relativeHeight".into(),
-        })?;
-    let behind_text = xml::optional_attr_bool(e, b"behindDoc")?
-        .ok_or_else(|| ParseError::MissingAttribute {
+        }
+    })?;
+    let behind_text =
+        xml::optional_attr_bool(e, b"behindDoc")?.ok_or_else(|| ParseError::MissingAttribute {
             element: "wp:anchor".into(),
             attr: "behindDoc".into(),
         })?;
-    let lock_anchor = xml::optional_attr_bool(e, b"locked")?
-        .ok_or_else(|| ParseError::MissingAttribute {
+    let lock_anchor =
+        xml::optional_attr_bool(e, b"locked")?.ok_or_else(|| ParseError::MissingAttribute {
             element: "wp:anchor".into(),
             attr: "locked".into(),
         })?;
-    let allow_overlap = xml::optional_attr_bool(e, b"allowOverlap")?
-        .ok_or_else(|| ParseError::MissingAttribute {
+    let allow_overlap = xml::optional_attr_bool(e, b"allowOverlap")?.ok_or_else(|| {
+        ParseError::MissingAttribute {
             element: "wp:anchor".into(),
             attr: "allowOverlap".into(),
-        })?;
+        }
+    })?;
     let layout_in_cell = xml::optional_attr_bool(e, b"layoutInCell")?;
     let hidden = xml::optional_attr_bool(e, b"hidden")?;
 
@@ -1343,34 +1329,39 @@ pub fn parse_anchor_image(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"simplePos" => {
-                        let x = xml::optional_attr_i64(e, b"x")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                        let x = xml::optional_attr_i64(e, b"x")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "wp:simplePos".into(),
                                 attr: "x".into(),
-                            })?;
-                        let y = xml::optional_attr_i64(e, b"y")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                            }
+                        })?;
+                        let y = xml::optional_attr_i64(e, b"y")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "wp:simplePos".into(),
                                 attr: "y".into(),
-                            })?;
-                        simple_pos =
-                            Some(Offset::new(Dimension::new(x), Dimension::new(y)));
+                            }
+                        })?;
+                        simple_pos = Some(Offset::new(Dimension::new(x), Dimension::new(y)));
                         xml::skip_to_end(reader, buf, b"simplePos")?;
                     }
                     b"positionH" => {
-                        let rel_from = xml::optional_attr(e, b"relativeFrom")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
-                                element: "wp:positionH".into(),
-                                attr: "relativeFrom".into(),
+                        let rel_from =
+                            xml::optional_attr(e, b"relativeFrom")?.ok_or_else(|| {
+                                ParseError::MissingAttribute {
+                                    element: "wp:positionH".into(),
+                                    attr: "relativeFrom".into(),
+                                }
                             })?;
                         let rel = parse_anchor_relative_from(&rel_from)?;
                         h_pos = Some(parse_anchor_position(reader, buf, rel, b"positionH")?);
                     }
                     b"positionV" => {
-                        let rel_from = xml::optional_attr(e, b"relativeFrom")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
-                                element: "wp:positionV".into(),
-                                attr: "relativeFrom".into(),
+                        let rel_from =
+                            xml::optional_attr(e, b"relativeFrom")?.ok_or_else(|| {
+                                ParseError::MissingAttribute {
+                                    element: "wp:positionV".into(),
+                                    attr: "relativeFrom".into(),
+                                }
                             })?;
                         let rel = parse_anchor_relative_from(&rel_from)?;
                         v_pos = Some(parse_anchor_position(reader, buf, rel, b"positionV")?);
@@ -1409,12 +1400,10 @@ pub fn parse_anchor_image(
                         xml::skip_to_end(reader, buf, b"wrapTopAndBottom")?;
                     }
                     b"docPr" => {
-                        doc_properties =
-                            Some(parse_doc_properties(e, Some(reader), Some(buf))?);
+                        doc_properties = Some(parse_doc_properties(e, Some(reader), Some(buf))?);
                     }
                     b"cNvGraphicFramePr" => {
-                        graphic_frame_locks =
-                            Some(parse_cnv_graphic_frame_pr(reader, buf)?);
+                        graphic_frame_locks = Some(parse_cnv_graphic_frame_pr(reader, buf)?);
                     }
                     b"graphic" => {
                         picture = parse_graphic(reader, buf)?;
@@ -1443,18 +1432,19 @@ pub fn parse_anchor_image(
                         doc_properties = Some(parse_doc_properties(e, None, None)?);
                     }
                     b"simplePos" => {
-                        let x = xml::optional_attr_i64(e, b"x")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                        let x = xml::optional_attr_i64(e, b"x")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "wp:simplePos".into(),
                                 attr: "x".into(),
-                            })?;
-                        let y = xml::optional_attr_i64(e, b"y")?
-                            .ok_or_else(|| ParseError::MissingAttribute {
+                            }
+                        })?;
+                        let y = xml::optional_attr_i64(e, b"y")?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
                                 element: "wp:simplePos".into(),
                                 attr: "y".into(),
-                            })?;
-                        simple_pos =
-                            Some(Offset::new(Dimension::new(x), Dimension::new(y)));
+                            }
+                        })?;
+                        simple_pos = Some(Offset::new(Dimension::new(x), Dimension::new(y)));
                     }
                     b"wrapNone" => {
                         wrap = TextWrap::None;
@@ -1554,13 +1544,14 @@ fn parse_anchor_position(
                 match local {
                     b"posOffset" => {
                         let text = xml::read_text_content(reader, buf)?;
-                        let val: i64 = text.trim().parse().map_err(|_| {
-                            ParseError::InvalidAttributeValue {
-                                attr: "posOffset".into(),
-                                value: text.clone(),
-                                reason: "expected integer EMU value".into(),
-                            }
-                        })?;
+                        let val: i64 =
+                            text.trim()
+                                .parse()
+                                .map_err(|_| ParseError::InvalidAttributeValue {
+                                    attr: "posOffset".into(),
+                                    value: text.clone(),
+                                    reason: "expected integer EMU value".into(),
+                                })?;
                         result = Some(AnchorPosition::Offset {
                             relative_from,
                             offset: Dimension::new(val),

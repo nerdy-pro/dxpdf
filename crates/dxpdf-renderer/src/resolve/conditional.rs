@@ -5,8 +5,8 @@
 //! applicable tblStylePr overrides in priority order.
 
 use dxpdf_docx_model::model::{
-    ParagraphProperties, RunProperties, TableCellProperties,
-    TableLook, TableStyleOverride, TableStyleOverrideType,
+    ParagraphProperties, RunProperties, TableCellProperties, TableLook, TableStyleOverride,
+    TableStyleOverrideType,
 };
 
 /// Resolved conditional formatting for a single cell.
@@ -38,7 +38,13 @@ pub fn resolve_cell_conditional(
     col_band_size: u32,
 ) -> CellConditionalFormatting {
     let regions = applicable_regions(
-        row_idx, col_idx, num_rows, num_cols, look, row_band_size, col_band_size,
+        row_idx,
+        col_idx,
+        num_rows,
+        num_cols,
+        look,
+        row_band_size,
+        col_band_size,
     );
 
     let mut result = CellConditionalFormatting::default();
@@ -162,7 +168,9 @@ fn applicable_regions(
 
 /// Overlay cell properties (higher priority replaces existing values).
 fn overlay_cell_properties(result: &mut CellConditionalFormatting, tcp: &TableCellProperties) {
-    let target = result.cell_properties.get_or_insert_with(TableCellProperties::default);
+    let target = result
+        .cell_properties
+        .get_or_insert_with(TableCellProperties::default);
 
     // §17.7.6: each non-None field from the overlay replaces the target.
     if tcp.shading.is_some() {
@@ -180,7 +188,9 @@ fn overlay_cell_properties(result: &mut CellConditionalFormatting, tcp: &TableCe
 
 /// Overlay run properties (higher priority replaces existing values).
 fn overlay_run_properties(result: &mut CellConditionalFormatting, rp: &RunProperties) {
-    let target = result.run_properties.get_or_insert_with(RunProperties::default);
+    let target = result
+        .run_properties
+        .get_or_insert_with(RunProperties::default);
     // Higher priority: overlay's values replace target's.
     // Use merge in reverse: merge target into a clone of overlay.
     let mut merged = rp.clone();
@@ -190,7 +200,9 @@ fn overlay_run_properties(result: &mut CellConditionalFormatting, rp: &RunProper
 
 /// Overlay paragraph properties (higher priority replaces existing values).
 fn overlay_paragraph_properties(result: &mut CellConditionalFormatting, pp: &ParagraphProperties) {
-    let target = result.paragraph_properties.get_or_insert_with(ParagraphProperties::default);
+    let target = result
+        .paragraph_properties
+        .get_or_insert_with(ParagraphProperties::default);
     let mut merged = pp.clone();
     crate::resolve::properties::merge_paragraph_properties(&mut merged, target);
     *target = merged;
@@ -342,9 +354,11 @@ mod tests {
 
     #[test]
     fn first_row_shading_applied() {
-        let overrides = vec![
-            make_override(TableStyleOverrideType::FirstRow, Some(green_shading()), Some(true)),
-        ];
+        let overrides = vec![make_override(
+            TableStyleOverrideType::FirstRow,
+            Some(green_shading()),
+            Some(true),
+        )];
         let result = resolve_cell_conditional(0, 2, 6, 6, None, &overrides, 1, 1);
         assert!(result.cell_properties.is_some());
         assert!(result.cell_properties.as_ref().unwrap().shading.is_some());
@@ -353,23 +367,41 @@ mod tests {
 
     #[test]
     fn banding_shading_for_interior() {
-        let overrides = vec![
-            make_override(TableStyleOverrideType::Band1Horz, Some(blue_shading()), None),
-        ];
+        let overrides = vec![make_override(
+            TableStyleOverrideType::Band1Horz,
+            Some(blue_shading()),
+            None,
+        )];
         let result = resolve_cell_conditional(1, 2, 6, 6, None, &overrides, 1, 1);
-        let shading = result.cell_properties.as_ref().unwrap().shading.as_ref().unwrap();
+        let shading = result
+            .cell_properties
+            .as_ref()
+            .unwrap()
+            .shading
+            .as_ref()
+            .unwrap();
         assert_eq!(shading.fill, Color::Rgb(0xD3DFEE));
     }
 
     #[test]
     fn corner_overrides_first_row() {
         let overrides = vec![
-            make_override(TableStyleOverrideType::FirstRow, Some(green_shading()), None),
+            make_override(
+                TableStyleOverrideType::FirstRow,
+                Some(green_shading()),
+                None,
+            ),
             make_override(TableStyleOverrideType::NwCell, Some(blue_shading()), None),
         ];
         let result = resolve_cell_conditional(0, 0, 6, 6, None, &overrides, 1, 1);
         // NW corner has higher priority than FirstRow.
-        let shading = result.cell_properties.as_ref().unwrap().shading.as_ref().unwrap();
+        let shading = result
+            .cell_properties
+            .as_ref()
+            .unwrap()
+            .shading
+            .as_ref()
+            .unwrap();
         assert_eq!(shading.fill, Color::Rgb(0xD3DFEE));
     }
 

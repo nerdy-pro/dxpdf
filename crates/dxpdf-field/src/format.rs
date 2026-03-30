@@ -371,7 +371,10 @@ mod tests {
     fn general_format_upper() {
         assert_eq!(apply_general_format("hello", "Upper"), "HELLO");
         assert_eq!(apply_general_format("hello", "Lower"), "hello");
-        assert_eq!(apply_general_format("hello world", "FirstCap"), "Hello world");
+        assert_eq!(
+            apply_general_format("hello world", "FirstCap"),
+            "Hello world"
+        );
     }
 
     #[test]

@@ -3,7 +3,9 @@
 
 use std::rc::Rc;
 
-use dxpdf_docx_model::model::{Block, FieldCharType, Inline, RunElement, RunProperties, VerticalAlign};
+use dxpdf_docx_model::model::{
+    Block, FieldCharType, Inline, RunElement, RunProperties, VerticalAlign,
+};
 
 use crate::dimension::Pt;
 use crate::geometry::PtSize;
@@ -102,7 +104,9 @@ impl Fragment {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
-            Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
+            Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => {
+                Pt::ZERO
+            }
         }
     }
 
@@ -148,18 +152,11 @@ pub fn font_props_from_run(
     default_family: &str,
     default_size: Pt,
 ) -> FontProps {
-    let family = effective_font(&rp.fonts)
-        .unwrap_or(default_family);
+    let family = effective_font(&rp.fonts).unwrap_or(default_family);
 
-    let size = rp
-        .font_size
-        .map(Pt::from)
-        .unwrap_or(default_size);
+    let size = rp.font_size.map(Pt::from).unwrap_or(default_size);
 
-    let char_spacing = rp
-        .spacing
-        .map(Pt::from)
-        .unwrap_or(Pt::ZERO);
+    let char_spacing = rp.spacing.map(Pt::from).unwrap_or(Pt::ZERO);
 
     FontProps {
         family: Rc::from(family),
@@ -181,20 +178,56 @@ fn resolve_highlight_color(hl: dxpdf_docx_model::model::HighlightColor) -> RgbCo
     match hl {
         HighlightColor::Black => RgbColor { r: 0, g: 0, b: 0 },
         HighlightColor::Blue => RgbColor { r: 0, g: 0, b: 255 },
-        HighlightColor::Cyan => RgbColor { r: 0, g: 255, b: 255 },
+        HighlightColor::Cyan => RgbColor {
+            r: 0,
+            g: 255,
+            b: 255,
+        },
         HighlightColor::DarkBlue => RgbColor { r: 0, g: 0, b: 139 },
-        HighlightColor::DarkCyan => RgbColor { r: 0, g: 139, b: 139 },
-        HighlightColor::DarkGray => RgbColor { r: 169, g: 169, b: 169 },
+        HighlightColor::DarkCyan => RgbColor {
+            r: 0,
+            g: 139,
+            b: 139,
+        },
+        HighlightColor::DarkGray => RgbColor {
+            r: 169,
+            g: 169,
+            b: 169,
+        },
         HighlightColor::DarkGreen => RgbColor { r: 0, g: 100, b: 0 },
-        HighlightColor::DarkMagenta => RgbColor { r: 139, g: 0, b: 139 },
+        HighlightColor::DarkMagenta => RgbColor {
+            r: 139,
+            g: 0,
+            b: 139,
+        },
         HighlightColor::DarkRed => RgbColor { r: 139, g: 0, b: 0 },
-        HighlightColor::DarkYellow => RgbColor { r: 139, g: 139, b: 0 },
+        HighlightColor::DarkYellow => RgbColor {
+            r: 139,
+            g: 139,
+            b: 0,
+        },
         HighlightColor::Green => RgbColor { r: 0, g: 255, b: 0 },
-        HighlightColor::LightGray => RgbColor { r: 211, g: 211, b: 211 },
-        HighlightColor::Magenta => RgbColor { r: 255, g: 0, b: 255 },
+        HighlightColor::LightGray => RgbColor {
+            r: 211,
+            g: 211,
+            b: 211,
+        },
+        HighlightColor::Magenta => RgbColor {
+            r: 255,
+            g: 0,
+            b: 255,
+        },
         HighlightColor::Red => RgbColor { r: 255, g: 0, b: 0 },
-        HighlightColor::White => RgbColor { r: 255, g: 255, b: 255 },
-        HighlightColor::Yellow => RgbColor { r: 255, g: 255, b: 0 },
+        HighlightColor::White => RgbColor {
+            r: 255,
+            g: 255,
+            b: 255,
+        },
+        HighlightColor::Yellow => RgbColor {
+            r: 255,
+            g: 255,
+            b: 0,
+        },
     }
 }
 
@@ -204,13 +237,26 @@ fn resolve_highlight_color(hl: dxpdf_docx_model::model::HighlightColor) -> RgbCo
 /// Convert a number to lowercase Roman numerals.
 pub fn to_roman_lower(mut n: u32) -> String {
     const VALS: [(u32, &str); 13] = [
-        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
-        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
-        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
     ];
     let mut s = String::new();
     for &(val, sym) in &VALS {
-        while n >= val { s.push_str(sym); n -= val; }
+        while n >= val {
+            s.push_str(sym);
+            n -= val;
+        }
     }
     s
 }
@@ -262,8 +308,7 @@ fn emit_text_fragments<F>(
     measure_text: &F,
     baseline_offset: Pt,
     fragments: &mut Vec<Fragment>,
-)
-where
+) where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
 {
     if text.is_empty() {
@@ -331,17 +376,25 @@ where
     let font = FontProps {
         family: Rc::from(default_family),
         size: default_size,
-        bold: false, italic: false, underline: false,
+        bold: false,
+        italic: false,
+        underline: false,
         char_spacing: Pt::ZERO,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
     };
     let (w, m) = measure_text(&text, &font);
     Fragment::Text {
-        text, font, color: default_color,
-        shading: None, border: None,
-        width: w, trimmed_width: w, metrics: m,
-        hyperlink_url: None, baseline_offset: Pt::ZERO,
+        text,
+        font,
+        color: default_color,
+        shading: None,
+        border: None,
+        width: w,
+        trimmed_width: w,
+        metrics: m,
+        hyperlink_url: None,
+        baseline_offset: Pt::ZERO,
         text_offset: Pt::ZERO,
     }
 }
@@ -359,7 +412,12 @@ pub fn collect_fragments<F>(
     default_color: RgbColor,
     hyperlink_url: Option<&str>,
     measure_text: &F,
-    resolved_styles: Option<&std::collections::HashMap<dxpdf_docx_model::model::StyleId, crate::resolve::styles::ResolvedStyle>>,
+    resolved_styles: Option<
+        &std::collections::HashMap<
+            dxpdf_docx_model::model::StyleId,
+            crate::resolve::styles::ResolvedStyle,
+        >,
+    >,
     // §17.3.1: paragraph style's run properties, merged as base for all runs.
     paragraph_run_defaults: Option<&RunProperties>,
     footnote_counter: &mut u32,
@@ -373,9 +431,9 @@ where
     let mut fragments = Vec::new();
     let mut field_depth: i32 = 0; // tracks nested complex field state
     let mut field_instr = String::new(); // accumulated instruction text for current complex field
-    // §17.16.19: field substitution state for complex fields.
-    // Pending = substitution text waiting for the first result TextRun's formatting.
-    // Emitted = substitution was rendered, skip remaining result TextRuns until End.
+                                         // §17.16.19: field substitution state for complex fields.
+                                         // Pending = substitution text waiting for the first result TextRun's formatting.
+                                         // Emitted = substitution was rendered, skip remaining result TextRuns until End.
     let mut field_sub_pending: Option<String> = None;
     let mut field_sub_emitted = false;
     for inline in inlines {
@@ -416,12 +474,24 @@ where
                 let mut font = font_props_from_run(&effective_props, default_family, default_size);
                 let color = effective_props
                     .color
-                    .map(|c| crate::resolve::color::resolve_color(c, crate::resolve::color::ColorContext::Text))
+                    .map(|c| {
+                        crate::resolve::color::resolve_color(
+                            c,
+                            crate::resolve::color::ColorContext::Text,
+                        )
+                    })
                     .unwrap_or(default_color);
                 // §17.3.2.32: run-level shading (background behind text).
                 // §17.3.2.15: highlight color (fixed palette) takes effect when shading is absent.
-                let shading = effective_props.shading.as_ref()
-                    .map(|s| crate::resolve::color::resolve_color(s.fill, crate::resolve::color::ColorContext::Background))
+                let shading = effective_props
+                    .shading
+                    .as_ref()
+                    .map(|s| {
+                        crate::resolve::color::resolve_color(
+                            s.fill,
+                            crate::resolve::color::ColorContext::Background,
+                        )
+                    })
                     .or_else(|| effective_props.highlight.map(resolve_highlight_color));
 
                 // §17.3.2.42: vertical alignment (superscript/subscript).
@@ -450,7 +520,10 @@ where
                 // §17.3.2.4: run-level border.
                 let border = effective_props.border.as_ref().map(|b| FragmentBorder {
                     width: Pt::from(b.width),
-                    color: crate::resolve::color::resolve_color(b.color, crate::resolve::color::ColorContext::Text),
+                    color: crate::resolve::color::resolve_color(
+                        b.color,
+                        crate::resolve::color::ColorContext::Text,
+                    ),
                     space: Pt::new(b.space.raw() as f32),
                 });
 
@@ -460,16 +533,30 @@ where
                     let sub = field_sub_pending.take().unwrap();
                     field_sub_emitted = true;
                     emit_text_fragments(
-                        &sub, &font, color, shading, border, hyperlink_url,
-                        measure_text, baseline_offset, &mut fragments,
+                        &sub,
+                        &font,
+                        color,
+                        shading,
+                        border,
+                        hyperlink_url,
+                        measure_text,
+                        baseline_offset,
+                        &mut fragments,
                     );
                 } else {
                     for element in &tr.content {
                         match element {
                             RunElement::Text(text) => {
                                 emit_text_fragments(
-                                    text, &font, color, shading, border, hyperlink_url,
-                                    measure_text, baseline_offset, &mut fragments,
+                                    text,
+                                    &font,
+                                    color,
+                                    shading,
+                                    border,
+                                    hyperlink_url,
+                                    measure_text,
+                                    baseline_offset,
+                                    &mut fragments,
                                 );
                             }
                             RunElement::Tab => {
@@ -499,7 +586,10 @@ where
             Inline::Image(img) => {
                 // Only render INLINE images as fragments.
                 // Anchor (floating) images are handled separately in build.rs.
-                if matches!(img.placement, dxpdf_docx_model::model::ImagePlacement::Inline { .. }) {
+                if matches!(
+                    img.placement,
+                    dxpdf_docx_model::model::ImagePlacement::Inline { .. }
+                ) {
                     if let Some(rel_id) = crate::resolve::images::extract_image_rel_id(img) {
                         let w = Pt::from(img.extent.width);
                         let h = Pt::from(img.extent.height);
@@ -541,15 +631,26 @@ where
                 let substituted = evaluate_field_instruction(&field.instruction, field_ctx);
                 if let Some(text) = substituted {
                     fragments.push(make_field_text_fragment(
-                        text, default_family, default_size, default_color, measure_text,
+                        text,
+                        default_family,
+                        default_size,
+                        default_color,
+                        measure_text,
                     ));
                 } else {
                     let mut sub = collect_fragments(
                         &field.content,
-                        default_family, default_size, default_color,
-                        hyperlink_url, measure_text, resolved_styles,
-                        paragraph_run_defaults, footnote_counter, endnote_counter,
-                        field_ctx, theme,
+                        default_family,
+                        default_size,
+                        default_color,
+                        hyperlink_url,
+                        measure_text,
+                        resolved_styles,
+                        paragraph_run_defaults,
+                        footnote_counter,
+                        endnote_counter,
+                        field_ctx,
+                        theme,
                     );
                     fragments.append(&mut sub);
                 }
@@ -577,7 +678,11 @@ where
                         // was present to provide formatting, emit with defaults.
                         if let Some(text) = field_sub_pending.take() {
                             fragments.push(make_field_text_fragment(
-                                text, default_family, default_size, default_color, measure_text,
+                                text,
+                                default_family,
+                                default_size,
+                                default_color,
+                                measure_text,
                             ));
                         }
                         field_sub_emitted = false;
@@ -757,7 +862,10 @@ mod tests {
     fn dummy_measure(text: &str, _font: &FontProps) -> (Pt, TextMetrics) {
         (
             Pt::new(text.len() as f32 * 6.0),
-            TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(2.0) },
+            TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(2.0),
+            },
         )
     }
 
@@ -789,7 +897,20 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         assert_eq!(frags[0].width().raw(), 30.0); // 5 * 6
@@ -799,7 +920,20 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(10.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         if let Fragment::Text { font, .. } = &frags[0] {
             assert_eq!(&*font.family, "Arial");
@@ -817,7 +951,20 @@ mod tests {
             content: vec![RunElement::Tab],
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         assert!(matches!(frags[0], Fragment::Tab { .. }));
@@ -831,7 +978,20 @@ mod tests {
             content: vec![RunElement::LineBreak(BreakKind::TextWrapping)],
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         assert!(frags[0].is_line_break());
@@ -843,7 +1003,20 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
@@ -881,7 +1054,20 @@ mod tests {
                 fld_lock: None,
             }),
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
@@ -905,10 +1091,27 @@ mod tests {
             Inline::EndnoteRefMark,
             // LastRenderedPageBreak is now inside RunElement, not Inline
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         // BookmarkStart produces a Bookmark fragment, text run produces a Text fragment.
-        assert_eq!(frags.len(), 2, "bookmark + text run should produce fragments");
+        assert_eq!(
+            frags.len(),
+            2,
+            "bookmark + text run should produce fragments"
+        );
         assert!(matches!(frags[0], Fragment::Bookmark { .. }));
         assert!(matches!(frags[1], Fragment::Text { .. }));
     }
@@ -922,7 +1125,20 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -938,7 +1154,20 @@ mod tests {
             content: vec![RunElement::Text(String::new())],
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
         assert!(frags.is_empty());
     }
 
@@ -958,7 +1187,20 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
@@ -975,7 +1217,20 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -1017,7 +1272,20 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
+        let frags = collect_fragments(
+            &inlines,
+            "Default",
+            Pt::new(12.0),
+            RgbColor::BLACK,
+            None,
+            &dummy_measure,
+            None,
+            None,
+            &mut 0,
+            &mut 0,
+            FieldContext::default(),
+            None,
+        );
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {

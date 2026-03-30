@@ -5,14 +5,14 @@
 
 use std::rc::Rc;
 
-use crate::dimension::Pt;
-use crate::geometry::{PtRect, PtSize};
 use super::draw_command::{DrawCommand, LayoutedPage};
 use super::fragment::Fragment;
 use super::page::PageConfig;
 use super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::table::{layout_table, TableRowInput};
 use super::BoxConstraints;
+use crate::dimension::Pt;
+use crate::geometry::{PtRect, PtSize};
 
 /// §17.4.58 / §17.4.59: positioning data for a floating table.
 #[derive(Debug, Clone)]
@@ -154,9 +154,7 @@ pub fn layout_section(
         let col_width = config.columns[col].width;
         BoxConstraints::new(Pt::ZERO, col_width, Pt::ZERO, config.content_height())
     };
-    let col_x = |col: usize| -> Pt {
-        config.margins.left + config.columns[col].x_offset
-    };
+    let col_x = |col: usize| -> Pt { config.margins.left + config.columns[col].x_offset };
 
     for (block_idx, block) in blocks.iter().enumerate() {
         match block {
@@ -170,7 +168,14 @@ pub fn layout_section(
                 // §17.3.1.23: force a new page before this paragraph.
                 if *page_break_before && cursor_y > config.margins.top {
                     if !page_footnotes.is_empty() {
-                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                        render_page_footnotes(
+                            &mut current_page,
+                            config,
+                            &page_footnotes,
+                            default_line_height,
+                            measure_text,
+                            separator_indent,
+                        );
                         page_footnotes.clear();
                     }
                     pages.push(std::mem::replace(
@@ -190,9 +195,16 @@ pub fn layout_section(
                 let mut effective_style = style.clone();
 
                 // Log paragraph info.
-                let first_text = fragments.iter().find_map(|f| {
-                    if let Fragment::Text { text, .. } = f { Some(text.as_str()) } else { None }
-                }).unwrap_or("");
+                let first_text = fragments
+                    .iter()
+                    .find_map(|f| {
+                        if let Fragment::Text { text, .. } = f {
+                            Some(text.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or("");
                 log::debug!(
                     "[layout] block[{block_idx}] para style={:?} text={:?} cursor_y={:.1} col={current_col} floats={} fwd_floats={}",
                     effective_style.style_id, &first_text[..first_text.len().min(30)],
@@ -241,9 +253,7 @@ pub fn layout_section(
                         FloatingImageY::RelativeToParagraph(offset) => {
                             (content_top + offset, content_top + offset + fi.size.height)
                         }
-                        FloatingImageY::Absolute(img_y) => {
-                            (img_y, img_y + fi.size.height)
-                        }
+                        FloatingImageY::Absolute(img_y) => (img_y, img_y + fi.size.height),
                     };
                     if fi.wrap_top_and_bottom {
                         // §20.4.2.18: emit the image now and advance past it.
@@ -270,7 +280,10 @@ pub fn layout_section(
                         };
                         log::debug!(
                             "[layout]   register image float: x={:.1} y={:.1}-{:.1} w={:.1}",
-                            float_entry.page_x.raw(), y_start.raw(), y_end.raw(), float_entry.width.raw()
+                            float_entry.page_x.raw(),
+                            y_start.raw(),
+                            y_end.raw(),
+                            float_entry.width.raw()
                         );
                         page_floats.push(float_entry);
                     }
@@ -285,7 +298,12 @@ pub fn layout_section(
                 if abs_floats_dirty {
                     current_page_abs_floats.clear();
                     for (fi_idx, future_block) in blocks[page_start_block..].iter().enumerate() {
-                        if let LayoutBlock::Paragraph { floating_images: fi_list, page_break_before, .. } = future_block {
+                        if let LayoutBlock::Paragraph {
+                            floating_images: fi_list,
+                            page_break_before,
+                            ..
+                        } = future_block
+                        {
                             // Stop scanning at the next explicit page break
                             // (skip the first block since it may be the one that triggered the new page).
                             if *page_break_before && fi_idx > 0 {
@@ -321,11 +339,11 @@ pub fn layout_section(
                     if af.page_y_start > cursor_y + effective_style.space_before {
                         continue;
                     }
-                    let already_present = effective_floats.iter().any(|pf|
+                    let already_present = effective_floats.iter().any(|pf| {
                         (pf.page_x - af.page_x).raw().abs() < 0.1
-                        && (pf.page_y_start - af.page_y_start).raw().abs() < 0.1
-                        && (pf.page_y_end - af.page_y_end).raw().abs() < 0.1
-                    );
+                            && (pf.page_y_start - af.page_y_start).raw().abs() < 0.1
+                            && (pf.page_y_end - af.page_y_end).raw().abs() < 0.1
+                    });
                     if !already_present {
                         effective_floats.push(af.clone());
                     }
@@ -369,7 +387,14 @@ pub fn layout_section(
                         } else {
                             // All columns full — new page, reset to column 0.
                             if !page_footnotes.is_empty() {
-                                render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                                render_page_footnotes(
+                                    &mut current_page,
+                                    config,
+                                    &page_footnotes,
+                                    default_line_height,
+                                    measure_text,
+                                    separator_indent,
+                                );
                                 page_footnotes.clear();
                             }
                             pages.push(std::mem::replace(
@@ -381,7 +406,7 @@ pub fn layout_section(
                             bottom = page_bottom;
                             page_start_block = block_idx;
                             abs_floats_dirty = true;
-                    page_floats.clear();
+                            page_floats.clear();
                         }
                         cursor_y = column_top;
                         effective_style.page_x = col_x(current_col);
@@ -404,7 +429,14 @@ pub fn layout_section(
                             cursor_y = column_top;
                         } else {
                             if !page_footnotes.is_empty() {
-                                render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                                render_page_footnotes(
+                                    &mut current_page,
+                                    config,
+                                    &page_footnotes,
+                                    default_line_height,
+                                    measure_text,
+                                    separator_indent,
+                                );
                                 page_footnotes.clear();
                             }
                             pages.push(std::mem::replace(
@@ -417,7 +449,7 @@ pub fn layout_section(
                             bottom = page_bottom;
                             page_start_block = block_idx;
                             abs_floats_dirty = true;
-                    page_floats.clear();
+                            page_floats.clear();
                         }
                         // Update para_start_y after page/column change so
                         // floating images use the correct position.
@@ -427,7 +459,9 @@ pub fn layout_section(
                     // Offset commands to absolute page position
                     log::debug!(
                         "[layout]   chunk[{chunk_idx}] placed at y={:.1} x={:.1} height={:.1}",
-                        cursor_y.raw(), col_x(current_col).raw(), para.size.height.raw()
+                        cursor_y.raw(),
+                        col_x(current_col).raw(),
+                        para.size.height.raw()
                     );
                     for mut cmd in para.commands {
                         cmd.shift_y(cursor_y);
@@ -445,22 +479,31 @@ pub fn layout_section(
                 if effective_style.keep_next
                     && cursor_y > column_top
                     && block_idx + 1 < blocks.len()
-                    && num_cols <= 1 // skip for multi-column (too complex)
+                    && num_cols <= 1
+                // skip for multi-column (too complex)
                 {
                     let next_fits = match &blocks[block_idx + 1] {
-                        LayoutBlock::Paragraph { fragments: next_frags, style: next_style, .. } => {
+                        LayoutBlock::Paragraph {
+                            fragments: next_frags,
+                            style: next_style,
+                            ..
+                        } => {
                             // Speculatively lay out the next paragraph to check height.
                             let mut next_eff = next_style.clone();
                             // Collapse spacing between current and next.
-                            let next_collapse = effective_style.space_after.min(next_eff.space_before);
+                            let next_collapse =
+                                effective_style.space_after.min(next_eff.space_before);
                             let next_cursor = cursor_y - next_collapse;
                             let next_constraints = col_constraints(current_col);
                             next_eff.page_y = next_cursor;
                             next_eff.page_x = col_x(current_col);
                             next_eff.page_content_width = config.columns[current_col].width;
                             let next_para = layout_paragraph(
-                                next_frags, &next_constraints, &next_eff,
-                                default_line_height, measure_text,
+                                next_frags,
+                                &next_constraints,
+                                &next_eff,
+                                default_line_height,
+                                measure_text,
                             );
                             // Check if at least the first line fits.
                             next_cursor + next_para.size.height <= bottom
@@ -473,7 +516,14 @@ pub fn layout_section(
                         current_page.commands.truncate(cmds_before_para);
                         // Push page break.
                         if !page_footnotes.is_empty() {
-                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            render_page_footnotes(
+                                &mut current_page,
+                                config,
+                                &page_footnotes,
+                                default_line_height,
+                                measure_text,
+                                separator_indent,
+                            );
                             page_footnotes.clear();
                         }
                         pages.push(std::mem::replace(
@@ -486,7 +536,7 @@ pub fn layout_section(
                         bottom = page_bottom;
                         page_start_block = block_idx;
                         abs_floats_dirty = true;
-                    page_floats.clear();
+                        page_floats.clear();
 
                         // Re-layout the current paragraph on the new page.
                         // keepNext paragraphs at page top are not the structural
@@ -497,8 +547,11 @@ pub fn layout_section(
                         effective_style.page_content_width = config.columns[current_col].width;
                         effective_style.page_floats = Vec::new();
                         let para = layout_paragraph(
-                            fragments, &constraints, &effective_style,
-                            default_line_height, measure_text,
+                            fragments,
+                            &constraints,
+                            &effective_style,
+                            default_line_height,
+                            measure_text,
                         );
                         for mut cmd in para.commands {
                             cmd.shift_y(cursor_y);
@@ -536,11 +589,16 @@ pub fn layout_section(
 
                 // Collect footnotes for this page and reserve space at bottom.
                 if !footnotes.is_empty() {
-                    let fn_constraints = super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
+                    let fn_constraints =
+                        super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
                     let sep_height = Pt::new(4.0); // separator line + gap
                     for (fn_frags, fn_style) in footnotes {
                         let fn_para = super::paragraph::layout_paragraph(
-                            fn_frags, &fn_constraints, fn_style, default_line_height, measure_text,
+                            fn_frags,
+                            &fn_constraints,
+                            fn_style,
+                            default_line_height,
+                            measure_text,
                         );
                         // Only add separator space for the first footnote on this page.
                         if page_footnotes.is_empty() {
@@ -577,7 +635,10 @@ pub fn layout_section(
 
                     // §17.4.28 / §17.4.51: compute table x position.
                     let table_x = table_x_offset(
-                        *alignment, *indent, table.size.width, content_width,
+                        *alignment,
+                        *indent,
+                        table.size.width,
+                        content_width,
                         config.margins.left,
                     );
 
@@ -596,7 +657,14 @@ pub fn layout_section(
                     };
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                         if !page_footnotes.is_empty() {
-                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            render_page_footnotes(
+                                &mut current_page,
+                                config,
+                                &page_footnotes,
+                                default_line_height,
+                                measure_text,
+                                separator_indent,
+                            );
                             page_footnotes.clear();
                         }
                         pages.push(std::mem::replace(
@@ -610,7 +678,7 @@ pub fn layout_section(
                         bottom = page_bottom;
                         page_start_block = block_idx;
                         abs_floats_dirty = true;
-                    page_floats.clear();
+                        page_floats.clear();
                     }
 
                     // §17.4.59: tblpY is the absolute Y offset from the vertical
@@ -618,8 +686,12 @@ pub fn layout_section(
                     // content already occupies space above it).
                     let float_y_start = if fi.y_offset > Pt::ZERO {
                         let anchor_y = match fi.vert_anchor {
-                            dxpdf_docx_model::model::TableAnchor::Text => last_para_start_y + fi.y_offset,
-                            dxpdf_docx_model::model::TableAnchor::Margin => config.margins.top + fi.y_offset,
+                            dxpdf_docx_model::model::TableAnchor::Text => {
+                                last_para_start_y + fi.y_offset
+                            }
+                            dxpdf_docx_model::model::TableAnchor::Margin => {
+                                config.margins.top + fi.y_offset
+                            }
                             dxpdf_docx_model::model::TableAnchor::Page => fi.y_offset,
                         };
                         anchor_y.max(cursor_y)
@@ -648,7 +720,9 @@ pub fn layout_section(
                         page_y_start: float_y_start,
                         page_y_end: float_y_end,
                         width: table.size.width + fi.right_gap,
-                        source: super::float::FloatSource::Table { owner_block_idx: block_idx },
+                        source: super::float::FloatSource::Table {
+                            owner_block_idx: block_idx,
+                        },
                     });
                     continue;
                 }
@@ -657,8 +731,7 @@ pub fn layout_section(
                 // are treated as a single merged table — suppress the second
                 // table's top border to avoid doubling at the shared edge,
                 // and insert a border gap (equivalent to insideH) between them.
-                let suppress_top = style_id.is_some()
-                    && *style_id == prev_table_style_id;
+                let suppress_top = style_id.is_some() && *style_id == prev_table_style_id;
                 if suppress_top {
                     cursor_y += prev_table_border_gap;
                 }
@@ -667,7 +740,8 @@ pub fn layout_section(
                 // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.
                 let available = bottom - cursor_y;
                 let slices = super::table::layout_table_paginated(
-                    rows, col_widths,
+                    rows,
+                    col_widths,
                     &col_constraints(current_col),
                     default_line_height,
                     border_config.as_ref(),
@@ -681,15 +755,25 @@ pub fn layout_section(
                 // alignment and indent.
                 let table_width: Pt = col_widths.iter().copied().sum();
                 let table_x = table_x_offset(
-                    *alignment, *indent, table_width,
-                    content_width, config.margins.left,
+                    *alignment,
+                    *indent,
+                    table_width,
+                    content_width,
+                    config.margins.left,
                 );
 
                 for (slice_idx, slice) in slices.into_iter().enumerate() {
                     if slice_idx > 0 {
                         // Continuation slice → new page.
                         if !page_footnotes.is_empty() {
-                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            render_page_footnotes(
+                                &mut current_page,
+                                config,
+                                &page_footnotes,
+                                default_line_height,
+                                measure_text,
+                                separator_indent,
+                            );
                             page_footnotes.clear();
                         }
                         pages.push(std::mem::replace(
@@ -732,8 +816,12 @@ pub fn layout_section(
     // Render footnotes on the current (last) page.
     if !page_footnotes.is_empty() {
         render_page_footnotes(
-            &mut current_page, config, &page_footnotes,
-            default_line_height, measure_text, separator_indent,
+            &mut current_page,
+            config,
+            &page_footnotes,
+            default_line_height,
+            measure_text,
+            separator_indent,
         );
     }
 
@@ -804,9 +892,7 @@ pub fn stack_blocks(
                         FloatingImageY::RelativeToParagraph(offset) => {
                             (content_top + offset, content_top + offset + fi.size.height)
                         }
-                        FloatingImageY::Absolute(img_y) => {
-                            (img_y, img_y + fi.size.height)
-                        }
+                        FloatingImageY::Absolute(img_y) => (img_y, img_y + fi.size.height),
                     };
                     if fi.wrap_top_and_bottom {
                         let img_y = match fi.y {
@@ -899,7 +985,10 @@ pub fn stack_blocks(
                 );
 
                 let table_x = table_x_offset(
-                    *alignment, *indent, table.size.width, content_width,
+                    *alignment,
+                    *indent,
+                    table.size.width,
+                    content_width,
                     Pt::ZERO,
                 );
 
@@ -962,7 +1051,13 @@ fn render_page_footnotes(
     let mut footnote_layouts = Vec::new();
     let mut total_height = Pt::new(4.0); // separator + gap
     for (frags, style) in footnotes {
-        let para = layout_paragraph(frags, &constraints, style, default_line_height, measure_text);
+        let para = layout_paragraph(
+            frags,
+            &constraints,
+            style,
+            default_line_height,
+            measure_text,
+        );
         total_height += para.size.height;
         footnote_layouts.push(para);
     }
@@ -1003,12 +1098,8 @@ fn table_x_offset(
 ) -> Pt {
     use dxpdf_docx_model::model::Alignment;
     match alignment {
-        Some(Alignment::Center) => {
-            margin_left + (content_width - table_width) * 0.5
-        }
-        Some(Alignment::End) => {
-            margin_left + content_width - table_width
-        }
+        Some(Alignment::Center) => margin_left + (content_width - table_width) * 0.5,
+        Some(Alignment::End) => margin_left + content_width - table_width,
         _ => margin_left + indent,
     }
 }
@@ -1032,13 +1123,22 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                char_spacing: Pt::ZERO,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width), trimmed_width: Pt::new(width),
-            metrics: TextMetrics { ascent: Pt::new(height * 0.7), descent: Pt::new(height * 0.3) },
+            width: Pt::new(width),
+            trimmed_width: Pt::new(width),
+            metrics: TextMetrics {
+                ascent: Pt::new(height * 0.7),
+                descent: Pt::new(height * 0.3),
+            },
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+            text_offset: Pt::ZERO,
         }
     }
 
@@ -1059,7 +1159,10 @@ mod tests {
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
             footer_margin: Pt::new(5.0),
-            columns: vec![ColumnGeometry { x_offset: Pt::ZERO, width: Pt::new(180.0) }],
+            columns: vec![ColumnGeometry {
+                x_offset: Pt::ZERO,
+                width: Pt::new(180.0),
+            }],
         }
     }
 
@@ -1073,7 +1176,14 @@ mod tests {
     #[test]
     fn single_paragraph_on_one_page() {
         let blocks = vec![para_block("hello", 30.0)];
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+        let pages = layout_section(
+            &blocks,
+            &small_config(),
+            None,
+            Pt::ZERO,
+            Pt::new(14.0),
+            None,
+        );
 
         assert_eq!(pages.len(), 1);
         let text_count = pages[0]
@@ -1108,7 +1218,14 @@ mod tests {
         // Each paragraph: 14pt tall
         // 6 paragraphs = 84pt > 80pt → should break to 2 pages
         let blocks: Vec<_> = (0..6).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+        let pages = layout_section(
+            &blocks,
+            &small_config(),
+            None,
+            Pt::ZERO,
+            Pt::new(14.0),
+            None,
+        );
 
         assert_eq!(pages.len(), 2, "should overflow to 2 pages");
 
@@ -1144,8 +1261,17 @@ mod tests {
     fn many_paragraphs_produce_multiple_pages() {
         // 20 paragraphs at 14pt each = 280pt
         // Content area = 80pt → need 4 pages (80/14 = 5.7 paras per page)
-        let blocks: Vec<_> = (0..20).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+        let blocks: Vec<_> = (0..20)
+            .map(|i| para_block(&format!("p{i}"), 30.0))
+            .collect();
+        let pages = layout_section(
+            &blocks,
+            &small_config(),
+            None,
+            Pt::ZERO,
+            Pt::new(14.0),
+            None,
+        );
 
         assert_eq!(pages.len(), 4);
     }
@@ -1164,11 +1290,14 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None, vertical_merge: None, vertical_align: crate::layout::table::CellVAlign::Top,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: None,
+                    vertical_align: crate::layout::table::CellVAlign::Top,
                 }],
                 height_rule: None,
-            is_header: None,
-            cant_split: None,
+                is_header: None,
+                cant_split: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,
@@ -1178,7 +1307,14 @@ mod tests {
             style_id: None,
         }];
 
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+        let pages = layout_section(
+            &blocks,
+            &small_config(),
+            None,
+            Pt::ZERO,
+            Pt::new(14.0),
+            None,
+        );
         assert_eq!(pages.len(), 1);
 
         let text_count = pages[0]
@@ -1234,7 +1370,9 @@ mod tests {
         let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
 
         assert!(pages.len() >= 2, "should have at least 2 pages");
-        let heading_y = pages[1].commands.iter()
+        let heading_y = pages[1]
+            .commands
+            .iter()
             .find_map(|c| match c {
                 DrawCommand::Text { position, text, .. } if text == "heading" => Some(position.y),
                 _ => None,
@@ -1253,10 +1391,16 @@ mod tests {
 
     #[test]
     fn identical_borders_suppress_second_top() {
-        use crate::layout::paragraph::{ParagraphBorderStyle, BorderLine};
+        use crate::layout::paragraph::{BorderLine, ParagraphBorderStyle};
         let border = Some(ParagraphBorderStyle {
-            top: Some(BorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, space: Pt::new(1.0) }),
-            bottom: None, left: None, right: None,
+            top: Some(BorderLine {
+                width: Pt::new(0.5),
+                color: RgbColor::BLACK,
+                space: Pt::new(1.0),
+            }),
+            bottom: None,
+            left: None,
+            right: None,
         });
         let mut style1 = ParagraphStyle::default();
         style1.borders = border.clone();
@@ -1279,14 +1423,28 @@ mod tests {
                 floating_images: vec![],
             },
         ];
-        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+        let pages = layout_section(
+            &blocks,
+            &small_config(),
+            None,
+            Pt::ZERO,
+            Pt::new(14.0),
+            None,
+        );
 
         // Count Line draw commands (border lines).
         // Only the first paragraph should draw its top border; the second's
         // top border is suppressed by §17.3.1.24 grouping.
-        let line_cmds: Vec<_> = pages[0].commands.iter()
+        let line_cmds: Vec<_> = pages[0]
+            .commands
+            .iter()
             .filter(|c| matches!(c, DrawCommand::Line { .. }))
             .collect();
-        assert_eq!(line_cmds.len(), 1, "only one top border line (grouped): got {}", line_cmds.len());
+        assert_eq!(
+            line_cmds.len(),
+            1,
+            "only one top border line (grouped): got {}",
+            line_cmds.len()
+        );
     }
 }

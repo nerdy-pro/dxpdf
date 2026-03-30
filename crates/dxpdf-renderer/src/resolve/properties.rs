@@ -75,7 +75,10 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
     merge_opt(&mut target.keep_lines, &base.keep_lines);
     merge_opt(&mut target.widow_control, &base.widow_control);
     merge_opt(&mut target.page_break_before, &base.page_break_before);
-    merge_opt(&mut target.suppress_auto_hyphens, &base.suppress_auto_hyphens);
+    merge_opt(
+        &mut target.suppress_auto_hyphens,
+        &base.suppress_auto_hyphens,
+    );
     merge_opt(&mut target.contextual_spacing, &base.contextual_spacing);
     merge_opt(&mut target.bidi, &base.bidi);
     merge_opt(&mut target.word_wrap, &base.word_wrap);
@@ -94,15 +97,23 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
         // Start from parent tabs.
         target.tabs.clone_from(&base.tabs);
         // Remove positions that the child clears.
-        for clear in child_tabs.iter().filter(|t| t.alignment == TabAlignment::Clear) {
+        for clear in child_tabs
+            .iter()
+            .filter(|t| t.alignment == TabAlignment::Clear)
+        {
             target.tabs.retain(|t| t.position != clear.position);
         }
         // Add child's non-Clear tabs (replacing any at the same position).
-        for tab in child_tabs.iter().filter(|t| t.alignment != TabAlignment::Clear) {
+        for tab in child_tabs
+            .iter()
+            .filter(|t| t.alignment != TabAlignment::Clear)
+        {
             target.tabs.retain(|t| t.position != tab.position);
             target.tabs.push(*tab);
         }
-        target.tabs.sort_by(|a, b| a.position.raw().cmp(&b.position.raw()));
+        target
+            .tabs
+            .sort_by(|a, b| a.position.raw().cmp(&b.position.raw()));
     }
 }
 
@@ -173,7 +184,11 @@ mod tests {
         merge_run_properties(&mut target, &base);
 
         assert_eq!(target.bold, Some(false), "target's bold should win");
-        assert_eq!(target.font_size, Some(Dimension::<HalfPoints>::new(20)), "target's size should win");
+        assert_eq!(
+            target.font_size,
+            Some(Dimension::<HalfPoints>::new(20)),
+            "target's size should win"
+        );
         assert_eq!(target.italic, Some(true), "italic should come from base");
     }
 
@@ -207,8 +222,16 @@ mod tests {
         };
         merge_run_properties(&mut target, &base);
 
-        assert_eq!(target.fonts.ascii.as_deref(), Some("Arial"), "target's ascii should win");
-        assert_eq!(target.fonts.east_asian.as_deref(), Some("SimSun"), "east_asian should come from base");
+        assert_eq!(
+            target.fonts.ascii.as_deref(),
+            Some("Arial"),
+            "target's ascii should win"
+        );
+        assert_eq!(
+            target.fonts.east_asian.as_deref(),
+            Some("SimSun"),
+            "east_asian should come from base"
+        );
     }
 
     #[test]
@@ -348,8 +371,16 @@ mod tests {
         merge_paragraph_properties(&mut target, &base);
 
         assert_eq!(target.tabs.len(), 2, "both tabs should be present");
-        assert_eq!(target.tabs[0].position, Dimension::<Twips>::new(720), "sorted: left@720 first");
-        assert_eq!(target.tabs[1].position, Dimension::<Twips>::new(1440), "sorted: right@1440 second");
+        assert_eq!(
+            target.tabs[0].position,
+            Dimension::<Twips>::new(720),
+            "sorted: left@720 first"
+        );
+        assert_eq!(
+            target.tabs[1].position,
+            Dimension::<Twips>::new(1440),
+            "sorted: right@1440 second"
+        );
     }
 
     #[test]
@@ -433,7 +464,10 @@ mod tests {
         };
         merge_paragraph_properties(&mut target, &base);
 
-        assert!(target.tabs.is_empty(), "cleared tab should be gone, nothing added");
+        assert!(
+            target.tabs.is_empty(),
+            "cleared tab should be gone, nothing added"
+        );
     }
 
     #[test]
@@ -442,14 +476,21 @@ mod tests {
             alignment: Some(Alignment::Start),
             indentation: Some(Indentation::default()),
             spacing: Some(ParagraphSpacing::default()),
-            numbering: Some(NumberingReference { num_id: 1, level: 0 }),
+            numbering: Some(NumberingReference {
+                num_id: 1,
+                level: 0,
+            }),
             tabs: vec![TabStop {
                 position: Dimension::new(720),
                 alignment: TabAlignment::Left,
                 leader: TabLeader::None,
             }],
             borders: Some(ParagraphBorders {
-                top: None, bottom: None, left: None, right: None, between: None,
+                top: None,
+                bottom: None,
+                left: None,
+                right: None,
+                between: None,
             }),
             shading: Some(Shading {
                 fill: Color::Rgb(0),
@@ -467,11 +508,19 @@ mod tests {
             outline_level: Some(OutlineLevel::new(1)),
             text_alignment: Some(TextAlignment::Center),
             cnf_style: Some(CnfStyle {
-                val: None, first_row: Some(true), last_row: None,
-                first_column: None, last_column: None, odd_v_band: None,
-                even_v_band: None, odd_h_band: None, even_h_band: None,
-                first_row_first_column: None, first_row_last_column: None,
-                last_row_first_column: None, last_row_last_column: None,
+                val: None,
+                first_row: Some(true),
+                last_row: None,
+                first_column: None,
+                last_column: None,
+                odd_v_band: None,
+                even_v_band: None,
+                odd_h_band: None,
+                even_h_band: None,
+                first_row_first_column: None,
+                first_row_last_column: None,
+                last_row_first_column: None,
+                last_row_last_column: None,
             }),
             frame_properties: None,
             auto_space_de: Some(true),

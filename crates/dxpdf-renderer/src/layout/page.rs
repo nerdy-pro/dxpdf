@@ -37,10 +37,18 @@ impl Default for PageConfig {
         let content_width = SPEC_DEFAULT_PAGE_WIDTH - SPEC_DEFAULT_MARGIN - SPEC_DEFAULT_MARGIN;
         Self {
             page_size: PtSize::new(SPEC_DEFAULT_PAGE_WIDTH, SPEC_DEFAULT_PAGE_HEIGHT),
-            margins: PtEdgeInsets::new(SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN, SPEC_DEFAULT_MARGIN),
+            margins: PtEdgeInsets::new(
+                SPEC_DEFAULT_MARGIN,
+                SPEC_DEFAULT_MARGIN,
+                SPEC_DEFAULT_MARGIN,
+                SPEC_DEFAULT_MARGIN,
+            ),
             header_margin: SPEC_DEFAULT_MARGIN / 2.0,
             footer_margin: SPEC_DEFAULT_MARGIN / 2.0,
-            columns: vec![ColumnGeometry { x_offset: Pt::ZERO, width: content_width }],
+            columns: vec![ColumnGeometry {
+                x_offset: Pt::ZERO,
+                width: content_width,
+            }],
         }
     }
 }
@@ -107,7 +115,12 @@ impl PageConfig {
 fn compute_columns(content_width: Pt, columns: &Option<Columns>) -> Vec<ColumnGeometry> {
     let cols = match columns {
         Some(c) if c.count.unwrap_or(1) > 1 => c,
-        _ => return vec![ColumnGeometry { x_offset: Pt::ZERO, width: content_width }],
+        _ => {
+            return vec![ColumnGeometry {
+                x_offset: Pt::ZERO,
+                width: content_width,
+            }]
+        }
     };
 
     let num = cols.count.unwrap_or(1) as usize;
@@ -118,8 +131,14 @@ fn compute_columns(content_width: Pt, columns: &Option<Columns>) -> Vec<ColumnGe
         let mut result = Vec::with_capacity(cols.columns.len());
         let mut x = Pt::ZERO;
         for (i, col_def) in cols.columns.iter().enumerate() {
-            let w = col_def.width.map(Pt::from).unwrap_or(content_width / num as f32);
-            result.push(ColumnGeometry { x_offset: x, width: w });
+            let w = col_def
+                .width
+                .map(Pt::from)
+                .unwrap_or(content_width / num as f32);
+            result.push(ColumnGeometry {
+                x_offset: x,
+                width: w,
+            });
             if i < cols.columns.len() - 1 {
                 let gap = col_def.space.map(Pt::from).unwrap_or(default_space);
                 x += w + gap;
@@ -134,7 +153,10 @@ fn compute_columns(content_width: Pt, columns: &Option<Columns>) -> Vec<ColumnGe
     let mut result = Vec::with_capacity(num);
     for i in 0..num {
         let x = (col_width + default_space) * i as f32;
-        result.push(ColumnGeometry { x_offset: x, width: col_width });
+        result.push(ColumnGeometry {
+            x_offset: x,
+            width: col_width,
+        });
     }
     result
 }
@@ -156,15 +178,15 @@ mod tests {
     #[test]
     fn content_dimensions() {
         let cfg = PageConfig::default();
-        assert_eq!(cfg.content_width().raw(), 468.0);  // 612 - 72 - 72
-        assert_eq!(cfg.content_height().raw(), 648.0);  // 792 - 72 - 72
+        assert_eq!(cfg.content_width().raw(), 468.0); // 612 - 72 - 72
+        assert_eq!(cfg.content_height().raw(), 648.0); // 792 - 72 - 72
     }
 
     #[test]
     fn from_section_with_page_size() {
         let sect = SectionProperties {
             page_size: Some(PageSize {
-                width: Some(Dimension::<Twips>::new(12240)),  // 8.5in = 612pt
+                width: Some(Dimension::<Twips>::new(12240)), // 8.5in = 612pt
                 height: Some(Dimension::<Twips>::new(15840)), // 11in = 792pt
                 orientation: None,
             }),
@@ -179,11 +201,11 @@ mod tests {
     fn from_section_with_margins() {
         let sect = SectionProperties {
             page_margins: Some(PageMargins {
-                top: Some(Dimension::<Twips>::new(1440)),    // 1in = 72pt
+                top: Some(Dimension::<Twips>::new(1440)), // 1in = 72pt
                 right: Some(Dimension::<Twips>::new(1440)),
                 bottom: Some(Dimension::<Twips>::new(1440)),
                 left: Some(Dimension::<Twips>::new(1440)),
-                header: Some(Dimension::<Twips>::new(720)),  // 0.5in = 36pt
+                header: Some(Dimension::<Twips>::new(720)), // 0.5in = 36pt
                 footer: Some(Dimension::<Twips>::new(720)),
                 gutter: None,
             }),

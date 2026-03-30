@@ -13,12 +13,21 @@ const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     ("Calibri", &["Carlito", "Liberation Sans", "Noto Sans"]),
     ("Cambria", &["Caladea", "Liberation Serif", "Noto Serif"]),
     ("Arial", &["Liberation Sans", "Noto Sans", "Helvetica"]),
-    ("Times New Roman", &["Liberation Serif", "Noto Serif", "Times"]),
-    ("Courier New", &["Liberation Mono", "Noto Sans Mono", "Courier"]),
+    (
+        "Times New Roman",
+        &["Liberation Serif", "Noto Serif", "Times"],
+    ),
+    (
+        "Courier New",
+        &["Liberation Mono", "Noto Sans Mono", "Courier"],
+    ),
     ("Verdana", &["DejaVu Sans", "Noto Sans"]),
     ("Georgia", &["DejaVu Serif", "Noto Serif"]),
     ("Trebuchet MS", &["Ubuntu", "Noto Sans"]),
-    ("Consolas", &["Inconsolata", "Liberation Mono", "Noto Sans Mono"]),
+    (
+        "Consolas",
+        &["Inconsolata", "Liberation Mono", "Noto Sans Mono"],
+    ),
     ("Segoe UI", &["Noto Sans", "Liberation Sans"]),
 ];
 
@@ -55,16 +64,27 @@ fn resolve_typeface_uncached(font_mgr: &FontMgr, font_family: &str, style: FontS
     {
         for sub in *subs {
             if let Some(tf) = match_exact(font_mgr, sub, style) {
-                log::debug!("[font] '{}' {:?} → substitute '{}'", font_family, style, sub);
+                log::debug!(
+                    "[font] '{}' {:?} → substitute '{}'",
+                    font_family,
+                    style,
+                    sub
+                );
                 return tf;
             }
         }
     }
 
     // No exact match or known substitute — use the system's default sans-serif.
-    let tf = font_mgr.legacy_make_typeface(None::<&str>, style)
+    let tf = font_mgr
+        .legacy_make_typeface(None::<&str>, style)
         .expect("no fallback typeface available");
-    log::debug!("[font] '{}' {:?} → system default '{}'", font_family, style, tf.family_name());
+    log::debug!(
+        "[font] '{}' {:?} → system default '{}'",
+        font_family,
+        style,
+        tf.family_name()
+    );
     tf
 }
 
@@ -145,7 +165,13 @@ pub fn preload_fonts(font_mgr: &FontMgr, families: &[String]) {
 }
 
 /// Create a Skia Font for the given properties.
-pub fn make_font(font_mgr: &FontMgr, font_family: &str, font_size: Pt, bold: bool, italic: bool) -> Font {
+pub fn make_font(
+    font_mgr: &FontMgr,
+    font_family: &str,
+    font_size: Pt,
+    bold: bool,
+    italic: bool,
+) -> Font {
     let style = match (bold, italic) {
         (true, true) => FontStyle::bold_italic(),
         (true, false) => FontStyle::bold(),

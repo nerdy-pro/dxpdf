@@ -1,9 +1,7 @@
 //! Section splitting — split body blocks at SectionBreak nodes,
 //! resolve header/footer content via Document.headers/footers.
 
-use dxpdf_docx_model::model::{
-    Block, Document, RelId, SectionProperties,
-};
+use dxpdf_docx_model::model::{Block, Document, RelId, SectionProperties};
 
 /// A resolved section with its blocks and properties.
 #[derive(Clone, Debug)]
@@ -28,10 +26,10 @@ pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
     for block in &doc.body {
         match block {
             Block::SectionBreak(props) => {
-                let header = resolve_header(doc, &props.header_refs.default)
-                    .or_else(|| prev_header.clone());
-                let footer = resolve_footer(doc, &props.footer_refs.default)
-                    .or_else(|| prev_footer.clone());
+                let header =
+                    resolve_header(doc, &props.header_refs.default).or_else(|| prev_header.clone());
+                let footer =
+                    resolve_footer(doc, &props.footer_refs.default).or_else(|| prev_footer.clone());
                 prev_header.clone_from(&header);
                 prev_footer.clone_from(&footer);
                 sections.push(ResolvedSection {
@@ -48,10 +46,8 @@ pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
     }
 
     // Final section uses Document.final_section.
-    let header = resolve_header(doc, &doc.final_section.header_refs.default)
-        .or(prev_header);
-    let footer = resolve_footer(doc, &doc.final_section.footer_refs.default)
-        .or(prev_footer);
+    let header = resolve_header(doc, &doc.final_section.header_refs.default).or(prev_header);
+    let footer = resolve_footer(doc, &doc.final_section.footer_refs.default).or(prev_footer);
     sections.push(ResolvedSection {
         blocks: current_blocks,
         header,
@@ -64,25 +60,19 @@ pub fn resolve_sections(doc: &Document) -> Vec<ResolvedSection> {
 
 /// Look up header content by RelId.
 fn resolve_header(doc: &Document, rel_id: &Option<RelId>) -> Option<Vec<Block>> {
-    rel_id
-        .as_ref()
-        .and_then(|id| doc.headers.get(id))
-        .cloned()
+    rel_id.as_ref().and_then(|id| doc.headers.get(id)).cloned()
 }
 
 /// Look up footer content by RelId.
 fn resolve_footer(doc: &Document, rel_id: &Option<RelId>) -> Option<Vec<Block>> {
-    rel_id
-        .as_ref()
-        .and_then(|id| doc.footers.get(id))
-        .cloned()
+    rel_id.as_ref().and_then(|id| doc.footers.get(id)).cloned()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use dxpdf_docx_model::model::*;
+    use std::collections::HashMap;
 
     fn empty_doc() -> Document {
         Document {

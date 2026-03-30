@@ -35,7 +35,11 @@ pub fn fit_lines(fragments: &[Fragment], max_width: Pt) -> Vec<FittedLine> {
 }
 
 /// Line fitting with separate first-line and remaining-line widths.
-pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remaining_width: Pt) -> Vec<FittedLine> {
+pub fn fit_lines_with_first(
+    fragments: &[Fragment],
+    first_line_width: Pt,
+    remaining_width: Pt,
+) -> Vec<FittedLine> {
     if fragments.is_empty() {
         return Vec::new();
     }
@@ -79,7 +83,11 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         let new_width = line_width + frag_width;
 
         // Use first-line width for line 0, remaining width for subsequent lines.
-        let current_max = if lines.is_empty() { first_line_width } else { remaining_width };
+        let current_max = if lines.is_empty() {
+            first_line_width
+        } else {
+            remaining_width
+        };
 
         // For overflow checking, use trimmed width — trailing whitespace on the
         // last word is allowed to hang past the margin (standard Word behavior).
@@ -170,7 +178,12 @@ struct RangeMeasure {
 
 /// Measure total width, max height, text height, and ascent for a range of fragments.
 fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasure {
-    let mut m = RangeMeasure { width: Pt::ZERO, height: Pt::ZERO, text_height: Pt::ZERO, ascent: Pt::ZERO };
+    let mut m = RangeMeasure {
+        width: Pt::ZERO,
+        height: Pt::ZERO,
+        text_height: Pt::ZERO,
+        ascent: Pt::ZERO,
+    };
     for frag in &fragments[start..end] {
         m.width += frag.width();
         m.height = m.height.max(frag.height());
@@ -188,8 +201,8 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasu
 mod tests {
     use super::*;
     use crate::layout::fragment::{FontProps, TextMetrics};
-    use std::rc::Rc;
     use crate::resolve::color::RgbColor;
+    use std::rc::Rc;
 
     fn text_frag(text: &str, width: f32) -> Fragment {
         Fragment::Text {
@@ -200,13 +213,22 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                char_spacing: Pt::ZERO,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width), trimmed_width: Pt::new(width),
-            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
+            width: Pt::new(width),
+            trimmed_width: Pt::new(width),
+            metrics: TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(4.0),
+            },
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+            text_offset: Pt::ZERO,
         }
     }
 
@@ -318,13 +340,22 @@ mod tests {
                     bold: false,
                     italic: false,
                     underline: false,
-                    char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
                 },
                 color: RgbColor::BLACK,
-                width: Pt::new(20.0), trimmed_width: Pt::new(20.0),
-                metrics: TextMetrics { ascent: Pt::new(9.0), descent: Pt::new(3.0) },
+                width: Pt::new(20.0),
+                trimmed_width: Pt::new(20.0),
+                metrics: TextMetrics {
+                    ascent: Pt::new(9.0),
+                    descent: Pt::new(3.0),
+                },
                 hyperlink_url: None,
-                shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+                shading: None,
+                border: None,
+                baseline_offset: Pt::ZERO,
+                text_offset: Pt::ZERO,
             },
             Fragment::Text {
                 text: "big".into(),
@@ -334,13 +365,22 @@ mod tests {
                     bold: false,
                     italic: false,
                     underline: false,
-                    char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                    char_spacing: Pt::ZERO,
+                    underline_position: Pt::ZERO,
+                    underline_thickness: Pt::ZERO,
                 },
                 color: RgbColor::BLACK,
-                width: Pt::new(30.0), trimmed_width: Pt::new(30.0),
-                metrics: TextMetrics { ascent: Pt::new(22.0), descent: Pt::new(6.0) },
+                width: Pt::new(30.0),
+                trimmed_width: Pt::new(30.0),
+                metrics: TextMetrics {
+                    ascent: Pt::new(22.0),
+                    descent: Pt::new(6.0),
+                },
                 hyperlink_url: None,
-                shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+                shading: None,
+                border: None,
+                baseline_offset: Pt::ZERO,
+                text_offset: Pt::ZERO,
             },
         ];
         let lines = fit_lines(&frags, Pt::new(100.0));

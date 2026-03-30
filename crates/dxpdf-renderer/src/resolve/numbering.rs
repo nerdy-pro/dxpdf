@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use dxpdf_docx_model::model::{
-    Alignment, NumberFormat, NumberingDefinitions, NumberingLevelDefinition, NumId, NumPicBulletId,
-    RunProperties, Indentation,
+    Alignment, Indentation, NumId, NumPicBulletId, NumberFormat, NumberingDefinitions,
+    NumberingLevelDefinition, RunProperties,
 };
 
 /// A resolved numbering level — ready for label generation.
@@ -38,10 +38,8 @@ pub fn resolve_numbering(
             .map(|a| a.levels.as_slice())
             .unwrap_or(&[]);
 
-        let mut levels: Vec<ResolvedNumberingLevel> = abstract_levels
-            .iter()
-            .map(resolve_level)
-            .collect();
+        let mut levels: Vec<ResolvedNumberingLevel> =
+            abstract_levels.iter().map(resolve_level).collect();
 
         // Apply level overrides
         for ovr in &instance.level_overrides {
@@ -94,7 +92,10 @@ pub fn format_list_label(
         let placeholder = format!("%{}", i + 1);
         if result.contains(&placeholder) {
             let count = counters.get(&(num_id, i)).copied().unwrap_or(1);
-            let fmt = levels.get(i as usize).map(|l| l.format).unwrap_or(NumberFormat::Decimal);
+            let fmt = levels
+                .get(i as usize)
+                .map(|l| l.format)
+                .unwrap_or(NumberFormat::Decimal);
             let formatted = format_number(count, fmt);
             result = result.replace(&placeholder, &formatted);
         }
@@ -116,7 +117,9 @@ fn format_number(n: u32, fmt: NumberFormat) -> String {
 }
 
 fn to_letter_lower(n: u32) -> String {
-    if n == 0 { return String::new(); }
+    if n == 0 {
+        return String::new();
+    }
     let idx = ((n - 1) % 26) as u8;
     String::from((b'a' + idx) as char)
 }
@@ -127,13 +130,26 @@ fn to_letter_upper(n: u32) -> String {
 
 fn to_roman_lower(mut n: u32) -> String {
     const VALS: [(u32, &str); 13] = [
-        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
-        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
-        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
     ];
     let mut s = String::new();
     for &(val, sym) in &VALS {
-        while n >= val { s.push_str(sym); n -= val; }
+        while n >= val {
+            s.push_str(sym);
+            n -= val;
+        }
     }
     s
 }

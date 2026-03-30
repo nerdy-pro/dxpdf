@@ -191,20 +191,14 @@ mod tests {
 
     #[test]
     fn biggest_and_smallest() {
-        let c = BoxConstraints::new(
-            Pt::new(10.0), Pt::new(100.0),
-            Pt::new(20.0), Pt::new(200.0),
-        );
+        let c = BoxConstraints::new(Pt::new(10.0), Pt::new(100.0), Pt::new(20.0), Pt::new(200.0));
         assert_eq!(c.biggest(), PtSize::new(Pt::new(100.0), Pt::new(200.0)));
         assert_eq!(c.smallest(), PtSize::new(Pt::new(10.0), Pt::new(20.0)));
     }
 
     #[test]
     fn constrain_clamps_to_bounds() {
-        let c = BoxConstraints::new(
-            Pt::new(50.0), Pt::new(200.0),
-            Pt::new(50.0), Pt::new(200.0),
-        );
+        let c = BoxConstraints::new(Pt::new(50.0), Pt::new(200.0), Pt::new(50.0), Pt::new(200.0));
         // Too small
         let s1 = c.constrain(PtSize::new(Pt::new(10.0), Pt::new(10.0)));
         assert_eq!(s1, PtSize::new(Pt::new(50.0), Pt::new(50.0)));
@@ -222,10 +216,10 @@ mod tests {
     fn deflate_shrinks_constraints() {
         let c = BoxConstraints::tight(PtSize::new(Pt::new(400.0), Pt::new(600.0)));
         let edges = PtEdgeInsets::new(
-            Pt::new(10.0),  // top
-            Pt::new(20.0),  // right
-            Pt::new(30.0),  // bottom
-            Pt::new(40.0),  // left
+            Pt::new(10.0), // top
+            Pt::new(20.0), // right
+            Pt::new(30.0), // bottom
+            Pt::new(40.0), // left
         );
         let d = c.deflate(&edges);
 
@@ -239,7 +233,10 @@ mod tests {
     fn deflate_does_not_go_negative() {
         let c = BoxConstraints::tight(PtSize::new(Pt::new(10.0), Pt::new(10.0)));
         let edges = PtEdgeInsets::new(
-            Pt::new(100.0), Pt::new(100.0), Pt::new(100.0), Pt::new(100.0),
+            Pt::new(100.0),
+            Pt::new(100.0),
+            Pt::new(100.0),
+            Pt::new(100.0),
         );
         let d = c.deflate(&edges);
         assert_eq!(d.max_width.raw(), 0.0);
@@ -248,13 +245,13 @@ mod tests {
 
     #[test]
     fn enforce_intersects_constraints() {
-        let parent = BoxConstraints::new(
-            Pt::new(0.0), Pt::new(400.0),
-            Pt::new(0.0), Pt::new(600.0),
-        );
+        let parent =
+            BoxConstraints::new(Pt::new(0.0), Pt::new(400.0), Pt::new(0.0), Pt::new(600.0));
         let child = BoxConstraints::new(
-            Pt::new(100.0), Pt::new(300.0),
-            Pt::new(50.0), Pt::new(500.0),
+            Pt::new(100.0),
+            Pt::new(300.0),
+            Pt::new(50.0),
+            Pt::new(500.0),
         );
         let result = parent.enforce(&child);
 
@@ -278,14 +275,9 @@ mod tests {
 
     #[test]
     fn enforce_wider_child_gets_clamped() {
-        let parent = BoxConstraints::new(
-            Pt::new(0.0), Pt::new(200.0),
-            Pt::new(0.0), Pt::new(200.0),
-        );
-        let child = BoxConstraints::new(
-            Pt::new(0.0), Pt::new(999.0),
-            Pt::new(0.0), Pt::new(999.0),
-        );
+        let parent =
+            BoxConstraints::new(Pt::new(0.0), Pt::new(200.0), Pt::new(0.0), Pt::new(200.0));
+        let child = BoxConstraints::new(Pt::new(0.0), Pt::new(999.0), Pt::new(0.0), Pt::new(999.0));
         let result = parent.enforce(&child);
 
         assert_eq!(result.max_width.raw(), 200.0, "child can't exceed parent");
@@ -298,20 +290,17 @@ mod tests {
     fn page_to_body_to_cell_cascade() {
         // Simulate: Page (612x792) → margins (72 each) → table cell (200 wide, 20+20 margins)
         let page = BoxConstraints::tight(PtSize::new(Pt::new(612.0), Pt::new(792.0)));
-        let margins = PtEdgeInsets::new(
-            Pt::new(72.0), Pt::new(72.0), Pt::new(72.0), Pt::new(72.0),
-        );
+        let margins = PtEdgeInsets::new(Pt::new(72.0), Pt::new(72.0), Pt::new(72.0), Pt::new(72.0));
         let body = page.deflate(&margins);
-        assert_eq!(body.max_width.raw(), 468.0);  // 612 - 144
-        assert_eq!(body.max_height.raw(), 648.0);  // 792 - 144
+        assert_eq!(body.max_width.raw(), 468.0); // 612 - 144
+        assert_eq!(body.max_height.raw(), 648.0); // 792 - 144
 
         // Table cell: tight width 200, loose height
         let cell = BoxConstraints::tight_width(Pt::new(200.0), body.max_height);
-        let cell_padding = PtEdgeInsets::new(
-            Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0),
-        );
+        let cell_padding =
+            PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0));
         let cell_content = cell.deflate(&cell_padding);
-        assert_eq!(cell_content.max_width.raw(), 180.0);  // 200 - 20
+        assert_eq!(cell_content.max_width.raw(), 180.0); // 200 - 20
         assert!(cell_content.is_tight_width());
     }
 }

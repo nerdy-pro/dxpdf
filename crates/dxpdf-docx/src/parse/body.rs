@@ -293,25 +293,49 @@ fn parse_run(
                     }
                     // Non-run inlines: flush current run elements, then push separately.
                     b"instrText" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         let text = xml::read_text_content(reader, buf)?;
                         content.push(Inline::InstrText(text));
                     }
                     b"drawing" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         if let Some(img) = parse_drawing(reader, buf)? {
                             content.push(Inline::Image(Box::new(img)));
                         }
                     }
                     b"pict" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::Pict(parse_pict(reader, buf)?));
                     }
                     b"AlternateContent" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
-                        content.push(Inline::AlternateContent(
-                            parse_alternate_content(reader, buf)?,
-                        ));
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
+                        content.push(Inline::AlternateContent(parse_alternate_content(
+                            reader, buf,
+                        )?));
                     }
                     _ => xml::warn_unsupported_element("run", local),
                 }
@@ -348,42 +372,90 @@ fn parse_run(
                     b"lastRenderedPageBreak" => elements.push(RunElement::LastRenderedPageBreak),
                     // Non-run inlines: flush, then push separately.
                     b"sym" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         let font = xml::optional_attr(e, b"font")?.unwrap_or_default();
                         let char_str = xml::optional_attr(e, b"char")?.unwrap_or_default();
                         let char_code = u16::from_str_radix(&char_str, 16).unwrap_or(0);
                         content.push(Inline::Symbol(Symbol { font, char_code }));
                     }
                     b"footnoteReference" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
                             content.push(Inline::FootnoteRef(NoteId::new(id)));
                         }
                     }
                     b"endnoteReference" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         if let Some(id) = xml::optional_attr_i64(e, b"id")? {
                             content.push(Inline::EndnoteRef(NoteId::new(id)));
                         }
                     }
                     b"separator" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::Separator);
                     }
                     b"continuationSeparator" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::ContinuationSeparator);
                     }
                     b"footnoteRef" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::FootnoteRefMark);
                     }
                     b"endnoteRef" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::EndnoteRefMark);
                     }
                     b"fldChar" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         let field_char_type = match xml::optional_attr(e, b"fldCharType")?
                             .as_deref()
                         {
@@ -566,7 +638,11 @@ fn parse_vml_shapetype_from_attrs(e: &BytesStart<'_>) -> Result<VmlShapeType> {
     Ok(VmlShapeType {
         id: xml::optional_attr(e, b"id")?.map(VmlShapeId::new),
         coord_size: parse_vml_vector2d(xml::optional_attr(e, b"coordsize")?),
-        spt: xml::optional_attr(e, b"spt")?.map(|s| s.parse::<f32>()).transpose().ok().flatten(),
+        spt: xml::optional_attr(e, b"spt")?
+            .map(|s| s.parse::<f32>())
+            .transpose()
+            .ok()
+            .flatten(),
         adj: parse_vml_adj(xml::optional_attr(e, b"adj")?),
         path: parse_vml_path_commands(xml::optional_attr(e, b"path")?),
         filled: vml_bool_attr(e, b"filled")?,
@@ -587,7 +663,11 @@ fn parse_vml_shapetype(
     let mut st = VmlShapeType {
         id: xml::optional_attr(e, b"id")?.map(VmlShapeId::new),
         coord_size: parse_vml_vector2d(xml::optional_attr(e, b"coordsize")?),
-        spt: xml::optional_attr(e, b"spt")?.map(|s| s.parse::<f32>()).transpose().ok().flatten(),
+        spt: xml::optional_attr(e, b"spt")?
+            .map(|s| s.parse::<f32>())
+            .transpose()
+            .ok()
+            .flatten(),
         adj: parse_vml_adj(xml::optional_attr(e, b"adj")?),
         path: parse_vml_path_commands(xml::optional_attr(e, b"path")?),
         filled: vml_bool_attr(e, b"filled")?,
@@ -639,7 +719,9 @@ fn parse_vml_shape_from_attrs(e: &BytesStart<'_>) -> Result<VmlShape> {
         shape_type_ref: xml::optional_attr(e, b"type")?
             .map(|s| VmlShapeId::new(s.strip_prefix('#').unwrap_or(&s))),
         style: parse_vml_style(xml::optional_attr(e, b"style")?),
-        fill_color: xml::optional_attr(e, b"fillcolor")?.map(|s| parse_vml_color(&s)).transpose()?,
+        fill_color: xml::optional_attr(e, b"fillcolor")?
+            .map(|s| parse_vml_color(&s))
+            .transpose()?,
         stroked: vml_bool_attr(e, b"stroked")?,
         stroke: None,
         vml_path: None,
@@ -660,7 +742,9 @@ fn parse_vml_shape(
         shape_type_ref: xml::optional_attr(e, b"type")?
             .map(|s| VmlShapeId::new(s.strip_prefix('#').unwrap_or(&s))),
         style: parse_vml_style(xml::optional_attr(e, b"style")?),
-        fill_color: xml::optional_attr(e, b"fillcolor")?.map(|s| parse_vml_color(&s)).transpose()?,
+        fill_color: xml::optional_attr(e, b"fillcolor")?
+            .map(|s| parse_vml_color(&s))
+            .transpose()?,
         stroked: vml_bool_attr(e, b"stroked")?,
         stroke: None,
         vml_path: None,
@@ -979,7 +1063,10 @@ fn parse_vml_style(s: Option<String>) -> VmlStyle {
                     "inside" => Some(MsoPositionH::Inside),
                     "outside" => Some(MsoPositionH::Outside),
                     _ => {
-                        log::warn!("vml-style: unsupported mso-position-horizontal value {:?}", val);
+                        log::warn!(
+                            "vml-style: unsupported mso-position-horizontal value {:?}",
+                            val
+                        );
                         None
                     }
                 };
@@ -995,7 +1082,10 @@ fn parse_vml_style(s: Option<String>) -> VmlStyle {
                     "inner-margin-area" => Some(MsoPositionHRelative::InnerMarginArea),
                     "outer-margin-area" => Some(MsoPositionHRelative::OuterMarginArea),
                     _ => {
-                        log::warn!("vml-style: unsupported mso-position-horizontal-relative value {:?}", val);
+                        log::warn!(
+                            "vml-style: unsupported mso-position-horizontal-relative value {:?}",
+                            val
+                        );
                         None
                     }
                 };
@@ -1009,7 +1099,10 @@ fn parse_vml_style(s: Option<String>) -> VmlStyle {
                     "inside" => Some(MsoPositionV::Inside),
                     "outside" => Some(MsoPositionV::Outside),
                     _ => {
-                        log::warn!("vml-style: unsupported mso-position-vertical value {:?}", val);
+                        log::warn!(
+                            "vml-style: unsupported mso-position-vertical value {:?}",
+                            val
+                        );
                         None
                     }
                 };
@@ -1025,7 +1118,10 @@ fn parse_vml_style(s: Option<String>) -> VmlStyle {
                     "inner-margin-area" => Some(MsoPositionVRelative::InnerMarginArea),
                     "outer-margin-area" => Some(MsoPositionVRelative::OuterMarginArea),
                     _ => {
-                        log::warn!("vml-style: unsupported mso-position-vertical-relative value {:?}", val);
+                        log::warn!(
+                            "vml-style: unsupported mso-position-vertical-relative value {:?}",
+                            val
+                        );
                         None
                     }
                 };
@@ -1369,11 +1465,7 @@ fn vml_bool_attr(e: &BytesStart<'_>, name: &[u8]) -> Result<Option<bool>> {
         Some("t") | Some("true") => Ok(Some(true)),
         Some("f") | Some("false") => Ok(Some(false)),
         Some(other) => {
-            xml::warn_unsupported_attr(
-                "vml",
-                &String::from_utf8_lossy(name),
-                other,
-            );
+            xml::warn_unsupported_attr("vml", &String::from_utf8_lossy(name), other);
             Ok(None)
         }
         None => Ok(None),
@@ -1406,7 +1498,8 @@ fn parse_vml_path_commands(s: Option<String>) -> Vec<VmlPathCommand> {
             || rest.starts_with("qy")
             || rest.starts_with("nf")
             || rest.starts_with("ns")
-            || rest.starts_with("hа") // ha..hh variants
+            || rest.starts_with("hа")
+        // ha..hh variants
         {
             2
         } else if rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
@@ -1564,10 +1657,7 @@ fn take_coord(tokens: &[&str], i: &mut usize) -> Option<VmlPathCoord> {
     Some(coord)
 }
 
-fn take_2_coord(
-    tokens: &[&str],
-    i: &mut usize,
-) -> Option<(VmlPathCoord, VmlPathCoord)> {
+fn take_2_coord(tokens: &[&str], i: &mut usize) -> Option<(VmlPathCoord, VmlPathCoord)> {
     let a = take_coord(tokens, i)?;
     let b = take_coord(tokens, i)?;
     Some((a, b))
@@ -1592,8 +1682,6 @@ fn take_6_coord(
     let f = take_coord(tokens, i)?;
     Some((a, b, c, d, e, f))
 }
-
-
 
 /// Parse a VML `adj` attribute — comma-separated integer adjustment values.
 fn parse_vml_adj(s: Option<String>) -> Vec<i64> {
@@ -1632,8 +1720,7 @@ fn parse_alternate_content(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"Choice" => {
-                        let requires_str =
-                            xml::optional_attr(e, b"Requires")?.unwrap_or_default();
+                        let requires_str = xml::optional_attr(e, b"Requires")?.unwrap_or_default();
                         let requires = match requires_str.as_str() {
                             "wps" => McRequires::Wps,
                             "wpg" => McRequires::Wpg,
@@ -1645,10 +1732,7 @@ fn parse_alternate_content(
                             "w15" => McRequires::W15,
                             "w16" => McRequires::W16,
                             other => {
-                                log::warn!(
-                                    "mc:Choice: unsupported Requires {:?}",
-                                    other
-                                );
+                                log::warn!("mc:Choice: unsupported Requires {:?}", other);
                                 xml::skip_to_end(reader, buf, b"Choice")?;
                                 continue;
                             }
@@ -1665,11 +1749,7 @@ fn parse_alternate_content(
                     }
                 }
             }
-            Event::End(ref e)
-                if xml::local_name(e.name().as_ref()) == b"AlternateContent" =>
-            {
-                break
-            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"AlternateContent" => break,
             Event::Eof => return Err(xml::unexpected_eof(b"AlternateContent")),
             _ => {}
         }

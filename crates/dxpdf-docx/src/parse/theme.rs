@@ -102,10 +102,7 @@ fn parse_theme_elements(
 
 // ── a:clrScheme (§20.1.6.2) ────────────────────────────────────────────────
 
-fn parse_color_scheme(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<ThemeColorScheme> {
+fn parse_color_scheme(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<ThemeColorScheme> {
     let mut scheme = ThemeColorScheme::default();
 
     loop {
@@ -263,39 +260,48 @@ fn parse_font_collection(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"latin" => {
-                        scheme.latin = xml::optional_attr(e, b"typeface")?
-                            .ok_or_else(|| crate::error::ParseError::MissingAttribute {
+                        scheme.latin = xml::optional_attr(e, b"typeface")?.ok_or_else(|| {
+                            crate::error::ParseError::MissingAttribute {
                                 element: "a:latin".into(),
                                 attr: "typeface".into(),
-                            })?;
+                            }
+                        })?;
                     }
                     b"ea" => {
-                        scheme.east_asian = xml::optional_attr(e, b"typeface")?
-                            .ok_or_else(|| crate::error::ParseError::MissingAttribute {
-                                element: "a:ea".into(),
-                                attr: "typeface".into(),
+                        scheme.east_asian =
+                            xml::optional_attr(e, b"typeface")?.ok_or_else(|| {
+                                crate::error::ParseError::MissingAttribute {
+                                    element: "a:ea".into(),
+                                    attr: "typeface".into(),
+                                }
                             })?;
                     }
                     b"cs" => {
-                        scheme.complex_script = xml::optional_attr(e, b"typeface")?
-                            .ok_or_else(|| crate::error::ParseError::MissingAttribute {
-                                element: "a:cs".into(),
-                                attr: "typeface".into(),
+                        scheme.complex_script =
+                            xml::optional_attr(e, b"typeface")?.ok_or_else(|| {
+                                crate::error::ParseError::MissingAttribute {
+                                    element: "a:cs".into(),
+                                    attr: "typeface".into(),
+                                }
                             })?;
                     }
                     b"font" => {
-                        let script_str = xml::optional_attr(e, b"script")?
-                            .ok_or_else(|| crate::error::ParseError::MissingAttribute {
+                        let script_str = xml::optional_attr(e, b"script")?.ok_or_else(|| {
+                            crate::error::ParseError::MissingAttribute {
                                 element: "a:font".into(),
                                 attr: "script".into(),
-                            })?;
+                            }
+                        })?;
                         let script = parse_script_tag(&script_str);
-                        let typeface = xml::optional_attr(e, b"typeface")?
-                            .ok_or_else(|| crate::error::ParseError::MissingAttribute {
+                        let typeface = xml::optional_attr(e, b"typeface")?.ok_or_else(|| {
+                            crate::error::ParseError::MissingAttribute {
                                 element: "a:font".into(),
                                 attr: "typeface".into(),
-                            })?;
-                        scheme.script_fonts.push(ThemeScriptFont { script, typeface });
+                            }
+                        })?;
+                        scheme
+                            .script_fonts
+                            .push(ThemeScriptFont { script, typeface });
                     }
                     _ => xml::warn_unsupported_element("fontCollection", local),
                 }

@@ -119,7 +119,11 @@ fn resolve_theme_font_ref(
         ThemeFontRef::MinorEastAsia => &theme.minor_font.east_asian,
         ThemeFontRef::MinorBidi => &theme.minor_font.complex_script,
     };
-    if name.is_empty() { None } else { Some(name.clone()) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.clone())
+    }
 }
 
 fn add_nonempty(set: &mut HashSet<String>, s: &str) {
@@ -192,8 +196,8 @@ fn collect_from_inlines(set: &mut HashSet<String>, inlines: &[Inline]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use dxpdf_docx_model::model::*;
+    use std::collections::HashMap;
 
     fn empty_doc() -> Document {
         Document {
@@ -324,7 +328,8 @@ mod tests {
     fn collects_from_headers() {
         let mut doc = empty_doc();
         let header_id = RelId::new("rId1");
-        doc.headers.insert(header_id, vec![para_with_run("Georgia")]);
+        doc.headers
+            .insert(header_id, vec![para_with_run("Georgia")]);
 
         let families = collect_font_families(&doc);
         assert!(families.contains(&"Georgia".to_string()));

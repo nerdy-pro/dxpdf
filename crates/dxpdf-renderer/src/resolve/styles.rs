@@ -21,7 +21,10 @@ pub struct ResolvedStyle {
 /// Resolve all styles in the stylesheet by walking `basedOn` chains.
 /// The theme is used to resolve `asciiTheme` / `hAnsiTheme` font references
 /// on style-level run properties (§17.3.2.26).
-pub fn resolve_styles(sheet: &StyleSheet, theme: Option<&Theme>) -> HashMap<StyleId, ResolvedStyle> {
+pub fn resolve_styles(
+    sheet: &StyleSheet,
+    theme: Option<&Theme>,
+) -> HashMap<StyleId, ResolvedStyle> {
     let mut resolved: HashMap<StyleId, ResolvedStyle> = HashMap::new();
 
     for id in sheet.styles.keys() {
@@ -54,10 +57,7 @@ fn resolve_one(
     // Cycle detection: if we're already visiting this style, stop recursion.
     if !visiting.insert(id.clone()) {
         // Break the cycle — resolve with just own properties + doc defaults.
-        let mut para = style
-            .paragraph_properties
-            .clone()
-            .unwrap_or_default();
+        let mut para = style.paragraph_properties.clone().unwrap_or_default();
         let mut run = style.run_properties.clone().unwrap_or_default();
         let table = style.table_properties.clone();
         merge_paragraph_properties(&mut para, &sheet.doc_defaults_paragraph);
@@ -82,10 +82,7 @@ fn resolve_one(
     }
 
     // Start with own properties.
-    let mut para = style
-        .paragraph_properties
-        .clone()
-        .unwrap_or_default();
+    let mut para = style.paragraph_properties.clone().unwrap_or_default();
     let mut run = style.run_properties.clone().unwrap_or_default();
     // §17.3.2.26: resolve theme font references on the style's own run properties.
     if let Some(th) = theme {
@@ -121,7 +118,7 @@ fn resolve_one(
             paragraph: para,
             run,
             table,
-                table_style_overrides: style.table_style_overrides.clone(),
+            table_style_overrides: style.table_style_overrides.clone(),
         },
     );
 }
@@ -219,7 +216,11 @@ mod tests {
         let resolved = resolve_styles(&sheet, None);
         let h1 = resolved.get(&StyleId::new("Heading1")).unwrap();
 
-        assert_eq!(h1.paragraph.alignment, Some(Alignment::Center), "child overrides parent");
+        assert_eq!(
+            h1.paragraph.alignment,
+            Some(Alignment::Center),
+            "child overrides parent"
+        );
         assert_eq!(h1.run.bold, Some(true), "child overrides parent");
         assert_eq!(
             h1.run.font_size,
@@ -273,7 +274,11 @@ mod tests {
 
         assert_eq!(leaf.run.italic, Some(true), "own value");
         assert_eq!(leaf.run.bold, Some(true), "from Mid");
-        assert_eq!(leaf.run.font_size, Some(Dimension::<HalfPoints>::new(20)), "from Base");
+        assert_eq!(
+            leaf.run.font_size,
+            Some(Dimension::<HalfPoints>::new(20)),
+            "from Base"
+        );
     }
 
     #[test]
@@ -281,17 +286,25 @@ mod tests {
         let sheet = make_sheet(vec![
             (
                 StyleId::new("A"),
-                style(Some("B"), None, Some(RunProperties {
-                    bold: Some(true),
-                    ..Default::default()
-                })),
+                style(
+                    Some("B"),
+                    None,
+                    Some(RunProperties {
+                        bold: Some(true),
+                        ..Default::default()
+                    }),
+                ),
             ),
             (
                 StyleId::new("B"),
-                style(Some("A"), None, Some(RunProperties {
-                    italic: Some(true),
-                    ..Default::default()
-                })),
+                style(
+                    Some("A"),
+                    None,
+                    Some(RunProperties {
+                        italic: Some(true),
+                        ..Default::default()
+                    }),
+                ),
             ),
         ]);
 
@@ -334,12 +347,9 @@ mod tests {
                 font_size: Some(Dimension::<HalfPoints>::new(22)),
                 ..Default::default()
             },
-            styles: [(
-                StyleId::new("Normal"),
-                style(None, None, None),
-            )]
-            .into_iter()
-            .collect(),
+            styles: [(StyleId::new("Normal"), style(None, None, None))]
+                .into_iter()
+                .collect(),
             latent_styles: None,
         };
 
@@ -348,8 +358,7 @@ mod tests {
 
         // Paragraph doc defaults are deferred to the caller.
         assert_eq!(
-            normal.paragraph.alignment,
-            None,
+            normal.paragraph.alignment, None,
             "paragraph doc defaults are not merged into resolved styles"
         );
         // Run doc defaults ARE merged during resolution.

@@ -246,8 +246,7 @@ mod tests {
     #[test]
     fn resolve_preserves_media() {
         let mut doc = empty_doc();
-        doc.media
-            .insert(RelId::new("rId1"), vec![0xFF, 0xD8, 0xFF]);
+        doc.media.insert(RelId::new("rId1"), vec![0xFF, 0xD8, 0xFF]);
 
         let resolved = resolve(&doc);
         assert!(resolved.media.contains_key(&RelId::new("rId1")));

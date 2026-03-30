@@ -42,7 +42,7 @@ pub(crate) fn tokenize(input: &str) -> Result<Vec<Token>, FieldParseError> {
                 return Err(FieldParseError::UnterminatedString { position: start });
             }
             i += 1; // skip closing quote
-            // Handle Unicode: re-decode from the original slice for non-ASCII
+                    // Handle Unicode: re-decode from the original slice for non-ASCII
             let content = &input[start + 1..i - 1];
             tokens.push(Token::Quoted(content.to_string(), start));
             continue;
@@ -67,11 +67,7 @@ pub(crate) fn tokenize(input: &str) -> Result<Vec<Token>, FieldParseError> {
 
         // Word: sequence of non-whitespace, non-quote, non-backslash characters
         let start = i;
-        while i < len
-            && !bytes[i].is_ascii_whitespace()
-            && bytes[i] != b'"'
-            && bytes[i] != b'\\'
-        {
+        while i < len && !bytes[i].is_ascii_whitespace() && bytes[i] != b'"' && bytes[i] != b'\\' {
             i += 1;
         }
         let word = &input[start..i];
@@ -246,12 +242,13 @@ pub fn parse(input: &str) -> Result<FieldInstruction, FieldParseError> {
 
         "SYMBOL" => {
             let code_str = require_first_arg(&mut remaining, "SYMBOL", "character code")?;
-            let char_code = code_str.parse::<u32>().map_err(|e| {
-                FieldParseError::InvalidNumber {
-                    value: code_str,
-                    reason: e.to_string(),
-                }
-            })?;
+            let char_code =
+                code_str
+                    .parse::<u32>()
+                    .map_err(|e| FieldParseError::InvalidNumber {
+                        value: code_str,
+                        reason: e.to_string(),
+                    })?;
             let font = switches::take_switch_with_value(&mut remaining, 'f')?;
             Ok(FieldInstruction::Symbol {
                 char_code,

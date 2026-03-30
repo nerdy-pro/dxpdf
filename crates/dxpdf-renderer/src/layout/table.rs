@@ -174,20 +174,26 @@ fn measure_table_rows(
             let mut row_grid = Vec::new();
             let mut grid_idx = 0;
             for (cell_ci, cell_input) in row.cells.iter().enumerate() {
-                let (mut b_top, mut b_bottom, b_left, b_right) =
-                    resolve_cell_effective_borders(
-                        cell_input, borders, row_idx, cell_ci,
-                        num_rows, row.cells.len(),
-                    );
+                let (mut b_top, mut b_bottom, b_left, b_right) = resolve_cell_effective_borders(
+                    cell_input,
+                    borders,
+                    row_idx,
+                    cell_ci,
+                    num_rows,
+                    row.cells.len(),
+                );
                 if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
                     b_top = None;
                 }
-                if row_idx + 1 < num_rows
-                    && is_vmerge_continue(&rows[row_idx + 1], grid_idx)
-                {
+                if row_idx + 1 < num_rows && is_vmerge_continue(&rows[row_idx + 1], grid_idx) {
                     b_bottom = None;
                 }
-                row_borders.push(CellBorders { top: b_top, bottom: b_bottom, left: b_left, right: b_right });
+                row_borders.push(CellBorders {
+                    top: b_top,
+                    bottom: b_bottom,
+                    left: b_left,
+                    right: b_right,
+                });
                 row_grid.push(grid_idx);
                 grid_idx += cell_input.grid_span.max(1) as usize;
             }
@@ -254,18 +260,30 @@ fn measure_table_rows(
 
             let is_continue = cell.vertical_merge == Some(VerticalMergeState::Continue);
             let layout = if is_continue {
-                CellLayout { commands: Vec::new(), content_height: Pt::ZERO }
+                CellLayout {
+                    commands: Vec::new(),
+                    content_height: Pt::ZERO,
+                }
             } else {
-                layout_cell(&cell.blocks, layout_w, &cell.margins, default_line_height, measure_text)
+                layout_cell(
+                    &cell.blocks,
+                    layout_w,
+                    &cell.margins,
+                    default_line_height,
+                    measure_text,
+                )
             };
 
             if cell.vertical_merge.is_none() {
-                max_height = max_height.max(
-                    layout.content_height + cell.margins.vertical(),
-                );
+                max_height = max_height.max(layout.content_height + cell.margins.vertical());
             }
 
-            entries.push(CellLayoutEntry { layout, cell_x, cell_w, grid_col: grid_idx });
+            entries.push(CellLayoutEntry {
+                layout,
+                cell_x,
+                cell_w,
+                grid_col: grid_idx,
+            });
             grid_idx += span;
         }
 
@@ -283,21 +301,33 @@ fn measure_table_rows(
     expand_rows_for_vmerge(rows, &row_cell_layouts, &mut row_heights);
 
     // Compute border gaps and assemble measured rows.
-    let measured_rows: Vec<MeasuredRow> = row_cell_layouts.into_iter()
+    let measured_rows: Vec<MeasuredRow> = row_cell_layouts
+        .into_iter()
         .zip(resolved_borders)
         .zip(row_heights.iter())
         .enumerate()
         .map(|(row_idx, ((entries, borders), &height))| {
             let border_gap_below = if row_idx + 1 < num_rows {
-                borders.iter().map(|b| border_width(b.bottom)).fold(Pt::ZERO, Pt::max)
+                borders
+                    .iter()
+                    .map(|b| border_width(b.bottom))
+                    .fold(Pt::ZERO, Pt::max)
             } else {
                 Pt::ZERO
             };
-            MeasuredRow { entries, borders, height, border_gap_below }
+            MeasuredRow {
+                entries,
+                borders,
+                height,
+                border_gap_below,
+            }
         })
         .collect();
 
-    MeasuredTable { rows: measured_rows, table_width }
+    MeasuredTable {
+        rows: measured_rows,
+        table_width,
+    }
 }
 
 /// Emit draw commands for a range of measured rows.
@@ -324,8 +354,11 @@ fn emit_table_rows(
         let row_height = mr.height;
         let is_first_in_range = row_idx == range_start;
 
-        for (cell_ci, (entry, cell_input)) in
-            mr.entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
+        for (cell_ci, (entry, cell_input)) in mr
+            .entries
+            .iter()
+            .zip(rows[row_idx].cells.iter())
+            .enumerate()
         {
             if let Some(color) = cell_input.shading {
                 commands.push(DrawCommand::Rect {
@@ -367,8 +400,16 @@ fn emit_table_rows(
             };
             emit_cell_borders(
                 border_commands,
-                CellBorders { top: cell_top, bottom: b_bottom, left: b_left, right: b_right },
-                entry.cell_x, entry.cell_w, *cursor_y, row_height + bottom_border_gap,
+                CellBorders {
+                    top: cell_top,
+                    bottom: b_bottom,
+                    left: b_left,
+                    right: b_right,
+                },
+                entry.cell_x,
+                entry.cell_w,
+                *cursor_y,
+                row_height + bottom_border_gap,
             );
         }
 
@@ -396,7 +437,14 @@ pub fn layout_table(
         };
     }
 
-    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text, suppress_first_row_top);
+    let measured = measure_table_rows(
+        rows,
+        col_widths,
+        default_line_height,
+        borders,
+        measure_text,
+        suppress_first_row_top,
+    );
 
     let mut commands = Vec::new();
     let mut content_commands = Vec::new();
@@ -405,8 +453,13 @@ pub fn layout_table(
 
     // Monolithic table: no top border override needed — borders are resolved correctly.
     emit_table_rows(
-        &measured, rows, 0..measured.rows.len(),
-        &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
+        &measured,
+        rows,
+        0..measured.rows.len(),
+        &mut cursor_y,
+        &mut commands,
+        &mut content_commands,
+        &mut border_commands,
         None,
     );
 
@@ -447,16 +500,28 @@ pub fn layout_table_paginated(
     suppress_first_row_top: bool,
 ) -> Vec<TableSlice> {
     if rows.is_empty() || col_widths.is_empty() {
-        return vec![TableSlice { commands: Vec::new(), size: PtSize::ZERO }];
+        return vec![TableSlice {
+            commands: Vec::new(),
+            size: PtSize::ZERO,
+        }];
     }
 
-    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text, suppress_first_row_top);
+    let measured = measure_table_rows(
+        rows,
+        col_widths,
+        default_line_height,
+        borders,
+        measure_text,
+        suppress_first_row_top,
+    );
 
     // §17.4.49: contiguous header rows from index 0.
-    let header_count = rows.iter()
+    let header_count = rows
+        .iter()
         .take_while(|r| r.is_header == Some(true))
         .count();
-    let header_height: Pt = measured.rows[..header_count].iter()
+    let header_height: Pt = measured.rows[..header_count]
+        .iter()
         .map(|mr| mr.height + mr.border_gap_below)
         .sum();
 
@@ -492,7 +557,10 @@ pub fn layout_table_paginated(
             if group.height > remaining {
                 log::warn!(
                     "[table] row group {}-{} ({:.1}pt) exceeds page height ({:.1}pt available)",
-                    group.start, group.end, group.height.raw(), remaining.raw(),
+                    group.start,
+                    group.end,
+                    group.height.raw(),
+                    remaining.raw(),
                 );
             }
             current_slice.push(group.start..group.end);
@@ -507,35 +575,44 @@ pub fn layout_table_paginated(
     let outer_top_border = borders.and_then(|b| b.top);
 
     // Emit draw commands for each slice.
-    slices.iter().enumerate().map(|(slice_idx, row_ranges)| {
-        let mut commands = Vec::new();
-        let mut content_commands = Vec::new();
-        let mut border_commands = Vec::new();
-        let mut cursor_y = Pt::ZERO;
-        for (range_idx, range) in row_ranges.iter().enumerate() {
-            // The first range on each continuation slice (slice_idx > 0) needs
-            // a top border override, since internal conflict resolution removed
-            // it. On the first slice, only apply if suppress_first_row_top was
-            // used (adjacent table collapse) — in that case the first range
-            // should NOT get the override (the whole point is to suppress it).
-            let top_override = if slice_idx > 0 && range_idx == 0 {
-                outer_top_border
-            } else {
-                None
-            };
-            emit_table_rows(
-                &measured, rows, range.clone(),
-                &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
-                top_override,
-            );
-        }
-        commands.append(&mut content_commands);
-        commands.append(&mut border_commands);
-        TableSlice {
-            commands,
-            size: PtSize::new(measured.table_width, cursor_y),
-        }
-    }).collect()
+    slices
+        .iter()
+        .enumerate()
+        .map(|(slice_idx, row_ranges)| {
+            let mut commands = Vec::new();
+            let mut content_commands = Vec::new();
+            let mut border_commands = Vec::new();
+            let mut cursor_y = Pt::ZERO;
+            for (range_idx, range) in row_ranges.iter().enumerate() {
+                // The first range on each continuation slice (slice_idx > 0) needs
+                // a top border override, since internal conflict resolution removed
+                // it. On the first slice, only apply if suppress_first_row_top was
+                // used (adjacent table collapse) — in that case the first range
+                // should NOT get the override (the whole point is to suppress it).
+                let top_override = if slice_idx > 0 && range_idx == 0 {
+                    outer_top_border
+                } else {
+                    None
+                };
+                emit_table_rows(
+                    &measured,
+                    rows,
+                    range.clone(),
+                    &mut cursor_y,
+                    &mut commands,
+                    &mut content_commands,
+                    &mut border_commands,
+                    top_override,
+                );
+            }
+            commands.append(&mut content_commands);
+            commands.append(&mut border_commands);
+            TableSlice {
+                commands,
+                size: PtSize::new(measured.table_width, cursor_y),
+            }
+        })
+        .collect()
 }
 
 /// A group of rows that must stay together during page splitting.
@@ -558,7 +635,9 @@ fn build_row_groups(rows: &[TableRowInput], measured: &MeasuredTable) -> Vec<Row
         // Extend through vMerge Continue rows.
         i += 1;
         while i < rows.len() {
-            let has_continue = rows[i].cells.iter()
+            let has_continue = rows[i]
+                .cells
+                .iter()
                 .any(|c| c.vertical_merge == Some(VerticalMergeState::Continue));
             if has_continue {
                 i += 1;
@@ -566,10 +645,15 @@ fn build_row_groups(rows: &[TableRowInput], measured: &MeasuredTable) -> Vec<Row
                 break;
             }
         }
-        let height: Pt = measured.rows[start..i].iter()
+        let height: Pt = measured.rows[start..i]
+            .iter()
             .map(|mr| mr.height + mr.border_gap_below)
             .sum();
-        groups.push(RowGroup { start, end: i, height });
+        groups.push(RowGroup {
+            start,
+            end: i,
+            height,
+        });
     }
     groups
 }
@@ -602,7 +686,12 @@ fn resolve_cell_effective_borders(
     col_idx: usize,
     num_rows: usize,
     num_cols: usize,
-) -> (Option<TableBorderLine>, Option<TableBorderLine>, Option<TableBorderLine>, Option<TableBorderLine>) {
+) -> (
+    Option<TableBorderLine>,
+    Option<TableBorderLine>,
+    Option<TableBorderLine>,
+    Option<TableBorderLine>,
+) {
     // Start with table-level borders mapped to cell edges.
     let tb = table_borders;
     let is_first_row = row_idx == 0;
@@ -610,17 +699,41 @@ fn resolve_cell_effective_borders(
     let is_first_col = col_idx == 0;
     let is_last_col = col_idx == num_cols - 1;
 
-    let mut top = if is_first_row { tb.and_then(|b| b.top) } else { tb.and_then(|b| b.inside_h) };
-    let mut bottom = if is_last_row { tb.and_then(|b| b.bottom) } else { tb.and_then(|b| b.inside_h) };
-    let mut left = if is_first_col { tb.and_then(|b| b.left) } else { tb.and_then(|b| b.inside_v) };
-    let mut right = if is_last_col { tb.and_then(|b| b.right) } else { tb.and_then(|b| b.inside_v) };
+    let mut top = if is_first_row {
+        tb.and_then(|b| b.top)
+    } else {
+        tb.and_then(|b| b.inside_h)
+    };
+    let mut bottom = if is_last_row {
+        tb.and_then(|b| b.bottom)
+    } else {
+        tb.and_then(|b| b.inside_h)
+    };
+    let mut left = if is_first_col {
+        tb.and_then(|b| b.left)
+    } else {
+        tb.and_then(|b| b.inside_v)
+    };
+    let mut right = if is_last_col {
+        tb.and_then(|b| b.right)
+    } else {
+        tb.and_then(|b| b.inside_v)
+    };
 
     // Per-cell borders from conditional formatting override.
     if let Some(ref cb) = cell.cell_borders {
-        if let Some(v) = &cb.top { top = resolve_override(v); }
-        if let Some(v) = &cb.bottom { bottom = resolve_override(v); }
-        if let Some(v) = &cb.left { left = resolve_override(v); }
-        if let Some(v) = &cb.right { right = resolve_override(v); }
+        if let Some(v) = &cb.top {
+            top = resolve_override(v);
+        }
+        if let Some(v) = &cb.bottom {
+            bottom = resolve_override(v);
+        }
+        if let Some(v) = &cb.left {
+            left = resolve_override(v);
+        }
+        if let Some(v) = &cb.right {
+            right = resolve_override(v);
+        }
     }
 
     (top, bottom, left, right)
@@ -716,7 +829,11 @@ fn resolve_border_conflict(
     match (a, b) {
         (None, b) => b,
         (a, None) => a,
-        (Some(a), Some(b)) => Some(if border_weight(&b) > border_weight(&a) { b } else { a }),
+        (Some(a), Some(b)) => Some(if border_weight(&b) > border_weight(&a) {
+            b
+        } else {
+            a
+        }),
     }
 }
 
@@ -757,7 +874,10 @@ struct CellBorders {
 fn emit_cell_borders(
     commands: &mut Vec<DrawCommand>,
     b: CellBorders,
-    cell_x: Pt, cell_w: Pt, row_y: Pt, row_h: Pt,
+    cell_x: Pt,
+    cell_w: Pt,
+    row_y: Pt,
+    row_h: Pt,
 ) {
     let top_half = b.top.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
     let bot_half = b.bottom.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
@@ -766,28 +886,40 @@ fn emit_cell_borders(
 
     // Horizontal borders: shifted inward by half-width.
     if let Some(ref border) = b.top {
-        emit_border(commands, border,
+        emit_border(
+            commands,
+            border,
             PtOffset::new(cell_x, row_y + top_half),
-            PtOffset::new(cell_x + cell_w, row_y + top_half));
+            PtOffset::new(cell_x + cell_w, row_y + top_half),
+        );
     }
     if let Some(ref border) = b.bottom {
-        emit_border(commands, border,
+        emit_border(
+            commands,
+            border,
             PtOffset::new(cell_x, row_y + row_h - bot_half),
-            PtOffset::new(cell_x + cell_w, row_y + row_h - bot_half));
+            PtOffset::new(cell_x + cell_w, row_y + row_h - bot_half),
+        );
     }
 
     // Vertical borders: shifted inward, extended to cover corners.
     let v_top = row_y;
     let v_bot = row_y + row_h;
     if let Some(ref border) = b.left {
-        emit_border(commands, border,
+        emit_border(
+            commands,
+            border,
             PtOffset::new(cell_x + left_half, v_top),
-            PtOffset::new(cell_x + left_half, v_bot));
+            PtOffset::new(cell_x + left_half, v_bot),
+        );
     }
     if let Some(ref border) = b.right {
-        emit_border(commands, border,
+        emit_border(
+            commands,
+            border,
             PtOffset::new(cell_x + cell_w - right_half, v_top),
-            PtOffset::new(cell_x + cell_w - right_half, v_bot));
+            PtOffset::new(cell_x + cell_w - right_half, v_bot),
+        );
     }
 }
 
@@ -805,20 +937,22 @@ fn emit_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, p1: PtOffse
             // §17.4.38: total = w:sz, each sub-line = sz/3, gap = sz/3.
             let sub_w = b.width * (1.0 / 3.0);
             let off = sub_w; // half sub-line + half gap = sz/3
-            // Offset perpendicular to the line direction.
+                             // Offset perpendicular to the line direction.
             let dx = if p1.x == p2.x { off } else { Pt::ZERO };
             let dy = if p1.y == p2.y { off } else { Pt::ZERO };
             commands.push(DrawCommand::Line {
                 line: PtLineSegment::new(
                     PtOffset::new(p1.x - dx, p1.y - dy),
-                    PtOffset::new(p2.x - dx, p2.y - dy)),
+                    PtOffset::new(p2.x - dx, p2.y - dy),
+                ),
                 color: b.color,
                 width: sub_w,
             });
             commands.push(DrawCommand::Line {
                 line: PtLineSegment::new(
                     PtOffset::new(p1.x + dx, p1.y + dy),
-                    PtOffset::new(p2.x + dx, p2.y + dy)),
+                    PtOffset::new(p2.x + dx, p2.y + dy),
+                ),
                 color: b.color,
                 width: sub_w,
             });
@@ -843,13 +977,22 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
-                char_spacing: Pt::ZERO, underline_position: Pt::ZERO, underline_thickness: Pt::ZERO,
+                char_spacing: Pt::ZERO,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
             },
             color: RgbColor::BLACK,
-            width: Pt::new(width), trimmed_width: Pt::new(width),
-            metrics: TextMetrics { ascent: Pt::new(10.0), descent: Pt::new(4.0) },
+            width: Pt::new(width),
+            trimmed_width: Pt::new(width),
+            metrics: TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(4.0),
+            },
             hyperlink_url: None,
-            shading: None, border: None, baseline_offset: Pt::ZERO, text_offset: Pt::ZERO,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+            text_offset: Pt::ZERO,
         }
     }
 
@@ -865,7 +1008,9 @@ mod tests {
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,
             shading: None,
-            cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
+            cell_borders: None,
+            vertical_merge: None,
+            vertical_align: CellVAlign::Top,
         }
     }
 
@@ -911,7 +1056,15 @@ mod tests {
 
     #[test]
     fn empty_table() {
-        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &[],
+            &[],
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
         assert!(result.commands.is_empty());
         assert_eq!(result.size, PtSize::ZERO);
     }
@@ -921,11 +1074,19 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("hello")],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 14.0);
@@ -944,18 +1105,26 @@ mod tests {
             TableRowInput {
                 cells: vec![simple_cell("a"), simple_cell("b")],
                 height_rule: None,
-            is_header: None,
-            cant_split: None,
+                is_header: None,
+                cant_split: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
                 height_rule: None,
-            is_header: None,
-            cant_split: None,
+                is_header: None,
+                cant_split: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 28.0); // 2 rows * 14pt
@@ -984,16 +1153,27 @@ mod tests {
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
-                    shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: None,
+                    vertical_align: CellVAlign::Top,
                 },
             ],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         assert_eq!(result.size.height.raw(), 28.0, "row height = tallest cell");
     }
@@ -1003,13 +1183,25 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("x")],
             height_rule: Some(RowHeightRule::AtLeast(Pt::new(40.0))),
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
-        assert_eq!(result.size.height.raw(), 40.0, "min height > content height");
+        assert_eq!(
+            result.size.height.raw(),
+            40.0,
+            "min height > content height"
+        );
     }
 
     #[test]
@@ -1025,15 +1217,29 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
-                shading: Some(RgbColor { r: 200, g: 200, b: 200 }),
-                cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
+                shading: Some(RgbColor {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                }),
+                cell_borders: None,
+                vertical_merge: None,
+                vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         let rect_count = result
             .commands
@@ -1048,11 +1254,50 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("a"), simple_cell("b")],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }), None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            Some(&super::TableBorderConfig {
+                top: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+                bottom: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+                left: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+                right: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+                inside_h: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+                inside_v: Some(super::TableBorderLine {
+                    width: Pt::new(0.5),
+                    color: RgbColor::BLACK,
+                    style: super::TableBorderStyle::Single,
+                }),
+            }),
+            None,
+            false,
+        );
 
         let line_count = result
             .commands
@@ -1071,18 +1316,31 @@ mod tests {
                 blocks: vec![LayoutBlock::Paragraph {
                     fragments: vec![text_frag("spanning", 30.0)],
                     style: ParagraphStyle::default(),
-                    page_break_before: false, footnotes: vec![], floating_images: vec![],
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![],
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 2, // spans both columns
-                shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
+                shading: None,
+                cell_borders: None,
+                vertical_merge: None,
+                vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         // Cell gets full 200pt width, text should still render
         assert_eq!(result.size.width.raw(), 200.0);
@@ -1101,18 +1359,36 @@ mod tests {
                 blocks: vec![LayoutBlock::Paragraph {
                     fragments: vec![text_frag("text", 30.0)],
                     style: ParagraphStyle::default(),
-                    page_break_before: false, footnotes: vec![], floating_images: vec![],
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![],
                 }],
-                margins: PtEdgeInsets::new(Pt::new(5.0), Pt::new(10.0), Pt::new(5.0), Pt::new(10.0)),
+                margins: PtEdgeInsets::new(
+                    Pt::new(5.0),
+                    Pt::new(10.0),
+                    Pt::new(5.0),
+                    Pt::new(10.0),
+                ),
                 grid_span: 1,
-                shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
+                shading: None,
+                cell_borders: None,
+                vertical_merge: None,
+                vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
-        is_header: None,
-        cant_split: None,
+            is_header: None,
+            cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
 
         // Row height = content(14) + top(5) + bottom(5) = 24
         assert_eq!(result.size.height.raw(), 24.0);
@@ -1147,14 +1423,34 @@ mod tests {
         let col_widths = vec![Pt::new(100.0)];
 
         // Without suppression: top border present.
-        let normal = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&borders), None, false);
-        let normal_lines: Vec<_> = normal.commands.iter()
+        let normal = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            Some(&borders),
+            None,
+            false,
+        );
+        let normal_lines: Vec<_> = normal
+            .commands
+            .iter()
             .filter(|c| matches!(c, DrawCommand::Line { .. }))
             .collect();
 
         // With suppression: top border removed.
-        let suppressed = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&borders), None, true);
-        let suppressed_lines: Vec<_> = suppressed.commands.iter()
+        let suppressed = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            Some(&borders),
+            None,
+            true,
+        );
+        let suppressed_lines: Vec<_> = suppressed
+            .commands
+            .iter()
             .filter(|c| matches!(c, DrawCommand::Line { .. }))
             .collect();
 

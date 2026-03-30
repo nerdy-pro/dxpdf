@@ -11,7 +11,7 @@ use dxpdf_docx_model::model::Block;
 
 use crate::dimension::Pt;
 
-use super::build::{BuildContext, HeaderFooterContent, build_header_footer_content};
+use super::build::{build_header_footer_content, BuildContext, HeaderFooterContent};
 use super::draw_command::{DrawCommand, LayoutedPage};
 use super::page::PageConfig;
 use super::section::stack_blocks;
@@ -41,10 +41,11 @@ pub fn render_headers_footers(
         // Header
         if let Some(blocks) = header_blocks {
             // Set per-page field context for PAGE/NUMPAGES evaluation.
-            ctx.field_ctx_cell.set(crate::layout::fragment::FieldContext {
-                page_number: Some(page_number),
-                num_pages: Some(total_pages),
-            });
+            ctx.field_ctx_cell
+                .set(crate::layout::fragment::FieldContext {
+                    page_number: Some(page_number),
+                    num_pages: Some(total_pages),
+                });
 
             let hf = build_header_footer_content(blocks, ctx);
             render_header(page, config, &hf, content_width, default_line_height);
@@ -52,10 +53,11 @@ pub fn render_headers_footers(
 
         // Footer
         if let Some(blocks) = footer_blocks {
-            ctx.field_ctx_cell.set(crate::layout::fragment::FieldContext {
-                page_number: Some(page_number),
-                num_pages: Some(total_pages),
-            });
+            ctx.field_ctx_cell
+                .set(crate::layout::fragment::FieldContext {
+                    page_number: Some(page_number),
+                    num_pages: Some(total_pages),
+                });
 
             let hf = build_header_footer_content(blocks, ctx);
             render_footer(page, config, &hf, content_width, default_line_height);
@@ -63,7 +65,8 @@ pub fn render_headers_footers(
     }
 
     // Reset field context after header/footer rendering.
-    ctx.field_ctx_cell.set(crate::layout::fragment::FieldContext::default());
+    ctx.field_ctx_cell
+        .set(crate::layout::fragment::FieldContext::default());
 }
 
 /// Render a single header onto a page.
@@ -205,48 +208,81 @@ mod tests {
             margins: PtEdgeInsets::new(Pt::new(72.0), Pt::new(72.0), Pt::new(72.0), Pt::new(72.0)),
             header_margin: Pt::new(36.0),
             footer_margin: Pt::new(36.0),
-            columns: vec![ColumnGeometry { x_offset: Pt::ZERO, width: Pt::new(468.0) }],
+            columns: vec![ColumnGeometry {
+                x_offset: Pt::ZERO,
+                width: Pt::new(468.0),
+            }],
         }
     }
 
     #[test]
     fn no_header_footer_leaves_page_unchanged() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
+        let mut pages = vec![LayoutedPage::new(PtSize::new(
+            Pt::new(612.0),
+            Pt::new(792.0),
+        ))];
         pages[0].commands.push(DrawCommand::Text {
             text: "body".into(),
             position: PtOffset::new(Pt::ZERO, Pt::ZERO),
             font_family: Rc::from("T"),
             font_size: Pt::new(12.0),
             char_spacing: Pt::ZERO,
-            bold: false, italic: false,
+            bold: false,
+            italic: false,
             color: RgbColor::BLACK,
         });
 
         let config = test_config();
         // Direct call to render_header / render_footer with empty content.
-        let hf = HeaderFooterContent { blocks: vec![], absolute_position: None, floating_images: vec![] };
-        render_header(&mut pages[0], &config, &hf, config.content_width(), Pt::new(14.0));
-        render_footer(&mut pages[0], &config, &hf, config.content_width(), Pt::new(14.0));
+        let hf = HeaderFooterContent {
+            blocks: vec![],
+            absolute_position: None,
+            floating_images: vec![],
+        };
+        render_header(
+            &mut pages[0],
+            &config,
+            &hf,
+            config.content_width(),
+            Pt::new(14.0),
+        );
+        render_footer(
+            &mut pages[0],
+            &config,
+            &hf,
+            config.content_width(),
+            Pt::new(14.0),
+        );
 
         assert_eq!(pages[0].commands.len(), 1, "no changes");
     }
 
     #[test]
     fn header_prepended_to_page() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
+        let mut pages = vec![LayoutedPage::new(PtSize::new(
+            Pt::new(612.0),
+            Pt::new(792.0),
+        ))];
         pages[0].commands.push(DrawCommand::Text {
             text: "body".into(),
             position: PtOffset::new(Pt::ZERO, Pt::ZERO),
             font_family: Rc::from("T"),
             font_size: Pt::new(12.0),
             char_spacing: Pt::ZERO,
-            bold: false, italic: false,
+            bold: false,
+            italic: false,
             color: RgbColor::BLACK,
         });
 
         let config = test_config();
         let header = make_hf(vec![text_frag("Header")]);
-        render_header(&mut pages[0], &config, &header, config.content_width(), Pt::new(14.0));
+        render_header(
+            &mut pages[0],
+            &config,
+            &header,
+            config.content_width(),
+            Pt::new(14.0),
+        );
 
         assert!(pages[0].commands.len() > 1);
         // First command should be the header text
@@ -257,11 +293,20 @@ mod tests {
 
     #[test]
     fn footer_appended_to_page() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
+        let mut pages = vec![LayoutedPage::new(PtSize::new(
+            Pt::new(612.0),
+            Pt::new(792.0),
+        ))];
 
         let config = test_config();
         let footer = make_hf(vec![text_frag("Footer")]);
-        render_footer(&mut pages[0], &config, &footer, config.content_width(), Pt::new(14.0));
+        render_footer(
+            &mut pages[0],
+            &config,
+            &footer,
+            config.content_width(),
+            Pt::new(14.0),
+        );
 
         assert_eq!(pages[0].commands.len(), 1);
         if let DrawCommand::Text { text, position, .. } = &pages[0].commands[0] {
@@ -281,7 +326,13 @@ mod tests {
         let config = test_config();
         let header = make_hf(vec![text_frag("H")]);
         for page in pages.iter_mut() {
-            render_header(page, &config, &header, config.content_width(), Pt::new(14.0));
+            render_header(
+                page,
+                &config,
+                &header,
+                config.content_width(),
+                Pt::new(14.0),
+            );
         }
 
         // Both pages should have header
@@ -292,10 +343,19 @@ mod tests {
 
     #[test]
     fn header_y_position_uses_header_margin() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(Pt::new(612.0), Pt::new(792.0)))];
+        let mut pages = vec![LayoutedPage::new(PtSize::new(
+            Pt::new(612.0),
+            Pt::new(792.0),
+        ))];
         let config = test_config();
         let header = make_hf(vec![text_frag("H")]);
-        render_header(&mut pages[0], &config, &header, config.content_width(), Pt::new(14.0));
+        render_header(
+            &mut pages[0],
+            &config,
+            &header,
+            config.content_width(),
+            Pt::new(14.0),
+        );
 
         if let DrawCommand::Text { position, .. } = &pages[0].commands[0] {
             // Header y should be near header_margin (36) + ascent
