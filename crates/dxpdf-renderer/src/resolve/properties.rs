@@ -3,7 +3,7 @@
 //! "Merge" means: for each field, if `self` is `None`, take the value from `base`.
 //! This implements the OOXML style inheritance cascade.
 
-use dxpdf_docx_model::model::{ParagraphProperties, RunProperties};
+use dxpdf_docx_model::model::{ParagraphProperties, RunProperties, TabAlignment};
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
@@ -86,9 +86,23 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
     merge_opt(&mut target.auto_space_de, &base.auto_space_de);
     merge_opt(&mut target.auto_space_dn, &base.auto_space_dn);
 
-    // Tabs: inherit if target has none
-    if target.tabs.is_empty() && !base.tabs.is_empty() {
+    // §17.3.1.38: merge tab stops at the individual-stop level.
+    // Child Clear entries remove matching positions from the parent.
+    // Child non-Clear entries are added. Result is sorted by position.
+    if !base.tabs.is_empty() || !target.tabs.is_empty() {
+        let child_tabs = std::mem::take(&mut target.tabs);
+        // Start from parent tabs.
         target.tabs.clone_from(&base.tabs);
+        // Remove positions that the child clears.
+        for clear in child_tabs.iter().filter(|t| t.alignment == TabAlignment::Clear) {
+            target.tabs.retain(|t| t.position != clear.position);
+        }
+        // Add child's non-Clear tabs (replacing any at the same position).
+        for tab in child_tabs.iter().filter(|t| t.alignment != TabAlignment::Clear) {
+            target.tabs.retain(|t| t.position != tab.position);
+            target.tabs.push(*tab);
+        }
+        target.tabs.sort_by(|a, b| a.position.raw().cmp(&b.position.raw()));
     }
 }
 
@@ -294,47 +308,113 @@ mod tests {
     }
 
     #[test]
-    fn merge_para_tabs_not_replaced_when_target_has_tabs() {
-        let target_tab = TabStop {
-            position: Dimension::<Twips>::new(720),
-            alignment: TabAlignment::Left,
-            leader: TabLeader::None,
-        };
-        let base_tab = TabStop {
-            position: Dimension::<Twips>::new(1440),
-            alignment: TabAlignment::Right,
-            leader: TabLeader::Dot,
-        };
+    fn merge_tabs_child_adds_to_parent() {
+        // §17.3.1.38: child non-Clear tabs are added to inherited parent tabs.
         let mut target = ParagraphProperties {
-            tabs: vec![target_tab],
+            tabs: vec![TabStop {
+                position: Dimension::<Twips>::new(720),
+                alignment: TabAlignment::Left,
+                leader: TabLeader::None,
+            }],
             ..Default::default()
         };
         let base = ParagraphProperties {
-            tabs: vec![base_tab],
+            tabs: vec![TabStop {
+                position: Dimension::<Twips>::new(1440),
+                alignment: TabAlignment::Right,
+                leader: TabLeader::Dot,
+            }],
             ..Default::default()
         };
         merge_paragraph_properties(&mut target, &base);
 
-        assert_eq!(target.tabs.len(), 1);
-        assert_eq!(target.tabs[0].position, Dimension::<Twips>::new(720), "target tabs should win");
+        assert_eq!(target.tabs.len(), 2, "both tabs should be present");
+        assert_eq!(target.tabs[0].position, Dimension::<Twips>::new(720), "sorted: left@720 first");
+        assert_eq!(target.tabs[1].position, Dimension::<Twips>::new(1440), "sorted: right@1440 second");
     }
 
     #[test]
-    fn merge_para_tabs_inherited_when_target_empty() {
-        let base_tab = TabStop {
-            position: Dimension::<Twips>::new(1440),
-            alignment: TabAlignment::Right,
-            leader: TabLeader::Dot,
-        };
+    fn merge_tabs_inherited_when_target_empty() {
         let mut target = ParagraphProperties::default();
         let base = ParagraphProperties {
-            tabs: vec![base_tab],
+            tabs: vec![TabStop {
+                position: Dimension::<Twips>::new(1440),
+                alignment: TabAlignment::Right,
+                leader: TabLeader::Dot,
+            }],
             ..Default::default()
         };
         merge_paragraph_properties(&mut target, &base);
 
         assert_eq!(target.tabs.len(), 1);
         assert_eq!(target.tabs[0].position, Dimension::<Twips>::new(1440));
+    }
+
+    #[test]
+    fn merge_tabs_clear_removes_parent_stop() {
+        // §17.3.1.38: val="clear" removes an inherited tab at that position.
+        let mut target = ParagraphProperties {
+            tabs: vec![
+                TabStop {
+                    position: Dimension::<Twips>::new(4536),
+                    alignment: TabAlignment::Clear,
+                    leader: TabLeader::None,
+                },
+                TabStop {
+                    position: Dimension::<Twips>::new(1701),
+                    alignment: TabAlignment::Left,
+                    leader: TabLeader::None,
+                },
+            ],
+            ..Default::default()
+        };
+        let base = ParagraphProperties {
+            tabs: vec![
+                TabStop {
+                    position: Dimension::<Twips>::new(4536),
+                    alignment: TabAlignment::Center,
+                    leader: TabLeader::None,
+                },
+                TabStop {
+                    position: Dimension::<Twips>::new(9072),
+                    alignment: TabAlignment::Right,
+                    leader: TabLeader::None,
+                },
+            ],
+            ..Default::default()
+        };
+        merge_paragraph_properties(&mut target, &base);
+
+        // center@4536 removed by clear, right@9072 inherited, left@1701 added.
+        assert_eq!(target.tabs.len(), 2);
+        assert_eq!(target.tabs[0].position, Dimension::<Twips>::new(1701));
+        assert_eq!(target.tabs[0].alignment, TabAlignment::Left);
+        assert_eq!(target.tabs[1].position, Dimension::<Twips>::new(9072));
+        assert_eq!(target.tabs[1].alignment, TabAlignment::Right);
+    }
+
+    #[test]
+    fn merge_tabs_clear_only_no_additions() {
+        // Child only clears a parent tab, adds nothing.
+        let mut target = ParagraphProperties {
+            tabs: vec![TabStop {
+                position: Dimension::<Twips>::new(4536),
+                alignment: TabAlignment::Clear,
+                leader: TabLeader::None,
+            }],
+            ..Default::default()
+        };
+        let base = ParagraphProperties {
+            tabs: vec![TabStop {
+                position: Dimension::<Twips>::new(4536),
+                alignment: TabAlignment::Center,
+                leader: TabLeader::None,
+            }],
+            ..Default::default()
+        };
+        merge_paragraph_properties(&mut target, &base);
+
+        assert!(target.tabs.is_empty(), "cleared tab should be gone, nothing added");
     }
 
     #[test]

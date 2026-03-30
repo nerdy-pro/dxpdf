@@ -1393,11 +1393,15 @@ fn paragraph_style_from_props(props: &model::ParagraphProperties) -> ParagraphSt
         .unwrap_or(LineSpacingRule::Auto(1.0));
 
     // §17.3.1.38: convert tab stops to layout format.
-    let tabs: Vec<TabStopDef> = props.tabs.iter().map(|t| TabStopDef {
-        position: Pt::from(t.position),
-        alignment: t.alignment,
-        leader: t.leader,
-    }).collect();
+    // Clear entries are directives consumed during style merging, not layout stops.
+    let tabs: Vec<TabStopDef> = props.tabs.iter()
+        .filter(|t| t.alignment != model::TabAlignment::Clear)
+        .map(|t| TabStopDef {
+            position: Pt::from(t.position),
+            alignment: t.alignment,
+            leader: t.leader,
+        })
+        .collect();
 
     ParagraphStyle {
         alignment: props.alignment.unwrap_or(model::Alignment::Start),
