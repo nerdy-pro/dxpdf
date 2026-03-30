@@ -56,7 +56,7 @@ pub struct ResolvedDocument {
 pub fn resolve(doc: &Document) -> ResolvedDocument {
     use dxpdf_docx_model::model::StyleType;
 
-    let styles = styles::resolve_styles(&doc.styles);
+    let styles = styles::resolve_styles(&doc.styles, doc.theme.as_ref());
     let numbering = numbering::resolve_numbering(&doc.numbering);
     let sections = sections::resolve_sections(doc);
     let font_families = fonts::collect_font_families(doc);

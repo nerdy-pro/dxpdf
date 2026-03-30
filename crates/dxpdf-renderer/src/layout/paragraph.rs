@@ -58,7 +58,7 @@ pub struct ParagraphStyle {
 }
 
 /// Resolved paragraph border style for rendering.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParagraphBorderStyle {
     pub top: Option<BorderLine>,
     pub bottom: Option<BorderLine>,
@@ -67,7 +67,7 @@ pub struct ParagraphBorderStyle {
 }
 
 /// A single border line for rendering.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BorderLine {
     pub width: Pt,
     pub color: RgbColor,

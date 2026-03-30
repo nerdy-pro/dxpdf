@@ -40,6 +40,12 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 color,
             } => {
                 let font = fonts::make_font(font_mgr, font_family, *font_size, *bold, *italic);
+                log::trace!(
+                    "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
+                    &text[..text.len().min(30)],
+                    font.typeface().family_name(),
+                    font_size.raw(), bold, italic,
+                );
                 let mut paint = Paint::default();
                 paint.set_anti_alias(true);
                 paint.set_color4f(to_color4f(*color), None);

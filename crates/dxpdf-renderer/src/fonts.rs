@@ -45,6 +45,7 @@ fn match_exact(font_mgr: &FontMgr, family: &str, style: FontStyle) -> Option<Typ
 
 fn resolve_typeface_uncached(font_mgr: &FontMgr, font_family: &str, style: FontStyle) -> Typeface {
     if let Some(tf) = match_exact(font_mgr, font_family, style) {
+        log::debug!("[font] '{}' {:?} → exact match", font_family, style);
         return tf;
     }
 
@@ -54,15 +55,17 @@ fn resolve_typeface_uncached(font_mgr: &FontMgr, font_family: &str, style: FontS
     {
         for sub in *subs {
             if let Some(tf) = match_exact(font_mgr, sub, style) {
+                log::debug!("[font] '{}' {:?} → substitute '{}'", font_family, style, sub);
                 return tf;
             }
         }
     }
 
-    font_mgr
-        .match_family_style("Helvetica", style)
-        .or_else(|| font_mgr.legacy_make_typeface(None::<&str>, style))
-        .expect("no fallback typeface available")
+    // No exact match or known substitute — use the system's default sans-serif.
+    let tf = font_mgr.legacy_make_typeface(None::<&str>, style)
+        .expect("no fallback typeface available");
+    log::debug!("[font] '{}' {:?} → system default '{}'", font_family, style, tf.family_name());
+    tf
 }
 
 /// Resolve a typeface with caching.

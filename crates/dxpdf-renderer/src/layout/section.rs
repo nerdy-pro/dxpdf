@@ -124,6 +124,10 @@ pub fn layout_section(
     // §17.3.1.9: track previous paragraph for contextual spacing collapsing.
     let mut prev_space_after = Pt::ZERO;
     let mut prev_style_id: Option<dxpdf_docx_model::model::StyleId> = None;
+    // §17.3.1.24: track previous paragraph borders for grouping.
+    // Consecutive paragraphs with identical borders form a group — interior
+    // paragraphs suppress their top border.
+    let mut prev_borders: Option<super::paragraph::ParagraphBorderStyle> = None;
     // Unified float tracking: tables + images.
     let mut page_floats: Vec<super::float::ActiveFloat> = Vec::new();
     // Per-page absolute float cache: absolute floats from paragraphs on the
@@ -197,6 +201,14 @@ pub fn layout_section(
                 // retain their space_before.
                 if cursor_y <= column_top && first_on_section_page {
                     effective_style.space_before = Pt::ZERO;
+                }
+                // §17.3.1.24: paragraph border grouping — consecutive paragraphs
+                // with identical borders form a group. Interior paragraphs
+                // suppress their top border to avoid doubling.
+                if effective_style.borders.is_some() && effective_style.borders == prev_borders {
+                    if let Some(ref mut b) = effective_style.borders {
+                        b.top = None;
+                    }
                 }
                 // §17.3.1.9 / §17.3.1.33: spacing collapse must happen BEFORE
                 // float registration so float y coordinates match actual paragraph position.
@@ -318,10 +330,23 @@ pub fn layout_section(
                         );
                     }
                 }
+                // §17.4.56: if active floats leave no horizontal space at the
+                // current cursor_y, advance past them so text can start below.
+                // This handles full-width floating tables that act as block spacers
+                // for non-owner paragraphs.
+                let col_width = config.columns[current_col].width;
+                let page_x = col_x(current_col);
+                for ef in &effective_floats {
+                    if ef.overlaps_y(cursor_y) && ef.width >= col_width {
+                        cursor_y = cursor_y.max(ef.page_y_end);
+                    }
+                }
+                super::float::prune_floats(&mut effective_floats, cursor_y);
+
                 effective_style.page_floats = effective_floats;
                 effective_style.page_y = cursor_y;
-                effective_style.page_x = col_x(current_col);
-                effective_style.page_content_width = config.columns[current_col].width;
+                effective_style.page_x = page_x;
+                effective_style.page_content_width = col_width;
 
                 // §17.6.4: split paragraph at column breaks for multi-column layout.
                 let frag_chunks = split_at_column_breaks(fragments);
@@ -477,6 +502,7 @@ pub fn layout_section(
                 }
 
                 first_on_section_page = false;
+                prev_borders = style.borders.clone();
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -638,6 +664,7 @@ pub fn layout_section(
 
                 cursor_y += table.size.height;
                 first_on_section_page = false;
+                prev_borders = None; // table breaks border grouping
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
             }
@@ -1150,5 +1177,46 @@ mod tests {
             "space_before should be preserved for pageBreakBefore: y={}",
             heading_y.raw(),
         );
+    }
+
+    // ── §17.3.1.24 paragraph border grouping tests ─────────────────────
+
+    #[test]
+    fn identical_borders_suppress_second_top() {
+        use crate::layout::paragraph::{ParagraphBorderStyle, BorderLine};
+        let border = Some(ParagraphBorderStyle {
+            top: Some(BorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, space: Pt::new(1.0) }),
+            bottom: None, left: None, right: None,
+        });
+        let mut style1 = ParagraphStyle::default();
+        style1.borders = border.clone();
+        let mut style2 = ParagraphStyle::default();
+        style2.borders = border;
+
+        let blocks = vec![
+            LayoutBlock::Paragraph {
+                fragments: vec![text_frag("para1", 30.0, 14.0)],
+                style: style1,
+                page_break_before: false,
+                footnotes: vec![],
+                floating_images: vec![],
+            },
+            LayoutBlock::Paragraph {
+                fragments: vec![text_frag("para2", 30.0, 14.0)],
+                style: style2,
+                page_break_before: false,
+                footnotes: vec![],
+                floating_images: vec![],
+            },
+        ];
+        let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
+
+        // Count Line draw commands (border lines).
+        // Only the first paragraph should draw its top border; the second's
+        // top border is suppressed by §17.3.1.24 grouping.
+        let line_cmds: Vec<_> = pages[0].commands.iter()
+            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .collect();
+        assert_eq!(line_cmds.len(), 1, "only one top border line (grouped): got {}", line_cmds.len());
     }
 }

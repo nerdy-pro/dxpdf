@@ -77,6 +77,51 @@ pub fn effective_font(fonts: &FontSet) -> Option<&str> {
         .or(fonts.complex_script.as_deref())
 }
 
+/// §17.3.2.26: resolve theme font references in a FontSet.
+///
+/// For each slot where a theme reference is present, resolve it to the
+/// actual font family name from the theme. The resolved name is written
+/// into the corresponding name field (ascii, high_ansi, etc.), overwriting
+/// any explicit name — theme references take precedence per §17.3.2.26.
+pub fn resolve_font_set_themes(fonts: &mut FontSet, theme: &dxpdf_docx_model::model::Theme) {
+    if let Some(ref tf) = fonts.ascii_theme {
+        if let Some(name) = resolve_theme_font_ref(tf, theme) {
+            fonts.ascii = Some(name);
+        }
+    }
+    if let Some(ref tf) = fonts.high_ansi_theme {
+        if let Some(name) = resolve_theme_font_ref(tf, theme) {
+            fonts.high_ansi = Some(name);
+        }
+    }
+    if let Some(ref tf) = fonts.east_asian_theme {
+        if let Some(name) = resolve_theme_font_ref(tf, theme) {
+            fonts.east_asian = Some(name);
+        }
+    }
+    if let Some(ref tf) = fonts.complex_script_theme {
+        if let Some(name) = resolve_theme_font_ref(tf, theme) {
+            fonts.complex_script = Some(name);
+        }
+    }
+}
+
+fn resolve_theme_font_ref(
+    tf: &dxpdf_docx_model::model::ThemeFontRef,
+    theme: &dxpdf_docx_model::model::Theme,
+) -> Option<String> {
+    use dxpdf_docx_model::model::ThemeFontRef;
+    let name = match tf {
+        ThemeFontRef::MajorHAnsi => &theme.major_font.latin,
+        ThemeFontRef::MajorEastAsia => &theme.major_font.east_asian,
+        ThemeFontRef::MajorBidi => &theme.major_font.complex_script,
+        ThemeFontRef::MinorHAnsi => &theme.minor_font.latin,
+        ThemeFontRef::MinorEastAsia => &theme.minor_font.east_asian,
+        ThemeFontRef::MinorBidi => &theme.minor_font.complex_script,
+    };
+    if name.is_empty() { None } else { Some(name.clone()) }
+}
+
 fn add_nonempty(set: &mut HashSet<String>, s: &str) {
     if !s.is_empty() {
         set.insert(s.to_string());

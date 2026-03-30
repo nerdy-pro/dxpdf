@@ -909,6 +909,7 @@ fn build_fragments(
         &mut fn_counter,
         &mut en_counter,
         ctx.field_ctx_cell.get(),
+        ctx.resolved.theme.as_ref(),
     );
     ctx.footnote_counter.set(fn_counter);
     ctx.endnote_counter.set(en_counter);

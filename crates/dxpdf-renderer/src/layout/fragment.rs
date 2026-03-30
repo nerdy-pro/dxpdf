@@ -310,6 +310,7 @@ pub fn collect_fragments<F>(
     footnote_counter: &mut u32,
     endnote_counter: &mut u32,
     field_ctx: FieldContext,
+    theme: Option<&dxpdf_docx_model::model::Theme>,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics), // (width, metrics)
@@ -337,6 +338,12 @@ where
                 // Run property cascade per §17.7.2:
                 // direct run properties → character style (w:rStyle) → paragraph style run defaults.
                 let mut effective_props = tr.properties.clone();
+                // §17.3.2.26: resolve theme font references before merging,
+                // so theme-derived names take precedence over explicit names
+                // from lower-priority levels in the cascade.
+                if let Some(th) = theme {
+                    crate::resolve::fonts::resolve_font_set_themes(&mut effective_props.fonts, th);
+                }
                 if let (Some(ref style_id), Some(styles)) = (&tr.style_id, resolved_styles) {
                     if let Some(resolved_style) = styles.get(style_id) {
                         crate::resolve::properties::merge_run_properties(
@@ -488,6 +495,7 @@ where
                     footnote_counter,
                     endnote_counter,
                     field_ctx,
+                    theme,
                 );
                 fragments.append(&mut sub);
             }
@@ -504,7 +512,7 @@ where
                         default_family, default_size, default_color,
                         hyperlink_url, measure_text, resolved_styles,
                         paragraph_run_defaults, footnote_counter, endnote_counter,
-                        field_ctx,
+                        field_ctx, theme,
                     );
                     fragments.append(&mut sub);
                 }
@@ -560,6 +568,7 @@ where
                         footnote_counter,
                         endnote_counter,
                         field_ctx,
+                        theme,
                     );
                     fragments.append(&mut sub);
                 }
@@ -688,6 +697,7 @@ where
                                     footnote_counter,
                                     endnote_counter,
                                     field_ctx,
+                                    theme,
                                 );
                                 fragments.append(&mut sub);
                             }
@@ -743,7 +753,7 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         assert_eq!(frags[0].width().raw(), 30.0); // 5 * 6
@@ -753,7 +763,7 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         if let Fragment::Text { font, .. } = &frags[0] {
             assert_eq!(&*font.family, "Arial");
@@ -766,7 +776,7 @@ mod tests {
     #[test]
     fn tab_produces_tab_fragment() {
         let inlines = vec![Inline::Tab];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         assert!(matches!(frags[0], Fragment::Tab { .. }));
@@ -775,7 +785,7 @@ mod tests {
     #[test]
     fn line_break_produces_break_fragment() {
         let inlines = vec![Inline::LineBreak(BreakKind::TextWrapping)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         assert!(frags[0].is_line_break());
@@ -787,7 +797,7 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
@@ -825,7 +835,7 @@ mod tests {
                 fld_lock: None,
             }),
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
@@ -849,7 +859,7 @@ mod tests {
             Inline::EndnoteRefMark,
             Inline::LastRenderedPageBreak,
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         // BookmarkStart produces a Bookmark fragment, text run produces a Text fragment.
         assert_eq!(frags.len(), 2, "bookmark + text run should produce fragments");
@@ -866,7 +876,7 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -882,7 +892,7 @@ mod tests {
             text: String::new(),
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
         assert!(frags.is_empty());
     }
 
@@ -902,7 +912,7 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
@@ -919,7 +929,7 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -961,7 +971,7 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default(), None);
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {

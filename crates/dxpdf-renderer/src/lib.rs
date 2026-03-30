@@ -128,7 +128,12 @@ pub fn layout_document(
 
     // Phase 1: layout all sections to determine total page count.
     for section in &resolved.sections {
-        let config = PageConfig::from_section(&section.properties);
+        // §17.6.2: if header/footer content extends past the body margin,
+        // push the body start down (or bottom up) so content doesn't overlap.
+        let config = adjust_margins_for_header_footer(
+            PageConfig::from_section(&section.properties), section, &ctx, dlh,
+        );
+
         *ctx.page_config.borrow_mut() = config.clone();
         let built = build_section_blocks(section, &config, &ctx);
         let measure_fn = |text: &str, font: &layout::fragment::FontProps| -> (dimension::Pt, layout::fragment::TextMetrics) {
@@ -232,6 +237,45 @@ pub fn layout_document(
     }
 
     all_pages
+}
+
+/// §17.6.2: if header or footer content extends past the body margin,
+/// adjust margins so body text starts after the header / ends before the footer.
+fn adjust_margins_for_header_footer(
+    mut config: PageConfig,
+    section: &crate::resolve::sections::ResolvedSection,
+    ctx: &layout::build::BuildContext,
+    default_line_height: dimension::Pt,
+) -> PageConfig {
+    let content_width = config.content_width();
+
+    if let Some(ref blocks) = section.header {
+        let hf = layout::build::build_header_footer_content(blocks, ctx);
+        if !hf.blocks.is_empty() {
+            let result = layout::section::stack_blocks(
+                &hf.blocks, content_width, default_line_height, None,
+            );
+            let header_bottom = config.header_margin + result.height;
+            if header_bottom > config.margins.top {
+                config.margins.top = header_bottom;
+            }
+        }
+    }
+
+    if let Some(ref blocks) = section.footer {
+        let hf = layout::build::build_header_footer_content(blocks, ctx);
+        if !hf.blocks.is_empty() {
+            let result = layout::section::stack_blocks(
+                &hf.blocks, content_width, default_line_height, None,
+            );
+            let footer_top = config.footer_margin + result.height;
+            if footer_top > config.margins.bottom {
+                config.margins.bottom = footer_top;
+            }
+        }
+    }
+
+    config
 }
 
 #[cfg(test)]

@@ -1005,7 +1005,28 @@ fn parse_font_set(e: &BytesStart<'_>) -> Result<FontSet> {
         high_ansi: xml::optional_attr(e, b"hAnsi")?,
         east_asian: xml::optional_attr(e, b"eastAsia")?,
         complex_script: xml::optional_attr(e, b"cs")?,
+        ascii_theme: xml::optional_attr(e, b"asciiTheme")?
+            .and_then(|v| parse_theme_font_ref(&v)),
+        high_ansi_theme: xml::optional_attr(e, b"hAnsiTheme")?
+            .and_then(|v| parse_theme_font_ref(&v)),
+        east_asian_theme: xml::optional_attr(e, b"eastAsiaTheme")?
+            .and_then(|v| parse_theme_font_ref(&v)),
+        complex_script_theme: xml::optional_attr(e, b"cstheme")?
+            .and_then(|v| parse_theme_font_ref(&v)),
     })
+}
+
+/// §17.18.84 ST_Theme
+fn parse_theme_font_ref(val: &str) -> Option<ThemeFontRef> {
+    match val {
+        "majorHAnsi" => Some(ThemeFontRef::MajorHAnsi),
+        "majorEastAsia" => Some(ThemeFontRef::MajorEastAsia),
+        "majorBidi" => Some(ThemeFontRef::MajorBidi),
+        "minorHAnsi" => Some(ThemeFontRef::MinorHAnsi),
+        "minorEastAsia" => Some(ThemeFontRef::MinorEastAsia),
+        "minorBidi" => Some(ThemeFontRef::MinorBidi),
+        _ => None,
+    }
 }
 
 /// §17.18.99 ST_Underline

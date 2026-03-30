@@ -3,10 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use dxpdf_docx_model::model::{
-    ParagraphProperties, RunProperties, StyleId, StyleSheet, TableProperties,
+    ParagraphProperties, RunProperties, StyleId, StyleSheet, TableProperties, Theme,
 };
 
-use super::properties::{merge_paragraph_properties, merge_run_properties};
+use super::properties::{merge_paragraph_properties, merge_run_properties, merge_table_properties};
 
 /// A fully resolved style — all `basedOn` inheritance has been applied.
 #[derive(Clone, Debug)]
@@ -19,13 +19,14 @@ pub struct ResolvedStyle {
 }
 
 /// Resolve all styles in the stylesheet by walking `basedOn` chains.
-/// Returns a map from StyleId to fully resolved properties.
-pub fn resolve_styles(sheet: &StyleSheet) -> HashMap<StyleId, ResolvedStyle> {
+/// The theme is used to resolve `asciiTheme` / `hAnsiTheme` font references
+/// on style-level run properties (§17.3.2.26).
+pub fn resolve_styles(sheet: &StyleSheet, theme: Option<&Theme>) -> HashMap<StyleId, ResolvedStyle> {
     let mut resolved: HashMap<StyleId, ResolvedStyle> = HashMap::new();
 
     for id in sheet.styles.keys() {
         if !resolved.contains_key(id) {
-            resolve_one(id, sheet, &mut resolved, &mut HashSet::new());
+            resolve_one(id, sheet, theme, &mut resolved, &mut HashSet::new());
         }
     }
 
@@ -37,6 +38,7 @@ pub fn resolve_styles(sheet: &StyleSheet) -> HashMap<StyleId, ResolvedStyle> {
 fn resolve_one(
     id: &StyleId,
     sheet: &StyleSheet,
+    theme: Option<&Theme>,
     resolved: &mut HashMap<StyleId, ResolvedStyle>,
     visiting: &mut HashSet<StyleId>,
 ) {
@@ -57,6 +59,7 @@ fn resolve_one(
             .clone()
             .unwrap_or_default();
         let mut run = style.run_properties.clone().unwrap_or_default();
+        let table = style.table_properties.clone();
         merge_paragraph_properties(&mut para, &sheet.doc_defaults_paragraph);
         merge_run_properties(&mut run, &sheet.doc_defaults_run);
         resolved.insert(
@@ -64,7 +67,7 @@ fn resolve_one(
             ResolvedStyle {
                 paragraph: para,
                 run,
-                table: style.table_properties.clone(),
+                table,
                 table_style_overrides: style.table_style_overrides.clone(),
             },
         );
@@ -74,7 +77,7 @@ fn resolve_one(
     // Resolve parent first (if any).
     if let Some(ref parent_id) = style.based_on {
         if !resolved.contains_key(parent_id) {
-            resolve_one(parent_id, sheet, resolved, visiting);
+            resolve_one(parent_id, sheet, theme, resolved, visiting);
         }
     }
 
@@ -84,12 +87,19 @@ fn resolve_one(
         .clone()
         .unwrap_or_default();
     let mut run = style.run_properties.clone().unwrap_or_default();
+    // §17.3.2.26: resolve theme font references on the style's own run properties.
+    if let Some(th) = theme {
+        super::fonts::resolve_font_set_themes(&mut run.fonts, th);
+    }
 
+    // §17.7.2: table property inheritance — cell margins from parent table styles.
+    let mut table = style.table_properties.clone();
     // Merge from resolved parent (if it exists and was successfully resolved).
     if let Some(ref parent_id) = style.based_on {
         if let Some(parent_resolved) = resolved.get(parent_id) {
             merge_paragraph_properties(&mut para, &parent_resolved.paragraph);
             merge_run_properties(&mut run, &parent_resolved.run);
+            merge_table_properties(&mut table, &parent_resolved.table);
         }
     }
 
@@ -110,7 +120,7 @@ fn resolve_one(
         ResolvedStyle {
             paragraph: para,
             run,
-            table: style.table_properties.clone(),
+            table,
                 table_style_overrides: style.table_style_overrides.clone(),
         },
     );
@@ -164,7 +174,7 @@ mod tests {
             ),
         )]);
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let normal = resolved.get(&StyleId::new("Normal")).unwrap();
 
         assert_eq!(normal.paragraph.alignment, Some(Alignment::Start));
@@ -206,7 +216,7 @@ mod tests {
             ),
         ]);
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let h1 = resolved.get(&StyleId::new("Heading1")).unwrap();
 
         assert_eq!(h1.paragraph.alignment, Some(Alignment::Center), "child overrides parent");
@@ -258,7 +268,7 @@ mod tests {
             ),
         ]);
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let leaf = resolved.get(&StyleId::new("Leaf")).unwrap();
 
         assert_eq!(leaf.run.italic, Some(true), "own value");
@@ -286,7 +296,7 @@ mod tests {
         ]);
 
         // Should not infinite loop or panic
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         assert!(resolved.contains_key(&StyleId::new("A")));
         assert!(resolved.contains_key(&StyleId::new("B")));
     }
@@ -305,7 +315,7 @@ mod tests {
             ),
         )]);
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let orphan = resolved.get(&StyleId::new("Orphan")).unwrap();
         assert_eq!(orphan.run.bold, Some(true));
     }
@@ -333,7 +343,7 @@ mod tests {
             latent_styles: None,
         };
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let normal = resolved.get(&StyleId::new("Normal")).unwrap();
 
         // Paragraph doc defaults are deferred to the caller.
@@ -374,7 +384,7 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_styles(&sheet);
+        let resolved = resolve_styles(&sheet, None);
         let strong = resolved.get(&StyleId::new("Strong")).unwrap();
 
         assert_eq!(strong.run.bold, Some(true), "style overrides doc default");

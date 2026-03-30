@@ -3,7 +3,7 @@
 //! "Merge" means: for each field, if `self` is `None`, take the value from `base`.
 //! This implements the OOXML style inheritance cascade.
 
-use dxpdf_docx_model::model::{ParagraphProperties, RunProperties, TabAlignment};
+use dxpdf_docx_model::model::{ParagraphProperties, RunProperties, TabAlignment, TableProperties};
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
@@ -106,6 +106,24 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
     }
 }
 
+/// §17.7.2: merge table properties from a parent table style.
+/// Only `cell_margins` is merged — other table properties (borders, width, etc.)
+/// are resolved separately through the table-level cascade in `build_table`.
+pub fn merge_table_properties(
+    target: &mut Option<TableProperties>,
+    base: &Option<TableProperties>,
+) {
+    match (target.as_mut(), base.as_ref()) {
+        (Some(t), Some(b)) => {
+            merge_opt(&mut t.cell_margins, &b.cell_margins);
+        }
+        (None, Some(_)) => {
+            *target = base.clone();
+        }
+        _ => {}
+    }
+}
+
 /// If `target` is `None`, clone `base` into it.
 fn merge_opt<T: Clone>(target: &mut Option<T>, base: &Option<T>) {
     if target.is_none() {
@@ -202,6 +220,7 @@ mod tests {
                 high_ansi: Some("F".into()),
                 east_asian: Some("F".into()),
                 complex_script: Some("F".into()),
+                ..Default::default()
             },
             font_size: Some(Dimension::<HalfPoints>::new(24)),
             bold: Some(true),

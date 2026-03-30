@@ -52,13 +52,33 @@ pub struct Lang {
     pub bidi: Option<String>,
 }
 
+/// §17.3.2.26: font theme reference identifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeFontRef {
+    MajorHAnsi,
+    MajorEastAsia,
+    MajorBidi,
+    MinorHAnsi,
+    MinorEastAsia,
+    MinorBidi,
+}
+
 /// Font family names for each script category.
+///
+/// Each slot has an explicit font name and/or a theme reference.
+/// §17.3.2.26: when both are present, the theme reference takes
+/// precedence and must be resolved against the document's theme.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct FontSet {
     pub ascii: Option<String>,
     pub high_ansi: Option<String>,
     pub east_asian: Option<String>,
     pub complex_script: Option<String>,
+    /// §17.3.2.26: theme font references (resolved during the resolve phase).
+    pub ascii_theme: Option<ThemeFontRef>,
+    pub high_ansi_theme: Option<ThemeFontRef>,
+    pub east_asian_theme: Option<ThemeFontRef>,
+    pub complex_script_theme: Option<ThemeFontRef>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
