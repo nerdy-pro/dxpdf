@@ -93,10 +93,13 @@ fn resolve_one(
         }
     }
 
-    // §17.7.2: doc defaults apply to paragraph and table styles, NOT character styles.
-    // Character styles only inherit from their basedOn chain.
+    // §17.7.2: doc defaults are NOT merged here — they are merged by the
+    // caller at the correct cascade level. For table cell paragraphs, the
+    // table style must be able to override doc defaults, which requires
+    // doc defaults to be the lowest priority in the merge chain.
+    // Character styles inherit only from their basedOn chain.
+    // Run defaults from docDefaults still apply for font resolution.
     if style.style_type != dxpdf_docx_model::model::StyleType::Character {
-        merge_paragraph_properties(&mut para, &sheet.doc_defaults_paragraph);
         merge_run_properties(&mut run, &sheet.doc_defaults_run);
     }
 
@@ -309,6 +312,9 @@ mod tests {
 
     #[test]
     fn doc_defaults_are_applied_as_base() {
+        // §17.7.2: doc defaults paragraph properties are NOT merged during
+        // style resolution — they are merged by the caller at the correct
+        // cascade level. Only run defaults are merged into resolved styles.
         let sheet = StyleSheet {
             doc_defaults_paragraph: ParagraphProperties {
                 alignment: Some(Alignment::Both),
@@ -330,11 +336,13 @@ mod tests {
         let resolved = resolve_styles(&sheet);
         let normal = resolved.get(&StyleId::new("Normal")).unwrap();
 
+        // Paragraph doc defaults are deferred to the caller.
         assert_eq!(
             normal.paragraph.alignment,
-            Some(Alignment::Both),
-            "should inherit from doc defaults"
+            None,
+            "paragraph doc defaults are not merged into resolved styles"
         );
+        // Run doc defaults ARE merged during resolution.
         assert_eq!(
             normal.run.font_size,
             Some(Dimension::<HalfPoints>::new(22)),

@@ -51,6 +51,9 @@ pub struct BuildContext<'a> {
     pub endnote_counter: std::cell::Cell<u32>,
     /// Per-(numId, level) running counters for list labels.
     pub list_counters: std::cell::RefCell<HashMap<(model::NumId, u8), u32>>,
+    /// Field evaluation context (page number, total pages).
+    /// Uses Cell so header/footer rendering can set per-page values.
+    pub field_ctx_cell: std::cell::Cell<crate::layout::fragment::FieldContext>,
 }
 
 impl BuildContext<'_> {
@@ -153,69 +156,87 @@ fn collect_endnotes(
 
 /// Collected header/footer content with layout metadata.
 pub struct HeaderFooterContent {
-    pub fragments: Vec<Fragment>,
-    pub style: ParagraphStyle,
+    /// Layout blocks (paragraphs and tables) for stacking.
+    pub blocks: Vec<LayoutBlock>,
     /// Absolute page-relative position from a VML text box, if present.
     pub absolute_position: Option<(Pt, Pt)>,
     /// Floating (anchor) images from header/footer paragraphs.
     pub floating_images: Vec<crate::layout::section::FloatingImage>,
 }
 
-/// Collect fragments from header/footer blocks, preserving paragraph style
-/// and VML absolute positioning.
-pub fn collect_fragments_from_blocks(
+/// Build header/footer content from blocks.
+///
+/// Produces `LayoutBlock` entries for both paragraphs and tables, and
+/// extracts floating images separately (they are positioned page-relative
+/// rather than stack-relative).
+pub fn build_header_footer_content(
     blocks: &[Block],
     ctx: &BuildContext,
 ) -> HeaderFooterContent {
-    let mut all_fragments = Vec::new();
+    let mut layout_blocks = Vec::new();
     let mut all_floating_images = Vec::new();
-    let mut style = ParagraphStyle::default();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
-    // Gather only paragraph blocks so we can detect the last one for look-ahead.
-    let para_blocks: Vec<&model::Paragraph> = blocks
-        .iter()
-        .filter_map(|b| if let Block::Paragraph(p) = b { Some(p.as_ref()) } else { None })
-        .collect();
+    let available_width = ctx.page_config.borrow().content_width();
 
-    for (i, p) in para_blocks.iter().enumerate() {
-        let (frags, props) = build_fragments(p, ctx, None, None);
-        if all_fragments.is_empty() {
-            style = paragraph_style_from_props(&props);
-        }
-        // Check for VML absolute positioning in Pict inlines.
-        if absolute_position.is_none() {
-            for inline in &p.content {
-                if let Some(pos) = find_vml_absolute_position(inline) {
-                    absolute_position = Some(pos);
-                    break;
-                }
-            }
-        }
-        // Extract floating (anchor) images from header paragraphs.
-        let floats = extract_floating_images(p, ctx, false);
-        all_floating_images.extend(floats);
+    let block_count = blocks.len();
+    for (block_i, block) in blocks.iter().enumerate() {
+        match block {
+            Block::Paragraph(p) => {
+                let (mut frags, props) = build_fragments(p, ctx, None, None);
+                let style = paragraph_style_from_props(&props);
 
-        if frags.is_empty() && i + 1 < para_blocks.len() {
-            // §17.10.1: empty paragraphs in headers/footers still occupy a line
-            // height (from the paragraph mark's font). Insert a LineBreak so
-            // subsequent text is vertically offset by that amount.
-            let (family, mut size, ..) = resolve_paragraph_defaults(p, ctx.resolved, false);
-            if let Some(ref mrp) = p.mark_run_properties {
-                if let Some(fs) = mrp.font_size {
-                    size = Pt::from(fs);
+                // Check for VML absolute positioning in Pict inlines.
+                if absolute_position.is_none() {
+                    for inline in &p.content {
+                        if let Some(pos) = find_vml_absolute_position(inline) {
+                            absolute_position = Some(pos);
+                            break;
+                        }
+                    }
                 }
+                // Extract floating (anchor) images — positioned page-relative.
+                let floats = extract_floating_images(p, ctx, false);
+                all_floating_images.extend(floats);
+
+                // §17.10.1: empty non-last paragraphs in headers/footers still
+                // occupy a line height (from the paragraph mark's font size).
+                if frags.is_empty() && block_i + 1 < block_count {
+                    let (family, mut size, ..) = resolve_paragraph_defaults(p, ctx.resolved, false);
+                    if let Some(ref mrp) = p.mark_run_properties {
+                        if let Some(fs) = mrp.font_size {
+                            size = Pt::from(fs);
+                        }
+                    }
+                    let line_height = ctx.measurer.default_line_height(&family, size);
+                    frags.push(Fragment::LineBreak { line_height });
+                }
+
+                layout_blocks.push(LayoutBlock::Paragraph {
+                    fragments: frags,
+                    style,
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![], // handled separately above
+                });
             }
-            let line_height = ctx.measurer.default_line_height(&family, size);
-            all_fragments.push(Fragment::LineBreak { line_height });
-        } else {
-            all_fragments.extend(frags);
+            Block::Table(t) => {
+                let built = build_table(t, available_width, ctx);
+                layout_blocks.push(LayoutBlock::Table {
+                    rows: built.rows,
+                    col_widths: built.col_widths,
+                    border_config: built.border_config,
+                    indent: built.indent,
+                    alignment: built.alignment,
+                    float_info: built.float_info,
+                });
+            }
+            Block::SectionBreak(_) => {}
         }
     }
 
     HeaderFooterContent {
-        fragments: all_fragments,
-        style,
+        blocks: layout_blocks,
         absolute_position,
         floating_images: all_floating_images,
     }
@@ -887,6 +908,7 @@ fn build_fragments(
         Some(&run_defaults),
         &mut fn_counter,
         &mut en_counter,
+        ctx.field_ctx_cell.get(),
     );
     ctx.footnote_counter.set(fn_counter);
     ctx.endnote_counter.set(en_counter);

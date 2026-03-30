@@ -19,7 +19,8 @@ pub mod skia_conv;
 
 use dxpdf_docx_model::model::Document;
 
-use crate::layout::build::{BuildContext, build_section_blocks, collect_fragments_from_blocks, default_line_height};
+use dxpdf_docx_model::model::Block;
+use crate::layout::build::{BuildContext, build_section_blocks, default_line_height};
 use crate::layout::draw_command::LayoutedPage;
 use crate::layout::header_footer::render_headers_footers;
 use crate::layout::page::PageConfig;
@@ -96,11 +97,20 @@ pub fn layout_document(
         footnote_counter: std::cell::Cell::new(0),
         endnote_counter: std::cell::Cell::new(0),
         list_counters: std::cell::RefCell::new(std::collections::HashMap::new()),
+        field_ctx_cell: std::cell::Cell::new(crate::layout::fragment::FieldContext::default()),
     };
     let dlh = default_line_height(&ctx);
     let mut all_pages = Vec::new();
     let mut all_endnotes = Vec::new();
     let mut last_config = PageConfig::default();
+    // Per-section metadata for deferred header/footer rendering.
+    struct SectionHfInfo<'a> {
+        page_range: std::ops::Range<usize>,
+        config: PageConfig,
+        header_blocks: Option<&'a [Block]>,
+        footer_blocks: Option<&'a [Block]>,
+    }
+    let mut section_hf: Vec<SectionHfInfo> = Vec::new();
 
     // §17.11.23: footnote separator indent from default paragraph style.
     let separator_indent = resolved.default_paragraph_style_id.as_ref()
@@ -116,6 +126,7 @@ pub fn layout_document(
     // §17.6.22: track continuation state for `Continuous` section breaks.
     let mut pending_continuation: Option<layout::section::ContinuationState> = None;
 
+    // Phase 1: layout all sections to determine total page count.
     for section in &resolved.sections {
         let config = PageConfig::from_section(&section.properties);
         *ctx.page_config.borrow_mut() = config.clone();
@@ -137,22 +148,11 @@ pub fn layout_document(
         // Collect endnotes for rendering at document end.
         all_endnotes.extend(built.endnotes);
 
-        // Render headers/footers onto each page.
-        let header_content = section.header.as_ref()
-            .map(|blocks| collect_fragments_from_blocks(blocks, &ctx));
-        let footer_content = section.footer.as_ref()
-            .map(|blocks| collect_fragments_from_blocks(blocks, &ctx));
-        render_headers_footers(
-            &mut pages, &config,
-            header_content.as_ref(), footer_content.as_ref(),
-            dlh,
-        );
-
-        last_config = config;
+        last_config = config.clone();
 
         // Check if the NEXT section is continuous — if so, save the last page
         // as continuation state instead of appending it.
-        // (We peek ahead by checking the section index.)
+        // (Peek ahead by checking the section index.)
         let next_is_continuous = {
             let section_idx = resolved.sections.iter().position(|s| std::ptr::eq(s, section));
             section_idx.and_then(|i| resolved.sections.get(i + 1))
@@ -161,7 +161,6 @@ pub fn layout_document(
 
         if next_is_continuous && !pages.is_empty() {
             let last_page = pages.pop().unwrap();
-            // Estimate cursor_y from the last command on the page.
             let cursor_y = estimate_cursor_y(&last_page, &last_config);
             pending_continuation = Some(layout::section::ContinuationState {
                 page: last_page,
@@ -169,7 +168,26 @@ pub fn layout_document(
             });
         }
 
+        let page_start = all_pages.len();
         all_pages.append(&mut pages);
+        section_hf.push(SectionHfInfo {
+            page_range: page_start..all_pages.len(),
+            config,
+            header_blocks: section.header.as_deref(),
+            footer_blocks: section.footer.as_deref(),
+        });
+    }
+
+    // Phase 2: render headers/footers with correct NUMPAGES (total page count).
+    let total_pages = all_pages.len();
+    for info in &section_hf {
+        *ctx.page_config.borrow_mut() = info.config.clone();
+        render_headers_footers(
+            &mut all_pages[info.page_range.clone()],
+            &info.config,
+            info.header_blocks, info.footer_blocks,
+            &ctx, dlh, info.page_range.start, total_pages,
+        );
     }
 
     // Render endnotes on a new page at the end of the document.

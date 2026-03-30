@@ -238,6 +238,59 @@ fn split_into_words(text: &str) -> Vec<&str> {
     words
 }
 
+/// §17.16.4.1: context for evaluating dynamic fields (PAGE, NUMPAGES).
+#[derive(Clone, Copy, Default)]
+pub struct FieldContext {
+    /// Current page number (1-based).
+    pub page_number: Option<usize>,
+    /// Total page count in the document.
+    pub num_pages: Option<usize>,
+}
+
+/// §17.16.4.1: evaluate a parsed field instruction against the current context.
+/// Returns the substituted text for PAGE/NUMPAGES, or None for other fields
+/// or when no context is available.
+fn evaluate_field_instruction(
+    instruction: &dxpdf_field::FieldInstruction,
+    ctx: FieldContext,
+) -> Option<String> {
+    match instruction {
+        dxpdf_field::FieldInstruction::Page { .. } => ctx.page_number.map(|n| n.to_string()),
+        dxpdf_field::FieldInstruction::NumPages { .. } => ctx.num_pages.map(|n| n.to_string()),
+        _ => None,
+    }
+}
+
+/// Build a text fragment for a substituted field value, using the paragraph's
+/// default font properties.
+fn make_field_text_fragment<F>(
+    text: String,
+    default_family: &str,
+    default_size: Pt,
+    default_color: crate::resolve::color::RgbColor,
+    measure_text: &F,
+) -> Fragment
+where
+    F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
+{
+    let font = FontProps {
+        family: Rc::from(default_family),
+        size: default_size,
+        bold: false, italic: false, underline: false,
+        char_spacing: Pt::ZERO,
+        underline_position: Pt::ZERO,
+        underline_thickness: Pt::ZERO,
+    };
+    let (w, m) = measure_text(&text, &font);
+    Fragment::Text {
+        text, font, color: default_color,
+        shading: None, border: None,
+        width: w, trimmed_width: w, metrics: m,
+        hyperlink_url: None, baseline_offset: Pt::ZERO,
+        text_offset: Pt::ZERO,
+    }
+}
+
 /// Walk inline content and collect fragments.
 /// `measure_text` is a callback that measures text width/height/ascent for a given font.
 /// `resolved_styles` is used to look up character styles (w:rStyle) on text runs.
@@ -256,18 +309,29 @@ pub fn collect_fragments<F>(
     paragraph_run_defaults: Option<&RunProperties>,
     footnote_counter: &mut u32,
     endnote_counter: &mut u32,
+    field_ctx: FieldContext,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics), // (width, metrics)
 {
     let mut fragments = Vec::new();
     let mut field_depth: i32 = 0; // tracks nested complex field state
+    let mut field_instr = String::new(); // accumulated instruction text for current complex field
+    // §17.16.19: field substitution state for complex fields.
+    // Pending = substitution text waiting for the first result TextRun's formatting.
+    // Emitted = substitution was rendered, skip remaining result TextRuns until End.
+    let mut field_sub_pending: Option<String> = None;
+    let mut field_sub_emitted = false;
 
     for inline in inlines {
         match inline {
             Inline::TextRun(tr) => {
-                // Skip field instruction text (between begin and separate)
+                // Skip field instruction text (between Begin and Separate).
                 if field_depth > 0 {
+                    continue;
+                }
+                // Skip remaining result runs after substitution was emitted.
+                if field_sub_emitted {
                     continue;
                 }
                 // Run property cascade per §17.7.2:
@@ -329,11 +393,21 @@ where
                     space: Pt::new(b.space.raw() as f32),
                 });
 
-                if !tr.text.is_empty() {
+                // §17.16.19: if a field substitution is pending, use the
+                // substituted text with this TextRun's resolved formatting
+                // (MERGEFORMAT — first result run provides the style).
+                let text_source: std::borrow::Cow<str> = if let Some(sub) = field_sub_pending.take() {
+                    field_sub_emitted = true;
+                    sub.into()
+                } else {
+                    tr.text.as_str().into()
+                };
+
+                if !text_source.is_empty() {
                     // Split text into word-level fragments so the line fitter
                     // can break between words. Whitespace is kept as a trailing
                     // part of the preceding word (e.g., "hello " + "world").
-                    for word in split_into_words(&tr.text) {
+                    for word in split_into_words(&text_source) {
                         let (w, m) = measure_text(word, &font);
                         // Measure trimmed width for overflow checking.
                         // Trailing whitespace is allowed to hang past the margin.
@@ -413,36 +487,63 @@ where
                     paragraph_run_defaults,
                     footnote_counter,
                     endnote_counter,
+                    field_ctx,
                 );
                 fragments.append(&mut sub);
             }
             Inline::Field(field) => {
-                // Simple field — collect content (the cached result)
-                let mut sub = collect_fragments(
-                    &field.content,
-                    default_family,
-                    default_size,
-                    default_color,
-                    hyperlink_url,
-                    measure_text,
-                    resolved_styles,
-                    paragraph_run_defaults,
-                    footnote_counter,
-                    endnote_counter,
-                );
-                fragments.append(&mut sub);
-            }
-            Inline::FieldChar(fc) => {
-                // Complex field state machine:
-                // Begin -> InstrText... -> Separate -> result runs -> End
-                match fc.field_char_type {
-                    FieldCharType::Begin => field_depth += 1,
-                    FieldCharType::Separate => field_depth -= 1, // now collect result runs
-                    FieldCharType::End => {} // no-op, result already collected
+                // §17.16.18: simple field — check for dynamic substitution.
+                let substituted = evaluate_field_instruction(&field.instruction, field_ctx);
+                if let Some(text) = substituted {
+                    fragments.push(make_field_text_fragment(
+                        text, default_family, default_size, default_color, measure_text,
+                    ));
+                } else {
+                    let mut sub = collect_fragments(
+                        &field.content,
+                        default_family, default_size, default_color,
+                        hyperlink_url, measure_text, resolved_styles,
+                        paragraph_run_defaults, footnote_counter, endnote_counter,
+                        field_ctx,
+                    );
+                    fragments.append(&mut sub);
                 }
             }
-            Inline::InstrText(_) => {
-                // Skipped — field instruction text, not rendered
+            Inline::FieldChar(fc) => {
+                // §17.16.18: complex field state machine:
+                // Begin → InstrText... → Separate → result runs → End
+                match fc.field_char_type {
+                    FieldCharType::Begin => {
+                        field_depth += 1;
+                        field_instr.clear();
+                        field_sub_pending = None;
+                        field_sub_emitted = false;
+                    }
+                    FieldCharType::Separate => {
+                        // §17.16.4.1: parse accumulated instruction, evaluate
+                        // PAGE/NUMPAGES if field context is available.
+                        if let Ok(parsed) = dxpdf_field::parse(&field_instr) {
+                            field_sub_pending = evaluate_field_instruction(&parsed, field_ctx);
+                        }
+                        field_depth -= 1; // now collect result runs (unless substituted)
+                    }
+                    FieldCharType::End => {
+                        // If a substitution was pending but no result TextRun
+                        // was present to provide formatting, emit with defaults.
+                        if let Some(text) = field_sub_pending.take() {
+                            fragments.push(make_field_text_fragment(
+                                text, default_family, default_size, default_color, measure_text,
+                            ));
+                        }
+                        field_sub_emitted = false;
+                    }
+                }
+            }
+            Inline::InstrText(text) => {
+                // Accumulate instruction text for complex field parsing.
+                if field_depth > 0 {
+                    field_instr.push_str(text);
+                }
             }
             Inline::AlternateContent(ac) => {
                 // Pick fallback content (safest for PDF rendering)
@@ -458,6 +559,7 @@ where
                         paragraph_run_defaults,
                         footnote_counter,
                         endnote_counter,
+                        field_ctx,
                     );
                     fragments.append(&mut sub);
                 }
@@ -585,6 +687,7 @@ where
                                     para_run_defaults,
                                     footnote_counter,
                                     endnote_counter,
+                                    field_ctx,
                                 );
                                 fragments.append(&mut sub);
                             }
@@ -640,7 +743,7 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         assert_eq!(frags[0].width().raw(), 30.0); // 5 * 6
@@ -650,7 +753,7 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(10.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         if let Fragment::Text { font, .. } = &frags[0] {
             assert_eq!(&*font.family, "Arial");
@@ -663,7 +766,7 @@ mod tests {
     #[test]
     fn tab_produces_tab_fragment() {
         let inlines = vec![Inline::Tab];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         assert!(matches!(frags[0], Fragment::Tab { .. }));
@@ -672,7 +775,7 @@ mod tests {
     #[test]
     fn line_break_produces_break_fragment() {
         let inlines = vec![Inline::LineBreak(BreakKind::TextWrapping)];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         assert!(frags[0].is_line_break());
@@ -684,7 +787,7 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
         if let Fragment::Text {
@@ -722,7 +825,7 @@ mod tests {
                 fld_lock: None,
             }),
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
@@ -746,7 +849,7 @@ mod tests {
             Inline::EndnoteRefMark,
             Inline::LastRenderedPageBreak,
         ];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         // BookmarkStart produces a Bookmark fragment, text run produces a Text fragment.
         assert_eq!(frags.len(), 2, "bookmark + text run should produce fragments");
@@ -763,7 +866,7 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -779,7 +882,7 @@ mod tests {
             text: String::new(),
             rsids: RevisionIds::default(),
         }))];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
         assert!(frags.is_empty());
     }
 
@@ -799,7 +902,7 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
@@ -816,7 +919,7 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
@@ -858,7 +961,7 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
-        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0);
+        let frags = collect_fragments(&inlines, "Default", Pt::new(12.0), RgbColor::BLACK, None, &dummy_measure, None, None, &mut 0, &mut 0, FieldContext::default());
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {
