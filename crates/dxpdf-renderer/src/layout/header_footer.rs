@@ -97,6 +97,7 @@ mod tests {
             fragments: frags,
             style: ParagraphStyle::default(),
             absolute_position: None,
+            floating_images: vec![],
         }
     }
 

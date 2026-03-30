@@ -172,24 +172,43 @@ pub fn collect_fragments_from_blocks(
     let mut style = ParagraphStyle::default();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
-    for block in blocks {
-        if let Block::Paragraph(p) = block {
-            let (frags, props) = build_fragments(p, ctx, None, None);
-            if all_fragments.is_empty() {
-                style = paragraph_style_from_props(&props);
-            }
-            // Check for VML absolute positioning in Pict inlines.
-            if absolute_position.is_none() {
-                for inline in &p.content {
-                    if let Some(pos) = find_vml_absolute_position(inline) {
-                        absolute_position = Some(pos);
-                        break;
-                    }
+    // Gather only paragraph blocks so we can detect the last one for look-ahead.
+    let para_blocks: Vec<&model::Paragraph> = blocks
+        .iter()
+        .filter_map(|b| if let Block::Paragraph(p) = b { Some(p.as_ref()) } else { None })
+        .collect();
+
+    for (i, p) in para_blocks.iter().enumerate() {
+        let (frags, props) = build_fragments(p, ctx, None, None);
+        if all_fragments.is_empty() {
+            style = paragraph_style_from_props(&props);
+        }
+        // Check for VML absolute positioning in Pict inlines.
+        if absolute_position.is_none() {
+            for inline in &p.content {
+                if let Some(pos) = find_vml_absolute_position(inline) {
+                    absolute_position = Some(pos);
+                    break;
                 }
             }
-            // Extract floating (anchor) images from header paragraphs.
-            let floats = extract_floating_images(p, ctx, false);
-            all_floating_images.extend(floats);
+        }
+        // Extract floating (anchor) images from header paragraphs.
+        let floats = extract_floating_images(p, ctx, false);
+        all_floating_images.extend(floats);
+
+        if frags.is_empty() && i + 1 < para_blocks.len() {
+            // §17.10.1: empty paragraphs in headers/footers still occupy a line
+            // height (from the paragraph mark's font). Insert a LineBreak so
+            // subsequent text is vertically offset by that amount.
+            let (family, mut size, ..) = resolve_paragraph_defaults(p, ctx.resolved, false);
+            if let Some(ref mrp) = p.mark_run_properties {
+                if let Some(fs) = mrp.font_size {
+                    size = Pt::from(fs);
+                }
+            }
+            let line_height = ctx.measurer.default_line_height(&family, size);
+            all_fragments.push(Fragment::LineBreak { line_height });
+        } else {
             all_fragments.extend(frags);
         }
     }
@@ -888,7 +907,7 @@ struct BuiltTable {
     indent: Pt,
     /// §17.4.28: table horizontal alignment (left/center/right).
     alignment: Option<model::Alignment>,
-    float_info: Option<(Pt, Pt, Pt)>,
+    float_info: Option<super::section::TableFloatInfo>,
 }
 
 /// Recursively build a table: resolve styles, conditional formatting, and
@@ -1023,10 +1042,15 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
 
     // §17.4.58: floating table positioning.
     let float_info = t.properties.positioning.as_ref().map(|pos| {
-        let table_width: Pt = col_widths.iter().copied().sum();
-        let right_gap = pos.right_from_text.map(Pt::from).unwrap_or(Pt::ZERO);
-        let bottom_gap = pos.bottom_from_text.map(Pt::from).unwrap_or(Pt::ZERO);
-        (table_width, right_gap, bottom_gap)
+        super::section::TableFloatInfo {
+            right_gap: pos.right_from_text.map(Pt::from).unwrap_or(Pt::ZERO),
+            bottom_gap: pos.bottom_from_text.map(Pt::from).unwrap_or(Pt::ZERO),
+            x_align: pos.x_align,
+            // §17.4.59: tblpY — absolute Y offset from the vertical anchor.
+            y_offset: pos.y.map(Pt::from).unwrap_or(Pt::ZERO),
+            // §17.4.58: default vertical anchor is "text".
+            vert_anchor: pos.vert_anchor.unwrap_or(dxpdf_docx_model::model::TableAnchor::Text),
+        }
     });
 
     // §17.4.51: table indentation from left margin.
@@ -1427,14 +1451,24 @@ fn convert_cell_border_override(b: &Option<model::Border>) -> Option<CellBorderO
 }
 
 /// Convert model `TableBorders` to a layout `TableBorderConfig`.
+/// §17.4.38: borders with `val="none"` or `val="nil"` are suppressed.
 fn convert_table_border_config(b: &model::TableBorders) -> TableBorderConfig {
+    let convert = |border: &Option<model::Border>| -> Option<TableBorderLine> {
+        border.as_ref().and_then(|b| {
+            if b.style == model::BorderStyle::None {
+                None
+            } else {
+                Some(convert_model_border(b))
+            }
+        })
+    };
     TableBorderConfig {
-        top: b.top.as_ref().map(convert_model_border),
-        bottom: b.bottom.as_ref().map(convert_model_border),
-        left: b.left.as_ref().map(convert_model_border),
-        right: b.right.as_ref().map(convert_model_border),
-        inside_h: b.inside_h.as_ref().map(convert_model_border),
-        inside_v: b.inside_v.as_ref().map(convert_model_border),
+        top: convert(&b.top),
+        bottom: convert(&b.bottom),
+        left: convert(&b.left),
+        right: convert(&b.right),
+        inside_h: convert(&b.inside_h),
+        inside_v: convert(&b.inside_v),
     }
 }
 

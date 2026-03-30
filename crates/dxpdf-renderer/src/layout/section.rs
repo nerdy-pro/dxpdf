@@ -14,6 +14,21 @@ use super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::table::{layout_table, TableRowInput};
 use super::BoxConstraints;
 
+/// §17.4.58 / §17.4.59: positioning data for a floating table.
+#[derive(Debug, Clone)]
+pub struct TableFloatInfo {
+    /// Gap between the table's right edge and surrounding text.
+    pub right_gap: Pt,
+    /// Gap between the table's bottom edge and surrounding text.
+    pub bottom_gap: Pt,
+    /// §17.4.58: horizontal alignment override (tblpXSpec).
+    pub x_align: Option<dxpdf_docx_model::model::TableXAlign>,
+    /// §17.4.59: absolute Y offset from the vertical anchor.
+    pub y_offset: Pt,
+    /// §17.4.58: vertical anchor reference (text / margin / page).
+    pub vert_anchor: dxpdf_docx_model::model::TableAnchor,
+}
+
 /// A floating (anchor) image to be positioned absolutely on the page.
 #[derive(Clone)]
 pub struct FloatingImage {
@@ -60,9 +75,8 @@ pub enum LayoutBlock {
         indent: Pt,
         /// §17.4.28: table horizontal alignment.
         alignment: Option<dxpdf_docx_model::model::Alignment>,
-        /// §17.4.58: floating table — text wraps around it.
-        /// (table_width, right_gap, bottom_gap) for float positioning.
-        float_info: Option<(Pt, Pt, Pt)>,
+        /// §17.4.58: floating table positioning — if present, text wraps around it.
+        float_info: Option<TableFloatInfo>,
     },
 }
 
@@ -115,9 +129,9 @@ pub fn layout_section(
     let mut page_start_block: usize = 0;
     // Whether we need to rescan absolute floats for this page.
     let mut abs_floats_dirty = true;
-    // Whether the current page is the first page of the section with no content yet.
-    // space_before is only suppressed here, not on overflow pages.
-    let mut first_on_section_page = true;
+    // §17.4.59: y position at the start of the most recently rendered paragraph,
+    // used as the anchor reference for floating tables with vertAnchor="text".
+    let mut last_para_start_y = cursor_y;
 
     // Column-aware constraint: use current column's width.
     let col_constraints = |col: usize| -> BoxConstraints {
@@ -171,11 +185,9 @@ pub fn layout_section(
 
                 // Save page state for potential keepNext rollback.
                 let cmds_before_para = current_page.commands.len();
-                let _cursor_before_para = cursor_y;
 
-                // §17.3.1.33: suppress space_before at the top of a section's
-                // first page. On overflow pages, space_before is preserved.
-                if cursor_y <= column_top && first_on_section_page {
+                // §17.3.1.33: suppress space_before at the top of any page.
+                if cursor_y <= column_top {
                     effective_style.space_before = Pt::ZERO;
                 }
                 // §17.3.1.9 / §17.3.1.33: spacing collapse must happen BEFORE
@@ -277,9 +289,7 @@ pub fn layout_section(
                 let mut effective_floats = page_floats.clone();
                 for af in &current_page_abs_floats {
                     // Only include forward-scanned floats that start above or
-                    // at the current paragraph position. Floats that start below
-                    // the cursor belong to later paragraphs and shouldn't affect
-                    // the current one.
+                    // at the current paragraph's content area top.
                     if af.page_y_start > cursor_y + effective_style.space_before {
                         continue;
                     }
@@ -308,6 +318,7 @@ pub fn layout_section(
                 // §17.6.4: split paragraph at column breaks for multi-column layout.
                 let frag_chunks = split_at_column_breaks(fragments);
                 let mut para_start_y = cursor_y;
+                last_para_start_y = cursor_y;
 
                 for (chunk_idx, chunk) in frag_chunks.iter().enumerate() {
                     // Advance to next column for chunks after a column break.
@@ -437,12 +448,8 @@ pub fn layout_section(
                     page_floats.clear();
 
                         // Re-layout the current paragraph on the new page.
-                        // Only suppress space_before at section start.
-                        if !first_on_section_page {
-                            // Restore original space_before for overflow pages.
-                        } else {
-                            effective_style.space_before = Pt::ZERO;
-                        }
+                        // §17.3.1.33: suppress space_before at new page top.
+                        effective_style.space_before = Pt::ZERO;
                         let constraints = col_constraints(current_col);
                         effective_style.page_y = cursor_y;
                         effective_style.page_x = col_x(current_col);
@@ -461,7 +468,6 @@ pub fn layout_section(
                     }
                 }
 
-                first_on_section_page = false;
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -526,7 +532,17 @@ pub fn layout_section(
 
                 // §17.4.58: floating table — render at current position and
                 // register as a float so subsequent text wraps around it.
-                if let Some((_, right_gap, _bottom_gap)) = float_info {
+                if let Some(fi) = float_info {
+                    // §17.4.58: apply tblpXSpec horizontal alignment.
+                    let table_x = match fi.x_align {
+                        Some(dxpdf_docx_model::model::TableXAlign::Center) => {
+                            config.margins.left + (content_width - table.size.width) * 0.5
+                        }
+                        Some(dxpdf_docx_model::model::TableXAlign::Right) => {
+                            config.margins.left + content_width - table.size.width
+                        }
+                        _ => table_x,
+                    };
                     if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
                         if !page_footnotes.is_empty() {
                             render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
@@ -546,30 +562,41 @@ pub fn layout_section(
                     page_floats.clear();
                     }
 
-                    let float_y_start = cursor_y;
+                    // §17.4.59: tblpY is the absolute Y offset from the vertical
+                    // anchor. The table must not start before cursor_y (preceding
+                    // content already occupies space above it).
+                    let float_y_start = if fi.y_offset > Pt::ZERO {
+                        let anchor_y = match fi.vert_anchor {
+                            dxpdf_docx_model::model::TableAnchor::Text => last_para_start_y + fi.y_offset,
+                            dxpdf_docx_model::model::TableAnchor::Margin => config.margins.top + fi.y_offset,
+                            dxpdf_docx_model::model::TableAnchor::Page => fi.y_offset,
+                        };
+                        anchor_y.max(cursor_y)
+                    } else {
+                        cursor_y
+                    };
                     // §17.4.56: float y_end uses only the table's visual height.
                     // The bottom_gap is distance from text, not part of the float
                     // region — it prevents text from getting too close but doesn't
                     // extend the wrapping zone.
-                    let float_y_end = cursor_y + table.size.height;
+                    let float_y_end = float_y_start + table.size.height;
 
                     for mut cmd in table.commands {
-                        cmd.shift_y(cursor_y);
+                        cmd.shift_y(float_y_start);
                         cmd.shift_x(table_x);
                         current_page.commands.push(cmd);
                     }
 
                     log::debug!(
                         "[layout]   register table float: x={:.1} y={:.1}-{:.1} w={:.1} block_idx={block_idx}",
-                        table_x.raw(), float_y_start.raw(), float_y_end.raw(), (table.size.width + *right_gap).raw()
+                        table_x.raw(), float_y_start.raw(), float_y_end.raw(), (table.size.width + fi.right_gap).raw()
                     );
                     // §17.4.56: register as float for text wrapping.
-                    // Table floats only wrap the owning paragraph, not subsequent ones.
                     page_floats.push(super::float::ActiveFloat {
                         page_x: table_x,
                         page_y_start: float_y_start,
                         page_y_end: float_y_end,
-                        width: table.size.width + *right_gap,
+                        width: table.size.width + fi.right_gap,
                         source: super::float::FloatSource::Table { owner_block_idx: block_idx },
                     });
                     continue;
@@ -601,7 +628,6 @@ pub fn layout_section(
                 }
 
                 cursor_y += table.size.height;
-                first_on_section_page = false;
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
             }
