@@ -8,14 +8,18 @@
 
 ### Page-Top Suppression
 
-**§17.3.1.33**: space_before is suppressed when a paragraph begins at the top of any page. This includes:
+**§17.3.1.33**: space_before is suppressed for "the first paragraph in a body/text story that begins on a page." This means only the **structural first paragraph** of a section on its initial page:
 
-- First paragraph of the document
-- Paragraphs after `pageBreakBefore` (Heading1 typically has this)
+- First paragraph of the document body
+- First paragraph after a section break
+
+Space_before is **NOT** suppressed for:
+
+- Paragraphs that start a new page via `pageBreakBefore` (e.g., Heading1 with `spacing before="480"` retains its 24pt offset)
 - Paragraphs pushed to a new page by overflow
 - Paragraphs re-laid after `keepNext` forces a page break
 
-Implementation: `cursor_y <= column_top` check in `layout_section`. No `first_on_section_page` gating — suppression applies universally at any page top.
+Implementation: `cursor_y <= column_top && first_on_section_page` in `layout_section`. The `first_on_section_page` flag is true only until the first paragraph or table is processed.
 
 ### Spacing Collapse
 

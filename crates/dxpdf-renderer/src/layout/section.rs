@@ -117,6 +117,10 @@ pub fn layout_section(
     let mut column_top = cursor_y;
     // Footnotes collected for the current page.
     let mut page_footnotes: Vec<(&[Fragment], &ParagraphStyle)> = Vec::new();
+    // §17.3.1.33: only the structural first paragraph of a section on its
+    // initial page has space_before suppressed. Paragraphs arriving at page
+    // top via pageBreakBefore or overflow retain their space_before.
+    let mut first_on_section_page = true;
     // §17.3.1.9: track previous paragraph for contextual spacing collapsing.
     let mut prev_space_after = Pt::ZERO;
     let mut prev_style_id: Option<dxpdf_docx_model::model::StyleId> = None;
@@ -186,8 +190,12 @@ pub fn layout_section(
                 // Save page state for potential keepNext rollback.
                 let cmds_before_para = current_page.commands.len();
 
-                // §17.3.1.33: suppress space_before at the top of any page.
-                if cursor_y <= column_top {
+                // §17.3.1.33: suppress space_before for the "first paragraph
+                // in a body/text story that begins on a page." Only the
+                // structural first content block of a section is suppressed —
+                // paragraphs at page top via pageBreakBefore or overflow
+                // retain their space_before.
+                if cursor_y <= column_top && first_on_section_page {
                     effective_style.space_before = Pt::ZERO;
                 }
                 // §17.3.1.9 / §17.3.1.33: spacing collapse must happen BEFORE
@@ -448,8 +456,8 @@ pub fn layout_section(
                     page_floats.clear();
 
                         // Re-layout the current paragraph on the new page.
-                        // §17.3.1.33: suppress space_before at new page top.
-                        effective_style.space_before = Pt::ZERO;
+                        // keepNext paragraphs at page top are not the structural
+                        // first — their space_before is preserved.
                         let constraints = col_constraints(current_col);
                         effective_style.page_y = cursor_y;
                         effective_style.page_x = col_x(current_col);
@@ -468,6 +476,7 @@ pub fn layout_section(
                     }
                 }
 
+                first_on_section_page = false;
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
 
@@ -628,6 +637,7 @@ pub fn layout_section(
                 }
 
                 cursor_y += table.size.height;
+                first_on_section_page = false;
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
             }
@@ -1080,5 +1090,65 @@ mod tests {
             .filter(|c| matches!(c, DrawCommand::Text { .. }))
             .count();
         assert_eq!(text_count, 1);
+    }
+
+    // ── §17.3.1.33 space_before suppression tests ──────────────────────
+
+    #[test]
+    fn space_before_suppressed_for_first_paragraph_of_section() {
+        let mut style = ParagraphStyle::default();
+        style.space_before = Pt::new(24.0);
+        let blocks = vec![LayoutBlock::Paragraph {
+            fragments: vec![text_frag("heading", 50.0, 14.0)],
+            style,
+            page_break_before: false,
+            footnotes: vec![],
+            floating_images: vec![],
+        }];
+        let config = small_config();
+        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
+
+        // First paragraph on the section's initial page: space_before suppressed.
+        if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
+            assert!(
+                position.y.raw() < config.margins.top.raw() + 24.0,
+                "space_before should be suppressed: y={}",
+                position.y.raw()
+            );
+        }
+    }
+
+    #[test]
+    fn space_before_preserved_for_page_break_before() {
+        let mut heading_style = ParagraphStyle::default();
+        heading_style.space_before = Pt::new(24.0);
+
+        let blocks = vec![
+            para_block("first page", 30.0),
+            LayoutBlock::Paragraph {
+                fragments: vec![text_frag("heading", 50.0, 14.0)],
+                style: heading_style,
+                page_break_before: true,
+                footnotes: vec![],
+                floating_images: vec![],
+            },
+        ];
+        let config = small_config();
+        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
+
+        assert!(pages.len() >= 2, "should have at least 2 pages");
+        let heading_y = pages[1].commands.iter()
+            .find_map(|c| match c {
+                DrawCommand::Text { position, text, .. } if text == "heading" => Some(position.y),
+                _ => None,
+            })
+            .expect("heading should be on page 2");
+        // §17.3.1.33: space_before is preserved — pageBreakBefore paragraphs
+        // are not the structural first of the section.
+        assert!(
+            heading_y.raw() > config.margins.top.raw() + 20.0,
+            "space_before should be preserved for pageBreakBefore: y={}",
+            heading_y.raw(),
+        );
     }
 }
