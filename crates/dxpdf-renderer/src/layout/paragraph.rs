@@ -254,6 +254,7 @@ pub fn layout_paragraph(
                     end: first.end + frag_idx,
                     width: first.width,
                     height: first.height,
+                    text_height: first.text_height,
                     ascent: first.ascent,
                     has_break: first.has_break,
                 }
@@ -262,7 +263,8 @@ pub fn layout_paragraph(
             };
 
             let natural = if fitted_line.height > Pt::ZERO { fitted_line.height } else { default_line_height };
-            let lh = resolve_line_height(natural, &style.line_spacing);
+            let text_h = if fitted_line.text_height > Pt::ZERO { fitted_line.text_height } else { default_line_height };
+            let lh = resolve_line_height(natural, text_h, &style.line_spacing);
 
             frag_idx = fitted_line.end;
             placements.push(LinePlacement { line: fitted_line, float_left: fl, float_right: fr });
@@ -299,12 +301,9 @@ pub fn layout_paragraph(
             let n = dc.lines.max(1) as usize;
             let mut y = cursor_y;
             for (i, lp) in line_placements.iter().enumerate().take(n) {
-                let natural = if lp.line.height > Pt::ZERO {
-                    lp.line.height
-                } else {
-                    default_line_height
-                };
-                let lh = resolve_line_height(natural, &style.line_spacing);
+                let natural = if lp.line.height > Pt::ZERO { lp.line.height } else { default_line_height };
+                let text_h = if lp.line.text_height > Pt::ZERO { lp.line.text_height } else { default_line_height };
+                let lh = resolve_line_height(natural, text_h, &style.line_spacing);
                 if i == n - 1 {
                     y += lp.line.ascent;
                     break;
@@ -367,12 +366,9 @@ pub fn layout_paragraph(
             style.indent_left + dc_offset + float_offset
         };
 
-        let natural_height = if line.height > Pt::ZERO {
-            line.height
-        } else {
-            default_line_height
-        };
-        let line_height = resolve_line_height(natural_height, &style.line_spacing);
+        let natural_height = if line.height > Pt::ZERO { line.height } else { default_line_height };
+        let text_height = if line.text_height > Pt::ZERO { line.text_height } else { default_line_height };
+        let line_height = resolve_line_height(natural_height, text_height, &style.line_spacing);
 
         // Alignment offset — computed relative to the line's available width.
         let float_reduction = lp.float_left + lp.float_right;
@@ -659,7 +655,7 @@ pub fn layout_paragraph(
     // If no lines, still consume default height + spacing.
     // Apply the paragraph's line spacing rule to the default line height.
     if line_placements.is_empty() {
-        let line_h = resolve_line_height(default_line_height, &style.line_spacing);
+        let line_h = resolve_line_height(default_line_height, default_line_height, &style.line_spacing);
         cursor_y = style.space_before + line_h + style.space_after;
     }
 
@@ -805,9 +801,20 @@ fn emit_tab_leader(
     });
 }
 
-fn resolve_line_height(natural: Pt, rule: &LineSpacingRule) -> Pt {
+/// §17.3.1.33: resolve the effective line height from the natural height
+/// and the line spacing rule.
+///
+/// For Auto mode, the multiplier applies only to text metrics — inline
+/// images use their natural height without scaling. The final line height
+/// is `max(text_height * multiplier, total_height)`.
+fn resolve_line_height(natural: Pt, text_height: Pt, rule: &LineSpacingRule) -> Pt {
     match rule {
-        LineSpacingRule::Auto(multiplier) => natural * *multiplier,
+        LineSpacingRule::Auto(multiplier) => {
+            let scaled_text = text_height * *multiplier;
+            // Use the scaled text height or the full natural height (which
+            // includes images), whichever is larger.
+            scaled_text.max(natural)
+        }
         LineSpacingRule::Exact(h) => *h,
         LineSpacingRule::AtLeast(min) => natural.max(*min),
     }
@@ -1010,15 +1017,32 @@ mod tests {
     }
 
     #[test]
-    fn resolve_line_height_auto() {
-        assert_eq!(resolve_line_height(Pt::new(14.0), &LineSpacingRule::Auto(1.0)).raw(), 14.0);
-        assert_eq!(resolve_line_height(Pt::new(14.0), &LineSpacingRule::Auto(1.5)).raw(), 21.0);
+    fn resolve_line_height_auto_text_only() {
+        // Text-only line: multiplier applies to text_height.
+        assert_eq!(resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.0)).raw(), 14.0);
+        assert_eq!(resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Auto(1.5)).raw(), 21.0);
+    }
+
+    #[test]
+    fn resolve_line_height_auto_image_line() {
+        // Image-only line: natural=325 (image), text_height=0 (no text).
+        // The multiplier does NOT inflate the image height.
+        let h = resolve_line_height(Pt::new(325.0), Pt::ZERO, &LineSpacingRule::Auto(1.08));
+        assert_eq!(h.raw(), 325.0, "image height should not be multiplied");
+    }
+
+    #[test]
+    fn resolve_line_height_auto_mixed_line() {
+        // Line with text (14pt) and image (100pt): multiplier scales text only.
+        // max(14*1.5=21, 100) = 100.
+        let h = resolve_line_height(Pt::new(100.0), Pt::new(14.0), &LineSpacingRule::Auto(1.5));
+        assert_eq!(h.raw(), 100.0, "image dominates");
     }
 
     #[test]
     fn resolve_line_height_exact_overrides() {
         assert_eq!(
-            resolve_line_height(Pt::new(14.0), &LineSpacingRule::Exact(Pt::new(20.0))).raw(),
+            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::Exact(Pt::new(20.0))).raw(),
             20.0
         );
     }
@@ -1026,12 +1050,12 @@ mod tests {
     #[test]
     fn resolve_line_height_at_least() {
         assert_eq!(
-            resolve_line_height(Pt::new(14.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
+            resolve_line_height(Pt::new(14.0), Pt::new(14.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
             14.0,
             "natural > minimum"
         );
         assert_eq!(
-            resolve_line_height(Pt::new(8.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
+            resolve_line_height(Pt::new(8.0), Pt::new(8.0), &LineSpacingRule::AtLeast(Pt::new(10.0))).raw(),
             10.0,
             "minimum > natural"
         );

@@ -13,6 +13,10 @@ pub struct FittedLine {
     pub width: Pt,
     /// Maximum height of any fragment in this line.
     pub height: Pt,
+    /// Maximum height of text-only fragments on this line.
+    /// §17.3.1.33: Auto line spacing multiplier applies to text metrics,
+    /// not to inline image heights.
+    pub text_height: Pt,
     /// Maximum ascent of any text fragment in this line.
     pub ascent: Pt,
     /// Whether this line ends with an explicit line break.
@@ -40,6 +44,7 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
     let mut line_start = 0;
     let mut line_width = Pt::ZERO;
     let mut line_height = Pt::ZERO;
+    let mut line_text_height = Pt::ZERO;
     let mut line_ascent = Pt::ZERO;
     let mut last_break_point = None; // index after which we can break
 
@@ -50,17 +55,20 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         // Explicit line break — emit current line including the break fragment.
         if frag.is_line_break() {
             line_height = line_height.max(frag.height());
+            line_text_height = line_text_height.max(frag.height());
             lines.push(FittedLine {
                 start: line_start,
                 end: i + 1,
                 width: line_width,
                 height: line_height,
+                text_height: line_text_height,
                 ascent: line_ascent,
                 has_break: true,
             });
             line_start = i + 1;
             line_width = Pt::ZERO;
             line_height = Pt::ZERO;
+            line_text_height = Pt::ZERO;
             line_ascent = Pt::ZERO;
             last_break_point = None;
             i += 1;
@@ -82,18 +90,20 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         if check_width > current_max && line_start < i {
             // Overflow — break at last break point, or before this fragment.
             let break_at = last_break_point.unwrap_or(i);
-            let (w, h, a) = measure_range(fragments, line_start, break_at);
+            let m = measure_range(fragments, line_start, break_at);
             lines.push(FittedLine {
                 start: line_start,
                 end: break_at,
-                width: w,
-                height: h,
-                ascent: a,
+                width: m.width,
+                height: m.height,
+                text_height: m.text_height,
+                ascent: m.ascent,
                 has_break: false,
             });
             line_start = break_at;
             line_width = Pt::ZERO;
             line_height = Pt::ZERO;
+            line_text_height = Pt::ZERO;
             line_ascent = Pt::ZERO;
             last_break_point = None;
             // Don't advance i — re-evaluate this fragment on the new line.
@@ -105,6 +115,9 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         // paragraph renderer will clip/overflow as needed.
         line_width = new_width;
         line_height = line_height.max(frag.height());
+        if !matches!(frag, Fragment::Image { .. }) {
+            line_text_height = line_text_height.max(frag.height());
+        }
         if let Fragment::Text { metrics, .. } = frag {
             line_ascent = line_ascent.max(metrics.ascent);
         }
@@ -131,6 +144,7 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
             end: fragments.len(),
             width: line_width,
             height: line_height,
+            text_height: line_text_height,
             ascent: line_ascent,
             has_break: false,
         });
@@ -139,22 +153,28 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
     lines
 }
 
-/// Measure total width, max height, and max ascent for a range of fragments.
-fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> (Pt, Pt, Pt) {
-    let mut width = Pt::ZERO;
-    let mut height = Pt::ZERO;
-    let mut ascent = Pt::ZERO;
+/// Measurements for a range of fragments.
+struct RangeMeasure {
+    width: Pt,
+    height: Pt,
+    text_height: Pt,
+    ascent: Pt,
+}
+
+/// Measure total width, max height, text height, and ascent for a range of fragments.
+fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasure {
+    let mut m = RangeMeasure { width: Pt::ZERO, height: Pt::ZERO, text_height: Pt::ZERO, ascent: Pt::ZERO };
     for frag in &fragments[start..end] {
-        width += frag.width();
-        height = height.max(frag.height());
-        if let Fragment::Text {
-            metrics, ..
-        } = frag
-        {
-            ascent = ascent.max(metrics.ascent);
+        m.width += frag.width();
+        m.height = m.height.max(frag.height());
+        if !matches!(frag, Fragment::Image { .. }) {
+            m.text_height = m.text_height.max(frag.height());
+        }
+        if let Fragment::Text { metrics, .. } = frag {
+            m.ascent = m.ascent.max(metrics.ascent);
         }
     }
-    (width, height, ascent)
+    m
 }
 
 #[cfg(test)]
