@@ -3,7 +3,7 @@ members = [".", "crates/dxpdf-docx-model", "crates/dxpdf-docx", "crates/dxpdf-fi
 
 [package]
 name = "dxpdf"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 description = "A fast DOCX-to-PDF converter powered by Skia"
 license = "MIT"
