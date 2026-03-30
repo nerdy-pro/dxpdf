@@ -19,8 +19,8 @@ exclude = ["test-cases/", "scripts/", "VISUAL_COMPARISON.md", "BENCHMARKS.md"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-dxpdf-docx = { path = "crates/dxpdf-docx" }
-dxpdf-renderer = { path = "crates/dxpdf-renderer" }
+dxpdf-docx = { path = "crates/dxpdf-docx", version = "0.1.0" }
+dxpdf-renderer = { path = "crates/dxpdf-renderer", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
 log = "0.4"

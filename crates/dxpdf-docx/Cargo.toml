@@ -6,8 +6,8 @@ description = "OOXML DOCX parser for dxpdf"
 license = "MIT"
 
 [dependencies]
-dxpdf-docx-model = { path = "../dxpdf-docx-model" }
-dxpdf-field = { path = "../dxpdf-field" }
+dxpdf-docx-model = { path = "../dxpdf-docx-model", version = "0.1.0" }
+dxpdf-field = { path = "../dxpdf-field", version = "0.1.0" }
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 thiserror = "2"

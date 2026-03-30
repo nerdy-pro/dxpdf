@@ -6,4 +6,4 @@ description = "DOCX document model types for dxpdf"
 license = "MIT"
 
 [dependencies]
-dxpdf-field = { path = "../dxpdf-field" }
+dxpdf-field = { path = "../dxpdf-field", version = "0.1.0" }
