@@ -148,12 +148,18 @@ pub struct TableLayout {
 /// Measure all table rows: resolve borders, lay out cell content, compute heights.
 /// This is the shared measurement phase used by both `layout_table` (monolithic)
 /// and `layout_table_paginated` (page-splitting).
+///
+/// §17.4.38: `suppress_first_row_top` — when `true`, the top border of the first
+/// row is suppressed. Used for adjacent table border collapse: consecutive tables
+/// with the same style are treated as a single merged table, so the second table's
+/// top border would duplicate the first table's bottom border.
 fn measure_table_rows(
     rows: &[TableRowInput],
     col_widths: &[Pt],
     default_line_height: Pt,
     borders: Option<&TableBorderConfig>,
     measure_text: super::paragraph::MeasureTextFn<'_>,
+    suppress_first_row_top: bool,
 ) -> MeasuredTable {
     let table_width: Pt = col_widths.iter().copied().sum();
     let num_rows = rows.len();
@@ -217,6 +223,13 @@ fn measure_table_rows(
                         }
                     }
                 }
+            }
+        }
+
+        // §17.4.38: suppress first-row top borders for adjacent table collapse.
+        if suppress_first_row_top && !resolved_borders.is_empty() {
+            for b in &mut resolved_borders[0] {
+                b.top = None;
             }
         }
     }
@@ -288,6 +301,11 @@ fn measure_table_rows(
 }
 
 /// Emit draw commands for a range of measured rows.
+///
+/// `top_border_override`: if `Some`, the first row in the range gets this border
+/// as its top edge. Used for page-split tables where the measured top borders were
+/// suppressed (adjacent table collapse) or resolved away (conflict resolution),
+/// but the continuation slice still needs a visible top boundary.
 fn emit_table_rows(
     measured: &MeasuredTable,
     rows: &[TableRowInput],
@@ -296,11 +314,14 @@ fn emit_table_rows(
     commands: &mut Vec<DrawCommand>,
     content_commands: &mut Vec<DrawCommand>,
     border_commands: &mut Vec<DrawCommand>,
+    top_border_override: Option<TableBorderLine>,
 ) {
     let num_rows = measured.rows.len();
+    let range_start = row_range.start;
     for row_idx in row_range {
         let mr = &measured.rows[row_idx];
         let row_height = mr.height;
+        let is_first_in_range = row_idx == range_start;
 
         for (cell_ci, (entry, cell_input)) in
             mr.entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
@@ -312,9 +333,18 @@ fn emit_table_rows(
                 });
             }
 
-            let b = &mr.borders[cell_ci];
-            let dx = (border_width(b.left) - cell_input.margins.left).max(Pt::ZERO);
-            let dy_border = (border_width(b.top) - cell_input.margins.top).max(Pt::ZERO);
+            // §17.4.38: restore top border for the first row on a page slice.
+            let cell_top = if is_first_in_range && mr.borders[cell_ci].top.is_none() {
+                top_border_override
+            } else {
+                mr.borders[cell_ci].top
+            };
+            let b_left = mr.borders[cell_ci].left;
+            let b_right = mr.borders[cell_ci].right;
+            let b_bottom = mr.borders[cell_ci].bottom;
+
+            let dx = (border_width(b_left) - cell_input.margins.left).max(Pt::ZERO);
+            let dy_border = (border_width(cell_top) - cell_input.margins.top).max(Pt::ZERO);
 
             let content_h = entry.layout.content_height + cell_input.margins.vertical();
             let dy_valign = match cell_input.vertical_align {
@@ -330,13 +360,13 @@ fn emit_table_rows(
             }
 
             let bottom_border_gap = if row_idx + 1 < num_rows {
-                border_width(b.bottom)
+                border_width(b_bottom)
             } else {
                 Pt::ZERO
             };
             emit_cell_borders(
                 border_commands,
-                CellBorders { top: b.top, bottom: b.bottom, left: b.left, right: b.right },
+                CellBorders { top: cell_top, bottom: b_bottom, left: b_left, right: b_right },
                 entry.cell_x, entry.cell_w, *cursor_y, row_height + bottom_border_gap,
             );
         }
@@ -346,6 +376,9 @@ fn emit_table_rows(
 }
 
 /// Lay out a table: compute column widths, lay out cells, emit borders.
+///
+/// §17.4.38: `suppress_first_row_top` suppresses the top border of the first row
+/// for adjacent table border collapse.
 pub fn layout_table(
     rows: &[TableRowInput],
     col_widths: &[Pt],
@@ -353,6 +386,7 @@ pub fn layout_table(
     default_line_height: Pt,
     borders: Option<&TableBorderConfig>,
     measure_text: super::paragraph::MeasureTextFn<'_>,
+    suppress_first_row_top: bool,
 ) -> TableLayout {
     if rows.is_empty() || col_widths.is_empty() {
         return TableLayout {
@@ -361,16 +395,18 @@ pub fn layout_table(
         };
     }
 
-    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text);
+    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text, suppress_first_row_top);
 
     let mut commands = Vec::new();
     let mut content_commands = Vec::new();
     let mut border_commands = Vec::new();
     let mut cursor_y = Pt::ZERO;
 
+    // Monolithic table: no top border override needed — borders are resolved correctly.
     emit_table_rows(
         &measured, rows, 0..measured.rows.len(),
         &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
+        None,
     );
 
     commands.append(&mut content_commands);
@@ -406,12 +442,13 @@ pub fn layout_table_paginated(
     measure_text: super::paragraph::MeasureTextFn<'_>,
     available_height: Pt,
     page_height: Pt,
+    suppress_first_row_top: bool,
 ) -> Vec<TableSlice> {
     if rows.is_empty() || col_widths.is_empty() {
         return vec![TableSlice { commands: Vec::new(), size: PtSize::ZERO }];
     }
 
-    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text);
+    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text, suppress_first_row_top);
 
     // §17.4.49: contiguous header rows from index 0.
     let header_count = rows.iter()
@@ -462,16 +499,32 @@ pub fn layout_table_paginated(
     }
     slices.push(current_slice);
 
+    // §17.4.38: the table's outer top border, used to restore the top edge
+    // on continuation page slices where border conflict resolution or adjacent
+    // table collapse removed it.
+    let outer_top_border = borders.and_then(|b| b.top);
+
     // Emit draw commands for each slice.
-    slices.iter().map(|row_ranges| {
+    slices.iter().enumerate().map(|(slice_idx, row_ranges)| {
         let mut commands = Vec::new();
         let mut content_commands = Vec::new();
         let mut border_commands = Vec::new();
         let mut cursor_y = Pt::ZERO;
-        for range in row_ranges {
+        for (range_idx, range) in row_ranges.iter().enumerate() {
+            // The first range on each continuation slice (slice_idx > 0) needs
+            // a top border override, since internal conflict resolution removed
+            // it. On the first slice, only apply if suppress_first_row_top was
+            // used (adjacent table collapse) — in that case the first range
+            // should NOT get the override (the whole point is to suppress it).
+            let top_override = if slice_idx > 0 && range_idx == 0 {
+                outer_top_border
+            } else {
+                None
+            };
             emit_table_rows(
                 &measured, rows, range.clone(),
                 &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
+                top_override,
             );
         }
         commands.append(&mut content_commands);
@@ -856,7 +909,7 @@ mod tests {
 
     #[test]
     fn empty_table() {
-        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&[], &[], &body_constraints(), Pt::new(14.0), None, None, false);
         assert!(result.commands.is_empty());
         assert_eq!(result.size, PtSize::ZERO);
     }
@@ -870,7 +923,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 14.0);
@@ -900,7 +953,7 @@ mod tests {
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         assert_eq!(result.size.width.raw(), 200.0);
         assert_eq!(result.size.height.raw(), 28.0); // 2 rows * 14pt
@@ -938,7 +991,7 @@ mod tests {
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         assert_eq!(result.size.height.raw(), 28.0, "row height = tallest cell");
     }
@@ -952,7 +1005,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         assert_eq!(result.size.height.raw(), 40.0, "min height > content height");
     }
@@ -978,7 +1031,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         let rect_count = result
             .commands
@@ -997,7 +1050,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }), None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }), None, false);
 
         let line_count = result
             .commands
@@ -1027,7 +1080,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         // Cell gets full 200pt width, text should still render
         assert_eq!(result.size.width.raw(), 200.0);
@@ -1057,7 +1110,7 @@ mod tests {
         cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
-        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
+        let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None, false);
 
         // Row height = content(14) + top(5) + bottom(5) = 24
         assert_eq!(result.size.height.raw(), 24.0);
@@ -1066,5 +1119,46 @@ mod tests {
         if let Some(DrawCommand::Text { position, .. }) = result.commands.first() {
             assert_eq!(position.x.raw(), 10.0, "left margin");
         }
+    }
+
+    #[test]
+    fn suppress_first_row_top_removes_top_borders() {
+        let border_line = super::TableBorderLine {
+            width: Pt::new(0.5),
+            color: RgbColor::BLACK,
+            style: super::TableBorderStyle::Single,
+        };
+        let borders = super::TableBorderConfig {
+            top: Some(border_line),
+            bottom: Some(border_line),
+            left: Some(border_line),
+            right: Some(border_line),
+            inside_h: None,
+            inside_v: None,
+        };
+        let rows = vec![TableRowInput {
+            cells: vec![simple_cell("a")],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        }];
+        let col_widths = vec![Pt::new(100.0)];
+
+        // Without suppression: top border present.
+        let normal = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&borders), None, false);
+        let normal_lines: Vec<_> = normal.commands.iter()
+            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .collect();
+
+        // With suppression: top border removed.
+        let suppressed = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&borders), None, true);
+        let suppressed_lines: Vec<_> = suppressed.commands.iter()
+            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .collect();
+
+        // Normal has 4 borders (top, bottom, left, right).
+        assert_eq!(normal_lines.len(), 4, "all 4 borders present");
+        // Suppressed has 3 borders (bottom, left, right — no top).
+        assert_eq!(suppressed_lines.len(), 3, "top border suppressed");
     }
 }

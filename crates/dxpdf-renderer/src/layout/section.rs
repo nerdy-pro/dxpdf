@@ -77,6 +77,8 @@ pub enum LayoutBlock {
         alignment: Option<dxpdf_docx_model::model::Alignment>,
         /// §17.4.58: floating table positioning — if present, text wraps around it.
         float_info: Option<TableFloatInfo>,
+        /// §17.4.38: table style reference for adjacent table border collapse.
+        style_id: Option<dxpdf_docx_model::model::StyleId>,
     },
 }
 
@@ -140,6 +142,12 @@ pub fn layout_section(
     // §17.4.59: y position at the start of the most recently rendered paragraph,
     // used as the anchor reference for floating tables with vertAnchor="text".
     let mut last_para_start_y = cursor_y;
+    // §17.4.38: track previous table for adjacent table border collapse.
+    // Consecutive tables with the same style are treated as a merged table:
+    // the second table's top border is suppressed, and an insideH-equivalent
+    // border gap is inserted between them.
+    let mut prev_table_style_id: Option<dxpdf_docx_model::model::StyleId> = None;
+    let mut prev_table_border_gap: Pt = Pt::ZERO;
 
     // Column-aware constraint: use current column's width.
     let col_constraints = |col: usize| -> BoxConstraints {
@@ -505,6 +513,8 @@ pub fn layout_section(
                 prev_borders = style.borders.clone();
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
+                prev_table_style_id = None; // paragraph breaks adjacent table chain
+                prev_table_border_gap = Pt::ZERO;
 
                 // §20.4.2.3: emit floating images (already registered above).
                 // wrapTopAndBottom images were already emitted before paragraph layout.
@@ -548,26 +558,32 @@ pub fn layout_section(
                 indent,
                 alignment,
                 float_info,
+                style_id,
             } => {
-                let table = layout_table(
-                    rows,
-                    col_widths,
-                    &col_constraints(current_col),
-                    default_line_height,
-                    border_config.as_ref(),
-                    measure_text,
-                );
-
-                // §17.4.28 / §17.4.51: compute table x position from
-                // alignment and indent.
-                let table_x = table_x_offset(
-                    *alignment, *indent, table.size.width, content_width,
-                    config.margins.left,
-                );
-
                 // §17.4.58: floating table — render at current position and
                 // register as a float so subsequent text wraps around it.
+                // Floating tables are absolutely positioned and do not
+                // participate in §17.4.38 adjacent table border collapse.
                 if let Some(fi) = float_info {
+                    let table = layout_table(
+                        rows,
+                        col_widths,
+                        &col_constraints(current_col),
+                        default_line_height,
+                        border_config.as_ref(),
+                        measure_text,
+                        false,
+                    );
+
+                    // §17.4.28 / §17.4.51: compute table x position.
+                    let table_x = table_x_offset(
+                        *alignment, *indent, table.size.width, content_width,
+                        config.margins.left,
+                    );
+
+                    // Floating table breaks the adjacent table chain.
+                    prev_table_style_id = None;
+                    prev_table_border_gap = Pt::ZERO;
                     // §17.4.58: apply tblpXSpec horizontal alignment.
                     let table_x = match fi.x_align {
                         Some(dxpdf_docx_model::model::TableXAlign::Center) => {
@@ -637,6 +653,16 @@ pub fn layout_section(
                     continue;
                 }
 
+                // §17.4.38: consecutive non-floating tables with the same style
+                // are treated as a single merged table — suppress the second
+                // table's top border to avoid doubling at the shared edge,
+                // and insert a border gap (equivalent to insideH) between them.
+                let suppress_top = style_id.is_some()
+                    && *style_id == prev_table_style_id;
+                if suppress_top {
+                    cursor_y += prev_table_border_gap;
+                }
+
                 // Non-floating table: paginated row-level splitting.
                 // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.
                 let available = bottom - cursor_y;
@@ -648,6 +674,15 @@ pub fn layout_section(
                     measure_text,
                     available,
                     config.content_height(),
+                    suppress_top,
+                );
+
+                // §17.4.28 / §17.4.51: compute table x position from
+                // alignment and indent.
+                let table_width: Pt = col_widths.iter().copied().sum();
+                let table_x = table_x_offset(
+                    *alignment, *indent, table_width,
+                    content_width, config.margins.left,
                 );
 
                 for (slice_idx, slice) in slices.into_iter().enumerate() {
@@ -681,6 +716,15 @@ pub fn layout_section(
                 prev_borders = None; // table breaks border grouping
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
+                prev_table_style_id = style_id.clone();
+                // §17.4.38: the gap between adjacent merged tables is the
+                // table's bottom border width (equivalent to insideH in the
+                // merged table). This gap separates rows visually and affects
+                // page-break decisions.
+                prev_table_border_gap = border_config
+                    .as_ref()
+                    .and_then(|b| b.bottom)
+                    .map_or(Pt::ZERO, |b| b.width);
             }
         }
     }
@@ -842,6 +886,8 @@ pub fn stack_blocks(
                 alignment,
                 ..
             } => {
+                // stack_blocks is used for table cells and header/footer —
+                // no adjacent table collapse in these contexts.
                 let table = layout_table(
                     rows,
                     col_widths,
@@ -849,6 +895,7 @@ pub fn stack_blocks(
                     default_line_height,
                     border_config.as_ref(),
                     measure_text,
+                    false,
                 );
 
                 let table_x = table_x_offset(
@@ -1128,6 +1175,7 @@ mod tests {
             indent: Pt::ZERO,
             alignment: None,
             float_info: None,
+            style_id: None,
         }];
 
         let pages = layout_section(&blocks, &small_config(), None, Pt::ZERO, Pt::new(14.0), None);

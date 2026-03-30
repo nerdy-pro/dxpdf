@@ -220,13 +220,25 @@ fn split_into_words(text: &str) -> Vec<&str> {
     let mut start = 0;
 
     for (i, ch) in text.char_indices() {
-        if ch == ' ' || ch == '\t' {
-            // Include the whitespace with the word that precedes it
-            let end = i + ch.len_utf8();
-            if end > start {
-                words.push(&text[start..end]);
-                start = end;
+        match ch {
+            // Whitespace: include with the preceding word.
+            ' ' | '\t' => {
+                let end = i + ch.len_utf8();
+                if end > start {
+                    words.push(&text[start..end]);
+                    start = end;
+                }
             }
+            // Hyphen/dash: break AFTER the hyphen (UAX #14).
+            // The hyphen stays with the preceding word.
+            '-' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' => {
+                let end = i + ch.len_utf8();
+                if end > start {
+                    words.push(&text[start..end]);
+                    start = end;
+                }
+            }
+            _ => {}
         }
     }
 

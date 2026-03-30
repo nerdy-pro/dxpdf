@@ -229,6 +229,7 @@ pub fn build_header_footer_content(
                     indent: built.indent,
                     alignment: built.alignment,
                     float_info: built.float_info,
+                    style_id: t.properties.style_id.clone(),
                 });
             }
             Block::SectionBreak(_) => {}
@@ -328,6 +329,7 @@ fn build_block(
                 indent: built.indent,
                 alignment: built.alignment,
                 float_info: built.float_info,
+                style_id: t.properties.style_id.clone(),
             })
         }
         Block::SectionBreak(_) => None,
@@ -981,7 +983,10 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         Some(model::TableMeasure::Twips(tw)) => Pt::from(tw),
         _ => available_width, // auto/nil: use grid cols or available width
     };
-    let col_widths = if is_auto_width && !grid_cols.is_empty() {
+    // §17.4.53: fixed layout uses exact grid column widths — no scaling.
+    // Auto layout scales columns to fit the target width.
+    let is_fixed = t.properties.layout == Some(model::TableLayout::Fixed);
+    let col_widths = if (is_auto_width || is_fixed) && !grid_cols.is_empty() {
         grid_cols.clone()
     } else {
         compute_column_widths(&grid_cols, num_cols, target_width)
@@ -1264,6 +1269,7 @@ fn build_cell_blocks(
                     indent: built.indent,
                     alignment: built.alignment,
                     float_info: built.float_info,
+                    style_id: nested_t.properties.style_id.clone(),
                 });
             }
             _ => {}

@@ -127,7 +127,14 @@ pub fn fit_lines_with_first(fragments: &[Fragment], first_line_width: Pt, remain
         // whitespace are mid-word continuations (e.g., a word split across runs)
         // and must not be broken.
         let is_break_point = match frag {
-            Fragment::Text { text, .. } => text.ends_with(' ') || text.ends_with('\t'),
+            Fragment::Text { text, .. } => {
+                text.ends_with(' ') || text.ends_with('\t')
+                    || text.ends_with('-')
+                    || text.ends_with('\u{2010}') // hyphen
+                    || text.ends_with('\u{2011}') // non-breaking hyphen (still a visual break point)
+                    || text.ends_with('\u{2013}') // en-dash
+                    || text.ends_with('\u{2014}') // em-dash
+            }
             _ => true, // tabs, images, line breaks are always break points
         };
         if is_break_point {
