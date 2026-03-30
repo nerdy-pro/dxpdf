@@ -35,7 +35,16 @@ impl TextMeasurer {
             descent: Pt::new(metrics.descent),
         };
 
-        (Pt::new(width), text_metrics)
+        // §17.3.2.35: include character spacing in the measured width
+        // so line fitting accounts for the extra inter-character space.
+        let char_count = text.chars().count();
+        let spacing_extra = if char_count > 0 {
+            font_props.char_spacing * (char_count as f32)
+        } else {
+            Pt::ZERO
+        };
+
+        (Pt::new(width) + spacing_extra, text_metrics)
     }
 
     /// Query font metrics for underline positioning.

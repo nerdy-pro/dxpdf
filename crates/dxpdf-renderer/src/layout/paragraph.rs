@@ -532,20 +532,27 @@ pub fn layout_paragraph(
 
                     let new_x = if let Some(ts) = tab_stop {
                         use dxpdf_docx_model::model::TabAlignment;
+                        // §17.3.1.37: for right/center tabs, compute the width
+                        // of content in this tab's zone — from here to the next
+                        // Tab fragment or line end, whichever comes first.
+                        let zone_end = fragments[frag_idx + 1..line.end]
+                            .iter()
+                            .position(|f| matches!(f, Fragment::Tab { .. }))
+                            .map_or(line.end, |i| frag_idx + 1 + i);
                         match ts.alignment {
                             TabAlignment::Right => {
-                                let remaining_width: Pt = fragments[frag_idx + 1..line.end]
+                                let zone_width: Pt = fragments[frag_idx + 1..zone_end]
                                     .iter()
                                     .map(|f| f.width())
                                     .sum();
-                                (tab_pos - remaining_width).max(x)
+                                (tab_pos - zone_width).max(x)
                             }
                             TabAlignment::Center => {
-                                let remaining_width: Pt = fragments[frag_idx + 1..line.end]
+                                let zone_width: Pt = fragments[frag_idx + 1..zone_end]
                                     .iter()
                                     .map(|f| f.width())
                                     .sum();
-                                (tab_pos - remaining_width * 0.5).max(x)
+                                (tab_pos - zone_width * 0.5).max(x)
                             }
                             _ => tab_pos,
                         }
