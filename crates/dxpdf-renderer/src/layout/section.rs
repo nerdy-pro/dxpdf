@@ -809,6 +809,12 @@ pub fn stack_blocks(
                         rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
                         image_data: fi.image_data.clone(),
                     });
+                    // Extend cursor to encompass the image so table cells
+                    // expand to contain floating images.
+                    let img_bottom = img_y + fi.size.height;
+                    if img_bottom > cursor_y {
+                        cursor_y = img_bottom;
+                    }
                 }
 
                 prev_space_after = effective_style.space_after;
