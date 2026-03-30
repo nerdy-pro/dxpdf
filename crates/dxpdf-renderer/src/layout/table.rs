@@ -26,6 +26,10 @@ pub struct TableRowInput {
     pub cells: Vec<TableCellInput>,
     /// §17.4.81: row height constraint.
     pub height_rule: Option<RowHeightRule>,
+    /// §17.4.49: row repeats as header on each continuation page.
+    pub is_header: Option<bool>,
+    /// §17.4.1: if true, row cannot be split across pages.
+    pub cant_split: Option<bool>,
 }
 
 /// §17.4.84: cell vertical alignment.
@@ -107,6 +111,22 @@ pub enum TableBorderStyle {
     Double,
 }
 
+/// Per-row measurement data from the table measurement phase.
+/// Contains everything needed to emit draw commands for this row.
+struct MeasuredRow {
+    entries: Vec<CellLayoutEntry>,
+    borders: Vec<CellBorders>,
+    height: Pt,
+    /// §17.4.38: maximum bottom border width for gap between this row and the next.
+    border_gap_below: Pt,
+}
+
+/// Result of the table measurement phase.
+struct MeasuredTable {
+    rows: Vec<MeasuredRow>,
+    table_width: Pt,
+}
+
 /// Per-cell layout result with positioning info from pass 2.
 struct CellLayoutEntry {
     layout: CellLayout,
@@ -125,30 +145,21 @@ pub struct TableLayout {
     pub size: PtSize,
 }
 
-/// Lay out a table: compute column widths, lay out cells, emit borders.
-pub fn layout_table(
+/// Measure all table rows: resolve borders, lay out cell content, compute heights.
+/// This is the shared measurement phase used by both `layout_table` (monolithic)
+/// and `layout_table_paginated` (page-splitting).
+fn measure_table_rows(
     rows: &[TableRowInput],
     col_widths: &[Pt],
-    _constraints: &BoxConstraints,
     default_line_height: Pt,
     borders: Option<&TableBorderConfig>,
     measure_text: super::paragraph::MeasureTextFn<'_>,
-) -> TableLayout {
-    if rows.is_empty() || col_widths.is_empty() {
-        return TableLayout {
-            commands: Vec::new(),
-            size: PtSize::ZERO,
-        };
-    }
-
+) -> MeasuredTable {
     let table_width: Pt = col_widths.iter().copied().sum();
-    let mut commands = Vec::new();
-    let mut cursor_y = Pt::ZERO;
-    let mut row_heights = Vec::with_capacity(rows.len());
     let num_rows = rows.len();
+    let mut row_heights = Vec::with_capacity(num_rows);
 
-    // Pass 2a: resolve borders for every cell (needed before layout to
-    // compute content insets).
+    // Pass 2a: resolve borders for every cell.
     let mut resolved_borders: Vec<Vec<CellBorders>> = Vec::new();
     {
         let mut grid_indices: Vec<Vec<usize>> = Vec::new();
@@ -190,22 +201,18 @@ pub fn layout_table(
                     resolved_borders[row_idx][cell_ci + 1].left = None;
                 }
                 if row_idx + 1 < num_rows {
-                    // Resolve bottom/top border conflicts for ALL grid columns
-                    // spanned by this cell (not just the first).
                     let start_grid = grid_indices[row_idx][cell_ci];
                     let span = rows[row_idx].cells[cell_ci].grid_span.max(1) as usize;
                     let mut resolved_once = false;
                     for gc in start_grid..start_grid + span {
                         if let Some(below_ci) = cell_index_at_grid_col(&rows[row_idx + 1], gc) {
                             if !resolved_once {
-                                // First spanned column: full conflict resolution.
                                 let bottom = resolved_borders[row_idx][cell_ci].bottom;
                                 let top = resolved_borders[row_idx + 1][below_ci].top;
                                 let winner = resolve_border_conflict(bottom, top);
                                 resolved_borders[row_idx][cell_ci].bottom = winner;
                                 resolved_once = true;
                             }
-                            // Suppress top border for ALL cells below the span.
                             resolved_borders[row_idx + 1][below_ci].top = None;
                         }
                     }
@@ -214,7 +221,7 @@ pub fn layout_table(
         }
     }
 
-    // Pass 2b: lay out each cell with content area reduced by border widths.
+    // Pass 2b: lay out each cell.
     let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
 
     for (row_idx, row) in rows.iter().enumerate() {
@@ -227,13 +234,9 @@ pub fn layout_table(
             let cell_w: Pt = col_widths[grid_idx..grid_idx + span].iter().copied().sum();
             let cell_x: Pt = col_widths[..grid_idx].iter().copied().sum();
 
-            // Border insets only apply when they exceed cell margins —
-            // cell margins already provide spacing between border and content.
             let b = &resolved_borders[row_idx][cell_ci];
             let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);
             let extra_right = (border_width(b.right) - cell.margins.right).max(Pt::ZERO);
-            let _extra_top = (border_width(b.top) - cell.margins.top).max(Pt::ZERO);
-            let _extra_bottom = (border_width(b.bottom) - cell.margins.bottom).max(Pt::ZERO);
             let layout_w = (cell_w - extra_left - extra_right).max(Pt::ZERO);
 
             let is_continue = cell.vertical_merge == Some(VerticalMergeState::Continue);
@@ -243,18 +246,7 @@ pub fn layout_table(
                 layout_cell(&cell.blocks, layout_w, &cell.margins, default_line_height, measure_text)
             };
 
-            log::debug!(
-                "[table] row[{row_idx}] cell[{cell_ci}] x={:.1} w={:.1} layout_w={:.1} content_h={:.1} margins=({:.1},{:.1},{:.1},{:.1}) borders=({},{},{},{}) span={}",
-                cell_x.raw(), cell_w.raw(), layout_w.raw(), layout.content_height.raw(),
-                cell.margins.top.raw(), cell.margins.right.raw(), cell.margins.bottom.raw(), cell.margins.left.raw(),
-                b.top.is_some(), b.right.is_some(), b.bottom.is_some(), b.left.is_some(),
-                span,
-            );
-
             if cell.vertical_merge.is_none() {
-                // §17.4.38: borders are drawn inward from the cell edge (half-width
-                // offset). They don't expand the cell — only the cell margins and
-                // content height determine the row height.
                 max_height = max_height.max(
                     layout.content_height + cell.margins.vertical(),
                 );
@@ -265,49 +257,65 @@ pub fn layout_table(
         }
 
         match row.height_rule {
-            Some(RowHeightRule::AtLeast(min_h)) => {
-                log::debug!("[table] row[{row_idx}] height_rule=AtLeast({:.1})", min_h.raw());
-                max_height = max_height.max(min_h);
-            }
-            Some(RowHeightRule::Exact(h)) => {
-                log::debug!("[table] row[{row_idx}] height_rule=Exact({:.1})", h.raw());
-                max_height = h;
-            }
+            Some(RowHeightRule::AtLeast(min_h)) => max_height = max_height.max(min_h),
+            Some(RowHeightRule::Exact(h)) => max_height = h,
             None => {}
         }
 
-        log::debug!("[table] row[{row_idx}] final_height={:.1}", max_height.raw());
         row_heights.push(max_height);
         row_cell_layouts.push(entries);
     }
 
-    // §17.4.85: distribute vMerge overflow evenly across the merge group.
+    // §17.4.85: distribute vMerge overflow.
     expand_rows_for_vmerge(rows, &row_cell_layouts, &mut row_heights);
 
-    // Pass 3: emit in layered order — shading below content below borders.
-    let mut content_commands = Vec::new();
-    let mut border_commands = Vec::new();
+    // Compute border gaps and assemble measured rows.
+    let measured_rows: Vec<MeasuredRow> = row_cell_layouts.into_iter()
+        .zip(resolved_borders.into_iter())
+        .zip(row_heights.iter())
+        .enumerate()
+        .map(|(row_idx, ((entries, borders), &height))| {
+            let border_gap_below = if row_idx + 1 < num_rows {
+                borders.iter().map(|b| border_width(b.bottom)).fold(Pt::ZERO, Pt::max)
+            } else {
+                Pt::ZERO
+            };
+            MeasuredRow { entries, borders, height, border_gap_below }
+        })
+        .collect();
 
-    for (row_idx, entries) in row_cell_layouts.iter().enumerate() {
-        let row_height = row_heights[row_idx];
-        log::debug!("[table] emit row[{row_idx}] y={:.1} height={:.1}", cursor_y.raw(), row_height.raw());
+    MeasuredTable { rows: measured_rows, table_width }
+}
+
+/// Emit draw commands for a range of measured rows.
+fn emit_table_rows(
+    measured: &MeasuredTable,
+    rows: &[TableRowInput],
+    row_range: std::ops::Range<usize>,
+    cursor_y: &mut Pt,
+    commands: &mut Vec<DrawCommand>,
+    content_commands: &mut Vec<DrawCommand>,
+    border_commands: &mut Vec<DrawCommand>,
+) {
+    let num_rows = measured.rows.len();
+    for row_idx in row_range {
+        let mr = &measured.rows[row_idx];
+        let row_height = mr.height;
 
         for (cell_ci, (entry, cell_input)) in
-            entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
+            mr.entries.iter().zip(rows[row_idx].cells.iter()).enumerate()
         {
             if let Some(color) = cell_input.shading {
                 commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(entry.cell_x, cursor_y, entry.cell_w, row_height),
+                    rect: PtRect::from_xywh(entry.cell_x, *cursor_y, entry.cell_w, row_height),
                     color,
                 });
             }
 
-            // Content offset: border pushes content inward only beyond margins.
-            let b = &resolved_borders[row_idx][cell_ci];
+            let b = &mr.borders[cell_ci];
             let dx = (border_width(b.left) - cell_input.margins.left).max(Pt::ZERO);
             let dy_border = (border_width(b.top) - cell_input.margins.top).max(Pt::ZERO);
 
-            // §17.4.84: vertical alignment within the cell.
             let content_h = entry.layout.content_height + cell_input.margins.vertical();
             let dy_valign = match cell_input.vertical_align {
                 CellVAlign::Bottom => (row_height - content_h - dy_border).max(Pt::ZERO),
@@ -317,48 +325,198 @@ pub fn layout_table(
 
             for cmd in &entry.layout.commands {
                 let mut cmd = cmd.clone();
-                cmd.shift(entry.cell_x + dx, cursor_y + dy_border + dy_valign);
+                cmd.shift(entry.cell_x + dx, *cursor_y + dy_border + dy_valign);
                 content_commands.push(cmd);
             }
 
-            // §17.4.38: compute border gap below this row.
-            // The bottom border occupies space between rows, so pass the
-            // effective height (row + border gap) to emit_cell_borders so
-            // the bottom border is drawn at the gap center.
             let bottom_border_gap = if row_idx + 1 < num_rows {
                 border_width(b.bottom)
             } else {
                 Pt::ZERO
             };
             emit_cell_borders(
-                &mut border_commands,
+                border_commands,
                 CellBorders { top: b.top, bottom: b.bottom, left: b.left, right: b.right },
-                entry.cell_x, entry.cell_w, cursor_y, row_height + bottom_border_gap,
+                entry.cell_x, entry.cell_w, *cursor_y, row_height + bottom_border_gap,
             );
         }
 
-        cursor_y += row_height;
-
-        // §17.4.38: border between this row and the next occupies space.
-        if row_idx + 1 < num_rows {
-            let mut max_border_w = Pt::ZERO;
-            for cell_ci in 0..entries.len() {
-                let bw = border_width(resolved_borders[row_idx][cell_ci].bottom);
-                if bw > max_border_w {
-                    max_border_w = bw;
-                }
-            }
-            cursor_y += max_border_w;
-        }
+        *cursor_y += row_height + mr.border_gap_below;
     }
+}
+
+/// Lay out a table: compute column widths, lay out cells, emit borders.
+pub fn layout_table(
+    rows: &[TableRowInput],
+    col_widths: &[Pt],
+    _constraints: &BoxConstraints,
+    default_line_height: Pt,
+    borders: Option<&TableBorderConfig>,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
+) -> TableLayout {
+    if rows.is_empty() || col_widths.is_empty() {
+        return TableLayout {
+            commands: Vec::new(),
+            size: PtSize::ZERO,
+        };
+    }
+
+    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text);
+
+    let mut commands = Vec::new();
+    let mut content_commands = Vec::new();
+    let mut border_commands = Vec::new();
+    let mut cursor_y = Pt::ZERO;
+
+    emit_table_rows(
+        &measured, rows, 0..measured.rows.len(),
+        &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
+    );
 
     commands.append(&mut content_commands);
     commands.append(&mut border_commands);
 
     TableLayout {
         commands,
-        size: PtSize::new(table_width, cursor_y),
+        size: PtSize::new(measured.table_width, cursor_y),
     }
+}
+
+/// One page-slice of a table, produced by `layout_table_paginated`.
+#[derive(Debug)]
+pub struct TableSlice {
+    /// Draw commands positioned relative to this slice's top-left origin (0,0).
+    pub commands: Vec<DrawCommand>,
+    /// Size of this slice.
+    pub size: PtSize,
+}
+
+/// Lay out a table with page splitting at row boundaries.
+///
+/// §17.4.49: header rows repeat on each continuation page.
+/// §17.4.1: `cantSplit` rows are kept together (moved to next page if needed).
+///
+/// Returns one `TableSlice` per page.
+pub fn layout_table_paginated(
+    rows: &[TableRowInput],
+    col_widths: &[Pt],
+    _constraints: &BoxConstraints,
+    default_line_height: Pt,
+    borders: Option<&TableBorderConfig>,
+    measure_text: super::paragraph::MeasureTextFn<'_>,
+    available_height: Pt,
+    page_height: Pt,
+) -> Vec<TableSlice> {
+    if rows.is_empty() || col_widths.is_empty() {
+        return vec![TableSlice { commands: Vec::new(), size: PtSize::ZERO }];
+    }
+
+    let measured = measure_table_rows(rows, col_widths, default_line_height, borders, measure_text);
+
+    // §17.4.49: contiguous header rows from index 0.
+    let header_count = rows.iter()
+        .take_while(|r| r.is_header == Some(true))
+        .count();
+    let header_height: Pt = measured.rows[..header_count].iter()
+        .map(|mr| mr.height + mr.border_gap_below)
+        .sum();
+
+    let groups = build_row_groups(rows, &measured);
+
+    // Pack groups into page slices.
+    // Each slice is a Vec<Range<usize>> of row ranges to emit.
+    let mut slices: Vec<Vec<std::ops::Range<usize>>> = Vec::new();
+    let mut current_slice: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut remaining = available_height;
+    let is_first_slice = |slices: &Vec<Vec<_>>| slices.is_empty();
+
+    for group in &groups {
+        // Header rows on the first slice are emitted as normal rows.
+        if is_first_slice(&slices) && group.start < header_count {
+            current_slice.push(group.start..group.end);
+            remaining -= group.height;
+            continue;
+        }
+
+        if group.height <= remaining {
+            current_slice.push(group.start..group.end);
+            remaining -= group.height;
+        } else {
+            // Close current slice.
+            slices.push(std::mem::take(&mut current_slice));
+            // New page: start with header rows (if any).
+            remaining = page_height;
+            if header_count > 0 {
+                current_slice.push(0..header_count);
+                remaining -= header_height;
+            }
+            if group.height > remaining {
+                log::warn!(
+                    "[table] row group {}-{} ({:.1}pt) exceeds page height ({:.1}pt available)",
+                    group.start, group.end, group.height.raw(), remaining.raw(),
+                );
+            }
+            current_slice.push(group.start..group.end);
+            remaining -= group.height;
+        }
+    }
+    slices.push(current_slice);
+
+    // Emit draw commands for each slice.
+    slices.iter().map(|row_ranges| {
+        let mut commands = Vec::new();
+        let mut content_commands = Vec::new();
+        let mut border_commands = Vec::new();
+        let mut cursor_y = Pt::ZERO;
+        for range in row_ranges {
+            emit_table_rows(
+                &measured, rows, range.clone(),
+                &mut cursor_y, &mut commands, &mut content_commands, &mut border_commands,
+            );
+        }
+        commands.append(&mut content_commands);
+        commands.append(&mut border_commands);
+        TableSlice {
+            commands,
+            size: PtSize::new(measured.table_width, cursor_y),
+        }
+    }).collect()
+}
+
+/// A group of rows that must stay together during page splitting.
+struct RowGroup {
+    start: usize,
+    end: usize, // exclusive
+    height: Pt,
+}
+
+/// Build atomic row groups for pagination.
+///
+/// Groups are formed by: vMerge groups (Restart through consecutive Continue
+/// rows) and §17.4.1 cantSplit rows. Each group is an indivisible unit for
+/// page-break decisions.
+fn build_row_groups(rows: &[TableRowInput], measured: &MeasuredTable) -> Vec<RowGroup> {
+    let mut groups = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        let start = i;
+        // Extend through vMerge Continue rows.
+        i += 1;
+        while i < rows.len() {
+            let has_continue = rows[i].cells.iter()
+                .any(|c| c.vertical_merge == Some(VerticalMergeState::Continue));
+            if has_continue {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        let height: Pt = measured.rows[start..i].iter()
+            .map(|mr| mr.height + mr.border_gap_below)
+            .sum();
+        groups.push(RowGroup { start, end: i, height });
+    }
+    groups
 }
 
 /// Compute column widths by scaling grid column values to fit available width.
@@ -708,6 +866,8 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("hello")],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
@@ -729,10 +889,14 @@ mod tests {
             TableRowInput {
                 cells: vec![simple_cell("a"), simple_cell("b")],
                 height_rule: None,
+            is_header: None,
+            cant_split: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
                 height_rule: None,
+            is_header: None,
+            cant_split: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
@@ -769,6 +933,8 @@ mod tests {
                 },
             ],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
@@ -782,6 +948,8 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("x")],
             height_rule: Some(RowHeightRule::AtLeast(Pt::new(40.0))),
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
@@ -806,6 +974,8 @@ mod tests {
                 cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
@@ -823,6 +993,8 @@ mod tests {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("a"), simple_cell("b")],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), Some(&super::TableBorderConfig { top: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), bottom: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), left: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), right: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_h: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }), inside_v: Some(super::TableBorderLine { width: Pt::new(0.5), color: RgbColor::BLACK, style: super::TableBorderStyle::Single }) }), None);
@@ -851,6 +1023,8 @@ mod tests {
                 shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);
@@ -879,6 +1053,8 @@ mod tests {
                 shading: None, cell_borders: None, vertical_merge: None, vertical_align: CellVAlign::Top,
             }],
             height_rule: None,
+        is_header: None,
+        cant_split: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(&rows, &col_widths, &body_constraints(), Pt::new(14.0), None, None);

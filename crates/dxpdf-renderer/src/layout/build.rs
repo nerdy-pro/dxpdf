@@ -1047,6 +1047,8 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
                         _ => RowHeightRule::AtLeast(Pt::from(h.value)),
                     }
                 }),
+                is_header: row.properties.is_header,
+                cant_split: row.properties.cant_split,
             }
         })
         .collect();

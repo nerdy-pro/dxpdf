@@ -637,32 +637,46 @@ pub fn layout_section(
                     continue;
                 }
 
-                // Non-floating table: page break if table doesn't fit.
-                if cursor_y + table.size.height > bottom && cursor_y > config.margins.top {
-                    if !page_footnotes.is_empty() {
-                        render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
-                        page_footnotes.clear();
+                // Non-floating table: paginated row-level splitting.
+                // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.
+                let available = bottom - cursor_y;
+                let slices = super::table::layout_table_paginated(
+                    rows, col_widths,
+                    &col_constraints(current_col),
+                    default_line_height,
+                    border_config.as_ref(),
+                    measure_text,
+                    available,
+                    config.content_height(),
+                );
+
+                for (slice_idx, slice) in slices.into_iter().enumerate() {
+                    if slice_idx > 0 {
+                        // Continuation slice → new page.
+                        if !page_footnotes.is_empty() {
+                            render_page_footnotes(&mut current_page, config, &page_footnotes, default_line_height, measure_text, separator_indent);
+                            page_footnotes.clear();
+                        }
+                        pages.push(std::mem::replace(
+                            &mut current_page,
+                            LayoutedPage::new(config.page_size),
+                        ));
+                        cursor_y = config.margins.top;
+                        column_top = config.margins.top;
+                        current_col = 0;
+                        bottom = page_bottom;
+                        page_start_block = block_idx;
+                        abs_floats_dirty = true;
+                        page_floats.clear();
                     }
-                    pages.push(std::mem::replace(
-                        &mut current_page,
-                        LayoutedPage::new(config.page_size),
-                    ));
-                    cursor_y = config.margins.top;
-                    column_top = config.margins.top;
-                    current_col = 0;
-                    bottom = page_bottom;
-                    page_start_block = block_idx;
-                    abs_floats_dirty = true;
-                    page_floats.clear();
-                }
 
-                for mut cmd in table.commands {
-                    cmd.shift_y(cursor_y);
-                    cmd.shift_x(table_x);
-                    current_page.commands.push(cmd);
+                    for mut cmd in slice.commands {
+                        cmd.shift_y(cursor_y);
+                        cmd.shift_x(table_x);
+                        current_page.commands.push(cmd);
+                    }
+                    cursor_y += slice.size.height;
                 }
-
-                cursor_y += table.size.height;
                 first_on_section_page = false;
                 prev_borders = None; // table breaks border grouping
                 prev_space_after = Pt::ZERO;
@@ -1106,6 +1120,8 @@ mod tests {
                     shading: None, cell_borders: None, vertical_merge: None, vertical_align: crate::layout::table::CellVAlign::Top,
                 }],
                 height_rule: None,
+            is_header: None,
+            cant_split: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,
