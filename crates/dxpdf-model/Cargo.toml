@@ -1,9 +1,0 @@
-[package]
-name = "dxpdf-model"
-version = "0.1.5"
-edition = "2021"
-license = "MIT"
-description = "Document model types for dxpdf"
-
-[dependencies]
-thiserror = "2"

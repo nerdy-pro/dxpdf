@@ -1,0 +1,22 @@
+[package]
+name = "dxpdf-docx"
+version = "0.1.0"
+edition = "2021"
+description = "OOXML DOCX parser for dxpdf"
+license = "MIT"
+
+[dependencies]
+dxpdf-docx-model = { path = "../dxpdf-docx-model" }
+dxpdf-field = { path = "../dxpdf-field" }
+quick-xml = "0.37"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+thiserror = "2"
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parse_bench"
+harness = false

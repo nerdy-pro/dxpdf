@@ -144,8 +144,8 @@ fn parse_zip_without_document_xml_returns_error() {
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("document.xml"),
-        "Error should mention document.xml: {err}"
+        err.contains("missing required part"),
+        "Error should mention a missing part: {err}"
     );
 }
 

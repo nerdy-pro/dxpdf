@@ -1,0 +1,16 @@
+[package]
+name = "dxpdf-renderer"
+version = "0.1.0"
+edition = "2021"
+description = "PDF renderer for dxpdf — measure, layout, and paint pipeline"
+license = "MIT"
+
+[dependencies]
+dxpdf-docx-model = { path = "../dxpdf-docx-model" }
+dxpdf-field = { path = "../dxpdf-field" }
+skia-safe = "0.93"
+log = "0.4"
+
+[dev-dependencies]
+dxpdf-docx = { path = "../dxpdf-docx" }
+env_logger = "0.11"

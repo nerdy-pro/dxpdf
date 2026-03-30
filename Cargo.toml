@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/dxpdf-model"]
+members = [".", "crates/dxpdf-docx-model", "crates/dxpdf-docx", "crates/dxpdf-field", "crates/dxpdf-renderer"]
 
 [package]
 name = "dxpdf"
@@ -19,11 +19,9 @@ exclude = ["test-cases/", "scripts/", "VISUAL_COMPARISON.md", "BENCHMARKS.md"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-dxpdf-model = { path = "crates/dxpdf-model" }
+dxpdf-docx = { path = "crates/dxpdf-docx" }
+dxpdf-renderer = { path = "crates/dxpdf-renderer" }
 clap = { version = "4", features = ["derive"] }
-quick-xml = "0.37"
-zip = { version = "2", default-features = false, features = ["deflate"] }
-skia-safe = "0.93"
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
@@ -35,3 +33,9 @@ python = ["pyo3"]
 
 [dev-dependencies]
 tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "convert_bench"
+harness = false
