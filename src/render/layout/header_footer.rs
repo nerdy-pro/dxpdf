@@ -194,7 +194,7 @@ mod tests {
             underline_thickness: Pt::ZERO,
         };
         Fragment::Text {
-            text: s.to_string(),
+            text: Rc::from(s),
             font,
             color: RgbColor::BLACK,
             shading: None,
@@ -297,7 +297,7 @@ mod tests {
         assert!(pages[0].commands.len() > 1);
         // First command should be the header text
         if let DrawCommand::Text { text, .. } = &pages[0].commands[0] {
-            assert_eq!(text, "Header");
+            assert_eq!(&**text, "Header");
         }
     }
 
@@ -320,7 +320,7 @@ mod tests {
 
         assert_eq!(pages[0].commands.len(), 1);
         if let DrawCommand::Text { text, position, .. } = &pages[0].commands[0] {
-            assert_eq!(text, "Footer");
+            assert_eq!(&**text, "Footer");
             // Footer y should be near the bottom of the page.
             assert!(position.y.raw() > 700.0, "footer y={}", position.y.raw());
         }

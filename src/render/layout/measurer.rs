@@ -1,5 +1,7 @@
 //! Text measurer — wraps Skia FontMgr for real font metrics.
 
+use std::cell::RefCell;
+
 use skia_safe::FontMgr;
 
 use crate::render::dimension::Pt;
@@ -7,14 +9,18 @@ use crate::render::fonts;
 
 use super::fragment::FontProps;
 
-/// Measures text using Skia fonts. Wraps a FontMgr reference.
+/// Measures text using Skia fonts. Wraps a FontMgr reference and a Font cache.
 pub struct TextMeasurer {
     font_mgr: FontMgr,
+    font_cache: RefCell<fonts::FontCache>,
 }
 
 impl TextMeasurer {
     pub fn new(font_mgr: FontMgr) -> Self {
-        Self { font_mgr }
+        Self {
+            font_mgr,
+            font_cache: RefCell::new(fonts::FontCache::new()),
+        }
     }
 
     /// Measure a text string with the given font properties.
@@ -24,7 +30,8 @@ impl TextMeasurer {
         text: &str,
         font_props: &FontProps,
     ) -> (Pt, super::fragment::TextMetrics) {
-        let font = fonts::make_font(
+        let mut cache = self.font_cache.borrow_mut();
+        let font = cache.get(
             &self.font_mgr,
             &font_props.family,
             font_props.size,
@@ -55,7 +62,8 @@ impl TextMeasurer {
     /// Returns (underline_position, underline_thickness) in points.
     /// Position is positive below baseline per Skia convention.
     pub fn underline_metrics(&self, font_props: &FontProps) -> (Pt, Pt) {
-        let font = fonts::make_font(
+        let mut cache = self.font_cache.borrow_mut();
+        let font = cache.get(
             &self.font_mgr,
             &font_props.family,
             font_props.size,
@@ -83,7 +91,8 @@ impl TextMeasurer {
 
     /// Get line height for the default font (used for empty paragraphs).
     pub fn default_line_height(&self, family: &str, size: Pt) -> Pt {
-        let font = fonts::make_font(&self.font_mgr, family, size, false, false);
+        let mut cache = self.font_cache.borrow_mut();
+        let font = cache.get(&self.font_mgr, family, size, false, false);
         let (_, metrics) = font.metrics();
         // ascent + descent (without leading)
         Pt::new(-metrics.ascent + metrics.descent)

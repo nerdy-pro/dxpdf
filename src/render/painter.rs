@@ -1,5 +1,8 @@
 //! Paint phase — iterate DrawCommands and emit Skia PDF canvas operations.
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use skia_safe::{pdf, Data, FontMgr, Paint};
 
 use crate::render::dimension::Pt;
@@ -12,12 +15,17 @@ use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u8>, RenderError> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
+    let mut font_cache = fonts::FontCache::new();
+    // Cache decoded Skia images across pages, keyed by Rc pointer identity.
+    // Avoids re-copying and re-decoding the same image bytes on every page
+    // (e.g. a logo repeated in headers/footers).
+    let mut image_cache: HashMap<*const [u8], skia_safe::Image> = HashMap::new();
 
     for page in pages {
         let mut on_page = doc.begin_page(to_size(page.page_size), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, font_mgr);
+            render_page(canvas, page, font_mgr, &mut font_cache, &mut image_cache);
         }
         doc = on_page.end_page();
     }
@@ -26,7 +34,13 @@ pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u
     Ok(pdf_bytes)
 }
 
-fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontMgr) {
+fn render_page(
+    canvas: &skia_safe::Canvas,
+    page: &LayoutedPage,
+    font_mgr: &FontMgr,
+    font_cache: &mut fonts::FontCache,
+    image_cache: &mut HashMap<*const [u8], skia_safe::Image>,
+) {
     for cmd in &page.commands {
         match cmd {
             DrawCommand::Text {
@@ -39,7 +53,7 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 italic,
                 color,
             } => {
-                let font = fonts::make_font(font_mgr, font_family, *font_size, *bold, *italic);
+                let font = font_cache.get(font_mgr, font_family, *font_size, *bold, *italic);
                 log::trace!(
                     "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
                     &text[..text.len().min(30)],
@@ -55,15 +69,32 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 if char_spacing.abs() > Pt::ZERO {
                     // §17.3.2.35 w:spacing — draw each character with
                     // explicit spacing to match the measured fragment width.
+                    let char_count = text.chars().count();
+                    let glyphs = font.text_to_glyphs_vec(&**text);
+                    // Batch path: use text_to_glyphs + get_widths when glyph
+                    // count matches char count (common Latin/CJK text).
+                    // Fallback to per-char measure_str for ligatures or
+                    // complex scripts where counts diverge.
+                    let use_batch = glyphs.len() == char_count;
+                    let mut batch_widths = vec![0f32; glyphs.len()];
+                    if use_batch {
+                        font.get_widths(&glyphs, &mut batch_widths);
+                    }
+
                     let mut cursor = *position;
-                    for ch in text.chars() {
-                        let s = ch.to_string();
-                        canvas.draw_str(&s, to_point(cursor), &font, &paint);
-                        let (w, _) = font.measure_str(&s, None);
+                    let mut buf = [0u8; 4];
+                    for (i, ch) in text.chars().enumerate() {
+                        let s = ch.encode_utf8(&mut buf);
+                        let w = if use_batch {
+                            batch_widths[i]
+                        } else {
+                            font.measure_str(&*s, None).0
+                        };
+                        canvas.draw_str(&*s, to_point(cursor), font, &paint);
                         cursor.x += Pt::new(w) + *char_spacing;
                     }
                 } else {
-                    canvas.draw_str(text, to_point(*position), &font, &paint);
+                    canvas.draw_str(text, to_point(*position), font, &paint);
                 }
             }
             DrawCommand::Underline { line, color, width }
@@ -78,9 +109,15 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 canvas.draw_line(start, end, &paint);
             }
             DrawCommand::Image { rect, image_data } => {
-                let skia_data = Data::new_copy(image_data);
-                if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                let ptr_key: *const [u8] = Rc::as_ptr(image_data);
+                if let Some(image) = image_cache.get(&ptr_key) {
                     canvas.draw_image_rect(image, None, to_rect(*rect), &Paint::default());
+                } else {
+                    let skia_data = Data::new_copy(image_data);
+                    if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                        canvas.draw_image_rect(&image, None, to_rect(*rect), &Paint::default());
+                        image_cache.insert(ptr_key, image);
+                    }
                 }
             }
             DrawCommand::Rect { rect, color } => {
@@ -174,7 +211,7 @@ mod tests {
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
-                text: String::new(),
+                text: Rc::from(""),
                 font_family: Rc::from("Helvetica"),
                 char_spacing: Pt::ZERO,
                 font_size: Pt::new(12.0),

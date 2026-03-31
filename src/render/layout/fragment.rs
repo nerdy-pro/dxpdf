@@ -54,7 +54,7 @@ pub struct FragmentBorder {
 #[derive(Clone, Debug)]
 pub enum Fragment {
     Text {
-        text: String,
+        text: Rc<str>,
         font: FontProps,
         color: RgbColor,
         /// §17.3.2.32: run-level shading (background color behind text).
@@ -329,7 +329,7 @@ fn emit_text_fragments<F>(
             w
         };
         fragments.push(Fragment::Text {
-            text: word.to_string(),
+            text: Rc::from(word),
             font: font.clone(),
             color,
             shading,
@@ -370,7 +370,7 @@ fn evaluate_field_instruction(
 /// Build a text fragment for a substituted field value, using the paragraph's
 /// default font properties.
 fn make_field_text_fragment<F>(
-    text: String,
+    text: Rc<str>,
     default_family: &str,
     default_size: Pt,
     default_color: crate::render::resolve::color::RgbColor,
@@ -634,7 +634,7 @@ where
                 let substituted = evaluate_field_instruction(&field.instruction, field_ctx);
                 if let Some(text) = substituted {
                     fragments.push(make_field_text_fragment(
-                        text,
+                        Rc::from(text.as_str()),
                         default_family,
                         default_size,
                         default_color,
@@ -681,7 +681,7 @@ where
                         // was present to provide formatting, emit with defaults.
                         if let Some(text) = field_sub_pending.take() {
                             fragments.push(make_field_text_fragment(
-                                text,
+                                Rc::from(text.as_str()),
                                 default_family,
                                 default_size,
                                 default_color,
@@ -733,7 +733,7 @@ where
                 let text = ch.to_string();
                 let (w, m) = measure_text(&text, &font);
                 fragments.push(Fragment::Text {
-                    text,
+                    text: Rc::from(text.as_str()),
                     font,
                     color: RgbColor::BLACK,
                     shading: None,
@@ -776,7 +776,7 @@ where
                 // Superscript baseline offset: raise by ~40% of the full-size ascent.
                 let baseline_offset = -(default_size * 0.4);
                 fragments.push(Fragment::Text {
-                    text: num_text,
+                    text: Rc::from(num_text.as_str()),
                     font: ref_font,
                     color: default_color,
                     shading: None,
@@ -807,7 +807,7 @@ where
                 let (w, m) = measure_text(&num_text, &ref_font);
                 let baseline_offset = -(default_size * 0.4);
                 fragments.push(Fragment::Text {
-                    text: num_text,
+                    text: Rc::from(num_text.as_str()),
                     font: ref_font,
                     color: default_color,
                     shading: None,
@@ -1028,7 +1028,7 @@ mod tests {
             ..
         } = &frags[0]
         {
-            assert_eq!(text, "click ");
+            assert_eq!(&**text, "click ");
             assert_eq!(hyperlink_url.as_deref(), Some("rId1"));
         } else {
             panic!("expected Text fragment");
@@ -1075,7 +1075,7 @@ mod tests {
         // Should only have the "3" result, not "PAGE"
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
-            assert_eq!(text, "3");
+            assert_eq!(&**text, "3");
         }
     }
 
@@ -1145,7 +1145,7 @@ mod tests {
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
-            assert_eq!(text, "fallback");
+            assert_eq!(&**text, "fallback");
         }
     }
 
@@ -1208,7 +1208,7 @@ mod tests {
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { font, text, .. } = &frags[0] {
             assert_eq!(&*font.family, "Wingdings");
-            assert_eq!(text, "F");
+            assert_eq!(&**text, "F");
         }
     }
 
@@ -1237,7 +1237,7 @@ mod tests {
 
         assert_eq!(frags.len(), 1);
         if let Fragment::Text { text, .. } = &frags[0] {
-            assert_eq!(text, "5");
+            assert_eq!(&**text, "5");
         }
     }
 
@@ -1292,13 +1292,13 @@ mod tests {
 
         assert_eq!(frags.len(), 3);
         if let Fragment::Text { text, .. } = &frags[0] {
-            assert_eq!(text, "hello ");
+            assert_eq!(&**text, "hello ");
         }
         if let Fragment::Text { text, .. } = &frags[1] {
-            assert_eq!(text, "world ");
+            assert_eq!(&**text, "world ");
         }
         if let Fragment::Text { text, .. } = &frags[2] {
-            assert_eq!(text, "foo");
+            assert_eq!(&**text, "foo");
         }
     }
 }

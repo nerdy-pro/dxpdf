@@ -3,6 +3,8 @@
 //! Implements the LayoutBox protocol: receives BoxConstraints, returns PtSize,
 //! emits DrawCommands at absolute offsets during paint.
 
+use std::rc::Rc;
+
 use crate::model::Alignment;
 
 use super::draw_command::DrawCommand;
@@ -783,7 +785,7 @@ fn split_oversized_fragments(
                         (per_char, *metrics)
                     };
                     result.push(Fragment::Text {
-                        text: ch_str,
+                        text: Rc::from(ch_str.as_str()),
                         font: font.clone(),
                         color: *color,
                         shading: *shading,
@@ -893,7 +895,7 @@ fn emit_tab_leader(
 
     commands.push(DrawCommand::Text {
         position: PtOffset::new(leader_x.max(x_start), baseline_y),
-        text: leader_text,
+        text: Rc::from(leader_text.as_str()),
         font_family: leader_font.family,
         char_spacing: Pt::ZERO,
         font_size: leader_font.size,
@@ -987,7 +989,7 @@ mod tests {
 
         assert_eq!(result.commands.len(), 1);
         if let DrawCommand::Text { text, position, .. } = &result.commands[0] {
-            assert_eq!(text, "hello");
+            assert_eq!(&**text, "hello");
             assert_eq!(position.x.raw(), 0.0); // left aligned, no indent
         }
     }
