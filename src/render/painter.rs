@@ -70,11 +70,20 @@ fn render_page(
                 if char_spacing.abs() > Pt::ZERO {
                     // §17.3.2.35 w:spacing — draw each character with
                     // explicit spacing to match the measured fragment width.
+                    // Batch: convert text → glyphs → widths in two Skia calls
+                    // instead of per-char measure_str + String allocation.
+                    let glyphs = font.text_to_glyphs_vec(text.as_str());
+                    let mut widths = vec![0f32; glyphs.len()];
+                    font.get_widths(&glyphs, &mut widths);
+
                     let mut cursor = *position;
-                    for ch in text.chars() {
-                        let s = ch.to_string();
-                        canvas.draw_str(&s, to_point(cursor), font, &paint);
-                        let (w, _) = font.measure_str(&s, None);
+                    let mut buf = [0u8; 4];
+                    for (i, ch) in text.chars().enumerate() {
+                        let s = ch.encode_utf8(&mut buf);
+                        canvas.draw_str(s, to_point(cursor), font, &paint);
+                        // Use pre-computed glyph width (falls back to 0 for
+                        // complex scripts where glyph count != char count).
+                        let w = widths.get(i).copied().unwrap_or(0.0);
                         cursor.x += Pt::new(w) + *char_spacing;
                     }
                 } else {
