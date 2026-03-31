@@ -1169,13 +1169,19 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         })
         .collect();
 
-    // §17.4.38: resolve table borders from direct properties or table style.
-    let tbl_borders = t.properties.borders.as_ref().or_else(|| {
-        raw_table_style
-            .and_then(|s| s.table.as_ref())
-            .and_then(|tp| tp.borders.as_ref())
-    });
-    let border_config = tbl_borders.map(convert_table_border_config);
+    // §17.4.38: resolve table borders — merge direct properties over table style.
+    // Direct tblBorders may specify only a subset of edges (e.g. insideH=none);
+    // unspecified edges inherit from the table style.
+    let style_borders = raw_table_style
+        .and_then(|s| s.table.as_ref())
+        .and_then(|tp| tp.borders.as_ref());
+    let tbl_borders = match (t.properties.borders.as_ref(), style_borders) {
+        (Some(direct), Some(style)) => Some(merge_table_borders(direct, style)),
+        (Some(direct), None) => Some(*direct),
+        (None, Some(style)) => Some(*style),
+        (None, None) => None,
+    };
+    let border_config = tbl_borders.as_ref().map(convert_table_border_config);
 
     // §17.4.58: floating table positioning.
     let float_info = t.properties.positioning.as_ref().map(|pos| {
@@ -1657,6 +1663,23 @@ fn convert_cell_border_override(b: &Option<model::Border>) -> Option<CellBorderO
             CellBorderOverride::Border(convert_model_border(b))
         }
     })
+}
+
+/// §17.4.38: merge direct table borders over style borders.
+/// Each edge in `direct` overrides the corresponding edge in `style`;
+/// unspecified edges (`None`) inherit from the style.
+fn merge_table_borders(
+    direct: &model::TableBorders,
+    style: &model::TableBorders,
+) -> model::TableBorders {
+    model::TableBorders {
+        top: direct.top.or(style.top),
+        bottom: direct.bottom.or(style.bottom),
+        left: direct.left.or(style.left),
+        right: direct.right.or(style.right),
+        inside_h: direct.inside_h.or(style.inside_h),
+        inside_v: direct.inside_v.or(style.inside_v),
+    }
 }
 
 /// Convert model `TableBorders` to a layout `TableBorderConfig`.
