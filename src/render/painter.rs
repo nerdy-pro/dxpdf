@@ -1,5 +1,8 @@
 //! Paint phase — iterate DrawCommands and emit Skia PDF canvas operations.
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use skia_safe::{pdf, Data, FontMgr, Paint};
 
 use crate::render::dimension::Pt;
@@ -13,12 +16,16 @@ pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
     let mut font_cache = fonts::FontCache::new();
+    // Cache decoded Skia images across pages, keyed by Rc pointer identity.
+    // Avoids re-copying and re-decoding the same image bytes on every page
+    // (e.g. a logo repeated in headers/footers).
+    let mut image_cache: HashMap<*const [u8], skia_safe::Image> = HashMap::new();
 
     for page in pages {
         let mut on_page = doc.begin_page(to_size(page.page_size), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, font_mgr, &mut font_cache);
+            render_page(canvas, page, font_mgr, &mut font_cache, &mut image_cache);
         }
         doc = on_page.end_page();
     }
@@ -32,6 +39,7 @@ fn render_page(
     page: &LayoutedPage,
     font_mgr: &FontMgr,
     font_cache: &mut fonts::FontCache,
+    image_cache: &mut HashMap<*const [u8], skia_safe::Image>,
 ) {
     for cmd in &page.commands {
         match cmd {
@@ -85,9 +93,15 @@ fn render_page(
                 canvas.draw_line(start, end, &paint);
             }
             DrawCommand::Image { rect, image_data } => {
-                let skia_data = Data::new_copy(image_data);
-                if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                let ptr_key: *const [u8] = Rc::as_ptr(image_data);
+                if let Some(image) = image_cache.get(&ptr_key) {
                     canvas.draw_image_rect(image, None, to_rect(*rect), &Paint::default());
+                } else {
+                    let skia_data = Data::new_copy(image_data);
+                    if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                        canvas.draw_image_rect(&image, None, to_rect(*rect), &Paint::default());
+                        image_cache.insert(ptr_key, image);
+                    }
                 }
             }
             DrawCommand::Rect { rect, color } => {
