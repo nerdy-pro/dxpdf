@@ -923,7 +923,12 @@ fn emit_cell_borders(
             emit_border_rect(
                 commands,
                 border,
-                PtRect::from_xywh(cell_x + cell_w - right_w, row_y + top_inset, right_w, v_height),
+                PtRect::from_xywh(
+                    cell_x + cell_w - right_w,
+                    row_y + top_inset,
+                    right_w,
+                    v_height,
+                ),
                 false,
             );
         }

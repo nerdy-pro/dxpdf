@@ -1064,10 +1064,26 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         (Some(direct), Some(style)) => {
             use crate::model::geometry::EdgeInsets;
             Some(EdgeInsets {
-                top: if direct.top.raw() != 0 { direct.top } else { style.top },
-                bottom: if direct.bottom.raw() != 0 { direct.bottom } else { style.bottom },
-                left: if direct.left.raw() != 0 { direct.left } else { style.left },
-                right: if direct.right.raw() != 0 { direct.right } else { style.right },
+                top: if direct.top.raw() != 0 {
+                    direct.top
+                } else {
+                    style.top
+                },
+                bottom: if direct.bottom.raw() != 0 {
+                    direct.bottom
+                } else {
+                    style.bottom
+                },
+                left: if direct.left.raw() != 0 {
+                    direct.left
+                } else {
+                    style.left
+                },
+                right: if direct.right.raw() != 0 {
+                    direct.right
+                } else {
+                    style.right
+                },
             })
         }
         (Some(direct), None) => Some(direct),
