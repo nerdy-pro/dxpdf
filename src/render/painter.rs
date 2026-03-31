@@ -70,20 +70,28 @@ fn render_page(
                 if char_spacing.abs() > Pt::ZERO {
                     // §17.3.2.35 w:spacing — draw each character with
                     // explicit spacing to match the measured fragment width.
-                    // Batch: convert text → glyphs → widths in two Skia calls
-                    // instead of per-char measure_str + String allocation.
-                    let glyphs = font.text_to_glyphs_vec(text.as_str());
-                    let mut widths = vec![0f32; glyphs.len()];
-                    font.get_widths(&glyphs, &mut widths);
+                    let char_count = text.chars().count();
+                    let glyphs = font.text_to_glyphs_vec(&**text);
+                    // Batch path: use text_to_glyphs + get_widths when glyph
+                    // count matches char count (common Latin/CJK text).
+                    // Fallback to per-char measure_str for ligatures or
+                    // complex scripts where counts diverge.
+                    let use_batch = glyphs.len() == char_count;
+                    let mut batch_widths = vec![0f32; glyphs.len()];
+                    if use_batch {
+                        font.get_widths(&glyphs, &mut batch_widths);
+                    }
 
                     let mut cursor = *position;
                     let mut buf = [0u8; 4];
                     for (i, ch) in text.chars().enumerate() {
                         let s = ch.encode_utf8(&mut buf);
-                        canvas.draw_str(s, to_point(cursor), font, &paint);
-                        // Use pre-computed glyph width (falls back to 0 for
-                        // complex scripts where glyph count != char count).
-                        let w = widths.get(i).copied().unwrap_or(0.0);
+                        let w = if use_batch {
+                            batch_widths[i]
+                        } else {
+                            font.measure_str(&*s, None).0
+                        };
+                        canvas.draw_str(&*s, to_point(cursor), font, &paint);
                         cursor.x += Pt::new(w) + *char_spacing;
                     }
                 } else {
@@ -204,7 +212,7 @@ mod tests {
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
-                text: String::new(),
+                text: Rc::from(""),
                 font_family: Rc::from("Helvetica"),
                 char_spacing: Pt::ZERO,
                 font_size: Pt::new(12.0),
