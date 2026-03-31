@@ -199,7 +199,7 @@ pub fn layout_section(
                     .iter()
                     .find_map(|f| {
                         if let Fragment::Text { text, .. } = f {
-                            Some(text.as_str())
+                            Some(&**text)
                         } else {
                             None
                         }
@@ -1374,7 +1374,7 @@ mod tests {
             .commands
             .iter()
             .find_map(|c| match c {
-                DrawCommand::Text { position, text, .. } if text == "heading" => Some(position.y),
+                DrawCommand::Text { position, text, .. } if &**text == "heading" => Some(position.y),
                 _ => None,
             })
             .expect("heading should be on page 2");

@@ -5,6 +5,7 @@
 //! content, which may contain nested tables.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::model::{self, Block, FirstLineIndent, LineSpacing, Paragraph, Table, TableCell};
 
@@ -123,7 +124,7 @@ fn build_note_content(
                 frags.insert(
                     0,
                     Fragment::Text {
-                        text: num_text,
+                        text: Rc::from(num_text.as_str()),
                         font: ref_font,
                         color: RgbColor::BLACK,
                         shading: None,
@@ -508,7 +509,7 @@ fn build_paragraph_block(
                     // room for the tab to fill hanging − w to the stop.
                     let label_width = w;
                     let label_frag = Fragment::Text {
-                        text: label_text,
+                        text: Rc::from(label_text.as_str()),
                         font: label_font.clone(),
                         color: default_color,
                         shading: None,
@@ -1711,7 +1712,7 @@ fn split_oversized_fragments(
                     } = &frag
                     {
                         result.push(Fragment::Text {
-                            text: ch_str,
+                            text: Rc::from(ch_str.as_str()),
                             font: font.clone(),
                             color: *color,
                             shading: *shading,

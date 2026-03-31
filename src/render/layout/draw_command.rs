@@ -11,7 +11,7 @@ use crate::render::resolve::color::RgbColor;
 pub enum DrawCommand {
     Text {
         position: PtOffset,
-        text: String,
+        text: Rc<str>,
         font_family: Rc<str>,
         char_spacing: Pt,
         font_size: Pt,
