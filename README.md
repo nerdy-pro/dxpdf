@@ -177,7 +177,7 @@ Each layout element (paragraphs, table cells, headers/footers) goes through thre
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **37 features fully implemented, 7 partial, 13 planned.**
+Validated against ISO 29500 (Office Open XML). **37 features fully implemented, 9 partial, 13 planned.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
