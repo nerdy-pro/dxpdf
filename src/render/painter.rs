@@ -58,7 +58,10 @@ fn draw_text_blob(
 ) {
     let glyphs = font.str_to_glyphs_vec(text);
     if glyphs.is_empty() {
-        log::warn!("[paint] text produced no glyphs: {:?}", &text[..text.len().min(40)]);
+        log::warn!(
+            "[paint] text produced no glyphs: {:?}",
+            &text[..text.len().min(40)]
+        );
         return;
     }
 
@@ -280,9 +283,7 @@ mod tests {
 
         // All positions must be fractional (not rounded to integers).
         // At least some interior positions should have non-zero fractional parts.
-        let has_fractional = positions
-            .iter()
-            .any(|p| (p - p.round()).abs() > 0.001);
+        let has_fractional = positions.iter().any(|p| (p - p.round()).abs() > 0.001);
         assert!(
             has_fractional,
             "positions should preserve fractional precision: {:?}",
