@@ -1,0 +1,44 @@
+name: Linux Benchmark
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Benchmark on Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype-dev hyperfine
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Per-phase timing (RUST_LOG=debug)
+        run: |
+          for f in test-files/sample-docx-files-sample{1,2,3,4}.docx; do
+            echo "=== $(basename $f) ==="
+            RUST_LOG=debug ./target/release/dxpdf "$f" -o /dev/null 2>&1 | grep -E "Parse:|Render:|Total:"
+          done
+
+      - name: Hyperfine benchmark
+        run: |
+          hyperfine --warmup 3 --runs 20 \
+            './target/release/dxpdf test-files/sample-docx-files-sample1.docx -o /dev/null' \
+            './target/release/dxpdf test-files/sample-docx-files-sample2.docx -o /dev/null' \
+            './target/release/dxpdf test-files/sample-docx-files-sample3.docx -o /dev/null' \
+            './target/release/dxpdf test-files/sample-docx-files-sample4.docx -o /dev/null'
+
+      - name: Criterion benchmarks
+        run: cargo bench --bench convert_bench 2>&1 | grep -E "time:|e2e"
