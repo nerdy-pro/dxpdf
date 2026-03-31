@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::model::{
+use crate::model::{
     ParagraphProperties, RunProperties, StyleId, StyleSheet, TableProperties, Theme,
 };
 
@@ -15,7 +15,7 @@ pub struct ResolvedStyle {
     pub run: RunProperties,
     pub table: Option<TableProperties>,
     /// §17.7.6.6: table style conditional formatting overrides.
-    pub table_style_overrides: Vec<crate::model::model::TableStyleOverride>,
+    pub table_style_overrides: Vec<crate::model::TableStyleOverride>,
 }
 
 /// Resolve all styles in the stylesheet by walking `basedOn` chains.
@@ -106,7 +106,7 @@ fn resolve_one(
     // doc defaults to be the lowest priority in the merge chain.
     // Character styles inherit only from their basedOn chain.
     // Run defaults from docDefaults still apply for font resolution.
-    if style.style_type != crate::model::model::StyleType::Character {
+    if style.style_type != crate::model::StyleType::Character {
         merge_run_properties(&mut run, &sheet.doc_defaults_run);
     }
 
@@ -127,7 +127,7 @@ fn resolve_one(
 mod tests {
     use super::*;
     use crate::model::dimension::{Dimension, HalfPoints};
-    use crate::model::model::*;
+    use crate::model::*;
 
     fn make_sheet(styles: Vec<(StyleId, Style)>) -> StyleSheet {
         StyleSheet {

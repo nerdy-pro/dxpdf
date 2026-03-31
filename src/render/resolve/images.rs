@@ -1,6 +1,6 @@
 //! Image extraction — navigate DrawingML hierarchy to extract image RelIds.
 
-use crate::model::model::{GraphicContent, Image, RelId};
+use crate::model::{GraphicContent, Image, RelId};
 
 /// Extract the embedded image relationship ID from a DrawingML Image.
 /// Navigates: Image → graphic → Picture → blip_fill → blip → embed.
@@ -16,7 +16,7 @@ mod tests {
     use super::*;
     use crate::model::dimension::Dimension;
     use crate::model::geometry::{EdgeInsets, Size};
-    use crate::model::model::*;
+    use crate::model::*;
 
     fn make_image_with_blip(rel_id: &str) -> Image {
         Image {

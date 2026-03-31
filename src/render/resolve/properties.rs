@@ -3,7 +3,7 @@
 //! "Merge" means: for each field, if `self` is `None`, take the value from `base`.
 //! This implements the OOXML style inheritance cascade.
 
-use crate::model::model::{ParagraphProperties, RunProperties, TabAlignment, TableProperties};
+use crate::model::{ParagraphProperties, RunProperties, TabAlignment, TableProperties};
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
@@ -146,7 +146,7 @@ fn merge_opt<T: Clone>(target: &mut Option<T>, base: &Option<T>) {
 mod tests {
     use super::*;
     use crate::model::dimension::{Dimension, HalfPoints, Twips};
-    use crate::model::model::*;
+    use crate::model::*;
 
     // ── RunProperties merging ────────────────────────────────────────────
 

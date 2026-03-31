@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::model::model::{
-    self, Block, FirstLineIndent, LineSpacing, Paragraph, Table, TableCell,
-};
+use crate::model::{self, Block, FirstLineIndent, LineSpacing, Paragraph, Table, TableCell};
 
 use crate::render::dimension::Pt;
 use crate::render::geometry::{self, PtSize};
@@ -285,7 +283,7 @@ fn find_vml_pos_in_pict(pict: &model::Pict) -> Option<(Pt, Pt)> {
 
 /// Extract absolute page-relative position from a VML shape style, in points.
 fn vml_absolute_position(style: &model::VmlStyle) -> Option<(Pt, Pt)> {
-    use crate::model::model::CssPosition;
+    use crate::model::CssPosition;
     if style.position != Some(CssPosition::Absolute) {
         return None;
     }
@@ -296,7 +294,7 @@ fn vml_absolute_position(style: &model::VmlStyle) -> Option<(Pt, Pt)> {
 
 /// Convert a VML CSS length to points.
 fn vml_length_to_pt(len: model::VmlLength) -> Pt {
-    use crate::model::model::VmlLengthUnit;
+    use crate::model::VmlLengthUnit;
     let value = len.value as f32;
     Pt::new(match len.unit {
         VmlLengthUnit::Pt => value,
@@ -428,18 +426,18 @@ fn build_paragraph_block(
                 {
                     merged_props.tabs.insert(
                         0,
-                        crate::model::model::TabStop {
+                        crate::model::TabStop {
                             position: lvl_left,
-                            alignment: crate::model::model::TabAlignment::Left,
-                            leader: crate::model::model::TabLeader::None,
+                            alignment: crate::model::TabAlignment::Left,
+                            leader: crate::model::TabLeader::None,
                         },
                     );
                 }
             } else {
                 let counters = ctx.list_counters.borrow();
-                if let Some(label_text) =
-                    crate::render::resolve::numbering::format_list_label(levels, level, &counters, num_id)
-                {
+                if let Some(label_text) = crate::render::resolve::numbering::format_list_label(
+                    levels, level, &counters, num_id,
+                ) {
                     // Resolve label font from level run_properties or paragraph defaults.
                     let (default_family, default_size, default_color, _, _) =
                         resolve_paragraph_defaults(p, ctx.resolved, false);
@@ -500,8 +498,8 @@ fn build_paragraph_block(
                     // producing a natural gap = hanging − w.
                     let jc = level_def.and_then(|l| l.justification);
                     let text_offset = match jc {
-                        Some(crate::model::model::Alignment::End) => -w,
-                        Some(crate::model::model::Alignment::Center) => w * -0.5,
+                        Some(crate::model::Alignment::End) => -w,
+                        Some(crate::model::Alignment::Center) => w * -0.5,
                         _ => Pt::ZERO,
                     };
                     // The label fragment width is the text width only.
@@ -538,10 +536,10 @@ fn build_paragraph_block(
                     if let Some(lvl_left) = lvl_left {
                         merged_props.tabs.insert(
                             0,
-                            crate::model::model::TabStop {
+                            crate::model::TabStop {
                                 position: lvl_left,
-                                alignment: crate::model::model::TabAlignment::Left,
-                                leader: crate::model::model::TabLeader::None,
+                                alignment: crate::model::TabAlignment::Left,
+                                leader: crate::model::TabLeader::None,
                             },
                         );
                     }
@@ -730,17 +728,14 @@ fn extract_floating_images(
     ctx: &BuildContext,
     cell_context: bool,
 ) -> Vec<crate::render::layout::section::FloatingImage> {
-    use crate::render::layout::section::{FloatingImage, FloatingImageY};
-    use crate::model::model::{
+    use crate::model::{
         AnchorAlignment, AnchorPosition, AnchorRelativeFrom, ImagePlacement, Inline,
     };
+    use crate::render::layout::section::{FloatingImage, FloatingImageY};
 
     let mut images = Vec::new();
 
-    fn find_anchor_images<'a>(
-        inlines: &'a [Inline],
-        out: &mut Vec<&'a crate::model::model::Image>,
-    ) {
+    fn find_anchor_images<'a>(inlines: &'a [Inline], out: &mut Vec<&'a crate::model::Image>) {
         for inline in inlines {
             match inline {
                 Inline::Image(img) => {
@@ -925,7 +920,7 @@ fn extract_floating_images(
                 y,
                 wrap_top_and_bottom: matches!(
                     anchor.wrap,
-                    crate::model::model::TextWrap::TopAndBottom { .. }
+                    crate::model::TextWrap::TopAndBottom { .. }
                 ),
                 dist_left: Pt::from(anchor.distance.left),
                 dist_right: Pt::from(anchor.distance.right),
@@ -996,9 +991,10 @@ fn build_fragments(
         }
     }
 
-    let measure = |text: &str, font: &FontProps| -> (Pt, crate::render::layout::fragment::TextMetrics) {
-        ctx.measurer.measure(text, font)
-    };
+    let measure =
+        |text: &str, font: &FontProps| -> (Pt, crate::render::layout::fragment::TextMetrics) {
+            ctx.measurer.measure(text, font)
+        };
 
     let mut fn_counter = ctx.footnote_counter.get();
     let mut en_counter = ctx.endnote_counter.get();
@@ -1159,8 +1155,8 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
             TableRowInput {
                 cells,
                 height_rule: row.properties.height.map(|h| {
+                    use crate::model::HeightRule;
                     use crate::render::layout::table::RowHeightRule;
-                    use crate::model::model::HeightRule;
                     match h.rule {
                         HeightRule::Exact => RowHeightRule::Exact(Pt::from(h.value)),
                         _ => RowHeightRule::AtLeast(Pt::from(h.value)),
@@ -1189,9 +1185,7 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
             // §17.4.59: tblpY — absolute Y offset from the vertical anchor.
             y_offset: pos.y.map(Pt::from).unwrap_or(Pt::ZERO),
             // §17.4.58: default vertical anchor is "text".
-            vert_anchor: pos
-                .vert_anchor
-                .unwrap_or(crate::model::model::TableAnchor::Text),
+            vert_anchor: pos.vert_anchor.unwrap_or(crate::model::TableAnchor::Text),
         }
     });
 
@@ -1229,9 +1223,7 @@ fn build_table_cell(
     cell: &TableCell,
     table_props: &model::TableProperties,
     table_style: Option<&ResolvedStyle>,
-    style_cell_margins: Option<
-        crate::model::geometry::EdgeInsets<crate::model::dimension::Twips>,
-    >,
+    style_cell_margins: Option<crate::model::geometry::EdgeInsets<crate::model::dimension::Twips>>,
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
@@ -1342,8 +1334,12 @@ fn build_table_cell(
         shading,
         cell_borders,
         vertical_merge: cell.properties.vertical_merge.map(|vm| match vm {
-            model::VerticalMerge::Restart => crate::render::layout::table::VerticalMergeState::Restart,
-            model::VerticalMerge::Continue => crate::render::layout::table::VerticalMergeState::Continue,
+            model::VerticalMerge::Restart => {
+                crate::render::layout::table::VerticalMergeState::Restart
+            }
+            model::VerticalMerge::Continue => {
+                crate::render::layout::table::VerticalMergeState::Continue
+            }
         }),
         vertical_align: valign,
     }
@@ -1926,7 +1922,7 @@ fn populate_underline_metrics(fragments: &mut [Fragment], measurer: &TextMeasure
 /// Extract the display size for a picture bullet from its VML shape style.
 /// Falls back to 9pt × 9pt (common Word default for picture bullets).
 fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
-    use crate::model::model::VmlLengthUnit;
+    use crate::model::VmlLengthUnit;
 
     let default = PtSize::new(Pt::new(9.0), Pt::new(9.0));
     let shape = match bullet.pict.as_ref().and_then(|p| p.shapes.first()) {
@@ -1934,7 +1930,7 @@ fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
         None => return default,
     };
 
-    let to_pt = |len: &crate::model::model::VmlLength| -> Pt {
+    let to_pt = |len: &crate::model::VmlLength| -> Pt {
         let val = len.value as f32;
         match len.unit {
             VmlLengthUnit::Pt => Pt::new(val),

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::model::model::{
+use crate::model::{
     Alignment, Indentation, NumId, NumPicBulletId, NumberFormat, NumberingDefinitions,
     NumberingLevelDefinition, RunProperties,
 };
@@ -174,7 +174,7 @@ fn format_ordinal(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::model::*;
+    use crate::model::*;
 
     fn make_defs(
         abstracts: Vec<(AbstractNumId, Vec<NumberingLevelDefinition>)>,

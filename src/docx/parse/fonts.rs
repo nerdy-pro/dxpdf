@@ -10,7 +10,7 @@ use crate::docx::error::{ParseError, Result};
 use crate::docx::xml;
 use crate::docx::zip::{PackageContents, Relationships};
 
-use crate::model::model::{EmbeddedFont, EmbeddedFontVariant, RelId};
+use crate::model::{EmbeddedFont, EmbeddedFontVariant, RelId};
 
 /// A raw embedded font reference before de-obfuscation.
 struct FontEmbedRef {

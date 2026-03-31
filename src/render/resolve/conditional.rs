@@ -4,7 +4,7 @@
 //! based on its position, tblLook flags, and band sizes. Overlays
 //! applicable tblStylePr overrides in priority order.
 
-use crate::model::model::{
+use crate::model::{
     ParagraphProperties, RunProperties, TableCellProperties, TableLook, TableStyleOverride,
     TableStyleOverrideType,
 };
@@ -211,7 +211,7 @@ fn overlay_paragraph_properties(result: &mut CellConditionalFormatting, pp: &Par
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::model::*;
+    use crate::model::*;
 
     fn make_override(
         override_type: TableStyleOverrideType,

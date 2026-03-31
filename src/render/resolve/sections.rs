@@ -1,7 +1,7 @@
 //! Section splitting — split body blocks at SectionBreak nodes,
 //! resolve header/footer content via Document.headers/footers.
 
-use crate::model::model::{Block, Document, RelId, SectionProperties};
+use crate::model::{Block, Document, RelId, SectionProperties};
 
 /// A resolved section with its blocks and properties.
 #[derive(Clone, Debug)]
@@ -71,7 +71,7 @@ fn resolve_footer(doc: &Document, rel_id: &Option<RelId>) -> Option<Vec<Block>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::model::*;
+    use crate::model::*;
     use std::collections::HashMap;
 
     fn empty_doc() -> Document {

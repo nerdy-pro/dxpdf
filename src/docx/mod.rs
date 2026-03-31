@@ -11,7 +11,7 @@ pub mod geometry {
     pub use crate::model::geometry::*;
 }
 pub mod model {
-    pub use crate::model::model::*;
+    pub use crate::model::*;
 }
 
 pub mod error;

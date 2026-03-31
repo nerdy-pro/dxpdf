@@ -254,10 +254,10 @@ fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::docx::zip::Relationshi
 }
 
 fn resolve_hyperlinks_in_inlines(
-    inlines: &mut [crate::model::model::Inline],
+    inlines: &mut [crate::model::Inline],
     rels: &crate::docx::zip::Relationships,
 ) {
-    use crate::model::model::{HyperlinkTarget, Inline, RelId};
+    use crate::model::{HyperlinkTarget, Inline, RelId};
 
     for inline in inlines {
         match inline {

@@ -7,7 +7,7 @@
 //! Content is built per-page so that PAGE / NUMPAGES fields (§17.16.4.1)
 //! evaluate to the correct values on each page.
 
-use crate::model::model::Block;
+use crate::model::Block;
 
 use crate::render::dimension::Pt;
 
@@ -105,7 +105,12 @@ fn render_header(
             super::section::FloatingImageY::RelativeToParagraph(offset) => offset_y + offset,
         };
         header_cmds.push(DrawCommand::Image {
-            rect: crate::render::geometry::PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
+            rect: crate::render::geometry::PtRect::from_xywh(
+                fi.x,
+                img_y,
+                fi.size.width,
+                fi.size.height,
+            ),
             image_data: fi.image_data.clone(),
         });
     }
@@ -142,7 +147,12 @@ fn render_footer(
             super::section::FloatingImageY::RelativeToParagraph(offset) => footer_y + offset,
         };
         page.commands.push(DrawCommand::Image {
-            rect: crate::render::geometry::PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
+            rect: crate::render::geometry::PtRect::from_xywh(
+                fi.x,
+                img_y,
+                fi.size.width,
+                fi.size.height,
+            ),
             image_data: fi.image_data.clone(),
         });
     }
@@ -217,7 +227,7 @@ mod tests {
 
     #[test]
     fn no_header_footer_leaves_page_unchanged() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(
+        let mut pages = [LayoutedPage::new(PtSize::new(
             Pt::new(612.0),
             Pt::new(792.0),
         ))];
@@ -259,7 +269,7 @@ mod tests {
 
     #[test]
     fn header_prepended_to_page() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(
+        let mut pages = [LayoutedPage::new(PtSize::new(
             Pt::new(612.0),
             Pt::new(792.0),
         ))];
@@ -293,7 +303,7 @@ mod tests {
 
     #[test]
     fn footer_appended_to_page() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(
+        let mut pages = [LayoutedPage::new(PtSize::new(
             Pt::new(612.0),
             Pt::new(792.0),
         ))];
@@ -343,7 +353,7 @@ mod tests {
 
     #[test]
     fn header_y_position_uses_header_margin() {
-        let mut pages = vec![LayoutedPage::new(PtSize::new(
+        let mut pages = [LayoutedPage::new(PtSize::new(
             Pt::new(612.0),
             Pt::new(792.0),
         ))];

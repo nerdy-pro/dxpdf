@@ -1,10 +1,10 @@
 #![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
+pub mod docx;
+pub mod error;
 pub mod field;
 pub mod model;
-pub mod docx;
 pub mod render;
-pub mod error;
 
 pub use error::Error;
 

@@ -11,7 +11,7 @@ pub mod styles;
 
 use std::collections::HashMap;
 
-use crate::model::model::{
+use crate::model::{
     Block, Document, NoteId, NumId, NumPicBullet, NumPicBulletId, ParagraphProperties, RelId,
     RunProperties, StyleId, Theme,
 };
@@ -54,7 +54,7 @@ pub struct ResolvedDocument {
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
 pub fn resolve(doc: &Document) -> ResolvedDocument {
-    use crate::model::model::StyleType;
+    use crate::model::StyleType;
 
     let styles = styles::resolve_styles(&doc.styles, doc.theme.as_ref());
     let numbering = numbering::resolve_numbering(&doc.numbering);
@@ -89,7 +89,7 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
 mod tests {
     use super::*;
     use crate::model::dimension::{Dimension, HalfPoints};
-    use crate::model::model::*;
+    use crate::model::*;
 
     fn empty_doc() -> Document {
         Document {

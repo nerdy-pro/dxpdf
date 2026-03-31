@@ -3,7 +3,7 @@
 //! Implements the LayoutBox protocol: receives BoxConstraints, returns PtSize,
 //! emits DrawCommands at absolute offsets during paint.
 
-use crate::model::model::Alignment;
+use crate::model::Alignment;
 
 use super::draw_command::DrawCommand;
 use super::fragment::Fragment;
@@ -18,9 +18,9 @@ pub struct TabStopDef {
     /// Absolute position from paragraph left edge.
     pub position: Pt,
     /// §17.18.81: tab alignment (left, center, right, decimal).
-    pub alignment: crate::model::model::TabAlignment,
+    pub alignment: crate::model::TabAlignment,
     /// §17.18.82: leader character (dot, hyphen, underscore, etc.).
-    pub leader: crate::model::model::TabLeader,
+    pub leader: crate::model::TabLeader,
 }
 
 /// Configuration for paragraph layout.
@@ -46,7 +46,7 @@ pub struct ParagraphStyle {
     /// §17.3.1.9: suppress spacing between paragraphs of the same style.
     pub contextual_spacing: bool,
     /// Style ID for contextual spacing comparison.
-    pub style_id: Option<crate::model::model::StyleId>,
+    pub style_id: Option<crate::model::StyleId>,
     /// Active floats for per-line width adjustment.
     pub page_floats: Vec<super::float::ActiveFloat>,
     /// Absolute y position of this paragraph on the page (for float overlap checks).
@@ -519,8 +519,12 @@ pub fn layout_paragraph(
                     });
 
                     if let Some(url) = hyperlink_url {
-                        let rect =
-                            crate::render::geometry::PtRect::from_xywh(x, cursor_y, *width, line_height);
+                        let rect = crate::render::geometry::PtRect::from_xywh(
+                            x,
+                            cursor_y,
+                            *width,
+                            line_height,
+                        );
                         if url.starts_with("http://")
                             || url.starts_with("https://")
                             || url.starts_with("mailto:")
@@ -580,7 +584,7 @@ pub fn layout_paragraph(
                     let (tab_pos, tab_stop) = find_next_tab_stop(x, &style.tabs, line_available);
 
                     let new_x = if let Some(ts) = tab_stop {
-                        use crate::model::model::TabAlignment;
+                        use crate::model::TabAlignment;
                         // §17.3.1.37: for right/center tabs, compute the width
                         // of content in this tab's zone — from here to the next
                         // Tab fragment or line end, whichever comes first.
@@ -829,7 +833,7 @@ fn find_next_tab_stop(
 #[allow(clippy::too_many_arguments)]
 fn emit_tab_leader(
     commands: &mut Vec<DrawCommand>,
-    leader: crate::model::model::TabLeader,
+    leader: crate::model::TabLeader,
     x_start: Pt,
     x_end: Pt,
     baseline_y: Pt,
@@ -837,7 +841,7 @@ fn emit_tab_leader(
     measure_text: MeasureTextFn<'_>,
     default_line_height: Pt,
 ) {
-    use crate::model::model::TabLeader;
+    use crate::model::TabLeader;
 
     let leader_char = match leader {
         TabLeader::Dot => ".",

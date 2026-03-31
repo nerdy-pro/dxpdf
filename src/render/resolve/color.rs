@@ -1,6 +1,6 @@
 //! Color resolution — Color::Auto to RGB, theme color index to RGB.
 
-use crate::model::model::{Color, ThemeColorIndex, ThemeColorScheme};
+use crate::model::{Color, ThemeColorIndex, ThemeColorScheme};
 
 /// Resolved RGB color (0xRRGGBB).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

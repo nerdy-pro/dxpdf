@@ -1,6 +1,6 @@
 //! Page configuration — convert section properties to layout-ready config.
 
-use crate::model::model::{Columns, SectionProperties};
+use crate::model::{Columns, SectionProperties};
 
 use crate::render::dimension::Pt;
 use crate::render::geometry::{PtEdgeInsets, PtSize};
@@ -165,7 +165,7 @@ fn compute_columns(content_width: Pt, columns: &Option<Columns>) -> Vec<ColumnGe
 mod tests {
     use super::*;
     use crate::model::dimension::{Dimension, Twips};
-    use crate::model::model::{PageMargins, PageSize};
+    use crate::model::{PageMargins, PageSize};
 
     #[test]
     fn default_is_us_letter() {

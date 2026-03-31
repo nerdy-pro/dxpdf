@@ -463,11 +463,14 @@ fn parse_run(
                             Some("separate") => FieldCharType::Separate,
                             Some("end") => FieldCharType::End,
                             Some(other) => {
-                                return Err(crate::docx::error::ParseError::InvalidAttributeValue {
-                                    attr: "fldChar/fldCharType".into(),
-                                    value: other.into(),
-                                    reason: "expected begin, separate, or end per §17.18.29".into(),
-                                });
+                                return Err(
+                                    crate::docx::error::ParseError::InvalidAttributeValue {
+                                        attr: "fldChar/fldCharType".into(),
+                                        value: other.into(),
+                                        reason: "expected begin, separate, or end per §17.18.29"
+                                            .into(),
+                                    },
+                                );
                             }
                             None => {
                                 return Err(crate::docx::error::ParseError::MissingAttribute {

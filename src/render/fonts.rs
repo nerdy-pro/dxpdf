@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::model::model::{EmbeddedFont, EmbeddedFontVariant};
+use crate::model::{EmbeddedFont, EmbeddedFontVariant};
 use skia_safe::{Data, Font, FontMgr, FontStyle, Typeface};
 
 use crate::render::dimension::Pt;

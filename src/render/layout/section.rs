@@ -22,11 +22,11 @@ pub struct TableFloatInfo {
     /// Gap between the table's bottom edge and surrounding text.
     pub bottom_gap: Pt,
     /// §17.4.58: horizontal alignment override (tblpXSpec).
-    pub x_align: Option<crate::model::model::TableXAlign>,
+    pub x_align: Option<crate::model::TableXAlign>,
     /// §17.4.59: absolute Y offset from the vertical anchor.
     pub y_offset: Pt,
     /// §17.4.58: vertical anchor reference (text / margin / page).
-    pub vert_anchor: crate::model::model::TableAnchor,
+    pub vert_anchor: crate::model::TableAnchor,
 }
 
 /// A floating (anchor) image to be positioned absolutely on the page.
@@ -74,11 +74,11 @@ pub enum LayoutBlock {
         /// §17.4.51: table indentation from left margin.
         indent: Pt,
         /// §17.4.28: table horizontal alignment.
-        alignment: Option<crate::model::model::Alignment>,
+        alignment: Option<crate::model::Alignment>,
         /// §17.4.58: floating table positioning — if present, text wraps around it.
         float_info: Option<TableFloatInfo>,
         /// §17.4.38: table style reference for adjacent table border collapse.
-        style_id: Option<crate::model::model::StyleId>,
+        style_id: Option<crate::model::StyleId>,
     },
 }
 
@@ -125,7 +125,7 @@ pub fn layout_section(
     let mut first_on_section_page = true;
     // §17.3.1.9: track previous paragraph for contextual spacing collapsing.
     let mut prev_space_after = Pt::ZERO;
-    let mut prev_style_id: Option<crate::model::model::StyleId> = None;
+    let mut prev_style_id: Option<crate::model::StyleId> = None;
     // §17.3.1.24: track previous paragraph borders for grouping.
     // Consecutive paragraphs with identical borders form a group — interior
     // paragraphs suppress their top border.
@@ -146,7 +146,7 @@ pub fn layout_section(
     // Consecutive tables with the same style are treated as a merged table:
     // the second table's top border is suppressed, and an insideH-equivalent
     // border gap is inserted between them.
-    let mut prev_table_style_id: Option<crate::model::model::StyleId> = None;
+    let mut prev_table_style_id: Option<crate::model::StyleId> = None;
     let mut prev_table_border_gap: Pt = Pt::ZERO;
 
     // Column-aware constraint: use current column's width.
@@ -647,10 +647,10 @@ pub fn layout_section(
                     prev_table_border_gap = Pt::ZERO;
                     // §17.4.58: apply tblpXSpec horizontal alignment.
                     let table_x = match fi.x_align {
-                        Some(crate::model::model::TableXAlign::Center) => {
+                        Some(crate::model::TableXAlign::Center) => {
                             config.margins.left + (content_width - table.size.width) * 0.5
                         }
-                        Some(crate::model::model::TableXAlign::Right) => {
+                        Some(crate::model::TableXAlign::Right) => {
                             config.margins.left + content_width - table.size.width
                         }
                         _ => table_x,
@@ -686,13 +686,9 @@ pub fn layout_section(
                     // content already occupies space above it).
                     let float_y_start = if fi.y_offset > Pt::ZERO {
                         let anchor_y = match fi.vert_anchor {
-                            crate::model::model::TableAnchor::Text => {
-                                last_para_start_y + fi.y_offset
-                            }
-                            crate::model::model::TableAnchor::Margin => {
-                                config.margins.top + fi.y_offset
-                            }
-                            crate::model::model::TableAnchor::Page => fi.y_offset,
+                            crate::model::TableAnchor::Text => last_para_start_y + fi.y_offset,
+                            crate::model::TableAnchor::Margin => config.margins.top + fi.y_offset,
+                            crate::model::TableAnchor::Page => fi.y_offset,
                         };
                         anchor_y.max(cursor_y)
                     } else {
@@ -861,7 +857,7 @@ pub fn stack_blocks(
     let mut commands = Vec::new();
     let mut cursor_y = Pt::ZERO;
     let mut prev_space_after = Pt::ZERO;
-    let mut prev_style_id: Option<crate::model::model::StyleId> = None;
+    let mut prev_style_id: Option<crate::model::StyleId> = None;
     let mut page_floats: Vec<super::float::ActiveFloat> = Vec::new();
 
     for block in blocks {
@@ -1090,13 +1086,13 @@ fn render_page_footnotes(
 
 /// §17.4.28: compute the table's x offset based on alignment and indent.
 fn table_x_offset(
-    alignment: Option<crate::model::model::Alignment>,
+    alignment: Option<crate::model::Alignment>,
     indent: Pt,
     table_width: Pt,
     content_width: Pt,
     margin_left: Pt,
 ) -> Pt {
-    use crate::model::model::Alignment;
+    use crate::model::Alignment;
     match alignment {
         Some(Alignment::Center) => margin_left + (content_width - table_width) * 0.5,
         Some(Alignment::End) => margin_left + content_width - table_width,
@@ -1329,8 +1325,10 @@ mod tests {
 
     #[test]
     fn space_before_suppressed_for_first_paragraph_of_section() {
-        let mut style = ParagraphStyle::default();
-        style.space_before = Pt::new(24.0);
+        let style = ParagraphStyle {
+            space_before: Pt::new(24.0),
+            ..Default::default()
+        };
         let blocks = vec![LayoutBlock::Paragraph {
             fragments: vec![text_frag("heading", 50.0, 14.0)],
             style,
@@ -1353,8 +1351,10 @@ mod tests {
 
     #[test]
     fn space_before_preserved_for_page_break_before() {
-        let mut heading_style = ParagraphStyle::default();
-        heading_style.space_before = Pt::new(24.0);
+        let heading_style = ParagraphStyle {
+            space_before: Pt::new(24.0),
+            ..Default::default()
+        };
 
         let blocks = vec![
             para_block("first page", 30.0),
@@ -1402,10 +1402,14 @@ mod tests {
             left: None,
             right: None,
         });
-        let mut style1 = ParagraphStyle::default();
-        style1.borders = border.clone();
-        let mut style2 = ParagraphStyle::default();
-        style2.borders = border;
+        let style1 = ParagraphStyle {
+            borders: border.clone(),
+            ..Default::default()
+        };
+        let style2 = ParagraphStyle {
+            borders: border,
+            ..Default::default()
+        };
 
         let blocks = vec![
             LayoutBlock::Paragraph {

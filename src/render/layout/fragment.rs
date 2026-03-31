@@ -3,9 +3,7 @@
 
 use std::rc::Rc;
 
-use crate::model::model::{
-    Block, FieldCharType, Inline, RunElement, RunProperties, VerticalAlign,
-};
+use crate::model::{Block, FieldCharType, Inline, RunElement, RunProperties, VerticalAlign};
 
 use crate::render::dimension::Pt;
 use crate::render::geometry::PtSize;
@@ -173,8 +171,8 @@ pub fn font_props_from_run(
 
 /// §17.18.40 ST_HighlightColor: map highlight enum to RGB.
 /// These are the fixed palette colors defined in the OOXML spec.
-fn resolve_highlight_color(hl: crate::model::model::HighlightColor) -> RgbColor {
-    use crate::model::model::HighlightColor;
+fn resolve_highlight_color(hl: crate::model::HighlightColor) -> RgbColor {
+    use crate::model::HighlightColor;
     match hl {
         HighlightColor::Black => RgbColor { r: 0, g: 0, b: 0 },
         HighlightColor::Blue => RgbColor { r: 0, g: 0, b: 255 },
@@ -414,7 +412,7 @@ pub fn collect_fragments<F>(
     measure_text: &F,
     resolved_styles: Option<
         &std::collections::HashMap<
-            crate::model::model::StyleId,
+            crate::model::StyleId,
             crate::render::resolve::styles::ResolvedStyle,
         >,
     >,
@@ -423,7 +421,7 @@ pub fn collect_fragments<F>(
     footnote_counter: &mut u32,
     endnote_counter: &mut u32,
     field_ctx: FieldContext,
-    theme: Option<&crate::model::model::Theme>,
+    theme: Option<&crate::model::Theme>,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics), // (width, metrics)
@@ -454,7 +452,10 @@ where
                 // so theme-derived names take precedence over explicit names
                 // from lower-priority levels in the cascade.
                 if let Some(th) = theme {
-                    crate::render::resolve::fonts::resolve_font_set_themes(&mut effective_props.fonts, th);
+                    crate::render::resolve::fonts::resolve_font_set_themes(
+                        &mut effective_props.fonts,
+                        th,
+                    );
                 }
                 if let (Some(ref style_id), Some(styles)) = (&tr.style_id, resolved_styles) {
                     if let Some(resolved_style) = styles.get(style_id) {
@@ -586,11 +587,9 @@ where
             Inline::Image(img) => {
                 // Only render INLINE images as fragments.
                 // Anchor (floating) images are handled separately in build.rs.
-                if matches!(
-                    img.placement,
-                    crate::model::model::ImagePlacement::Inline { .. }
-                ) {
-                    if let Some(rel_id) = crate::render::resolve::images::extract_image_rel_id(img) {
+                if matches!(img.placement, crate::model::ImagePlacement::Inline { .. }) {
+                    if let Some(rel_id) = crate::render::resolve::images::extract_image_rel_id(img)
+                    {
                         let w = Pt::from(img.extent.width);
                         let h = Pt::from(img.extent.height);
                         fragments.push(Fragment::Image {
@@ -603,12 +602,8 @@ where
             }
             Inline::Hyperlink(link) => {
                 let url: Option<&str> = match &link.target {
-                    crate::model::model::HyperlinkTarget::External(rel_id) => {
-                        Some(rel_id.as_str())
-                    }
-                    crate::model::model::HyperlinkTarget::Internal { anchor } => {
-                        Some(anchor.as_str())
-                    }
+                    crate::model::HyperlinkTarget::External(rel_id) => Some(rel_id.as_str()),
+                    crate::model::HyperlinkTarget::Internal { anchor } => Some(anchor.as_str()),
                 };
                 let mut sub = collect_fragments(
                     &link.content,
@@ -856,7 +851,7 @@ where
 mod tests {
     use super::*;
     use crate::model::dimension::{Dimension, HalfPoints};
-    use crate::model::model::*;
+    use crate::model::*;
 
     /// Dummy measurer: width = text.len() * 6.0, ascent = 10.0, descent = 2.0
     fn dummy_measure(text: &str, _font: &FontProps) -> (Pt, TextMetrics) {

@@ -17,15 +17,15 @@ pub mod painter;
 pub mod resolve;
 pub mod skia_conv;
 
-use crate::model::model::Document;
+use crate::model::Document;
 
+use crate::model::Block;
 use crate::render::layout::build::{build_section_blocks, default_line_height, BuildContext};
 use crate::render::layout::draw_command::LayoutedPage;
 use crate::render::layout::header_footer::render_headers_footers;
 use crate::render::layout::page::PageConfig;
 use crate::render::layout::section::layout_section;
 use crate::render::resolve::ResolvedDocument;
-use crate::model::model::Block;
 
 /// Render a parsed DOCX document to PDF bytes.
 ///
@@ -100,7 +100,9 @@ pub fn layout_document(
         footnote_counter: std::cell::Cell::new(0),
         endnote_counter: std::cell::Cell::new(0),
         list_counters: std::cell::RefCell::new(std::collections::HashMap::new()),
-        field_ctx_cell: std::cell::Cell::new(crate::render::layout::fragment::FieldContext::default()),
+        field_ctx_cell: std::cell::Cell::new(
+            crate::render::layout::fragment::FieldContext::default(),
+        ),
     };
     let dlh = default_line_height(&ctx);
     let mut all_pages = Vec::new();
@@ -123,7 +125,7 @@ pub fn layout_document(
         .and_then(|s| s.paragraph.indentation)
         .and_then(|ind| ind.first_line)
         .map(|fl| match fl {
-            crate::model::model::FirstLineIndent::FirstLine(v) => dimension::Pt::from(v),
+            crate::model::FirstLineIndent::FirstLine(v) => dimension::Pt::from(v),
             _ => dimension::Pt::ZERO,
         })
         .unwrap_or(dimension::Pt::ZERO);
@@ -151,14 +153,13 @@ pub fn layout_document(
         };
 
         // §17.6.22: continuous sections continue on the current page.
-        let continuation = if section.properties.section_type
-            == Some(crate::model::model::SectionType::Continuous)
-        {
-            pending_continuation.take()
-        } else {
-            pending_continuation = None;
-            None
-        };
+        let continuation =
+            if section.properties.section_type == Some(crate::model::SectionType::Continuous) {
+                pending_continuation.take()
+            } else {
+                pending_continuation = None;
+                None
+            };
 
         let mut pages = layout_section(
             &built.blocks,
@@ -185,8 +186,7 @@ pub fn layout_document(
             section_idx
                 .and_then(|i| resolved.sections.get(i + 1))
                 .is_some_and(|next| {
-                    next.properties.section_type
-                        == Some(crate::model::model::SectionType::Continuous)
+                    next.properties.section_type == Some(crate::model::SectionType::Continuous)
                 })
         };
 
@@ -318,7 +318,7 @@ fn adjust_margins_for_header_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::model::*;
+    use crate::model::*;
     use std::collections::HashMap;
 
     fn empty_doc() -> Document {

@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::model::model::{Block, Document, FontSet, Inline};
+use crate::model::{Block, Document, FontSet, Inline};
 
 /// Collect all unique font family names referenced in the document.
 /// Sources: theme, style sheet, inline content, numbering levels, paragraph marks.
@@ -83,7 +83,7 @@ pub fn effective_font(fonts: &FontSet) -> Option<&str> {
 /// actual font family name from the theme. The resolved name is written
 /// into the corresponding name field (ascii, high_ansi, etc.), overwriting
 /// any explicit name — theme references take precedence per §17.3.2.26.
-pub fn resolve_font_set_themes(fonts: &mut FontSet, theme: &crate::model::model::Theme) {
+pub fn resolve_font_set_themes(fonts: &mut FontSet, theme: &crate::model::Theme) {
     if let Some(ref tf) = fonts.ascii_theme {
         if let Some(name) = resolve_theme_font_ref(tf, theme) {
             fonts.ascii = Some(name);
@@ -107,10 +107,10 @@ pub fn resolve_font_set_themes(fonts: &mut FontSet, theme: &crate::model::model:
 }
 
 fn resolve_theme_font_ref(
-    tf: &crate::model::model::ThemeFontRef,
-    theme: &crate::model::model::Theme,
+    tf: &crate::model::ThemeFontRef,
+    theme: &crate::model::Theme,
 ) -> Option<String> {
-    use crate::model::model::ThemeFontRef;
+    use crate::model::ThemeFontRef;
     let name = match tf {
         ThemeFontRef::MajorHAnsi => &theme.major_font.latin,
         ThemeFontRef::MajorEastAsia => &theme.major_font.east_asian,
@@ -196,7 +196,7 @@ fn collect_from_inlines(set: &mut HashSet<String>, inlines: &[Inline]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::model::*;
+    use crate::model::*;
     use std::collections::HashMap;
 
     fn empty_doc() -> Document {
