@@ -6,8 +6,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error("Parse error: {0}")]
-    Parse(#[from] dxpdf_docx::error::ParseError),
+    Parse(#[from] crate::docx::error::ParseError),
 
     #[error("Render error: {0}")]
-    Render(#[from] dxpdf_renderer::error::RenderError),
+    Render(#[from] crate::render::error::RenderError),
 }
