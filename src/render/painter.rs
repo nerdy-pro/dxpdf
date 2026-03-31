@@ -12,12 +12,13 @@ use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u8>, RenderError> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let mut doc = pdf::new_document(&mut pdf_bytes, None);
+    let mut font_cache = fonts::FontCache::new();
 
     for page in pages {
         let mut on_page = doc.begin_page(to_size(page.page_size), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, font_mgr);
+            render_page(canvas, page, font_mgr, &mut font_cache);
         }
         doc = on_page.end_page();
     }
@@ -26,7 +27,12 @@ pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u
     Ok(pdf_bytes)
 }
 
-fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontMgr) {
+fn render_page(
+    canvas: &skia_safe::Canvas,
+    page: &LayoutedPage,
+    font_mgr: &FontMgr,
+    font_cache: &mut fonts::FontCache,
+) {
     for cmd in &page.commands {
         match cmd {
             DrawCommand::Text {
@@ -39,7 +45,8 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                 italic,
                 color,
             } => {
-                let font = fonts::make_font(font_mgr, font_family, *font_size, *bold, *italic);
+                let font =
+                    font_cache.get(font_mgr, font_family, *font_size, *bold, *italic);
                 log::trace!(
                     "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
                     &text[..text.len().min(30)],
@@ -58,12 +65,12 @@ fn render_page(canvas: &skia_safe::Canvas, page: &LayoutedPage, font_mgr: &FontM
                     let mut cursor = *position;
                     for ch in text.chars() {
                         let s = ch.to_string();
-                        canvas.draw_str(&s, to_point(cursor), &font, &paint);
+                        canvas.draw_str(&s, to_point(cursor), font, &paint);
                         let (w, _) = font.measure_str(&s, None);
                         cursor.x += Pt::new(w) + *char_spacing;
                     }
                 } else {
-                    canvas.draw_str(text, to_point(*position), &font, &paint);
+                    canvas.draw_str(text, to_point(*position), font, &paint);
                 }
             }
             DrawCommand::Underline { line, color, width }

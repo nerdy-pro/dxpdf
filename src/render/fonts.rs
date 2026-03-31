@@ -8,6 +8,65 @@ use skia_safe::{Data, Font, FontMgr, FontStyle, Typeface};
 
 use crate::render::dimension::Pt;
 
+/// Key for the Font object cache (typeface + size + style).
+#[derive(Hash, Eq, PartialEq)]
+struct FontKey {
+    family: String,
+    /// Font size stored as bits for exact f32 hashing.
+    size_bits: u32,
+    weight: i32,
+    slant: skia_safe::font_style::Slant,
+}
+
+/// Cache of fully-configured `Font` objects, avoiding repeated
+/// `resolve_typeface()` lookups and `Font::from_typeface()` construction.
+#[derive(Default)]
+pub struct FontCache {
+    cache: HashMap<FontKey, Font>,
+}
+
+impl FontCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get or create a Font for the given properties.
+    pub fn get(
+        &mut self,
+        font_mgr: &FontMgr,
+        font_family: &str,
+        font_size: Pt,
+        bold: bool,
+        italic: bool,
+    ) -> &Font {
+        let style = match (bold, italic) {
+            (true, true) => FontStyle::bold_italic(),
+            (true, false) => FontStyle::bold(),
+            (false, true) => FontStyle::italic(),
+            (false, false) => FontStyle::normal(),
+        };
+        let key = FontKey {
+            family: font_family.to_lowercase(),
+            size_bits: f32::from(font_size).to_bits(),
+            weight: *style.weight(),
+            slant: style.slant(),
+        };
+        self.cache.entry(key).or_insert_with_key(|k| {
+            let style = FontStyle::new(
+                skia_safe::font_style::Weight::from(k.weight),
+                skia_safe::font_style::Width::NORMAL,
+                k.slant,
+            );
+            let typeface = resolve_typeface(font_mgr, font_family, style);
+            let mut font = Font::from_typeface(typeface, f32::from(font_size));
+            font.set_subpixel(true);
+            font.set_linear_metrics(true);
+            font.set_hinting(skia_safe::FontHinting::None);
+            font
+        })
+    }
+}
+
 /// Open-source metric-compatible substitutes for proprietary fonts.
 const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     ("Calibri", &["Carlito", "Liberation Sans", "Noto Sans"]),
