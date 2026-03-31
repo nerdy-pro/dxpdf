@@ -144,10 +144,8 @@ pub fn layout_section(
     let mut last_para_start_y = cursor_y;
     // §17.4.38: track previous table for adjacent table border collapse.
     // Consecutive tables with the same style are treated as a merged table:
-    // the second table's top border is suppressed, and an insideH-equivalent
-    // border gap is inserted between them.
+    // the second table's top border is suppressed.
     let mut prev_table_style_id: Option<crate::model::StyleId> = None;
-    let mut prev_table_border_gap: Pt = Pt::ZERO;
 
     // Column-aware constraint: use current column's width.
     let col_constraints = |col: usize| -> BoxConstraints {
@@ -567,7 +565,6 @@ pub fn layout_section(
                 prev_space_after = effective_style.space_after;
                 prev_style_id = effective_style.style_id.clone();
                 prev_table_style_id = None; // paragraph breaks adjacent table chain
-                prev_table_border_gap = Pt::ZERO;
 
                 // §20.4.2.3: emit floating images (already registered above).
                 // wrapTopAndBottom images were already emitted before paragraph layout.
@@ -644,7 +641,6 @@ pub fn layout_section(
 
                     // Floating table breaks the adjacent table chain.
                     prev_table_style_id = None;
-                    prev_table_border_gap = Pt::ZERO;
                     // §17.4.58: apply tblpXSpec horizontal alignment.
                     let table_x = match fi.x_align {
                         Some(crate::model::TableXAlign::Center) => {
@@ -725,12 +721,9 @@ pub fn layout_section(
 
                 // §17.4.38: consecutive non-floating tables with the same style
                 // are treated as a single merged table — suppress the second
-                // table's top border to avoid doubling at the shared edge,
-                // and insert a border gap (equivalent to insideH) between them.
+                // table's top border so the shared edge is drawn once by the
+                // previous table's bottom border.
                 let suppress_top = style_id.is_some() && *style_id == prev_table_style_id;
-                if suppress_top {
-                    cursor_y += prev_table_border_gap;
-                }
 
                 // Non-floating table: paginated row-level splitting.
                 // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.
@@ -797,14 +790,6 @@ pub fn layout_section(
                 prev_space_after = Pt::ZERO;
                 prev_style_id = None;
                 prev_table_style_id = style_id.clone();
-                // §17.4.38: the gap between adjacent merged tables is the
-                // table's bottom border width (equivalent to insideH in the
-                // merged table). This gap separates rows visually and affects
-                // page-break decisions.
-                prev_table_border_gap = border_config
-                    .as_ref()
-                    .and_then(|b| b.bottom)
-                    .map_or(Pt::ZERO, |b| b.width);
             }
         }
     }

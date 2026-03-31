@@ -5,7 +5,7 @@
 //! Pass 3: Position cells and emit border commands.
 
 use crate::render::dimension::Pt;
-use crate::render::geometry::{PtEdgeInsets, PtLineSegment, PtOffset, PtRect, PtSize};
+use crate::render::geometry::{PtEdgeInsets, PtRect, PtSize};
 use crate::render::resolve::color::RgbColor;
 
 use super::cell::{layout_cell, CellLayout};
@@ -868,9 +868,13 @@ struct CellBorders {
     right: Option<TableBorderLine>,
 }
 
-/// Emit all four borders for a cell. Borders are drawn INWARD from the
-/// cell edge per OOXML — the line center is offset inward by half the
-/// border width so the outer edge of the line aligns with the cell edge.
+/// Emit all four borders for a cell as filled rectangles.
+/// Borders are drawn INWARD from the cell edge per OOXML.
+///
+/// Horizontal borders (top/bottom) own the corner squares — they span the
+/// full cell width. Vertical borders (left/right) fill only the space
+/// between the horizontals. This eliminates anti-aliasing gaps at corners
+/// that plagued the previous stroke-based approach.
 fn emit_cell_borders(
     commands: &mut Vec<DrawCommand>,
     b: CellBorders,
@@ -879,83 +883,102 @@ fn emit_cell_borders(
     row_y: Pt,
     row_h: Pt,
 ) {
-    let top_half = b.top.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
-    let bot_half = b.bottom.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
-    let left_half = b.left.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
-    let right_half = b.right.map(|b| b.width * 0.5).unwrap_or(Pt::ZERO);
+    let top_w = b.top.map(|b| b.width).unwrap_or(Pt::ZERO);
+    let bot_w = b.bottom.map(|b| b.width).unwrap_or(Pt::ZERO);
+    let left_w = b.left.map(|b| b.width).unwrap_or(Pt::ZERO);
+    let right_w = b.right.map(|b| b.width).unwrap_or(Pt::ZERO);
 
-    // Horizontal borders: shifted inward by half-width.
+    // Horizontal borders: full cell width, covering corner squares.
     if let Some(ref border) = b.top {
-        emit_border(
+        emit_border_rect(
             commands,
             border,
-            PtOffset::new(cell_x, row_y + top_half),
-            PtOffset::new(cell_x + cell_w, row_y + top_half),
+            PtRect::from_xywh(cell_x, row_y, cell_w, top_w),
+            true,
         );
     }
     if let Some(ref border) = b.bottom {
-        emit_border(
+        emit_border_rect(
             commands,
             border,
-            PtOffset::new(cell_x, row_y + row_h - bot_half),
-            PtOffset::new(cell_x + cell_w, row_y + row_h - bot_half),
+            PtRect::from_xywh(cell_x, row_y + row_h - bot_w, cell_w, bot_w),
+            true,
         );
     }
 
-    // Vertical borders: shifted inward, extended to cover corners.
-    let v_top = row_y;
-    let v_bot = row_y + row_h;
-    if let Some(ref border) = b.left {
-        emit_border(
-            commands,
-            border,
-            PtOffset::new(cell_x + left_half, v_top),
-            PtOffset::new(cell_x + left_half, v_bot),
-        );
-    }
-    if let Some(ref border) = b.right {
-        emit_border(
-            commands,
-            border,
-            PtOffset::new(cell_x + cell_w - right_half, v_top),
-            PtOffset::new(cell_x + cell_w - right_half, v_bot),
-        );
+    // Vertical borders: between horizontal borders (no corner overlap).
+    let top_inset = if b.top.is_some() { top_w } else { Pt::ZERO };
+    let bot_inset = if b.bottom.is_some() { bot_w } else { Pt::ZERO };
+    let v_height = row_h - top_inset - bot_inset;
+    if v_height > Pt::ZERO {
+        if let Some(ref border) = b.left {
+            emit_border_rect(
+                commands,
+                border,
+                PtRect::from_xywh(cell_x, row_y + top_inset, left_w, v_height),
+                false,
+            );
+        }
+        if let Some(ref border) = b.right {
+            emit_border_rect(
+                commands,
+                border,
+                PtRect::from_xywh(cell_x + cell_w - right_w, row_y + top_inset, right_w, v_height),
+                false,
+            );
+        }
     }
 }
 
-/// Emit a single border line (or two lines for §17.4.38 double style).
-fn emit_border(commands: &mut Vec<DrawCommand>, b: &TableBorderLine, p1: PtOffset, p2: PtOffset) {
+/// Emit a border as filled rectangle(s).
+/// `is_horizontal` controls double-border sub-rect orientation.
+fn emit_border_rect(
+    commands: &mut Vec<DrawCommand>,
+    b: &TableBorderLine,
+    rect: PtRect,
+    is_horizontal: bool,
+) {
     match b.style {
         TableBorderStyle::Single => {
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(p1, p2),
+            commands.push(DrawCommand::Rect {
+                rect,
                 color: b.color,
-                width: b.width,
             });
         }
         TableBorderStyle::Double => {
             // §17.4.38: total = w:sz, each sub-line = sz/3, gap = sz/3.
-            let sub_w = b.width * (1.0 / 3.0);
-            let off = sub_w; // half sub-line + half gap = sz/3
-                             // Offset perpendicular to the line direction.
-            let dx = if p1.x == p2.x { off } else { Pt::ZERO };
-            let dy = if p1.y == p2.y { off } else { Pt::ZERO };
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(
-                    PtOffset::new(p1.x - dx, p1.y - dy),
-                    PtOffset::new(p2.x - dx, p2.y - dy),
-                ),
-                color: b.color,
-                width: sub_w,
-            });
-            commands.push(DrawCommand::Line {
-                line: PtLineSegment::new(
-                    PtOffset::new(p1.x + dx, p1.y + dy),
-                    PtOffset::new(p2.x + dx, p2.y + dy),
-                ),
-                color: b.color,
-                width: sub_w,
-            });
+            let sub = b.width * (1.0 / 3.0);
+            if is_horizontal {
+                // Two horizontal sub-rects: top and bottom of the border area.
+                commands.push(DrawCommand::Rect {
+                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, rect.size.width, sub),
+                    color: b.color,
+                });
+                commands.push(DrawCommand::Rect {
+                    rect: PtRect::from_xywh(
+                        rect.origin.x,
+                        rect.origin.y + rect.size.height - sub,
+                        rect.size.width,
+                        sub,
+                    ),
+                    color: b.color,
+                });
+            } else {
+                // Two vertical sub-rects: left and right of the border area.
+                commands.push(DrawCommand::Rect {
+                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, sub, rect.size.height),
+                    color: b.color,
+                });
+                commands.push(DrawCommand::Rect {
+                    rect: PtRect::from_xywh(
+                        rect.origin.x + rect.size.width - sub,
+                        rect.origin.y,
+                        sub,
+                        rect.size.height,
+                    ),
+                    color: b.color,
+                });
+            }
         }
     }
 }
@@ -1299,14 +1322,17 @@ mod tests {
             false,
         );
 
-        let line_count = result
+        // Borders are emitted as filled rects. Count border rects by
+        // excluding cell shading rects (which use non-BLACK colors or
+        // appear before borders in the command list).
+        let border_rect_count = result
             .commands
             .iter()
-            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
             .count();
         // §17.4.43: shared edges drawn once after conflict resolution.
-        // Top(2) + bottom(2) + left(1) + insideV(1) + right(1) = 7 lines.
-        assert_eq!(line_count, 7);
+        // Top(2) + bottom(2) + left(1) + insideV(1) + right(1) = 7 border rects.
+        assert_eq!(border_rect_count, 7);
     }
 
     #[test]
@@ -1432,10 +1458,10 @@ mod tests {
             None,
             false,
         );
-        let normal_lines: Vec<_> = normal
+        let normal_borders: Vec<_> = normal
             .commands
             .iter()
-            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
             .collect();
 
         // With suppression: top border removed.
@@ -1448,15 +1474,15 @@ mod tests {
             None,
             true,
         );
-        let suppressed_lines: Vec<_> = suppressed
+        let suppressed_borders: Vec<_> = suppressed
             .commands
             .iter()
-            .filter(|c| matches!(c, DrawCommand::Line { .. }))
+            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
             .collect();
 
         // Normal has 4 borders (top, bottom, left, right).
-        assert_eq!(normal_lines.len(), 4, "all 4 borders present");
+        assert_eq!(normal_borders.len(), 4, "all 4 borders present");
         // Suppressed has 3 borders (bottom, left, right — no top).
-        assert_eq!(suppressed_lines.len(), 3, "top border suppressed");
+        assert_eq!(suppressed_borders.len(), 3, "top border suppressed");
     }
 }
