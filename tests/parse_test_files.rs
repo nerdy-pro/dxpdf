@@ -1,7 +1,7 @@
 //! Integration tests that parse real DOCX files from the test-files directory
 //! and validate the resulting Document structure.
 
-use dxpdf::model::model::*;
+use dxpdf::model::*;
 
 const TEST_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-files");
 

@@ -16,7 +16,7 @@ fn test_docx_files() -> Vec<&'static str> {
     ]
 }
 
-fn parse_docx(filename: &str) -> dxpdf::model::model::Document {
+fn parse_docx(filename: &str) -> dxpdf::model::Document {
     let path = Path::new(TEST_DIR).join(filename);
     let bytes = std::fs::read(&path).unwrap_or_else(|e| {
         panic!("Failed to read {}: {e}", path.display());
