@@ -200,6 +200,9 @@ fn parse_paragraph(
                             content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
                         }
                     }
+                    // Empty self-closing <w:r/> carries only revision IDs
+                    // (rsidR, rsidRPr) — no text or inline content to render.
+                    b"r" => {}
                     _ => xml::warn_unsupported_element("paragraph", local),
                 }
             }
