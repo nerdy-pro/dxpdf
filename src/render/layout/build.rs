@@ -1057,7 +1057,39 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
     let style_cell_margins = raw_table_style
         .and_then(|s| s.table.as_ref())
         .and_then(|tp| tp.cell_margins);
-    let default_cell_margins = t.properties.cell_margins.or(style_cell_margins);
+    // Per-edge merge: direct tblCellMar overrides style per-edge, with
+    // unspecified edges (value 0) falling back to the style's value.
+    // Word merges per-edge rather than replacing the entire set.
+    let default_cell_margins = match (t.properties.cell_margins, style_cell_margins) {
+        (Some(direct), Some(style)) => {
+            use crate::model::geometry::EdgeInsets;
+            Some(EdgeInsets {
+                top: if direct.top.raw() != 0 {
+                    direct.top
+                } else {
+                    style.top
+                },
+                bottom: if direct.bottom.raw() != 0 {
+                    direct.bottom
+                } else {
+                    style.bottom
+                },
+                left: if direct.left.raw() != 0 {
+                    direct.left
+                } else {
+                    style.left
+                },
+                right: if direct.right.raw() != 0 {
+                    direct.right
+                } else {
+                    style.right
+                },
+            })
+        }
+        (Some(direct), None) => Some(direct),
+        (None, Some(style)) => Some(style),
+        (None, None) => None,
+    };
 
     // §17.4.63: resolve table width from tblW.
     let is_auto_width = matches!(
@@ -1135,8 +1167,7 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
                     let cell_margins_h = cell
                         .properties
                         .margins
-                        .or(t.properties.cell_margins)
-                        .or(style_cell_margins)
+                        .or(default_cell_margins)
                         .map(|m| Pt::from(m.left) + Pt::from(m.right))
                         .unwrap_or(Pt::ZERO);
                     let inner_width = (cell_width - cell_margins_h).max(Pt::ZERO);
@@ -1145,7 +1176,7 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
                         cell,
                         &t.properties,
                         raw_table_style,
-                        style_cell_margins,
+                        default_cell_margins,
                         &cond,
                         inner_width,
                         ctx,
@@ -1169,13 +1200,19 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
         })
         .collect();
 
-    // §17.4.38: resolve table borders from direct properties or table style.
-    let tbl_borders = t.properties.borders.as_ref().or_else(|| {
-        raw_table_style
-            .and_then(|s| s.table.as_ref())
-            .and_then(|tp| tp.borders.as_ref())
-    });
-    let border_config = tbl_borders.map(convert_table_border_config);
+    // §17.4.38: resolve table borders — merge direct properties over table style.
+    // Direct tblBorders may specify only a subset of edges (e.g. insideH=none);
+    // unspecified edges inherit from the table style.
+    let style_borders = raw_table_style
+        .and_then(|s| s.table.as_ref())
+        .and_then(|tp| tp.borders.as_ref());
+    let tbl_borders = match (t.properties.borders.as_ref(), style_borders) {
+        (Some(direct), Some(style)) => Some(merge_table_borders(direct, style)),
+        (Some(direct), None) => Some(*direct),
+        (None, Some(style)) => Some(*style),
+        (None, None) => None,
+    };
+    let border_config = tbl_borders.as_ref().map(convert_table_border_config);
 
     // §17.4.58: floating table positioning.
     let float_info = t.properties.positioning.as_ref().map(|pos| {
@@ -1222,18 +1259,17 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
 /// Build a single table cell: resolve content blocks, margins, shading, borders.
 fn build_table_cell(
     cell: &TableCell,
-    table_props: &model::TableProperties,
+    _table_props: &model::TableProperties,
     table_style: Option<&ResolvedStyle>,
     style_cell_margins: Option<crate::model::geometry::EdgeInsets<crate::model::dimension::Twips>>,
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
 ) -> TableCellInput {
-    // §17.4.42: cell margins cascade: cell → table → table style.
+    // §17.4.42: cell margins cascade: cell-level tcMar → pre-merged table default.
     let cell_margins = cell
         .properties
         .margins
-        .or(table_props.cell_margins)
         .or(style_cell_margins)
         .map(|m| {
             geometry::PtEdgeInsets::new(
@@ -1657,6 +1693,23 @@ fn convert_cell_border_override(b: &Option<model::Border>) -> Option<CellBorderO
             CellBorderOverride::Border(convert_model_border(b))
         }
     })
+}
+
+/// §17.4.38: merge direct table borders over style borders.
+/// Each edge in `direct` overrides the corresponding edge in `style`;
+/// unspecified edges (`None`) inherit from the style.
+fn merge_table_borders(
+    direct: &model::TableBorders,
+    style: &model::TableBorders,
+) -> model::TableBorders {
+    model::TableBorders {
+        top: direct.top.or(style.top),
+        bottom: direct.bottom.or(style.bottom),
+        left: direct.left.or(style.left),
+        right: direct.right.or(style.right),
+        inside_h: direct.inside_h.or(style.inside_h),
+        inside_v: direct.inside_v.or(style.inside_v),
+    }
 }
 
 /// Convert model `TableBorders` to a layout `TableBorderConfig`.
