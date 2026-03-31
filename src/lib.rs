@@ -1,5 +1,9 @@
 #![allow(clippy::collapsible_if, clippy::collapsible_match)]
 
+pub mod field;
+pub mod model;
+pub mod docx;
+pub mod render;
 pub mod error;
 
 pub use error::Error;
@@ -9,11 +13,11 @@ pub fn convert(docx_bytes: &[u8]) -> Result<Vec<u8>, Error> {
     use std::time::Instant;
 
     let t0 = Instant::now();
-    let document = dxpdf_docx::parse(docx_bytes)?;
+    let document = crate::docx::parse(docx_bytes)?;
     log::debug!("Parse:  {:?}", t0.elapsed());
 
     let t1 = Instant::now();
-    let pdf_bytes = dxpdf_renderer::render(&document)?;
+    let pdf_bytes = crate::render::render(&document)?;
     log::debug!("Render: {:?}", t1.elapsed());
 
     log::debug!("Total:  {:?}", t0.elapsed());

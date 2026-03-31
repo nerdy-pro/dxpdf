@@ -7,10 +7,13 @@ const FILES: &[&str] = &[
     "sample-docx-files-sample2.docx",
     "sample-docx-files-sample3.docx",
     "sample-docx-files-sample4.docx",
+    "sample-docx-files-sample-4.docx",
+    "sample-docx-files-sample-5.docx",
+    "sample-docx-files-sample-6.docx",
 ];
 
-fn bench_convert(c: &mut Criterion) {
-    let mut group = c.benchmark_group("convert");
+fn bench_parse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parse");
 
     for name in FILES {
         let path = format!("{TEST_DIR}/{name}");
@@ -20,13 +23,13 @@ fn bench_convert(c: &mut Criterion) {
             .trim_end_matches(".docx");
 
         group.throughput(Throughput::Bytes(data.len() as u64));
-        group.bench_with_input(BenchmarkId::new("e2e", short), &data, |b, data| {
-            b.iter(|| dxpdf::convert(data).unwrap());
+        group.bench_with_input(BenchmarkId::new("file", short), &data, |b, data| {
+            b.iter(|| dxpdf::docx::parse(data).unwrap());
         });
     }
 
     group.finish();
 }
 
-criterion_group!(benches, bench_convert);
+criterion_group!(benches, bench_parse);
 criterion_main!(benches);
