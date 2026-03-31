@@ -309,10 +309,18 @@ fn emit_text_fragments<F>(
 ) where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
 {
-    if text.is_empty() {
+    // §2.1 XML spec: C0 control characters (U+0000–U+001F) other than
+    // HT (U+0009), LF (U+000A), CR (U+000D) are invalid in XML but some
+    // producers embed LF/CR in w:t content. Strip all non-tab controls
+    // so they don't render as tofu/question-mark glyphs.
+    let cleaned: String = text
+        .chars()
+        .filter(|&c| !c.is_control() || c == '\t')
+        .collect();
+    if cleaned.is_empty() {
         return;
     }
-    for word in split_into_words(text) {
+    for word in split_into_words(&cleaned) {
         let (w, m) = measure_text(word, font);
         let trimmed = word.trim_end();
         let tw = if trimmed.len() < word.len() {
