@@ -53,8 +53,7 @@ fn render_page(
                 italic,
                 color,
             } => {
-                let font =
-                    font_cache.get(font_mgr, font_family, *font_size, *bold, *italic);
+                let font = font_cache.get(font_mgr, font_family, *font_size, *bold, *italic);
                 log::trace!(
                     "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
                     &text[..text.len().min(30)],

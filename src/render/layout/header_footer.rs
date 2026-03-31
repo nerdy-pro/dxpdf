@@ -161,12 +161,12 @@ fn render_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
     use crate::render::geometry::{PtEdgeInsets, PtOffset, PtSize};
     use crate::render::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::render::layout::paragraph::ParagraphStyle;
     use crate::render::layout::section::LayoutBlock;
     use crate::render::resolve::color::RgbColor;
+    use std::rc::Rc;
 
     fn make_hf(frags: Vec<Fragment>) -> HeaderFooterContent {
         HeaderFooterContent {

@@ -1374,7 +1374,9 @@ mod tests {
             .commands
             .iter()
             .find_map(|c| match c {
-                DrawCommand::Text { position, text, .. } if &**text == "heading" => Some(position.y),
+                DrawCommand::Text { position, text, .. } if &**text == "heading" => {
+                    Some(position.y)
+                }
                 _ => None,
             })
             .expect("heading should be on page 2");
