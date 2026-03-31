@@ -222,35 +222,3 @@ pub fn preload_fonts(font_mgr: &FontMgr, families: &[String]) {
         }
     }
 }
-
-/// Create a Skia Font for the given properties.
-///
-/// Font flags for PDF-correct output:
-/// - `subpixel(true)`: enables fractional glyph positioning.
-/// - `linear_metrics(true)`: bypasses hinting grid-fit so that glyph
-///   advance widths are returned (and emitted to PDF) as fractional
-///   values. Without this, Skia's PDF backend rounds inter-glyph `Td`
-///   advances to integers, producing visible gaps within words when
-///   metric-compatible substitute fonts are used on Linux.
-/// - `hinting(None)`: disables hinting entirely so metrics are pure
-///   outline-based, consistent across platforms.
-pub fn make_font(
-    font_mgr: &FontMgr,
-    font_family: &str,
-    font_size: Pt,
-    bold: bool,
-    italic: bool,
-) -> Font {
-    let style = match (bold, italic) {
-        (true, true) => FontStyle::bold_italic(),
-        (true, false) => FontStyle::bold(),
-        (false, true) => FontStyle::italic(),
-        (false, false) => FontStyle::normal(),
-    };
-    let typeface = resolve_typeface(font_mgr, font_family, style);
-    let mut font = Font::from_typeface(typeface, f32::from(font_size));
-    font.set_subpixel(true);
-    font.set_linear_metrics(true);
-    font.set_hinting(skia_safe::FontHinting::None);
-    font
-}
