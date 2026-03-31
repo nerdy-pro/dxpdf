@@ -1412,6 +1412,13 @@ pub fn parse_anchor_image(
                     b"sizeRelH" | b"sizeRelV" => {
                         xml::skip_to_end(reader, buf, local)?;
                     }
+                    // MCE §M.2.1: mc:AlternateContent wraps elements like
+                    // positionH/positionV with wp14 extensions in mc:Choice
+                    // and standard fallbacks in mc:Fallback. Skip to Fallback
+                    // and re-parse its children as anchor children.
+                    b"AlternateContent" => {
+                        parse_anchor_alternate_content(reader, buf, &mut h_pos, &mut v_pos)?;
+                    }
                     _ => {
                         xml::warn_unsupported_element("anchor-image", local);
                         xml::skip_to_end(reader, buf, local)?;
@@ -1523,6 +1530,79 @@ pub fn parse_anchor_image(
             hidden,
         }),
     }))
+}
+
+/// MCE §M.2.1: parse mc:AlternateContent inside wp:anchor.
+/// Skips mc:Choice, parses mc:Fallback children (positionH/positionV).
+fn parse_anchor_alternate_content(
+    reader: &mut Reader<&[u8]>,
+    buf: &mut Vec<u8>,
+    h_pos: &mut Option<AnchorPosition>,
+    v_pos: &mut Option<AnchorPosition>,
+) -> Result<()> {
+    loop {
+        match xml::next_event(reader, buf)? {
+            Event::Start(ref e) => {
+                let qn = e.name();
+                let local = xml::local_name(qn.as_ref());
+                match local {
+                    b"Choice" => xml::skip_to_end(reader, buf, b"Choice")?,
+                    b"Fallback" => {
+                        // Parse Fallback children as anchor-level elements.
+                        loop {
+                            match xml::next_event(reader, buf)? {
+                                Event::Start(ref e2) => {
+                                    let qn2 = e2.name();
+                                    let local2 = xml::local_name(qn2.as_ref());
+                                    match local2 {
+                                        b"positionH" => {
+                                            if let Some(rel) =
+                                                xml::optional_attr(e2, b"relativeFrom")?
+                                            {
+                                                let rel = parse_anchor_relative_from(&rel)?;
+                                                *h_pos = Some(parse_anchor_position(
+                                                    reader,
+                                                    buf,
+                                                    rel,
+                                                    b"positionH",
+                                                )?);
+                                            }
+                                        }
+                                        b"positionV" => {
+                                            if let Some(rel) =
+                                                xml::optional_attr(e2, b"relativeFrom")?
+                                            {
+                                                let rel = parse_anchor_relative_from(&rel)?;
+                                                *v_pos = Some(parse_anchor_position(
+                                                    reader,
+                                                    buf,
+                                                    rel,
+                                                    b"positionV",
+                                                )?);
+                                            }
+                                        }
+                                        _ => xml::skip_to_end(reader, buf, local2)?,
+                                    }
+                                }
+                                Event::End(ref e2)
+                                    if xml::local_name(e2.name().as_ref()) == b"Fallback" =>
+                                {
+                                    break
+                                }
+                                Event::Eof => return Err(xml::unexpected_eof(b"Fallback")),
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => xml::skip_to_end(reader, buf, local)?,
+                }
+            }
+            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"AlternateContent" => break,
+            Event::Eof => return Err(xml::unexpected_eof(b"AlternateContent")),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 // ── Anchor helpers ──────────────────────────────────────────────────────────

@@ -75,18 +75,20 @@ fn render_page(
                     // count matches char count (common Latin/CJK text).
                     // Fallback to per-char measure_str for ligatures or
                     // complex scripts where counts diverge.
-                    let use_batch = glyphs.len() == char_count;
-                    let mut batch_widths = vec![0f32; glyphs.len()];
-                    if use_batch {
-                        font.get_widths(&glyphs, &mut batch_widths);
-                    }
+                    let batch_widths = if glyphs.len() == char_count {
+                        let mut widths = vec![0f32; glyphs.len()];
+                        font.get_widths(&glyphs, &mut widths);
+                        Some(widths)
+                    } else {
+                        None
+                    };
 
                     let mut cursor = *position;
                     let mut buf = [0u8; 4];
                     for (i, ch) in text.chars().enumerate() {
                         let s = ch.encode_utf8(&mut buf);
-                        let w = if use_batch {
-                            batch_widths[i]
+                        let w = if let Some(ref widths) = batch_widths {
+                            widths[i]
                         } else {
                             font.measure_str(&*s, None).0
                         };
