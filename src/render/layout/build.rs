@@ -1174,7 +1174,6 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
 
                     build_table_cell(
                         cell,
-                        &t.properties,
                         raw_table_style,
                         default_cell_margins,
                         &cond,
@@ -1259,7 +1258,6 @@ fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable
 /// Build a single table cell: resolve content blocks, margins, shading, borders.
 fn build_table_cell(
     cell: &TableCell,
-    _table_props: &model::TableProperties,
     table_style: Option<&ResolvedStyle>,
     style_cell_margins: Option<crate::model::geometry::EdgeInsets<crate::model::dimension::Twips>>,
     cond: &CellConditionalFormatting,
