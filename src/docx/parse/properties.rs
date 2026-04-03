@@ -1337,23 +1337,42 @@ fn parse_text_alignment(val: &str) -> Result<TextAlignment> {
     }
 }
 
-/// §17.3.1.8: parse `w:cnfStyle` element attributes.
+/// §17.3.1.8: parse `w:cnfStyle` element attributes into a [`CnfStyle`] flag set.
+///
+/// The `val` binary string is parsed first (positions 0–11 → flags), then any
+/// explicit individual attributes override the corresponding bits, allowing
+/// producers that omit `val` to be handled correctly.
 fn parse_cnf_style(e: &BytesStart<'_>) -> Result<CnfStyle> {
-    Ok(CnfStyle {
-        val: xml::optional_attr(e, b"val")?,
-        first_row: xml::optional_attr_bool(e, b"firstRow")?,
-        last_row: xml::optional_attr_bool(e, b"lastRow")?,
-        first_column: xml::optional_attr_bool(e, b"firstColumn")?,
-        last_column: xml::optional_attr_bool(e, b"lastColumn")?,
-        odd_v_band: xml::optional_attr_bool(e, b"oddVBand")?,
-        even_v_band: xml::optional_attr_bool(e, b"evenVBand")?,
-        odd_h_band: xml::optional_attr_bool(e, b"oddHBand")?,
-        even_h_band: xml::optional_attr_bool(e, b"evenHBand")?,
-        first_row_first_column: xml::optional_attr_bool(e, b"firstRowFirstColumn")?,
-        first_row_last_column: xml::optional_attr_bool(e, b"firstRowLastColumn")?,
-        last_row_first_column: xml::optional_attr_bool(e, b"lastRowFirstColumn")?,
-        last_row_last_column: xml::optional_attr_bool(e, b"lastRowLastColumn")?,
-    })
+    // Seed from the legacy 12-char binary string if present.
+    let mut flags = match xml::optional_attr(e, b"val")? {
+        Some(s) => CnfStyle::from_val_str(&s),
+        None => CnfStyle::empty(),
+    };
+
+    // Individual attributes take precedence over the `val` string.
+    let pairs: &[(&[u8], CnfStyle)] = &[
+        (b"firstRow",            CnfStyle::FIRST_ROW),
+        (b"lastRow",             CnfStyle::LAST_ROW),
+        (b"firstColumn",         CnfStyle::FIRST_COLUMN),
+        (b"lastColumn",          CnfStyle::LAST_COLUMN),
+        (b"oddVBand",            CnfStyle::ODD_V_BAND),
+        (b"evenVBand",           CnfStyle::EVEN_V_BAND),
+        (b"oddHBand",            CnfStyle::ODD_H_BAND),
+        (b"evenHBand",           CnfStyle::EVEN_H_BAND),
+        (b"firstRowFirstColumn", CnfStyle::FIRST_ROW_FIRST_COLUMN),
+        (b"firstRowLastColumn",  CnfStyle::FIRST_ROW_LAST_COLUMN),
+        (b"lastRowFirstColumn",  CnfStyle::LAST_ROW_FIRST_COLUMN),
+        (b"lastRowLastColumn",   CnfStyle::LAST_ROW_LAST_COLUMN),
+    ];
+    for &(attr, flag) in pairs {
+        match xml::optional_attr_bool(e, attr)? {
+            Some(true)  => flags |= flag,
+            Some(false) => flags &= !flag,
+            None        => {}   // absent — leave the val-seeded bit unchanged
+        }
+    }
+
+    Ok(flags)
 }
 
 /// §17.4.58: parse `w:tblpPr` attributes.
