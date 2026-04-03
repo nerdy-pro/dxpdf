@@ -47,6 +47,7 @@ impl BuildContext<'_> {
 }
 
 /// Mutable state threaded through the recursive tree walk.
+#[derive(Default)]
 pub struct BuildState {
     /// Page configuration for the current section.
     pub page_config: crate::render::layout::page::PageConfig,
@@ -60,17 +61,6 @@ pub struct BuildState {
     pub field_ctx: crate::render::layout::fragment::FieldContext,
 }
 
-impl Default for BuildState {
-    fn default() -> Self {
-        Self {
-            page_config: crate::render::layout::page::PageConfig::default(),
-            footnote_counter: 0,
-            endnote_counter: 0,
-            list_counters: HashMap::new(),
-            field_ctx: crate::render::layout::fragment::FieldContext::default(),
-        }
-    }
-}
 
 // ── Public entry point ──────────────────────────────────────────────────────
 

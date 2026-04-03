@@ -134,71 +134,51 @@ fn parse_paragraph(
     let mut content = Vec::new();
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Start(ref e) | Event::Empty(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
-                    b"pPr" => {
+                    b"bookmarkStart" => {
+                        if let (Some(id), Some(name)) = (
+                            xml::optional_attr_i64(e, b"id")?,
+                            xml::optional_attr(e, b"name")?,
+                        ) {
+                            content.push(Inline::BookmarkStart {
+                                id: BookmarkId::new(id),
+                                name,
+                            });
+                        }
+                    }
+                    b"bookmarkEnd" => {
+                        if let Some(id) = xml::optional_attr_i64(e, b"id")? {
+                            content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
+                        }
+                    }
+                    // Start-only: have child elements
+                    b"pPr" if is_start => {
                         let parsed = properties::parse_paragraph_properties(reader, buf)?;
                         para_props = parsed.properties;
                         style_id = parsed.style_id;
                         mark_run_props = parsed.run_properties;
                         section_props = parsed.section_properties;
                     }
-                    b"r" => {
+                    b"r" if is_start => {
                         let run_rsids = parse_run_rsids(e)?;
                         parse_run(reader, buf, &mut content, run_rsids)?;
                     }
-                    b"hyperlink" => {
+                    b"hyperlink" if is_start => {
                         let r_id = xml::optional_attr(e, b"id")?;
                         let anchor = xml::optional_attr(e, b"anchor")?;
                         let hyperlink = parse_hyperlink_content(r_id, anchor, reader, buf)?;
                         content.push(Inline::Hyperlink(hyperlink));
                     }
-                    b"bookmarkStart" => {
-                        if let (Some(id), Some(name)) = (
-                            xml::optional_attr_i64(e, b"id")?,
-                            xml::optional_attr(e, b"name")?,
-                        ) {
-                            content.push(Inline::BookmarkStart {
-                                id: BookmarkId::new(id),
-                                name,
-                            });
-                        }
-                    }
-                    b"bookmarkEnd" => {
-                        if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
-                        }
-                    }
-                    b"fldSimple" => {
+                    b"fldSimple" if is_start => {
                         let instr = xml::optional_attr(e, b"instr")?.unwrap_or_default();
                         let field = parse_simple_field_content(&instr, reader, buf)?;
                         content.push(Inline::Field(field));
-                    }
-                    _ => xml::warn_unsupported_element("paragraph", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"bookmarkStart" => {
-                        if let (Some(id), Some(name)) = (
-                            xml::optional_attr_i64(e, b"id")?,
-                            xml::optional_attr(e, b"name")?,
-                        ) {
-                            content.push(Inline::BookmarkStart {
-                                id: BookmarkId::new(id),
-                                name,
-                            });
-                        }
-                    }
-                    b"bookmarkEnd" => {
-                        if let Some(id) = xml::optional_attr_i64(e, b"id")? {
-                            content.push(Inline::BookmarkEnd(BookmarkId::new(id)));
-                        }
                     }
                     // Empty self-closing <w:r/> carries only revision IDs
                     // (rsidR, rsidRPr) — no text or inline content to render.
@@ -600,34 +580,33 @@ pub fn parse_pict(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Pict>
     let mut shapes = Vec::new();
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Empty(ref e) | Event::Start(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"shapetype" => {
-                        shape_type = Some(parse_vml_shapetype(e, reader, buf)?);
+                        shape_type = Some(if is_start {
+                            parse_vml_shapetype(e, reader, buf)?
+                        } else {
+                            parse_vml_shapetype_from_attrs(e)?
+                        });
                     }
                     b"shape" => {
-                        shapes.push(parse_vml_shape(e, reader, buf)?);
+                        shapes.push(if is_start {
+                            parse_vml_shape(e, reader, buf)?
+                        } else {
+                            parse_vml_shape_from_attrs(e)?
+                        });
                     }
                     _ => {
                         xml::warn_unsupported_element("pict", local);
-                        xml::skip_to_end(reader, buf, local)?;
+                        if is_start {
+                            xml::skip_to_end(reader, buf, local)?;
+                        }
                     }
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"shapetype" => {
-                        shape_type = Some(parse_vml_shapetype_from_attrs(e)?);
-                    }
-                    b"shape" => {
-                        shapes.push(parse_vml_shape_from_attrs(e)?);
-                    }
-                    _ => xml::warn_unsupported_element("pict", local),
                 }
             }
             Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pict" => break,

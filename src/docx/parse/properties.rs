@@ -44,11 +44,14 @@ pub fn parse_paragraph_properties(
     let mut sect_props: Option<SectionProperties> = None;
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Empty(ref e) | Event::Start(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
+                    // attrs-only — valid as Start or Empty
                     b"pStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -63,60 +66,38 @@ pub fn parse_paragraph_properties(
                             props.alignment = Some(parse_alignment(&val)?);
                         }
                     }
-                    b"numPr" => {
-                        props.numbering = Some(parse_numbering_pr(reader, buf)?);
-                    }
-                    b"tabs" => {
-                        props.tabs = parse_tabs(reader, buf)?;
-                    }
-                    b"pBdr" => {
-                        props.borders = Some(parse_paragraph_borders(reader, buf)?);
-                    }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
-                    }
-                    b"rPr" => {
-                        let (rp, _) = parse_run_properties(reader, buf)?;
-                        run_props = Some(rp);
                     }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
                     }
+                    // Start-only: have child elements
+                    b"numPr" if is_start => {
+                        props.numbering = Some(parse_numbering_pr(reader, buf)?);
+                    }
+                    b"tabs" if is_start => {
+                        props.tabs = parse_tabs(reader, buf)?;
+                    }
+                    b"pBdr" if is_start => {
+                        props.borders = Some(parse_paragraph_borders(reader, buf)?);
+                    }
+                    b"rPr" if is_start => {
+                        let (rp, _) = parse_run_properties(reader, buf)?;
+                        run_props = Some(rp);
+                    }
                     // §17.6.18: sectPr inside pPr defines the section that ends
                     // with this paragraph. Contains pgSz, pgMar, cols, headerReference,
                     // footerReference, titlePg, type, pgNumType, docGrid, etc.
-                    b"sectPr" => {
+                    b"sectPr" if is_start => {
                         let rsids = parse_section_rsids(e)?;
                         let mut sp = parse_section_properties(reader, buf)?;
                         sp.rsids = rsids;
                         sect_props = Some(sp);
                     }
-                    _ => xml::warn_unsupported_element("pPr", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                    }
-                    b"ind" => {
-                        props.indentation = Some(parse_indentation(e)?);
-                    }
-                    b"spacing" => {
-                        props.spacing = Some(parse_paragraph_spacing(e)?);
-                    }
-                    b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
-                    }
-                    b"shd" => {
-                        props.shading = Some(parse_shading(e)?);
-                    }
+                    // Empty-only: no children
                     b"keepNext" => {
                         props.keep_next = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
@@ -144,7 +125,8 @@ pub fn parse_paragraph_properties(
                         props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"wordWrap" => {
-                        props.word_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.word_wrap =
+                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
                     }
                     b"textAlignment" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -164,11 +146,6 @@ pub fn parse_paragraph_properties(
                     b"autoSpaceDN" => {
                         props.auto_space_dn =
                             Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"outlineLvl" => {
-                        if let Some(val) = xml::optional_attr_u32(e, b"val")? {
-                            props.outline_level = OutlineLevel::from_ooxml(val as u8);
-                        }
                     }
                     // §17.6.18: an empty sectPr is valid (inherits all defaults).
                     b"sectPr" => {
@@ -346,8 +323,10 @@ pub fn parse_table_properties(
     let mut style_id: Option<StyleId> = None;
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Empty(ref e) | Event::Start(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
@@ -355,41 +334,15 @@ pub fn parse_table_properties(
                         props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                         style_id.clone_from(&props.style_id);
                     }
-                    b"tblBorders" => {
+                    // Start-only: have child elements
+                    b"tblBorders" if is_start => {
                         props.borders = Some(parse_table_borders(reader, buf)?);
                     }
-                    b"tblCellMar" => {
+                    b"tblCellMar" if is_start => {
                         props.cell_margins =
                             Some(parse_edge_insets_twips(reader, buf, b"tblCellMar")?);
                     }
-                    b"tblLook" => {
-                        props.look = Some(parse_table_look(e)?);
-                    }
-                    b"tblStyleRowBandSize" => {
-                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblStyleColBandSize" => {
-                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblpPr" => {
-                        props.positioning = Some(parse_table_positioning(e)?);
-                    }
-                    b"tblOverlap" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.overlap = Some(parse_table_overlap(&val)?);
-                        }
-                    }
-                    _ => xml::warn_unsupported_element("tblPr", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"tblStyle" => {
-                        props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                        style_id.clone_from(&props.style_id);
-                    }
+                    // attrs-only — valid as Start or Empty
                     b"jc" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
                             props.alignment = Some(parse_alignment(&val)?);
