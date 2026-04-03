@@ -10,6 +10,19 @@ use crate::render::geometry::PtSize;
 use crate::render::resolve::color::RgbColor;
 use crate::render::resolve::fonts::effective_font;
 
+// ── Superscript / subscript rendering constants ───────────────────────────────
+// §17.3.2.42: these ratios are "application-defined" per the spec; the values
+// below match Word's rendering as documented in the OpenXML SDK reference.
+
+/// Font size of super/subscript text as a fraction of the base font size.
+const SUPERSCRIPT_FONT_SIZE_RATIO: f32 = 0.58;
+
+/// Superscript baseline shift: fraction of base ascent to raise the text by.
+const SUPERSCRIPT_ASCENT_OFFSET_RATIO: f32 = 0.33;
+
+/// Subscript baseline shift: fraction of base character height to lower the text by.
+const SUBSCRIPT_HEIGHT_OFFSET_RATIO: f32 = 0.08;
+
 /// Font properties needed for rendering a text fragment.
 #[derive(Clone, Debug)]
 pub struct FontProps {
@@ -504,20 +517,16 @@ where
                     .or_else(|| effective_props.highlight.map(resolve_highlight_color));
 
                 // §17.3.2.42: vertical alignment (superscript/subscript).
-                // The spec states these are "application-defined" — the values below
-                // match Word's rendering: 58% font size reduction, superscript shifted
-                // up by 33% of base ascent, subscript shifted down by 8% of base height.
-                // These ratios are documented in the OpenXML SDK reference.
                 let mut baseline_offset = match effective_props.vertical_align {
                     Some(VerticalAlign::Superscript) => {
                         let (_, base_m) = measure_text("X", &font);
-                        font.size = font.size * 0.58;
-                        -(base_m.ascent * 0.33)
+                        font.size = font.size * SUPERSCRIPT_FONT_SIZE_RATIO;
+                        -(base_m.ascent * SUPERSCRIPT_ASCENT_OFFSET_RATIO)
                     }
                     Some(VerticalAlign::Subscript) => {
                         let (_, base_m) = measure_text("X", &font);
-                        font.size = font.size * 0.58;
-                        base_m.height() * 0.08
+                        font.size = font.size * SUPERSCRIPT_FONT_SIZE_RATIO;
+                        base_m.height() * SUBSCRIPT_HEIGHT_OFFSET_RATIO
                     }
                     _ => Pt::ZERO,
                 };

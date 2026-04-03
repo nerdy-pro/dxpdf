@@ -14,6 +14,15 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::{PtOffset, PtSize};
 use crate::render::resolve::color::RgbColor;
 
+// ── Tab leader rendering constants ────────────────────────────────────────────
+
+/// Maximum font size used when measuring/drawing tab leader characters (pt).
+/// Caps at 12pt so leaders remain legible regardless of paragraph line height.
+const LEADER_FONT_SIZE_CAP: Pt = Pt::new(12.0);
+
+/// Fallback width for a single leader character when no measurer is available (pt).
+const LEADER_CHAR_WIDTH_FALLBACK: Pt = Pt::new(4.0);
+
 /// §17.3.1.38: a resolved tab stop for layout.
 #[derive(Clone, Debug)]
 pub struct TabStopDef {
@@ -863,7 +872,7 @@ fn emit_tab_leader(
     // Use a small font to get the leader char width.
     let leader_font = super::fragment::FontProps {
         family: std::rc::Rc::from("Times New Roman"),
-        size: default_line_height.min(Pt::new(12.0)),
+        size: default_line_height.min(LEADER_FONT_SIZE_CAP),
         bold: false,
         italic: false,
         underline: false,
@@ -875,7 +884,7 @@ fn emit_tab_leader(
     let char_width = if let Some(m) = measure_text {
         m(leader_char, &leader_font).0
     } else {
-        Pt::new(4.0) // fallback estimate
+        LEADER_CHAR_WIDTH_FALLBACK
     };
 
     if char_width <= Pt::ZERO {

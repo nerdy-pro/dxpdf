@@ -14,6 +14,25 @@ use super::BoxConstraints;
 use crate::render::dimension::Pt;
 use crate::render::geometry::{PtRect, PtSize};
 
+// ── Footnote rendering constants ─────────────────────────────────────────────
+
+/// §17.11.23: footnote separator width as a fraction of the content area.
+/// Word renders the separator at one-third of the text column width.
+const FOOTNOTE_SEPARATOR_RATIO: f32 = 0.33;
+
+/// Thickness of the footnote separator line (pt).
+const FOOTNOTE_SEPARATOR_LINE_WIDTH: Pt = Pt::new(0.5);
+
+/// Vertical gap between the footnote separator and the first footnote paragraph.
+/// Also used as the initial height budget for the separator region (pt).
+const FOOTNOTE_SEPARATOR_GAP: Pt = Pt::new(4.0);
+
+// ── Float deduplication ───────────────────────────────────────────────────────
+
+/// Position tolerance for deduplicating floating images (pt).
+/// Two float entries within this distance on every axis are treated as identical.
+const FLOAT_DEDUP_EPSILON_PT: f32 = 0.1;
+
 /// §17.4.58 / §17.4.59: positioning data for a floating table.
 #[derive(Debug, Clone)]
 pub struct TableFloatInfo {
@@ -338,9 +357,11 @@ pub fn layout_section(
                         continue;
                     }
                     let already_present = effective_floats.iter().any(|pf| {
-                        (pf.page_x - af.page_x).raw().abs() < 0.1
-                            && (pf.page_y_start - af.page_y_start).raw().abs() < 0.1
-                            && (pf.page_y_end - af.page_y_end).raw().abs() < 0.1
+                        (pf.page_x - af.page_x).raw().abs() < FLOAT_DEDUP_EPSILON_PT
+                            && (pf.page_y_start - af.page_y_start).raw().abs()
+                                < FLOAT_DEDUP_EPSILON_PT
+                            && (pf.page_y_end - af.page_y_end).raw().abs()
+                                < FLOAT_DEDUP_EPSILON_PT
                     });
                     if !already_present {
                         effective_floats.push(af.clone());
@@ -588,7 +609,7 @@ pub fn layout_section(
                 if !footnotes.is_empty() {
                     let fn_constraints =
                         super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
-                    let sep_height = Pt::new(4.0); // separator line + gap
+                    let sep_height = FOOTNOTE_SEPARATOR_GAP;
                     for (fn_frags, fn_style) in footnotes {
                         let fn_para = super::paragraph::layout_paragraph(
                             fn_frags,
@@ -1030,7 +1051,7 @@ fn render_page_footnotes(
 
     // Layout all footnotes to compute total height.
     let mut footnote_layouts = Vec::new();
-    let mut total_height = Pt::new(4.0); // separator + gap
+    let mut total_height = FOOTNOTE_SEPARATOR_GAP; // separator line + gap above first note
     for (frags, style) in footnotes {
         let para = layout_paragraph(
             frags,
@@ -1047,18 +1068,18 @@ fn render_page_footnotes(
 
     // §17.11.23: separator line positioned per default paragraph indent.
     let sep_x = config.margins.left + separator_indent;
-    let sep_width = content_width * 0.33;
+    let sep_width = content_width * FOOTNOTE_SEPARATOR_RATIO;
     page.commands.push(DrawCommand::Line {
         line: crate::render::geometry::PtLineSegment::new(
             crate::render::geometry::PtOffset::new(sep_x, footnote_top),
             crate::render::geometry::PtOffset::new(sep_x + sep_width, footnote_top),
         ),
         color: crate::render::resolve::color::RgbColor::BLACK,
-        width: Pt::new(0.5),
+        width: FOOTNOTE_SEPARATOR_LINE_WIDTH,
     });
 
     // Render footnote paragraphs.
-    let mut cursor_y = footnote_top + Pt::new(4.0);
+    let mut cursor_y = footnote_top + FOOTNOTE_SEPARATOR_GAP;
     for para in footnote_layouts {
         for mut cmd in para.commands {
             cmd.shift_y(cursor_y);
