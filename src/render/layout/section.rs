@@ -409,21 +409,22 @@ pub fn layout_section(
                 // Only include absolute floats whose y range starts at or above
                 // the current cursor — floats below shouldn't affect text above.
                 let mut effective_floats = state.page_floats.clone();
-                for af in &state.current_page_abs_floats {
-                    if af.page_y_start > state.cursor_y + effective_style.space_before {
-                        continue;
-                    }
-                    let already_present = effective_floats.iter().any(|pf| {
-                        (pf.page_x - af.page_x).raw().abs() < FLOAT_DEDUP_EPSILON_PT
-                            && (pf.page_y_start - af.page_y_start).raw().abs()
-                                < FLOAT_DEDUP_EPSILON_PT
-                            && (pf.page_y_end - af.page_y_end).raw().abs()
-                                < FLOAT_DEDUP_EPSILON_PT
-                    });
-                    if !already_present {
-                        effective_floats.push(af.clone());
-                    }
-                }
+                let y_threshold = state.cursor_y + effective_style.space_before;
+                let deduped: Vec<ActiveFloat> = state.current_page_abs_floats
+                    .iter()
+                    .filter(|af| af.page_y_start <= y_threshold)
+                    .filter(|af| {
+                        !effective_floats.iter().any(|pf| {
+                            (pf.page_x - af.page_x).raw().abs() < FLOAT_DEDUP_EPSILON_PT
+                                && (pf.page_y_start - af.page_y_start).raw().abs()
+                                    < FLOAT_DEDUP_EPSILON_PT
+                                && (pf.page_y_end - af.page_y_end).raw().abs()
+                                    < FLOAT_DEDUP_EPSILON_PT
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                effective_floats.extend(deduped);
                 if !effective_floats.is_empty() {
                     for (i, f) in effective_floats.iter().enumerate() {
                         log::debug!(
