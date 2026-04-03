@@ -15,7 +15,7 @@ use super::convert::{
     convert_cell_border_override, convert_table_border_config, merge_table_borders,
     split_oversized_fragments,
 };
-use super::BuildContext;
+use super::{BuildContext, BuildState};
 
 /// Result of building a table from the model.
 pub(super) struct BuiltTable {
@@ -31,7 +31,7 @@ pub(super) struct BuiltTable {
 
 /// Recursively build a table: resolve styles, conditional formatting, and
 /// recurse into each cell's content blocks.
-pub(super) fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) -> BuiltTable {
+pub(super) fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext, state: &mut BuildState) -> BuiltTable {
     // §17.4.14: grid column widths.
     let num_cols = if t.grid.is_empty() {
         t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)
@@ -173,6 +173,7 @@ pub(super) fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext) ->
                         &cond,
                         inner_width,
                         ctx,
+                        state,
                     )
                 })
                 .collect();
@@ -257,6 +258,7 @@ fn build_table_cell(
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
+    state: &mut BuildState,
 ) -> TableCellInput {
     // §17.4.42: cell margins cascade: cell-level tcMar → pre-merged table default.
     let cell_margins = cell
@@ -354,7 +356,7 @@ fn build_table_cell(
     let content_width = (inner_width - border_inset_h).max(Pt::ZERO);
 
     // Recurse into cell content blocks.
-    let cell_blocks = build_cell_blocks(&cell.content, table_style, cond, content_width, ctx);
+    let cell_blocks = build_cell_blocks(&cell.content, table_style, cond, content_width, ctx, state);
 
     TableCellInput {
         blocks: cell_blocks,
@@ -384,6 +386,7 @@ fn build_cell_blocks(
     cond: &CellConditionalFormatting,
     inner_width: Pt,
     ctx: &BuildContext,
+    state: &mut BuildState,
 ) -> Vec<LayoutBlock> {
     let mut blocks = Vec::new();
     let mut pending_dropcap: Option<DropCapInfo> = None;
@@ -402,7 +405,7 @@ fn build_cell_blocks(
                     continue;
                 }
                 if let Some(lb) =
-                    build_paragraph_block(p, ctx, &mut pending_dropcap, table_style, Some(cond))
+                    build_paragraph_block(p, ctx, state, &mut pending_dropcap, table_style, Some(cond))
                 {
                     // Split oversized text fragments for narrow cells.
                     let lb = if let LayoutBlock::Paragraph {
@@ -428,7 +431,7 @@ fn build_cell_blocks(
                 }
             }
             Block::Table(nested_t) => {
-                let built = build_table(nested_t, inner_width, ctx);
+                let built = build_table(nested_t, inner_width, ctx, state);
                 blocks.push(LayoutBlock::Table {
                     rows: built.rows,
                     col_widths: built.col_widths,

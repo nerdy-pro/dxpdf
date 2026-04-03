@@ -15,7 +15,7 @@ use super::convert::{
     remap_legacy_font_chars, resolve_paragraph_defaults,
 };
 use super::table::build_table;
-use super::BuildContext;
+use super::{BuildContext, BuildState};
 
 /// Recursively process a single model block into a layout block.
 ///
@@ -25,12 +25,13 @@ pub(super) fn build_block(
     block: &Block,
     available_width: Pt,
     ctx: &BuildContext,
+    state: &mut BuildState,
     pending_dropcap: &mut Option<DropCapInfo>,
 ) -> Option<LayoutBlock> {
     match block {
-        Block::Paragraph(p) => build_paragraph_block(p, ctx, pending_dropcap, None, None),
+        Block::Paragraph(p) => build_paragraph_block(p, ctx, state, pending_dropcap, None, None),
         Block::Table(t) => {
-            let built = build_table(t, available_width, ctx);
+            let built = build_table(t, available_width, ctx, state);
             Some(LayoutBlock::Table {
                 rows: built.rows,
                 col_widths: built.col_widths,
@@ -53,11 +54,12 @@ pub(super) fn build_block(
 pub(super) fn build_paragraph_block(
     p: &Paragraph,
     ctx: &BuildContext,
+    state: &mut BuildState,
     pending_dropcap: &mut Option<DropCapInfo>,
     table_style: Option<&ResolvedStyle>,
     cond: Option<&CellConditionalFormatting>,
 ) -> Option<LayoutBlock> {
-    let (mut fragments, mut merged_props) = build_fragments(p, ctx, table_style, cond);
+    let (mut fragments, mut merged_props) = build_fragments(p, ctx, state, table_style, cond);
 
     // §17.9.22: inject list label if paragraph has a numbering reference.
     if let Some(ref num_ref) = merged_props.numbering {
@@ -66,7 +68,7 @@ pub(super) fn build_paragraph_block(
         if let Some(levels) = ctx.resolved.numbering.get(&num_id) {
             // Update counters: increment this level, reset deeper levels.
             {
-                let mut counters = ctx.list_counters.borrow_mut();
+                let counters = &mut state.list_counters;
                 let count = counters.entry((num_id, level)).or_insert_with(|| {
                     levels.get(level as usize).map(|l| l.start).unwrap_or(1) - 1
                 });
@@ -135,9 +137,9 @@ pub(super) fn build_paragraph_block(
                     );
                 }
             } else {
-                let counters = ctx.list_counters.borrow();
+                let counters = &state.list_counters;
                 if let Some(label_text) = crate::render::resolve::numbering::format_list_label(
-                    levels, level, &counters, num_id,
+                    levels, level, counters, num_id,
                 ) {
                     // Resolve label font from level run_properties or paragraph defaults.
                     let (default_family, default_size, default_color, _, _) =
@@ -395,12 +397,12 @@ pub(super) fn build_paragraph_block(
             }
         })
         .collect();
-    let fn_base = ctx.footnote_counter.get() - fn_refs.len() as u32;
+    let fn_base = state.footnote_counter - fn_refs.len() as u32;
     let mut para_footnotes = Vec::new();
     for (i, note_id) in fn_refs.iter().enumerate() {
         let display = format!("{}", fn_base + i as u32 + 1);
         if let Some(content) = ctx.resolved.footnotes.get(note_id) {
-            let notes = build_note_content(note_id.value(), &display, content, ctx);
+            let notes = build_note_content(note_id.value(), &display, content, ctx, state);
             for (_, frags, style) in notes {
                 para_footnotes.push((frags, style));
             }
@@ -410,7 +412,7 @@ pub(super) fn build_paragraph_block(
     // §20.4.2.3: extract floating (anchor) images from this paragraph.
     // In cell context, positions are cell-relative instead of page-relative.
     let cell_context = table_style.is_some();
-    let floating_images = extract_floating_images(p, ctx, cell_context);
+    let floating_images = extract_floating_images(p, ctx, state, cell_context);
 
     Some(LayoutBlock::Paragraph {
         fragments,
@@ -427,11 +429,12 @@ pub(super) fn build_note_content(
     display_num: &str,
     content: &[Block],
     ctx: &BuildContext,
+    state: &mut BuildState,
 ) -> Vec<(String, Vec<Fragment>, crate::render::layout::paragraph::ParagraphStyle)> {
     let mut results = Vec::new();
     for (i, block) in content.iter().enumerate() {
         if let model::Block::Paragraph(p) = block {
-            let (mut frags, merged_props) = build_fragments(p, ctx, None, None);
+            let (mut frags, merged_props) = build_fragments(p, ctx, state, None, None);
 
             // Prepend display number to the first paragraph.
             if i == 0 && !frags.is_empty() {
@@ -479,6 +482,7 @@ pub(super) fn build_note_content(
 /// Collect endnotes from the resolved document.
 pub(super) fn collect_endnotes(
     ctx: &BuildContext,
+    state: &mut BuildState,
     endnotes: &mut Vec<(String, Vec<Fragment>, crate::render::layout::paragraph::ParagraphStyle)>,
 ) {
     // IDs 0 and 1 are reserved for separator and continuation separator.
@@ -492,7 +496,7 @@ pub(super) fn collect_endnotes(
     for (i, note_id) in en_ids.iter().enumerate() {
         let display = crate::render::layout::fragment::to_roman_lower((i + 1) as u32);
         if let Some(content) = ctx.resolved.endnotes.get(note_id) {
-            endnotes.extend(build_note_content(note_id.value(), &display, content, ctx));
+            endnotes.extend(build_note_content(note_id.value(), &display, content, ctx, state));
         }
     }
 }
@@ -504,6 +508,7 @@ pub(super) fn collect_endnotes(
 pub(super) fn build_fragments(
     para: &Paragraph,
     ctx: &BuildContext,
+    state: &mut BuildState,
     table_style: Option<&ResolvedStyle>,
     cond: Option<&CellConditionalFormatting>,
 ) -> (Vec<Fragment>, model::ParagraphProperties) {
@@ -562,8 +567,6 @@ pub(super) fn build_fragments(
             ctx.measurer.measure(text, font)
         };
 
-    let mut fn_counter = ctx.footnote_counter.get();
-    let mut en_counter = ctx.endnote_counter.get();
     let mut fragments = collect_fragments(
         &para.content,
         &default_family,
@@ -573,13 +576,11 @@ pub(super) fn build_fragments(
         &measure,
         Some(&ctx.resolved.styles),
         Some(&run_defaults),
-        &mut fn_counter,
-        &mut en_counter,
-        ctx.field_ctx_cell.get(),
+        &mut state.footnote_counter,
+        &mut state.endnote_counter,
+        state.field_ctx,
         ctx.resolved.theme.as_ref(),
     );
-    ctx.footnote_counter.set(fn_counter);
-    ctx.endnote_counter.set(en_counter);
     populate_image_data(&mut fragments, ctx.media());
     populate_underline_metrics(&mut fragments, ctx.measurer);
 
@@ -592,6 +593,7 @@ pub(super) fn build_fragments(
 pub(super) fn extract_floating_images(
     para: &Paragraph,
     ctx: &BuildContext,
+    state: &BuildState,
     cell_context: bool,
 ) -> Vec<crate::render::layout::section::FloatingImage> {
     use crate::model::{
@@ -651,7 +653,7 @@ pub(super) fn extract_floating_images(
 
             let w = Pt::from(img.extent.width);
             let h = Pt::from(img.extent.height);
-            let pc = ctx.page_config.borrow();
+            let pc = &state.page_config;
 
             // Resolve horizontal position.
             // In cell context, positions are relative to the cell origin.

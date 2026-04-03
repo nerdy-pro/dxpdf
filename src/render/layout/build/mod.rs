@@ -34,26 +34,41 @@ pub(super) const SPEC_DEFAULT_FONT_SIZE: Pt = Pt::new(10.0);
 
 // ── Context ─────────────────────────────────────────────────────────────────
 
-/// Context threaded through the recursive tree walk.
+/// Immutable context threaded through the recursive tree walk.
 pub struct BuildContext<'a> {
     pub measurer: &'a TextMeasurer,
     pub resolved: &'a ResolvedDocument,
-    /// Page configuration for the current section.
-    pub page_config: std::cell::RefCell<crate::render::layout::page::PageConfig>,
-    /// Sequential footnote display number (1, 2, 3...).
-    pub footnote_counter: std::cell::Cell<u32>,
-    /// Sequential endnote display number (i, ii, iii...).
-    pub endnote_counter: std::cell::Cell<u32>,
-    /// Per-(numId, level) running counters for list labels.
-    pub list_counters: std::cell::RefCell<HashMap<(model::NumId, u8), u32>>,
-    /// Field evaluation context (page number, total pages).
-    /// Uses Cell so header/footer rendering can set per-page values.
-    pub field_ctx_cell: std::cell::Cell<crate::render::layout::fragment::FieldContext>,
 }
 
 impl BuildContext<'_> {
     pub(super) fn media(&self) -> &HashMap<model::RelId, Vec<u8>> {
         &self.resolved.media
+    }
+}
+
+/// Mutable state threaded through the recursive tree walk.
+pub struct BuildState {
+    /// Page configuration for the current section.
+    pub page_config: crate::render::layout::page::PageConfig,
+    /// Sequential footnote display number (1, 2, 3...).
+    pub footnote_counter: u32,
+    /// Sequential endnote display number (i, ii, iii...).
+    pub endnote_counter: u32,
+    /// Per-(numId, level) running counters for list labels.
+    pub list_counters: HashMap<(model::NumId, u8), u32>,
+    /// Field evaluation context (page number, total pages).
+    pub field_ctx: crate::render::layout::fragment::FieldContext,
+}
+
+impl Default for BuildState {
+    fn default() -> Self {
+        Self {
+            page_config: crate::render::layout::page::PageConfig::default(),
+            footnote_counter: 0,
+            endnote_counter: 0,
+            list_counters: HashMap::new(),
+            field_ctx: crate::render::layout::fragment::FieldContext::default(),
+        }
     }
 }
 
@@ -71,17 +86,18 @@ pub fn build_section_blocks(
     section: &ResolvedSection,
     config: &PageConfig,
     ctx: &BuildContext,
+    state: &mut BuildState,
 ) -> BuiltSection {
     let mut pending_dropcap: Option<crate::render::layout::paragraph::DropCapInfo> = None;
     let blocks: Vec<LayoutBlock> = section
         .blocks
         .iter()
-        .filter_map(|block| build_block(block, config.content_width(), ctx, &mut pending_dropcap))
+        .filter_map(|block| build_block(block, config.content_width(), ctx, state, &mut pending_dropcap))
         .collect();
 
     // Collect endnotes (rendered at document end).
     let mut endnotes = Vec::new();
-    collect_endnotes(ctx, &mut endnotes);
+    collect_endnotes(ctx, state, &mut endnotes);
 
     BuiltSection { blocks, endnotes }
 }
@@ -101,18 +117,22 @@ pub struct HeaderFooterContent {
 /// Produces `LayoutBlock` entries for both paragraphs and tables, and
 /// extracts floating images separately (they are positioned page-relative
 /// rather than stack-relative).
-pub fn build_header_footer_content(blocks: &[Block], ctx: &BuildContext) -> HeaderFooterContent {
+pub fn build_header_footer_content(
+    blocks: &[Block],
+    ctx: &BuildContext,
+    state: &mut BuildState,
+) -> HeaderFooterContent {
     let mut layout_blocks = Vec::new();
     let mut all_floating_images = Vec::new();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
-    let available_width = ctx.page_config.borrow().content_width();
+    let available_width = state.page_config.content_width();
 
     let block_count = blocks.len();
     for (block_i, block) in blocks.iter().enumerate() {
         match block {
             Block::Paragraph(p) => {
-                let (mut frags, props) = build_fragments(p, ctx, None, None);
+                let (mut frags, props) = build_fragments(p, ctx, state, None, None);
                 let style = paragraph_style_from_props(&props);
 
                 // Check for VML absolute positioning in Pict inlines.
@@ -125,7 +145,7 @@ pub fn build_header_footer_content(blocks: &[Block], ctx: &BuildContext) -> Head
                     }
                 }
                 // Extract floating (anchor) images — positioned page-relative.
-                let floats = extract_floating_images(p, ctx, false);
+                let floats = extract_floating_images(p, ctx, state, false);
                 all_floating_images.extend(floats);
 
                 // §17.10.1: empty non-last paragraphs in headers/footers still
@@ -150,7 +170,7 @@ pub fn build_header_footer_content(blocks: &[Block], ctx: &BuildContext) -> Head
                 });
             }
             Block::Table(t) => {
-                let built = build_table(t, available_width, ctx);
+                let built = build_table(t, available_width, ctx, state);
                 layout_blocks.push(LayoutBlock::Table {
                     rows: built.rows,
                     col_widths: built.col_widths,

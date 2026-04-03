@@ -11,7 +11,7 @@ use crate::model::Block;
 
 use crate::render::dimension::Pt;
 
-use super::build::{build_header_footer_content, BuildContext, HeaderFooterContent};
+use super::build::{build_header_footer_content, BuildContext, BuildState, HeaderFooterContent};
 use super::draw_command::{DrawCommand, LayoutedPage};
 use super::page::PageConfig;
 use super::section::stack_blocks;
@@ -29,6 +29,7 @@ pub fn render_headers_footers(
     header_blocks: Option<&[Block]>,
     footer_blocks: Option<&[Block]>,
     ctx: &BuildContext,
+    state: &mut BuildState,
     default_line_height: Pt,
     page_base: usize,
     total_pages: usize,
@@ -41,32 +42,29 @@ pub fn render_headers_footers(
         // Header
         if let Some(blocks) = header_blocks {
             // Set per-page field context for PAGE/NUMPAGES evaluation.
-            ctx.field_ctx_cell
-                .set(crate::render::layout::fragment::FieldContext {
-                    page_number: Some(page_number),
-                    num_pages: Some(total_pages),
-                });
+            state.field_ctx = crate::render::layout::fragment::FieldContext {
+                page_number: Some(page_number),
+                num_pages: Some(total_pages),
+            };
 
-            let hf = build_header_footer_content(blocks, ctx);
+            let hf = build_header_footer_content(blocks, ctx, state);
             render_header(page, config, &hf, content_width, default_line_height);
         }
 
         // Footer
         if let Some(blocks) = footer_blocks {
-            ctx.field_ctx_cell
-                .set(crate::render::layout::fragment::FieldContext {
-                    page_number: Some(page_number),
-                    num_pages: Some(total_pages),
-                });
+            state.field_ctx = crate::render::layout::fragment::FieldContext {
+                page_number: Some(page_number),
+                num_pages: Some(total_pages),
+            };
 
-            let hf = build_header_footer_content(blocks, ctx);
+            let hf = build_header_footer_content(blocks, ctx, state);
             render_footer(page, config, &hf, content_width, default_line_height);
         }
     }
 
     // Reset field context after header/footer rendering.
-    ctx.field_ctx_cell
-        .set(crate::render::layout::fragment::FieldContext::default());
+    state.field_ctx = crate::render::layout::fragment::FieldContext::default();
 }
 
 /// Render a single header onto a page.

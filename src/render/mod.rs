@@ -20,7 +20,7 @@ pub mod skia_conv;
 use crate::model::Document;
 
 use crate::model::Block;
-use crate::render::layout::build::{build_section_blocks, default_line_height, BuildContext};
+use crate::render::layout::build::{build_section_blocks, default_line_height, BuildContext, BuildState};
 use crate::render::layout::draw_command::LayoutedPage;
 use crate::render::layout::header_footer::render_headers_footers;
 use crate::render::layout::page::PageConfig;
@@ -96,14 +96,8 @@ pub fn layout_document(
     let ctx = BuildContext {
         measurer: &measurer,
         resolved,
-        page_config: std::cell::RefCell::new(PageConfig::default()),
-        footnote_counter: std::cell::Cell::new(0),
-        endnote_counter: std::cell::Cell::new(0),
-        list_counters: std::cell::RefCell::new(std::collections::HashMap::new()),
-        field_ctx_cell: std::cell::Cell::new(
-            crate::render::layout::fragment::FieldContext::default(),
-        ),
     };
+    let mut state = BuildState::default();
     let dlh = default_line_height(&ctx);
     let mut all_pages = Vec::new();
     let mut all_endnotes = Vec::new();
@@ -141,11 +135,12 @@ pub fn layout_document(
             PageConfig::from_section(&section.properties),
             section,
             &ctx,
+            &mut state,
             dlh,
         );
 
-        *ctx.page_config.borrow_mut() = config.clone();
-        let built = build_section_blocks(section, &config, &ctx);
+        state.page_config = config.clone();
+        let built = build_section_blocks(section, &config, &ctx, &mut state);
         let measure_fn = |text: &str,
                           font: &layout::fragment::FontProps|
          -> (dimension::Pt, layout::fragment::TextMetrics) {
@@ -212,13 +207,14 @@ pub fn layout_document(
     // Phase 2: render headers/footers with correct NUMPAGES (total page count).
     let total_pages = all_pages.len();
     for info in &section_hf {
-        *ctx.page_config.borrow_mut() = info.config.clone();
+        state.page_config = info.config.clone();
         render_headers_footers(
             &mut all_pages[info.page_range.clone()],
             &info.config,
             info.header_blocks,
             info.footer_blocks,
             &ctx,
+            &mut state,
             dlh,
             info.page_range.start,
             total_pages,
@@ -284,12 +280,13 @@ fn adjust_margins_for_header_footer(
     mut config: PageConfig,
     section: &crate::render::resolve::sections::ResolvedSection,
     ctx: &layout::build::BuildContext,
+    state: &mut BuildState,
     default_line_height: dimension::Pt,
 ) -> PageConfig {
     let content_width = config.content_width();
 
     if let Some(ref blocks) = section.header {
-        let hf = layout::build::build_header_footer_content(blocks, ctx);
+        let hf = layout::build::build_header_footer_content(blocks, ctx, state);
         if !hf.blocks.is_empty() {
             let result =
                 layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
@@ -301,7 +298,7 @@ fn adjust_margins_for_header_footer(
     }
 
     if let Some(ref blocks) = section.footer {
-        let hf = layout::build::build_header_footer_content(blocks, ctx);
+        let hf = layout::build::build_header_footer_content(blocks, ctx, state);
         if !hf.blocks.is_empty() {
             let result =
                 layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
