@@ -230,6 +230,61 @@ pub fn parse_block_content_public(
 
 // ── Run ──────────────────────────────────────────────────────────────────────
 
+/// Parse a `w:br` element into a `RunElement`.
+///
+/// §17.3.3.1: `w:type` selects page/column/textWrapping; `w:clear` selects
+/// which float side to clear for textWrapping breaks.
+fn parse_run_break(e: &BytesStart<'_>) -> Result<RunElement> {
+    let br_type = xml::optional_attr(e, b"type")?;
+    Ok(match br_type.as_deref() {
+        Some("page") => RunElement::PageBreak,
+        Some("column") => RunElement::ColumnBreak,
+        _ => {
+            let clear = match xml::optional_attr(e, b"clear")?.as_deref() {
+                Some("left") => BreakClear::Left,
+                Some("right") => BreakClear::Right,
+                Some("all") => BreakClear::All,
+                _ => BreakClear::None,
+            };
+            let kind = if clear != BreakClear::None {
+                BreakKind::Clear(clear)
+            } else {
+                BreakKind::TextWrapping
+            };
+            RunElement::LineBreak(kind)
+        }
+    })
+}
+
+/// Parse a `w:fldChar` element into a `FieldChar`.
+///
+/// §17.16.18: `w:fldCharType` is required and must be `begin`, `separate`, or `end`.
+fn parse_fld_char(e: &BytesStart<'_>) -> Result<FieldChar> {
+    let field_char_type = match xml::optional_attr(e, b"fldCharType")?.as_deref() {
+        Some("begin") => FieldCharType::Begin,
+        Some("separate") => FieldCharType::Separate,
+        Some("end") => FieldCharType::End,
+        Some(other) => {
+            return Err(crate::docx::error::ParseError::InvalidAttributeValue {
+                attr: "fldChar/fldCharType".into(),
+                value: other.into(),
+                reason: "expected begin, separate, or end per §17.18.29".into(),
+            });
+        }
+        None => {
+            return Err(crate::docx::error::ParseError::MissingAttribute {
+                element: "fldChar".into(),
+                attr: "fldCharType".into(),
+            });
+        }
+    };
+    Ok(FieldChar {
+        field_char_type,
+        dirty: xml::optional_attr_bool(e, b"dirty")?,
+        fld_lock: xml::optional_attr_bool(e, b"fldLock")?,
+    })
+}
+
 fn parse_run(
     reader: &mut Reader<&[u8]>,
     buf: &mut Vec<u8>,
@@ -330,27 +385,7 @@ fn parse_run(
                     b"rPr" => {}
                     // Run-level elements: accumulate in the current run.
                     b"tab" => elements.push(RunElement::Tab),
-                    b"br" => {
-                        let br_type = xml::optional_attr(e, b"type")?;
-                        match br_type.as_deref() {
-                            Some("page") => elements.push(RunElement::PageBreak),
-                            Some("column") => elements.push(RunElement::ColumnBreak),
-                            _ => {
-                                let clear = match xml::optional_attr(e, b"clear")?.as_deref() {
-                                    Some("left") => BreakClear::Left,
-                                    Some("right") => BreakClear::Right,
-                                    Some("all") => BreakClear::All,
-                                    _ => BreakClear::None,
-                                };
-                                let kind = if clear != BreakClear::None {
-                                    BreakKind::Clear(clear)
-                                } else {
-                                    BreakKind::TextWrapping
-                                };
-                                elements.push(RunElement::LineBreak(kind));
-                            }
-                        }
-                    }
+                    b"br" => elements.push(parse_run_break(e)?),
                     b"cr" => elements.push(RunElement::LineBreak(BreakKind::TextWrapping)),
                     b"lastRenderedPageBreak" => elements.push(RunElement::LastRenderedPageBreak),
                     // Non-run inlines: flush, then push separately.
@@ -432,41 +467,8 @@ fn parse_run(
                         content.push(Inline::EndnoteRefMark);
                     }
                     b"fldChar" => {
-                        flush_run(
-                            &mut elements,
-                            &char_style_id,
-                            &run_props,
-                            &run_rsids,
-                            content,
-                        );
-                        let field_char_type = match xml::optional_attr(e, b"fldCharType")?
-                            .as_deref()
-                        {
-                            Some("begin") => FieldCharType::Begin,
-                            Some("separate") => FieldCharType::Separate,
-                            Some("end") => FieldCharType::End,
-                            Some(other) => {
-                                return Err(
-                                    crate::docx::error::ParseError::InvalidAttributeValue {
-                                        attr: "fldChar/fldCharType".into(),
-                                        value: other.into(),
-                                        reason: "expected begin, separate, or end per §17.18.29"
-                                            .into(),
-                                    },
-                                );
-                            }
-                            None => {
-                                return Err(crate::docx::error::ParseError::MissingAttribute {
-                                    element: "fldChar".into(),
-                                    attr: "fldCharType".into(),
-                                });
-                            }
-                        };
-                        content.push(Inline::FieldChar(FieldChar {
-                            field_char_type,
-                            dirty: xml::optional_attr_bool(e, b"dirty")?,
-                            fld_lock: xml::optional_attr_bool(e, b"fldLock")?,
-                        }));
+                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        content.push(Inline::FieldChar(parse_fld_char(e)?));
                     }
                     _ => xml::warn_unsupported_element("run", local),
                 }
