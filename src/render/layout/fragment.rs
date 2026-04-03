@@ -886,7 +886,7 @@ mod tests {
             style_id: None,
             properties: RunProperties {
                 fonts: FontSet {
-                    ascii: Some(font.into()),
+                    ascii: FontSlot::from_name(font),
                     ..Default::default()
                 },
                 font_size: Some(Dimension::<HalfPoints>::new(size)),

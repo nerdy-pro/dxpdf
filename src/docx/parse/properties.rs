@@ -1001,17 +1001,22 @@ fn parse_color_from_attr(e: &BytesStart<'_>) -> Result<Color> {
 
 fn parse_font_set(e: &BytesStart<'_>) -> Result<FontSet> {
     Ok(FontSet {
-        ascii: xml::optional_attr(e, b"ascii")?,
-        high_ansi: xml::optional_attr(e, b"hAnsi")?,
-        east_asian: xml::optional_attr(e, b"eastAsia")?,
-        complex_script: xml::optional_attr(e, b"cs")?,
-        ascii_theme: xml::optional_attr(e, b"asciiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
-        high_ansi_theme: xml::optional_attr(e, b"hAnsiTheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
-        east_asian_theme: xml::optional_attr(e, b"eastAsiaTheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
-        complex_script_theme: xml::optional_attr(e, b"cstheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
+        ascii: FontSlot {
+            explicit: xml::optional_attr(e, b"ascii")?,
+            theme: xml::optional_attr(e, b"asciiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        high_ansi: FontSlot {
+            explicit: xml::optional_attr(e, b"hAnsi")?,
+            theme: xml::optional_attr(e, b"hAnsiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        east_asian: FontSlot {
+            explicit: xml::optional_attr(e, b"eastAsia")?,
+            theme: xml::optional_attr(e, b"eastAsiaTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        complex_script: FontSlot {
+            explicit: xml::optional_attr(e, b"cs")?,
+            theme: xml::optional_attr(e, b"cstheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
     })
 }
 

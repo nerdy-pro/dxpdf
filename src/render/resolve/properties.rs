@@ -7,11 +7,11 @@ use crate::model::{ParagraphProperties, RunProperties, TabAlignment, TableProper
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
-    // FontSet: merge each sub-field independently
-    merge_opt(&mut target.fonts.ascii, &base.fonts.ascii);
-    merge_opt(&mut target.fonts.high_ansi, &base.fonts.high_ansi);
-    merge_opt(&mut target.fonts.east_asian, &base.fonts.east_asian);
-    merge_opt(&mut target.fonts.complex_script, &base.fonts.complex_script);
+    // FontSet: delegate to FontSlot::merge_from so each slot handles its own fields.
+    target.fonts.ascii.merge_from(&base.fonts.ascii);
+    target.fonts.high_ansi.merge_from(&base.fonts.high_ansi);
+    target.fonts.east_asian.merge_from(&base.fonts.east_asian);
+    target.fonts.complex_script.merge_from(&base.fonts.complex_script);
 
     merge_opt(&mut target.font_size, &base.font_size);
     merge_opt(&mut target.bold, &base.bold);
@@ -207,15 +207,15 @@ mod tests {
     fn merge_run_fonts_merged_field_by_field() {
         let mut target = RunProperties {
             fonts: FontSet {
-                ascii: Some("Arial".into()),
+                ascii: FontSlot::from_name("Arial"),
                 ..Default::default()
             },
             ..Default::default()
         };
         let base = RunProperties {
             fonts: FontSet {
-                ascii: Some("Times".into()),
-                east_asian: Some("SimSun".into()),
+                ascii: FontSlot::from_name("Times"),
+                east_asian: FontSlot::from_name("SimSun"),
                 ..Default::default()
             },
             ..Default::default()
@@ -223,12 +223,12 @@ mod tests {
         merge_run_properties(&mut target, &base);
 
         assert_eq!(
-            target.fonts.ascii.as_deref(),
+            target.fonts.ascii.explicit.as_deref(),
             Some("Arial"),
             "target's ascii should win"
         );
         assert_eq!(
-            target.fonts.east_asian.as_deref(),
+            target.fonts.east_asian.explicit.as_deref(),
             Some("SimSun"),
             "east_asian should come from base"
         );
@@ -239,11 +239,10 @@ mod tests {
         // Ensure merge touches every field by setting all in base, none in target.
         let base = RunProperties {
             fonts: FontSet {
-                ascii: Some("F".into()),
-                high_ansi: Some("F".into()),
-                east_asian: Some("F".into()),
-                complex_script: Some("F".into()),
-                ..Default::default()
+                ascii: FontSlot::from_name("F"),
+                high_ansi: FontSlot::from_name("F"),
+                east_asian: FontSlot::from_name("F"),
+                complex_script: FontSlot::from_name("F"),
             },
             font_size: Some(Dimension::<HalfPoints>::new(24)),
             bold: Some(true),
@@ -309,10 +308,10 @@ mod tests {
         assert!(target.position.is_some());
         assert!(target.lang.is_some());
         assert!(target.border.is_some());
-        assert!(target.fonts.ascii.is_some());
-        assert!(target.fonts.high_ansi.is_some());
-        assert!(target.fonts.east_asian.is_some());
-        assert!(target.fonts.complex_script.is_some());
+        assert!(target.fonts.ascii.explicit.is_some());
+        assert!(target.fonts.high_ansi.explicit.is_some());
+        assert!(target.fonts.east_asian.explicit.is_some());
+        assert!(target.fonts.complex_script.explicit.is_some());
         assert!(target.font_size.is_some());
     }
 
