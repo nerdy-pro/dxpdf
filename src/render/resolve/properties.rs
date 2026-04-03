@@ -5,6 +5,15 @@
 
 use crate::model::{ParagraphProperties, RunProperties, TabAlignment, TableProperties};
 
+/// Fill any `None` fields in `$target` from the corresponding fields in `$base`.
+///
+/// Expands to a sequence of `merge_opt(&mut $target.$field, &$base.$field)` calls.
+macro_rules! merge_fields {
+    ($target:expr, $base:expr, $($field:ident),+ $(,)?) => {
+        $(merge_opt(&mut $target.$field, &$base.$field);)+
+    };
+}
+
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
     // FontSet: delegate to FontSlot::merge_from so each slot handles its own fields.
@@ -13,30 +22,12 @@ pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
     target.fonts.east_asian.merge_from(&base.fonts.east_asian);
     target.fonts.complex_script.merge_from(&base.fonts.complex_script);
 
-    merge_opt(&mut target.font_size, &base.font_size);
-    merge_opt(&mut target.bold, &base.bold);
-    merge_opt(&mut target.italic, &base.italic);
-    merge_opt(&mut target.underline, &base.underline);
-    merge_opt(&mut target.strike, &base.strike);
-    merge_opt(&mut target.color, &base.color);
-    merge_opt(&mut target.highlight, &base.highlight);
-    merge_opt(&mut target.shading, &base.shading);
-    merge_opt(&mut target.vertical_align, &base.vertical_align);
-    merge_opt(&mut target.spacing, &base.spacing);
-    merge_opt(&mut target.kerning, &base.kerning);
-    merge_opt(&mut target.all_caps, &base.all_caps);
-    merge_opt(&mut target.small_caps, &base.small_caps);
-    merge_opt(&mut target.vanish, &base.vanish);
-    merge_opt(&mut target.no_proof, &base.no_proof);
-    merge_opt(&mut target.web_hidden, &base.web_hidden);
-    merge_opt(&mut target.rtl, &base.rtl);
-    merge_opt(&mut target.emboss, &base.emboss);
-    merge_opt(&mut target.imprint, &base.imprint);
-    merge_opt(&mut target.outline, &base.outline);
-    merge_opt(&mut target.shadow, &base.shadow);
-    merge_opt(&mut target.position, &base.position);
-    merge_opt(&mut target.lang, &base.lang);
-    merge_opt(&mut target.border, &base.border);
+    merge_fields!(target, base,
+        font_size, bold, italic, underline, strike, color, highlight,
+        shading, vertical_align, spacing, kerning, all_caps, small_caps,
+        vanish, no_proof, web_hidden, rtl, emboss, imprint, outline,
+        shadow, position, lang, border,
+    );
 }
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
@@ -68,26 +59,12 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
         (None, Some(_)) => target.spacing = base.spacing,
         _ => {}
     }
-    merge_opt(&mut target.numbering, &base.numbering);
-    merge_opt(&mut target.borders, &base.borders);
-    merge_opt(&mut target.shading, &base.shading);
-    merge_opt(&mut target.keep_next, &base.keep_next);
-    merge_opt(&mut target.keep_lines, &base.keep_lines);
-    merge_opt(&mut target.widow_control, &base.widow_control);
-    merge_opt(&mut target.page_break_before, &base.page_break_before);
-    merge_opt(
-        &mut target.suppress_auto_hyphens,
-        &base.suppress_auto_hyphens,
+    merge_fields!(target, base,
+        numbering, borders, shading,
+        keep_next, keep_lines, widow_control, page_break_before, suppress_auto_hyphens,
+        contextual_spacing, bidi, word_wrap, outline_level, text_alignment,
+        cnf_style, frame_properties, auto_space_de, auto_space_dn,
     );
-    merge_opt(&mut target.contextual_spacing, &base.contextual_spacing);
-    merge_opt(&mut target.bidi, &base.bidi);
-    merge_opt(&mut target.word_wrap, &base.word_wrap);
-    merge_opt(&mut target.outline_level, &base.outline_level);
-    merge_opt(&mut target.text_alignment, &base.text_alignment);
-    merge_opt(&mut target.cnf_style, &base.cnf_style);
-    merge_opt(&mut target.frame_properties, &base.frame_properties);
-    merge_opt(&mut target.auto_space_de, &base.auto_space_de);
-    merge_opt(&mut target.auto_space_dn, &base.auto_space_dn);
 
     // §17.3.1.38: merge tab stops at the individual-stop level.
     // Child Clear entries remove matching positions from the parent.
