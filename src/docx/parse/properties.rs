@@ -20,6 +20,29 @@ fn invalid_value(attr: &str, value: &str) -> ParseError {
 }
 use crate::docx::xml;
 
+/// Read a `w:val` boolean attribute, defaulting to `true` when the attribute is
+/// absent (OOXML §17.17.4 "toggle property" semantics: presence alone means on).
+///
+/// Returns `Ok(Some(bool))` always; `Ok(None)` is never produced because toggle
+/// properties with no `val` mean `true`, and absence of the element itself is
+/// handled at the call site (the arm simply won't match).
+#[inline]
+fn toggle_attr(e: &BytesStart<'_>) -> Result<Option<bool>> {
+    Ok(Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true)))
+}
+
+/// Read a `w:val` string attribute and map it through `f`, returning
+/// `Ok(None)` when the attribute is absent.
+///
+/// Equivalent to `xml::optional_attr(e, b"val")?.map(|v| f(&v)).transpose()`.
+#[inline]
+fn opt_val<T, F>(e: &BytesStart<'_>, f: F) -> Result<Option<T>>
+where
+    F: FnOnce(&str) -> Result<T>,
+{
+    xml::optional_attr(e, b"val")?.map(|v| f(&v)).transpose()
+}
+
 // ── Paragraph Properties ─────────────────────────────────────────────────────
 
 /// Parsed result of a `w:pPr` element.
@@ -61,11 +84,7 @@ pub fn parse_paragraph_properties(
                     b"spacing" => {
                         props.spacing = Some(parse_paragraph_spacing(e)?);
                     }
-                    b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
-                    }
+                    b"jc" => { props.alignment = opt_val(e, parse_alignment)?; }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
@@ -98,55 +117,19 @@ pub fn parse_paragraph_properties(
                         sect_props = Some(sp);
                     }
                     // Empty-only: no children
-                    b"keepNext" => {
-                        props.keep_next = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"keepLines" => {
-                        props.keep_lines =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"widowControl" => {
-                        props.widow_control =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"pageBreakBefore" => {
-                        props.page_break_before =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"suppressAutoHyphens" => {
-                        props.suppress_auto_hyphens =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"contextualSpacing" => {
-                        props.contextual_spacing =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"bidi" => {
-                        props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"wordWrap" => {
-                        props.word_wrap =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"textAlignment" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_alignment = Some(parse_text_alignment(&val)?);
-                        }
-                    }
-                    b"cnfStyle" => {
-                        props.cnf_style = Some(parse_cnf_style(e)?);
-                    }
-                    b"framePr" => {
-                        props.frame_properties = Some(parse_frame_properties(e)?);
-                    }
-                    b"autoSpaceDE" => {
-                        props.auto_space_de =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"autoSpaceDN" => {
-                        props.auto_space_dn =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"keepNext"           => { props.keep_next           = toggle_attr(e)?; }
+                    b"keepLines"          => { props.keep_lines          = toggle_attr(e)?; }
+                    b"widowControl"       => { props.widow_control       = toggle_attr(e)?; }
+                    b"pageBreakBefore"    => { props.page_break_before   = toggle_attr(e)?; }
+                    b"suppressAutoHyphens"=> { props.suppress_auto_hyphens = toggle_attr(e)?; }
+                    b"contextualSpacing"  => { props.contextual_spacing  = toggle_attr(e)?; }
+                    b"bidi"               => { props.bidi                = toggle_attr(e)?; }
+                    b"wordWrap"           => { props.word_wrap           = toggle_attr(e)?; }
+                    b"textAlignment"      => { props.text_alignment      = opt_val(e, parse_text_alignment)?; }
+                    b"cnfStyle"           => { props.cnf_style           = Some(parse_cnf_style(e)?); }
+                    b"framePr"            => { props.frame_properties    = Some(parse_frame_properties(e)?); }
+                    b"autoSpaceDE"        => { props.auto_space_de       = toggle_attr(e)?; }
+                    b"autoSpaceDN"        => { props.auto_space_dn       = toggle_attr(e)?; }
                     // §17.6.18: an empty sectPr is valid (inherits all defaults).
                     b"sectPr" => {
                         let rsids = parse_section_rsids(e)?;
@@ -200,13 +183,9 @@ pub fn parse_run_properties(
                         }
                     }
                     b"szCs" => {}
-                    b"b" => {
-                        props.bold = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"b"   => { props.bold   = toggle_attr(e)?; }
                     b"bCs" => {}
-                    b"i" => {
-                        props.italic = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"i"   => { props.italic = toggle_attr(e)?; }
                     b"iCs" => {}
                     b"u" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -238,11 +217,7 @@ pub fn parse_run_properties(
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
-                    b"vertAlign" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_vertical_align(&val)?);
-                        }
-                    }
+                    b"vertAlign" => { props.vertical_align = opt_val(e, parse_vertical_align)?; }
                     b"spacing" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             props.spacing = Some(Dimension::new(val));
@@ -253,23 +228,11 @@ pub fn parse_run_properties(
                             props.kerning = Some(Dimension::new(val));
                         }
                     }
-                    b"caps" => {
-                        props.all_caps = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"smallCaps" => {
-                        props.small_caps =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"vanish" => {
-                        props.vanish = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"noProof" => {
-                        props.no_proof = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"webHidden" => {
-                        props.web_hidden =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"caps"      => { props.all_caps   = toggle_attr(e)?; }
+                    b"smallCaps" => { props.small_caps = toggle_attr(e)?; }
+                    b"vanish"    => { props.vanish     = toggle_attr(e)?; }
+                    b"noProof"   => { props.no_proof   = toggle_attr(e)?; }
+                    b"webHidden" => { props.web_hidden = toggle_attr(e)?; }
                     b"position" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             props.position = Some(Dimension::new(val));
@@ -282,21 +245,11 @@ pub fn parse_run_properties(
                             bidi: xml::optional_attr(e, b"bidi")?,
                         });
                     }
-                    b"rtl" => {
-                        props.rtl = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"emboss" => {
-                        props.emboss = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"imprint" => {
-                        props.imprint = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"outline" => {
-                        props.outline = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"shadow" => {
-                        props.shadow = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"rtl"     => { props.rtl     = toggle_attr(e)?; }
+                    b"emboss"  => { props.emboss  = toggle_attr(e)?; }
+                    b"imprint" => { props.imprint = toggle_attr(e)?; }
+                    b"outline" => { props.outline = toggle_attr(e)?; }
+                    b"shadow"  => { props.shadow  = toggle_attr(e)?; }
                     b"bdr" => {
                         props.border = Some(parse_border(e)?);
                     }
@@ -343,46 +296,20 @@ pub fn parse_table_properties(
                             Some(parse_edge_insets_twips(reader, buf, b"tblCellMar")?);
                     }
                     // attrs-only — valid as Start or Empty
-                    b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
-                    }
-                    b"tblW" => {
-                        props.width = Some(parse_table_measure(e)?);
-                    }
-                    b"tblLayout" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.layout = Some(match val.as_str() {
-                                "fixed" => TableLayout::Fixed,
-                                "autofit" | "auto" => TableLayout::Auto,
-                                other => return Err(invalid_value("tblLayout/val", other)),
-                            });
-                        }
-                    }
-                    b"tblInd" => {
-                        props.indent = Some(parse_table_measure(e)?);
-                    }
-                    b"tblCellSpacing" => {
-                        props.cell_spacing = Some(parse_table_measure(e)?);
-                    }
-                    b"tblLook" => {
-                        props.look = Some(parse_table_look(e)?);
-                    }
-                    b"tblStyleRowBandSize" => {
-                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblStyleColBandSize" => {
-                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblpPr" => {
-                        props.positioning = Some(parse_table_positioning(e)?);
-                    }
-                    b"tblOverlap" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.overlap = Some(parse_table_overlap(&val)?);
-                        }
-                    }
+                    b"jc"               => { props.alignment          = opt_val(e, parse_alignment)?; }
+                    b"tblW"             => { props.width               = Some(parse_table_measure(e)?); }
+                    b"tblLayout"        => { props.layout              = opt_val(e, |v| Ok(match v {
+                        "fixed" => TableLayout::Fixed,
+                        "autofit" | "auto" => TableLayout::Auto,
+                        other => return Err(invalid_value("tblLayout/val", other)),
+                    }))?; }
+                    b"tblInd"           => { props.indent              = Some(parse_table_measure(e)?); }
+                    b"tblCellSpacing"   => { props.cell_spacing        = Some(parse_table_measure(e)?); }
+                    b"tblLook"          => { props.look                = Some(parse_table_look(e)?); }
+                    b"tblStyleRowBandSize" => { props.style_row_band_size = xml::optional_attr_u32(e, b"val")?; }
+                    b"tblStyleColBandSize" => { props.style_col_band_size = xml::optional_attr_u32(e, b"val")?; }
+                    b"tblpPr"           => { props.positioning         = Some(parse_table_positioning(e)?); }
+                    b"tblOverlap"       => { props.overlap             = opt_val(e, parse_table_overlap)?; }
                     _ => xml::warn_unsupported_element("tblPr", local),
                 }
             }
@@ -421,18 +348,9 @@ pub fn parse_table_row_properties(
                             });
                         }
                     }
-                    b"tblHeader" => {
-                        props.is_header = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"cantSplit" => {
-                        props.cant_split =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.justification = Some(parse_alignment(&val)?);
-                        }
-                    }
+                    b"tblHeader" => { props.is_header   = toggle_attr(e)?; }
+                    b"cantSplit"  => { props.cant_split  = toggle_attr(e)?; }
+                    b"jc"         => { props.justification = opt_val(e, parse_alignment)?; }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
@@ -486,11 +404,7 @@ pub fn parse_table_cell_properties(
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
-                    b"vAlign" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_cell_vertical_align(&val)?);
-                        }
-                    }
+                    b"vAlign" => { props.vertical_align = opt_val(e, parse_cell_vertical_align)?; }
                     b"vMerge" => {
                         let is_restart = xml::optional_attr(e, b"val")?
                             .map(|v| v == "restart")
@@ -504,14 +418,8 @@ pub fn parse_table_cell_properties(
                     b"gridSpan" => {
                         props.grid_span = xml::optional_attr_u32(e, b"val")?;
                     }
-                    b"textDirection" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_direction = Some(parse_text_direction(&val)?);
-                        }
-                    }
-                    b"noWrap" => {
-                        props.no_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
+                    b"textDirection" => { props.text_direction = opt_val(e, parse_text_direction)?; }
+                    b"noWrap"        => { props.no_wrap        = toggle_attr(e)?; }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
@@ -629,18 +537,9 @@ pub fn parse_section_properties(
                                 .map(Dimension::new),
                         });
                     }
-                    b"titlePg" => {
-                        props.title_page =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"pgNumType" => {
-                        props.page_number_type = Some(parse_page_number_type(e)?);
-                    }
-                    b"type" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.section_type = Some(parse_section_type(&val)?);
-                        }
-                    }
+                    b"titlePg"   => { props.title_page      = toggle_attr(e)?; }
+                    b"pgNumType" => { props.page_number_type = Some(parse_page_number_type(e)?); }
+                    b"type"      => { props.section_type     = opt_val(e, parse_section_type)?; }
                     _ => xml::warn_unsupported_element("sectPr", local),
                 }
             }
