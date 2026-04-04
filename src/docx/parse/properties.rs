@@ -127,7 +127,7 @@ pub fn parse_paragraph_properties(
                     b"wordWrap"           => { props.word_wrap           = toggle_attr(e)?; }
                     b"textAlignment"      => { props.text_alignment      = opt_val(e, parse_text_alignment)?; }
                     b"cnfStyle"           => { props.cnf_style           = Some(parse_cnf_style(e)?); }
-                    b"framePr"            => { props.frame_properties    = Some(parse_frame_properties(e)?); }
+                    b"framePr"            => { props.frame_properties    = Some(parse_frame_kind(e)?); }
                     b"autoSpaceDE"        => { props.auto_space_de       = toggle_attr(e)?; }
                     b"autoSpaceDN"        => { props.auto_space_dn       = toggle_attr(e)?; }
                     // §17.6.18: an empty sectPr is valid (inherits all defaults).
@@ -1286,17 +1286,26 @@ fn parse_table_overlap(val: &str) -> Result<TableOverlap> {
     }
 }
 
-/// §17.3.1.11: parse `w:framePr` attributes.
-fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
-    Ok(FrameProperties {
-        drop_cap: match xml::optional_attr(e, b"dropCap")?.as_deref() {
-            Some("none") => Some(DropCap::None),
-            Some("drop") => Some(DropCap::Drop),
-            Some("margin") => Some(DropCap::Margin),
-            Some(other) => return Err(invalid_value("framePr/dropCap", other)),
-            None => None,
-        },
-        lines: xml::optional_attr_u32(e, b"lines")?,
+/// §17.3.1.11: parse `w:framePr` attributes into a [`FrameKind`].
+///
+/// When `w:dropCap` is `"drop"` or `"margin"` the element represents a drop cap;
+/// otherwise it is a floating text-box frame.
+fn parse_frame_kind(e: &BytesStart<'_>) -> Result<FrameKind> {
+    let drop_cap = match xml::optional_attr(e, b"dropCap")?.as_deref() {
+        Some("drop") => Some(DropCap::Drop),
+        Some("margin") => Some(DropCap::Margin),
+        _ => None, // "none" or absent — not a drop cap
+    };
+
+    if let Some(style) = drop_cap {
+        return Ok(FrameKind::DropCap {
+            style,
+            lines: xml::optional_attr_u32(e, b"lines")?.unwrap_or(3),
+            h_space: xml::optional_attr_i64(e, b"hSpace")?.map(Dimension::new),
+        });
+    }
+
+    Ok(FrameKind::TextBox(TextBoxPositioning {
         width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
         height: xml::optional_attr_i64(e, b"h")?.map(Dimension::new),
         height_rule: match xml::optional_attr(e, b"hRule")?.as_deref() {
@@ -1353,7 +1362,7 @@ fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
             Some(other) => return Err(invalid_value("framePr/yAlign", other)),
             None => None,
         },
-    })
+    }))
 }
 
 /// §17.6.12: parse `w:pgNumType` attributes.

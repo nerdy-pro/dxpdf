@@ -296,16 +296,10 @@ pub(super) fn build_paragraph_block(
     }
 
     // §17.3.1.11: detect drop cap paragraph.
-    let is_dropcap = merged_props
-        .frame_properties
-        .and_then(|fp| fp.drop_cap)
-        .is_some_and(|dc| matches!(dc, model::DropCap::Drop | model::DropCap::Margin));
-
-    if is_dropcap {
-        let drop_cap_lines = merged_props
-            .frame_properties
-            .and_then(|fp| fp.lines)
-            .unwrap_or(3);
+    if let Some(model::FrameKind::DropCap { style, lines, h_space: dc_h_space }) =
+        merged_props.frame_properties
+    {
+        let drop_cap_lines = lines;
         let width: Pt = fragments.iter().map(|f| f.width()).sum();
         let height: Pt = fragments.iter().map(|f| f.height()).fold(Pt::ZERO, Pt::max);
         let ascent: Pt = fragments
@@ -315,15 +309,8 @@ pub(super) fn build_paragraph_block(
                 _ => Pt::ZERO,
             })
             .fold(Pt::ZERO, Pt::max);
-        let h_space = merged_props
-            .frame_properties
-            .and_then(|fp| fp.h_space)
-            .map(Pt::from)
-            .unwrap_or(Pt::ZERO);
-        let margin_mode = merged_props
-            .frame_properties
-            .and_then(|fp| fp.drop_cap)
-            .is_some_and(|dc| matches!(dc, model::DropCap::Margin));
+        let h_space = dc_h_space.map(Pt::from).unwrap_or(Pt::ZERO);
+        let margin_mode = matches!(style, model::DropCap::Margin);
         // The drop cap paragraph's own indent determines the x position.
         // This includes indent_left + indent_first_line from the cascade.
         let dc_indent_left = merged_props
