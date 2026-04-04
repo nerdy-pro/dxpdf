@@ -309,14 +309,11 @@ pub(super) fn build_fragments(
     table_style: Option<&ResolvedStyle>,
     cond: Option<&CellConditionalFormatting>,
 ) -> (Vec<Fragment>, model::ParagraphProperties) {
-    // Clone paragraph for style resolution.
-    let effective_para = para.clone();
-
     // §17.7.2: resolve paragraph defaults (direct → paragraph style).
     // Doc defaults are deferred so table style/conditional can be inserted
     // between paragraph style and doc defaults in the cascade.
     let (default_family, mut default_size, mut default_color, mut merged_props, mut run_defaults) =
-        resolve_paragraph_defaults(&effective_para, ctx.resolved, table_style.is_some());
+        resolve_paragraph_defaults(para, ctx.resolved, table_style.is_some());
 
     // §17.7.2: table conditional formatting — lower priority than paragraph style.
     if let Some(c) = cond {
