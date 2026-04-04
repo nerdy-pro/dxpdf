@@ -63,6 +63,8 @@ pub struct FloatingImage {
     /// §20.4.2.3 distL/distR: horizontal distance from surrounding text.
     pub dist_left: Pt,
     pub dist_right: Pt,
+    /// §20.4.2.3 @behindDoc: image is painted behind document text.
+    pub behind_doc: bool,
 }
 
 /// Vertical position for a floating image.
@@ -1072,6 +1074,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(height * 0.7),
                 descent: Pt::new(height * 0.3),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             shading: None,

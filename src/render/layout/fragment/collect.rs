@@ -527,6 +527,7 @@ mod tests {
             TextMetrics {
                 ascent: Pt::new(10.0),
                 descent: Pt::new(2.0),
+                leading: Pt::ZERO,
             },
         )
     }

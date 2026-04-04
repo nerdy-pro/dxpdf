@@ -44,6 +44,7 @@ impl TextMeasurer {
         let text_metrics = super::fragment::TextMetrics {
             ascent: Pt::new(-metrics.ascent),
             descent: Pt::new(metrics.descent),
+            leading: Pt::new(metrics.leading.max(0.0)),
         };
 
         // §17.3.2.35: include character spacing in the measured width
@@ -90,11 +91,12 @@ impl TextMeasurer {
     }
 
     /// Get line height for the default font (used for empty paragraphs).
+    /// §17.3.1.33: includes leading so Auto line spacing scales the full
+    /// font-recommended height.
     pub fn default_line_height(&self, family: &str, size: Pt) -> Pt {
         let mut cache = self.font_cache.borrow_mut();
         let font = cache.get(&self.font_mgr, family, size, false, false);
         let (_, metrics) = font.metrics();
-        // ascent + descent (without leading)
-        Pt::new(-metrics.ascent + metrics.descent)
+        Pt::new(-metrics.ascent + metrics.descent + metrics.leading.max(0.0))
     }
 }

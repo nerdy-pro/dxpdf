@@ -294,25 +294,58 @@ fn adjust_margins_for_header_footer(
 
     if let Some(ref blocks) = section.header {
         let hf = layout::build::build_header_footer_content(blocks, ctx, state);
-        if !hf.blocks.is_empty() {
-            let result =
-                layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
-            let header_bottom = config.header_margin + result.height;
-            if header_bottom > config.margins.top {
-                config.margins.top = header_bottom;
-            }
+        let result =
+            layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
+
+        // §17.6.2: header_bottom is the greater of stacked block content and
+        // wrapTopAndBottom floating image extent, both measured from the header
+        // margin edge. wrapNone/behindDoc images are backgrounds and don't
+        // push body content down.
+        let blocks_bottom = config.header_margin + result.height;
+        let floats_bottom = hf
+            .floating_images
+            .iter()
+            .filter(|fi| fi.wrap_top_and_bottom)
+            .map(|fi| {
+                let y = match fi.y {
+                    layout::section::FloatingImageY::Absolute(y) => y,
+                    layout::section::FloatingImageY::RelativeToParagraph(off) => {
+                        config.header_margin + off
+                    }
+                };
+                y + fi.size.height
+            })
+            .fold(dimension::Pt::ZERO, |a, b| a.max(b));
+        let header_bottom = blocks_bottom.max(floats_bottom);
+        if header_bottom > config.margins.top {
+            config.margins.top = header_bottom;
         }
     }
 
     if let Some(ref blocks) = section.footer {
         let hf = layout::build::build_header_footer_content(blocks, ctx, state);
-        if !hf.blocks.is_empty() {
-            let result =
-                layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
-            let footer_top = config.footer_margin + result.height;
-            if footer_top > config.margins.bottom {
-                config.margins.bottom = footer_top;
-            }
+        let result =
+            layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
+
+        let blocks_extent = config.footer_margin + result.height;
+        let floats_extent = hf
+            .floating_images
+            .iter()
+            .filter(|fi| fi.wrap_top_and_bottom)
+            .map(|fi| {
+                match fi.y {
+                    layout::section::FloatingImageY::Absolute(y) => {
+                        config.page_size.height - y
+                    }
+                    layout::section::FloatingImageY::RelativeToParagraph(off) => {
+                        config.footer_margin + off + fi.size.height
+                    }
+                }
+            })
+            .fold(dimension::Pt::ZERO, |a, b| a.max(b));
+        let footer_extent = blocks_extent.max(floats_extent);
+        if footer_extent > config.margins.bottom {
+            config.margins.bottom = footer_extent;
         }
     }
 

@@ -519,11 +519,24 @@ fn emit_line_commands(
             (content_width - float_reduction - dc_offset).max(Pt::ZERO)
         };
         let remaining = (line_available - line.width).max(Pt::ZERO);
-        let align_offset = match style.alignment {
-            Alignment::Center => remaining * 0.5,
-            Alignment::End => remaining,
-            Alignment::Both if !line.has_break && line_idx < line_placements.len() - 1 => Pt::ZERO,
-            _ => Pt::ZERO,
+        // §17.3.1.37: when a line contains tab characters, tab stops control
+        // horizontal positioning — paragraph alignment does not apply.
+        let line_has_tabs = fragments[line.start..line.end]
+            .iter()
+            .any(|f| matches!(f, Fragment::Tab { .. }));
+        let align_offset = if line_has_tabs {
+            Pt::ZERO
+        } else {
+            match style.alignment {
+                Alignment::Center => remaining * 0.5,
+                Alignment::End => remaining,
+                Alignment::Both
+                    if !line.has_break && line_idx < line_placements.len() - 1 =>
+                {
+                    Pt::ZERO
+                }
+                _ => Pt::ZERO,
+            }
         };
 
         let x_start = indent + align_offset;
@@ -1050,6 +1063,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(10.0),
                 descent: Pt::new(4.0),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             shading: None,

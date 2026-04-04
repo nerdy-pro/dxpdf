@@ -799,6 +799,7 @@ pub(super) fn extract_floating_images(
                 ),
                 dist_left: Pt::from(anchor.distance.left),
                 dist_right: Pt::from(anchor.distance.right),
+                behind_doc: anchor.behind_text,
             });
         }
     }

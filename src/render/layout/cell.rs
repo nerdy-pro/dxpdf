@@ -78,6 +78,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(10.0),
                 descent: Pt::new(4.0),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             shading: None,

@@ -52,12 +52,21 @@ pub struct TextMetrics {
     pub ascent: Pt,
     /// Distance from baseline to bottom of glyphs (positive downward).
     pub descent: Pt,
+    /// §17.3.1.33: inter-line leading from the font's metrics.
+    /// Included in Auto line spacing base but not in glyph height.
+    pub leading: Pt,
 }
 
 impl TextMetrics {
-    /// Total text height (ascent + descent).
+    /// Glyph height (ascent + descent) — used for baseline positioning.
     pub fn height(&self) -> Pt {
         self.ascent + self.descent
+    }
+
+    /// §17.3.1.33: full line height including leading — the base unit
+    /// that Auto line spacing multipliers scale.
+    pub fn line_height(&self) -> Pt {
+        self.ascent + self.descent + self.leading
     }
 }
 
