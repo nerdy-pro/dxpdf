@@ -96,6 +96,36 @@ pub struct DropCapInfo {
     pub position_offset: Pt,
 }
 
+impl ParagraphStyle {
+    /// Clone the style for layout, leaving `page_floats` empty.
+    ///
+    /// The caller always replaces `page_floats` with computed effective floats,
+    /// so cloning the (potentially large) source vec is wasted work.
+    pub fn clone_for_layout(&self) -> Self {
+        Self {
+            alignment: self.alignment,
+            space_before: self.space_before,
+            space_after: self.space_after,
+            indent_left: self.indent_left,
+            indent_right: self.indent_right,
+            indent_first_line: self.indent_first_line,
+            line_spacing: self.line_spacing,
+            tabs: self.tabs.clone(),
+            drop_cap: self.drop_cap.clone(),
+            borders: self.borders.clone(),
+            shading: self.shading,
+            keep_next: self.keep_next,
+            contextual_spacing: self.contextual_spacing,
+            style_id: self.style_id.clone(),
+            // Caller will replace these — skip cloning the vec.
+            page_floats: Vec::new(),
+            page_y: Pt::ZERO,
+            page_x: Pt::ZERO,
+            page_content_width: Pt::ZERO,
+        }
+    }
+}
+
 impl Default for ParagraphStyle {
     fn default() -> Self {
         Self {

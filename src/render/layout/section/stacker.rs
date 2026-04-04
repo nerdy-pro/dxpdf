@@ -48,7 +48,7 @@ pub fn stack_blocks(
                 floating_images,
                 ..
             } => {
-                let mut effective_style = style.clone();
+                let mut effective_style = style.clone_for_layout();
 
                 // Spacing collapse.
                 if effective_style.contextual_spacing
