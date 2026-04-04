@@ -11,6 +11,12 @@ use crate::render::fonts;
 use crate::render::layout::draw_command::{DrawCommand, LayoutedPage};
 use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 
+/// Target resolution for embedded images (pixels per inch).
+/// 150 DPI balances print quality with file size; matches LibreOffice.
+const IMAGE_TARGET_DPI: f32 = 150.0;
+/// Conversion factor from PDF points to target pixels.
+const IMAGE_DPI_SCALE: f32 = IMAGE_TARGET_DPI / 72.0;
+
 /// Render laid-out pages to PDF bytes via Skia.
 pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u8>, RenderError> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
@@ -121,6 +127,7 @@ fn render_page(
                 } else {
                     let skia_data = Data::new_copy(image_data);
                     if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                        let image = downsample_if_oversize(image, *rect);
                         canvas.draw_image_rect(&image, None, to_rect(*rect), &Paint::default());
                         image_cache.insert(ptr_key, image);
                     }
@@ -151,6 +158,56 @@ fn render_page(
                 canvas.annotate_named_destination(to_point(*position), &name_data);
             }
         }
+    }
+}
+
+/// Downsample an image if its native pixel dimensions significantly exceed
+/// the display dimensions at `IMAGE_TARGET_DPI`. Uses Mitchell-Netravali
+/// cubic filtering for high-quality results.
+fn downsample_if_oversize(
+    image: skia_safe::Image,
+    rect: crate::render::geometry::PtRect,
+) -> skia_safe::Image {
+    use skia_safe::CubicResampler;
+    use skia_safe::{AlphaType, ColorType, ImageInfo, SamplingOptions};
+
+    let target_w = (rect.size.width.raw() * IMAGE_DPI_SCALE).ceil() as i32;
+    let target_h = (rect.size.height.raw() * IMAGE_DPI_SCALE).ceil() as i32;
+    if image.width() > target_w && image.height() > target_h && target_w > 0 && target_h > 0 {
+        log::debug!(
+            "[paint] downsampling image {}×{} → {}×{} (display {:.0}×{:.0}pt @ {:.0} DPI)",
+            image.width(),
+            image.height(),
+            target_w,
+            target_h,
+            rect.size.width.raw(),
+            rect.size.height.raw(),
+            IMAGE_TARGET_DPI,
+        );
+        // Draw scaled image onto an opaque surface so Skia applies JPEG
+        // encoding (encoding_quality) instead of lossless FlateDecode.
+        let info = ImageInfo::new(
+            (target_w, target_h),
+            ColorType::RGBA8888,
+            AlphaType::Opaque,
+            None,
+        );
+        let sampling = SamplingOptions::from(CubicResampler::mitchell());
+        if let Some(mut surface) = skia_safe::surfaces::raster(&info, None, None) {
+            let dst = skia_safe::Rect::from_iwh(target_w, target_h);
+            surface.canvas().draw_image_rect_with_sampling_options(
+                &image,
+                None,
+                dst,
+                sampling,
+                &Paint::default(),
+            );
+            surface.image_snapshot()
+        } else {
+            image
+        }
+    } else {
+        image
     }
 }
 
