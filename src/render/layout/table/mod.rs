@@ -5,435 +5,22 @@
 //! Pass 3: Position cells and emit border commands.
 
 use crate::render::dimension::Pt;
-use crate::render::geometry::{PtEdgeInsets, PtRect, PtSize};
-use crate::render::resolve::color::RgbColor;
+use crate::render::geometry::PtSize;
 
-use super::cell::{layout_cell, CellLayout};
-use super::draw_command::DrawCommand;
 use super::BoxConstraints;
 
 mod borders;
+mod emit;
 mod grid;
+mod measure;
+mod types;
 
 pub use grid::compute_column_widths;
+pub use types::*;
 
-use borders::{
-    border_width, emit_cell_borders, resolve_border_conflict, resolve_cell_effective_borders,
-    CellBorders,
-};
-use grid::{build_row_groups, cell_index_at_grid_col, expand_rows_for_vmerge, is_vmerge_continue};
-
-/// §17.4.81: row height rule.
-#[derive(Clone, Copy, Debug)]
-pub enum RowHeightRule {
-    /// Row height is at least this value; grows to fit content.
-    AtLeast(Pt),
-    /// Row height is exactly this value; content may clip.
-    Exact(Pt),
-}
-
-/// A table row for layout.
-pub struct TableRowInput {
-    pub cells: Vec<TableCellInput>,
-    /// §17.4.81: row height constraint.
-    pub height_rule: Option<RowHeightRule>,
-    /// §17.4.49: row repeats as header on each continuation page.
-    pub is_header: Option<bool>,
-    /// §17.4.1: if true, row cannot be split across pages.
-    pub cant_split: Option<bool>,
-}
-
-/// §17.4.84: cell vertical alignment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CellVAlign {
-    Top,
-    Center,
-    Bottom,
-}
-
-/// A single cell for layout.
-pub struct TableCellInput {
-    pub blocks: Vec<super::section::LayoutBlock>,
-    pub margins: PtEdgeInsets,
-    /// Number of grid columns this cell spans (gridSpan, default 1).
-    pub grid_span: u32,
-    /// Background color for cell shading.
-    pub shading: Option<RgbColor>,
-    /// §17.7.6: per-cell resolved borders from conditional formatting.
-    pub cell_borders: Option<CellBorderConfig>,
-    /// §17.4.85: vertical merge state.
-    pub vertical_merge: Option<VerticalMergeState>,
-    /// §17.4.84: vertical alignment of content within the cell.
-    pub vertical_align: CellVAlign,
-}
-
-/// §17.4.85: vertical merge state for a cell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VerticalMergeState {
-    /// This cell starts a new vertical merge group.
-    Restart,
-    /// This cell continues from the cell above (content is skipped).
-    Continue,
-}
-
-/// §17.7.6: a conditional border override for a single cell edge.
-#[derive(Clone, Copy, Debug)]
-pub enum CellBorderOverride {
-    /// §17.4.38 val="nil": explicitly no border on this edge.
-    Nil,
-    /// A specific border line on this edge.
-    Border(TableBorderLine),
-}
-
-/// Per-cell border configuration (resolved from conditional formatting).
-/// `None` = no override (use table-level default for this edge).
-#[derive(Clone, Debug)]
-pub struct CellBorderConfig {
-    pub top: Option<CellBorderOverride>,
-    pub bottom: Option<CellBorderOverride>,
-    pub left: Option<CellBorderOverride>,
-    pub right: Option<CellBorderOverride>,
-}
-
-/// Resolved table border configuration.
-#[derive(Clone, Debug)]
-pub struct TableBorderConfig {
-    pub top: Option<TableBorderLine>,
-    pub bottom: Option<TableBorderLine>,
-    pub left: Option<TableBorderLine>,
-    pub right: Option<TableBorderLine>,
-    pub inside_h: Option<TableBorderLine>,
-    pub inside_v: Option<TableBorderLine>,
-}
-
-/// A single table border line.
-#[derive(Clone, Copy, Debug)]
-pub struct TableBorderLine {
-    pub width: Pt,
-    pub color: RgbColor,
-    /// §17.4.38: border style (single, double, etc.)
-    pub style: TableBorderStyle,
-}
-
-/// Supported table border styles.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TableBorderStyle {
-    Single,
-    Double,
-}
-
-/// Per-row measurement data from the table measurement phase.
-/// Contains everything needed to emit draw commands for this row.
-struct MeasuredRow {
-    entries: Vec<CellLayoutEntry>,
-    borders: Vec<CellBorders>,
-    height: Pt,
-    /// §17.4.38: maximum bottom border width for gap between this row and the next.
-    border_gap_below: Pt,
-}
-
-/// Result of the table measurement phase.
-struct MeasuredTable {
-    rows: Vec<MeasuredRow>,
-    table_width: Pt,
-}
-
-/// Per-cell layout result with positioning info from pass 2.
-struct CellLayoutEntry {
-    layout: CellLayout,
-    cell_x: Pt,
-    cell_w: Pt,
-    /// Starting grid column index (for vMerge neighbor lookup).
-    grid_col: usize,
-}
-
-/// Result of laying out a table.
-#[derive(Debug)]
-pub struct TableLayout {
-    /// Draw commands positioned relative to the table's top-left origin.
-    pub commands: Vec<DrawCommand>,
-    /// Total size of the table.
-    pub size: PtSize,
-}
-
-/// Measure all table rows: resolve borders, lay out cell content, compute heights.
-/// This is the shared measurement phase used by both `layout_table` (monolithic)
-/// and `layout_table_paginated` (page-splitting).
-///
-/// §17.4.38: `suppress_first_row_top` — when `true`, the top border of the first
-/// row is suppressed. Used for adjacent table border collapse: consecutive tables
-/// with the same style are treated as a single merged table, so the second table's
-/// top border would duplicate the first table's bottom border.
-fn measure_table_rows(
-    rows: &[TableRowInput],
-    col_widths: &[Pt],
-    default_line_height: Pt,
-    borders: Option<&TableBorderConfig>,
-    measure_text: super::paragraph::MeasureTextFn<'_>,
-    suppress_first_row_top: bool,
-) -> MeasuredTable {
-    let table_width: Pt = col_widths.iter().copied().sum();
-    let num_rows = rows.len();
-    let mut row_heights = Vec::with_capacity(num_rows);
-
-    // Pass 2a: resolve borders for every cell.
-    let mut resolved_borders: Vec<Vec<CellBorders>> = Vec::new();
-    {
-        let mut grid_indices: Vec<Vec<usize>> = Vec::new();
-        for (row_idx, row) in rows.iter().enumerate() {
-            let mut row_borders = Vec::new();
-            let mut row_grid = Vec::new();
-            let mut grid_idx = 0;
-            for (cell_ci, cell_input) in row.cells.iter().enumerate() {
-                let (mut b_top, mut b_bottom, b_left, b_right) = resolve_cell_effective_borders(
-                    cell_input,
-                    borders,
-                    row_idx,
-                    cell_ci,
-                    num_rows,
-                    row.cells.len(),
-                );
-                if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
-                    b_top = None;
-                }
-                if row_idx + 1 < num_rows && is_vmerge_continue(&rows[row_idx + 1], grid_idx) {
-                    b_bottom = None;
-                }
-                row_borders.push(CellBorders {
-                    top: b_top,
-                    bottom: b_bottom,
-                    left: b_left,
-                    right: b_right,
-                });
-                row_grid.push(grid_idx);
-                grid_idx += cell_input.grid_span.max(1) as usize;
-            }
-            resolved_borders.push(row_borders);
-            grid_indices.push(row_grid);
-        }
-
-        // §17.4.43: conflict resolution at shared edges.
-        for row_idx in 0..num_rows {
-            let num_cells = rows[row_idx].cells.len();
-            for cell_ci in 0..num_cells {
-                if cell_ci + 1 < num_cells {
-                    let right = resolved_borders[row_idx][cell_ci].right;
-                    let left = resolved_borders[row_idx][cell_ci + 1].left;
-                    let winner = resolve_border_conflict(right, left);
-                    resolved_borders[row_idx][cell_ci].right = winner;
-                    resolved_borders[row_idx][cell_ci + 1].left = None;
-                }
-                if row_idx + 1 < num_rows {
-                    let start_grid = grid_indices[row_idx][cell_ci];
-                    let span = rows[row_idx].cells[cell_ci].grid_span.max(1) as usize;
-                    let mut resolved_once = false;
-                    for gc in start_grid..start_grid + span {
-                        if let Some(below_ci) = cell_index_at_grid_col(&rows[row_idx + 1], gc) {
-                            if !resolved_once {
-                                let bottom = resolved_borders[row_idx][cell_ci].bottom;
-                                let top = resolved_borders[row_idx + 1][below_ci].top;
-                                let winner = resolve_border_conflict(bottom, top);
-                                resolved_borders[row_idx][cell_ci].bottom = winner;
-                                resolved_once = true;
-                            }
-                            resolved_borders[row_idx + 1][below_ci].top = None;
-                        }
-                    }
-                }
-            }
-        }
-
-        // §17.4.38: suppress first-row top borders for adjacent table collapse.
-        if suppress_first_row_top && !resolved_borders.is_empty() {
-            for b in &mut resolved_borders[0] {
-                b.top = None;
-            }
-        }
-    }
-
-    // Pass 2b: lay out each cell.
-    let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
-
-    for (row_idx, row) in rows.iter().enumerate() {
-        let mut entries = Vec::new();
-        let mut max_height = Pt::ZERO;
-        let mut grid_idx = 0;
-
-        for (cell_ci, cell) in row.cells.iter().enumerate() {
-            let span = cell.grid_span.max(1) as usize;
-            let cell_w: Pt = col_widths[grid_idx..grid_idx + span].iter().copied().sum();
-            let cell_x: Pt = col_widths[..grid_idx].iter().copied().sum();
-
-            let b = &resolved_borders[row_idx][cell_ci];
-            let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);
-            let extra_right = (border_width(b.right) - cell.margins.right).max(Pt::ZERO);
-            let layout_w = (cell_w - extra_left - extra_right).max(Pt::ZERO);
-
-            let is_continue = cell.vertical_merge == Some(VerticalMergeState::Continue);
-            let layout = if is_continue {
-                CellLayout {
-                    commands: Vec::new(),
-                    content_height: Pt::ZERO,
-                }
-            } else {
-                layout_cell(
-                    &cell.blocks,
-                    layout_w,
-                    &cell.margins,
-                    default_line_height,
-                    measure_text,
-                )
-            };
-
-            if cell.vertical_merge.is_none() {
-                max_height = max_height.max(layout.content_height + cell.margins.vertical());
-            }
-
-            entries.push(CellLayoutEntry {
-                layout,
-                cell_x,
-                cell_w,
-                grid_col: grid_idx,
-            });
-            grid_idx += span;
-        }
-
-        match row.height_rule {
-            Some(RowHeightRule::AtLeast(min_h)) => max_height = max_height.max(min_h),
-            Some(RowHeightRule::Exact(h)) => max_height = h,
-            None => {}
-        }
-
-        row_heights.push(max_height);
-        row_cell_layouts.push(entries);
-    }
-
-    // §17.4.85: distribute vMerge overflow.
-    expand_rows_for_vmerge(rows, &row_cell_layouts, &mut row_heights);
-
-    // Compute border gaps and assemble measured rows.
-    let measured_rows: Vec<MeasuredRow> = row_cell_layouts
-        .into_iter()
-        .zip(resolved_borders)
-        .zip(row_heights.iter())
-        .enumerate()
-        .map(|(row_idx, ((entries, borders), &height))| {
-            let border_gap_below = if row_idx + 1 < num_rows {
-                borders
-                    .iter()
-                    .map(|b| border_width(b.bottom))
-                    .fold(Pt::ZERO, Pt::max)
-            } else {
-                Pt::ZERO
-            };
-            MeasuredRow {
-                entries,
-                borders,
-                height,
-                border_gap_below,
-            }
-        })
-        .collect();
-
-    MeasuredTable {
-        rows: measured_rows,
-        table_width,
-    }
-}
-
-/// Layered command buffers for table rendering: shading, content, borders.
-struct TableCommandBuffers<'a> {
-    commands: &'a mut Vec<DrawCommand>,
-    content_commands: &'a mut Vec<DrawCommand>,
-    border_commands: &'a mut Vec<DrawCommand>,
-}
-
-/// Emit draw commands for a range of measured rows.
-///
-/// `top_border_override`: if `Some`, the first row in the range gets this border
-/// as its top edge. Used for page-split tables where the measured top borders were
-/// suppressed (adjacent table collapse) or resolved away (conflict resolution),
-/// but the continuation slice still needs a visible top boundary.
-fn emit_table_rows(
-    measured: &MeasuredTable,
-    rows: &[TableRowInput],
-    row_range: std::ops::Range<usize>,
-    cursor_y: &mut Pt,
-    bufs: &mut TableCommandBuffers<'_>,
-    top_border_override: Option<TableBorderLine>,
-) {
-    let commands = &mut *bufs.commands;
-    let content_commands = &mut *bufs.content_commands;
-    let border_commands = &mut *bufs.border_commands;
-    let num_rows = measured.rows.len();
-    let range_start = row_range.start;
-    for row_idx in row_range {
-        let mr = &measured.rows[row_idx];
-        let row_height = mr.height;
-        let is_first_in_range = row_idx == range_start;
-
-        for (cell_ci, (entry, cell_input)) in mr
-            .entries
-            .iter()
-            .zip(rows[row_idx].cells.iter())
-            .enumerate()
-        {
-            if let Some(color) = cell_input.shading {
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(entry.cell_x, *cursor_y, entry.cell_w, row_height),
-                    color,
-                });
-            }
-
-            // §17.4.38: restore top border for the first row on a page slice.
-            let cell_top = if is_first_in_range && mr.borders[cell_ci].top.is_none() {
-                top_border_override
-            } else {
-                mr.borders[cell_ci].top
-            };
-            let b_left = mr.borders[cell_ci].left;
-            let b_right = mr.borders[cell_ci].right;
-            let b_bottom = mr.borders[cell_ci].bottom;
-
-            let dx = (border_width(b_left) - cell_input.margins.left).max(Pt::ZERO);
-            let dy_border = (border_width(cell_top) - cell_input.margins.top).max(Pt::ZERO);
-
-            let content_h = entry.layout.content_height + cell_input.margins.vertical();
-            let dy_valign = match cell_input.vertical_align {
-                CellVAlign::Bottom => (row_height - content_h - dy_border).max(Pt::ZERO),
-                CellVAlign::Center => ((row_height - content_h - dy_border) * 0.5).max(Pt::ZERO),
-                CellVAlign::Top => Pt::ZERO,
-            };
-
-            for cmd in &entry.layout.commands {
-                let mut cmd = cmd.clone();
-                cmd.shift(entry.cell_x + dx, *cursor_y + dy_border + dy_valign);
-                content_commands.push(cmd);
-            }
-
-            let bottom_border_gap = if row_idx + 1 < num_rows {
-                border_width(b_bottom)
-            } else {
-                Pt::ZERO
-            };
-            emit_cell_borders(
-                border_commands,
-                CellBorders {
-                    top: cell_top,
-                    bottom: b_bottom,
-                    left: b_left,
-                    right: b_right,
-                },
-                entry.cell_x,
-                entry.cell_w,
-                *cursor_y,
-                row_height + bottom_border_gap,
-            );
-        }
-
-        *cursor_y += row_height + mr.border_gap_below;
-    }
-}
+use emit::{emit_table_rows, TableCommandBuffers};
+use grid::build_row_groups;
+use measure::measure_table_rows;
 
 /// Lay out a table: compute column widths, lay out cells, emit borders.
 ///
@@ -496,7 +83,7 @@ pub fn layout_table(
 #[derive(Debug)]
 pub struct TableSlice {
     /// Draw commands positioned relative to this slice's top-left origin (0,0).
-    pub commands: Vec<DrawCommand>,
+    pub commands: Vec<super::draw_command::DrawCommand>,
     /// Size of this slice.
     pub size: PtSize,
 }
@@ -649,10 +236,13 @@ pub fn layout_table_paginated(
 
 #[cfg(test)]
 mod tests {
+    use super::super::draw_command::DrawCommand;
     use super::*;
+    use crate::render::geometry::PtEdgeInsets;
     use crate::render::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::render::layout::paragraph::ParagraphStyle;
     use crate::render::layout::section::LayoutBlock;
+    use crate::render::resolve::color::RgbColor;
     use std::rc::Rc;
 
     fn text_frag(text: &str, width: f32) -> Fragment {
@@ -995,12 +585,12 @@ mod tests {
 
     #[test]
     fn suppress_first_row_top_removes_top_borders() {
-        let border_line = super::TableBorderLine {
+        let border_line = TableBorderLine {
             width: Pt::new(0.5),
             color: RgbColor::BLACK,
-            style: super::TableBorderStyle::Single,
+            style: TableBorderStyle::Single,
         };
-        let borders = super::TableBorderConfig {
+        let borders = TableBorderConfig {
             top: Some(border_line),
             bottom: Some(border_line),
             left: Some(border_line),

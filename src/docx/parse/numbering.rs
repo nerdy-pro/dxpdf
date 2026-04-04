@@ -7,7 +7,7 @@ use crate::docx::error::Result;
 use crate::docx::model::*;
 use crate::docx::xml;
 
-use super::{body, properties};
+use super::{properties, vml};
 
 /// Parse `word/numbering.xml`. Enters `<w:numbering>`, parses until `</w:numbering>`.
 pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
@@ -235,7 +235,7 @@ fn parse_num_pic_bullet(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"pict" => {
-                        pict = Some(body::parse_pict(reader, buf)?);
+                        pict = Some(vml::parse_pict(reader, buf)?);
                     }
                     _ => {
                         xml::warn_unsupported_element("numPicBullet", local);

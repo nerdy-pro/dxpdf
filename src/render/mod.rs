@@ -131,7 +131,7 @@ pub fn layout_document(
     let mut pending_continuation: Option<layout::section::ContinuationState> = None;
 
     // Phase 1: layout all sections to determine total page count.
-    for section in &resolved.sections {
+    for (section_idx, section) in resolved.sections.iter().enumerate() {
         // §17.6.2: if header/footer content extends past the body margin,
         // push the body start down (or bottom up) so content doesn't overlap.
         let config = adjust_margins_for_header_footer(
@@ -176,17 +176,9 @@ pub fn layout_document(
         // Check if the NEXT section is continuous — if so, save the last page
         // as continuation state instead of appending it.
         // (Peek ahead by checking the section index.)
-        let next_is_continuous = {
-            let section_idx = resolved
-                .sections
-                .iter()
-                .position(|s| std::ptr::eq(s, section));
-            section_idx
-                .and_then(|i| resolved.sections.get(i + 1))
-                .is_some_and(|next| {
-                    next.properties.section_type == Some(crate::model::SectionType::Continuous)
-                })
-        };
+        let next_is_continuous = resolved.sections.get(section_idx + 1).is_some_and(|next| {
+            next.properties.section_type == Some(crate::model::SectionType::Continuous)
+        });
 
         if next_is_continuous && !pages.is_empty() {
             let last_page = pages.pop().unwrap();

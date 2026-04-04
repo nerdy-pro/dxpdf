@@ -9,6 +9,7 @@ pub mod properties;
 pub mod settings;
 pub mod styles;
 pub mod theme;
+pub mod vml;
 
 use std::collections::HashMap;
 

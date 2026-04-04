@@ -1,6 +1,8 @@
 use crate::render::dimension::Pt;
 
-use super::{CellLayoutEntry, MeasuredTable, TableCellInput, TableRowInput, VerticalMergeState};
+use super::types::{
+    CellLayoutEntry, MeasuredTable, TableCellInput, TableRowInput, VerticalMergeState,
+};
 
 /// A group of rows that must stay together during page splitting.
 pub(super) struct RowGroup {

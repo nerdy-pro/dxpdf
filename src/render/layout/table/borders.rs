@@ -1,10 +1,10 @@
 use crate::render::dimension::Pt;
 use crate::render::geometry::PtRect;
 
-use super::{
-    CellBorderOverride, DrawCommand, TableBorderConfig, TableBorderLine, TableBorderStyle,
-    TableCellInput,
+use super::types::{
+    CellBorderOverride, TableBorderConfig, TableBorderLine, TableBorderStyle, TableCellInput,
 };
+use crate::render::layout::draw_command::DrawCommand;
 
 /// Resolved borders for one cell edge.
 pub(super) struct CellBorders {
@@ -247,13 +247,15 @@ fn emit_border_rect(
 mod tests {
     use crate::render::dimension::Pt;
     use crate::render::geometry::{PtEdgeInsets, PtSize};
+    use crate::render::layout::draw_command::DrawCommand;
     use crate::render::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::render::layout::paragraph::ParagraphStyle;
     use crate::render::layout::section::LayoutBlock;
     use crate::render::layout::table::{
-        layout_table, BoxConstraints, CellVAlign, DrawCommand, TableBorderConfig, TableBorderLine,
-        TableBorderStyle, TableCellInput, TableRowInput,
+        layout_table, CellVAlign, TableBorderConfig, TableBorderLine, TableBorderStyle,
+        TableCellInput, TableRowInput,
     };
+    use crate::render::layout::BoxConstraints;
     use crate::render::resolve::color::RgbColor;
     use std::rc::Rc;
 
