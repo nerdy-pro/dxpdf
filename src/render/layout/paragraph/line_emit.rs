@@ -419,8 +419,17 @@ pub(super) fn split_oversized_fragments(
     max_width: Pt,
     measure: MeasureTextFn<'_>,
 ) -> Vec<Fragment> {
+    // Fast path: check if any fragment actually needs splitting.
+    let needs_split = fragments.iter().any(|f| {
+        matches!(f, Fragment::Text { width, text, .. } if *width > max_width && text.len() > 1)
+    });
+    if !needs_split {
+        return fragments.to_vec();
+    }
+
     let mut result = Vec::with_capacity(fragments.len());
-    let mut any_split = false;
+    // Reusable buffer for single-character measurement (avoids per-char heap allocation).
+    let mut ch_buf = [0u8; 4];
     for frag in fragments {
         match frag {
             Fragment::Text {
@@ -435,17 +444,17 @@ pub(super) fn split_oversized_fragments(
                 baseline_offset,
                 ..
             } if *width > max_width && text.chars().count() > 1 => {
-                any_split = true;
+                let char_count = text.chars().count();
+                let per_char_fallback = *width / char_count as f32;
                 for ch in text.chars() {
-                    let ch_str = ch.to_string();
+                    let ch_str = ch.encode_utf8(&mut ch_buf);
                     let (w, char_metrics) = if let Some(m) = measure {
-                        m(&ch_str, font)
+                        m(ch_str, font)
                     } else {
-                        let per_char = *width / text.chars().count() as f32;
-                        (per_char, *metrics)
+                        (per_char_fallback, *metrics)
                     };
                     result.push(Fragment::Text {
-                        text: Rc::from(ch_str.as_str()),
+                        text: Rc::from(&*ch_str),
                         font: font.clone(),
                         color: *color,
                         shading: *shading,
@@ -461,9 +470,6 @@ pub(super) fn split_oversized_fragments(
             }
             _ => result.push(frag.clone()),
         }
-    }
-    if !any_split {
-        return fragments.to_vec();
     }
     result
 }
