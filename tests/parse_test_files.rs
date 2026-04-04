@@ -509,7 +509,7 @@ fn table_cells_have_content() {
 fn media_bytes_are_nonempty() {
     for name in ALL_FILES {
         let doc = load(name);
-        for (rel_id, data) in &doc.media {
+        for (rel_id, (data, _fmt)) in &doc.media {
             assert!(!data.is_empty(), "{name}: media {rel_id:?} has empty bytes");
         }
     }

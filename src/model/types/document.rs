@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::content::Block;
+use super::drawing::ImageFormat;
 use super::identifiers::{NoteId, RelId};
 use super::numbering::NumberingDefinitions;
 use super::section::SectionProperties;
@@ -28,8 +29,8 @@ pub struct Document {
     pub footers: HashMap<RelId, Vec<Block>>,
     pub footnotes: HashMap<NoteId, Vec<Block>>,
     pub endnotes: HashMap<NoteId, Vec<Block>>,
-    /// Embedded media (images) — raw bytes keyed by relationship ID.
-    pub media: HashMap<RelId, Vec<u8>>,
+    /// Embedded media (images) — raw bytes and detected format, keyed by relationship ID.
+    pub media: HashMap<RelId, (Vec<u8>, ImageFormat)>,
     /// §17.8.3: embedded fonts — de-obfuscated font data.
     pub embedded_fonts: Vec<EmbeddedFont>,
 }

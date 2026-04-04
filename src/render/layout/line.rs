@@ -57,6 +57,7 @@ pub fn fit_lines_with_first(
         let frag = &fragments[i];
 
         // Explicit line break — emit current line including the break fragment.
+        // LineBreak height already includes leading (from default_line_height).
         if frag.is_line_break() {
             line_height = line_height.max(frag.height());
             line_text_height = line_text_height.max(frag.height());
@@ -123,11 +124,17 @@ pub fn fit_lines_with_first(
         // paragraph renderer will clip/overflow as needed.
         line_width = new_width;
         line_height = line_height.max(frag.height());
-        if !matches!(frag, Fragment::Image { .. }) {
-            line_text_height = line_text_height.max(frag.height());
-        }
-        if let Fragment::Text { metrics, .. } = frag {
-            line_ascent = line_ascent.max(metrics.ascent);
+        // §17.3.1.33: text_height is the Auto line spacing base — use
+        // line_height() (includes leading) for text, glyph height for tabs.
+        match frag {
+            Fragment::Text { metrics, .. } => {
+                line_text_height = line_text_height.max(metrics.line_height());
+                line_ascent = line_ascent.max(metrics.ascent);
+            }
+            Fragment::Image { .. } => {} // images don't contribute to text_height
+            _ => {
+                line_text_height = line_text_height.max(frag.height());
+            }
         }
 
         // Track break opportunity: only after fragments that end with whitespace,
@@ -187,11 +194,15 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasu
     for frag in &fragments[start..end] {
         m.width += frag.width();
         m.height = m.height.max(frag.height());
-        if !matches!(frag, Fragment::Image { .. }) {
-            m.text_height = m.text_height.max(frag.height());
-        }
-        if let Fragment::Text { metrics, .. } = frag {
-            m.ascent = m.ascent.max(metrics.ascent);
+        match frag {
+            Fragment::Text { metrics, .. } => {
+                m.text_height = m.text_height.max(metrics.line_height());
+                m.ascent = m.ascent.max(metrics.ascent);
+            }
+            Fragment::Image { .. } => {}
+            _ => {
+                m.text_height = m.text_height.max(frag.height());
+            }
         }
     }
     m
@@ -223,6 +234,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(10.0),
                 descent: Pt::new(4.0),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             shading: None,
@@ -350,6 +362,7 @@ mod tests {
                 metrics: TextMetrics {
                     ascent: Pt::new(9.0),
                     descent: Pt::new(3.0),
+                    leading: Pt::ZERO,
                 },
                 hyperlink_url: None,
                 shading: None,
@@ -375,6 +388,7 @@ mod tests {
                 metrics: TextMetrics {
                     ascent: Pt::new(22.0),
                     descent: Pt::new(6.0),
+                    leading: Pt::ZERO,
                 },
                 hyperlink_url: None,
                 shading: None,

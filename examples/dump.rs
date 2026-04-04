@@ -118,17 +118,8 @@ fn dump(name: &str, doc: &Document) {
     // Media
     if !doc.media.is_empty() {
         println!("║ Media: {} entries", doc.media.len());
-        for (rel_id, data) in &doc.media {
-            let kind = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-                "PNG"
-            } else if data.starts_with(&[0xFF, 0xD8]) {
-                "JPEG"
-            } else if data.starts_with(b"GIF") {
-                "GIF"
-            } else {
-                "unknown"
-            };
-            println!("║   {} → {} bytes ({})", rel_id.as_str(), data.len(), kind);
+        for (rel_id, (data, fmt)) in &doc.media {
+            println!("║   {} → {} bytes ({:?})", rel_id.as_str(), data.len(), fmt);
         }
     }
 

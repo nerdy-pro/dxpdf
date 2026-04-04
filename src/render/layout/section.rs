@@ -3,8 +3,6 @@
 //! Takes measured blocks (paragraphs with fragments, tables with cells),
 //! fits them into pages respecting page size and margins, handles page breaks.
 
-use std::rc::Rc;
-
 use super::draw_command::{DrawCommand, LayoutedPage};
 use super::float::ActiveFloat;
 use super::fragment::Fragment;
@@ -15,6 +13,7 @@ use super::BoxConstraints;
 use crate::model::StyleId;
 use crate::render::dimension::Pt;
 use crate::render::geometry::{PtRect, PtSize};
+use crate::render::resolve::images::MediaEntry;
 
 // ── Footnote rendering constants ─────────────────────────────────────────────
 
@@ -53,7 +52,7 @@ pub struct TableFloatInfo {
 /// A floating (anchor) image to be positioned absolutely on the page.
 #[derive(Clone)]
 pub struct FloatingImage {
-    pub image_data: Rc<[u8]>,
+    pub image_data: MediaEntry,
     pub size: PtSize,
     /// Resolved absolute x position on the page.
     pub x: Pt,
@@ -64,6 +63,8 @@ pub struct FloatingImage {
     /// §20.4.2.3 distL/distR: horizontal distance from surrounding text.
     pub dist_left: Pt,
     pub dist_right: Pt,
+    /// §20.4.2.3 @behindDoc: image is painted behind document text.
+    pub behind_doc: bool,
 }
 
 /// Vertical position for a floating image.
@@ -1073,6 +1074,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(height * 0.7),
                 descent: Pt::new(height * 0.3),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             shading: None,

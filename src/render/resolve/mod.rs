@@ -17,6 +17,7 @@ use crate::model::{
     RunProperties, StyleId, Theme,
 };
 
+use self::images::MediaEntry;
 use self::numbering::ResolvedNumberingLevel;
 use self::sections::ResolvedSection;
 use self::styles::ResolvedStyle;
@@ -34,8 +35,8 @@ pub struct ResolvedDocument {
     pub numbering: HashMap<NumId, Vec<ResolvedNumberingLevel>>,
     /// All unique font families referenced in the document.
     pub font_families: Vec<String>,
-    /// Embedded media (images) — raw bytes keyed by relationship ID.
-    pub media: HashMap<RelId, Rc<[u8]>>,
+    /// Embedded media (images) — shared bytes with detected format, keyed by relationship ID.
+    pub media: HashMap<RelId, MediaEntry>,
     /// §17.9.21: picture bullet definitions keyed by numPicBulletId.
     pub pic_bullets: HashMap<NumPicBulletId, NumPicBullet>,
     /// Theme (for color resolution during paint).
@@ -78,7 +79,15 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         media: doc
             .media
             .iter()
-            .map(|(k, v)| (k.clone(), Rc::from(v.as_slice())))
+            .map(|(k, (bytes, fmt))| {
+                (
+                    k.clone(),
+                    MediaEntry {
+                        data: Rc::from(bytes.as_slice()),
+                        format: *fmt,
+                    },
+                )
+            })
             .collect(),
         pic_bullets: doc.numbering.pic_bullets.clone(),
         doc_defaults_paragraph: doc.styles.doc_defaults_paragraph.clone(),
@@ -251,14 +260,17 @@ mod tests {
     #[test]
     fn resolve_preserves_media() {
         let mut doc = empty_doc();
-        doc.media.insert(RelId::new("rId1"), vec![0xFF, 0xD8, 0xFF]);
+        use crate::model::ImageFormat;
+        doc.media.insert(
+            RelId::new("rId1"),
+            (vec![0xFF, 0xD8, 0xFF], ImageFormat::Jpeg),
+        );
 
         let resolved = resolve(&doc);
         assert!(resolved.media.contains_key(&RelId::new("rId1")));
-        assert_eq!(
-            &*resolved.media[&RelId::new("rId1")],
-            &[0xFF_u8, 0xD8, 0xFF][..]
-        );
+        let entry = &resolved.media[&RelId::new("rId1")];
+        assert_eq!(&*entry.data, &[0xFF_u8, 0xD8, 0xFF][..]);
+        assert_eq!(entry.format, ImageFormat::Jpeg);
     }
 
     #[test]

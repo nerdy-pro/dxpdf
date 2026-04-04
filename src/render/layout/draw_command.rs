@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::render::dimension::Pt;
 use crate::render::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::render::resolve::color::RgbColor;
+use crate::render::resolve::images::MediaEntry;
 
 /// A positioned drawing command — absolute page coordinates.
 #[derive(Debug, Clone)]
@@ -31,7 +32,7 @@ pub enum DrawCommand {
     },
     Image {
         rect: PtRect,
-        image_data: Rc<[u8]>,
+        image_data: MediaEntry,
     },
     Rect {
         rect: PtRect,

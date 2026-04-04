@@ -92,7 +92,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
     for rel in doc_rels.filter_by_type(&RelationshipType::Image) {
         let media_path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.take_part(&media_path) {
-            media.insert(rel.id.clone(), data);
+            let fmt = ImageFormat::detect(&rel.target, &data);
+            media.insert(rel.id.clone(), (data, fmt));
         }
     }
 
@@ -106,7 +107,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
             for rel in num_rels.filter_by_type(&RelationshipType::Image) {
                 let img_path = zip::resolve_target(num_dir, &rel.target);
                 if let Some(data) = package.take_part(&img_path) {
-                    media.insert(rel.id.clone(), data);
+                    let fmt = ImageFormat::detect(&rel.target, &data);
+                    media.insert(rel.id.clone(), (data, fmt));
                 }
             }
         }
@@ -155,7 +157,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
                 for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                     let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
                     if let Some(img_data) = package.take_part(&img_path) {
-                        media.insert(img_rel.id.clone(), img_data);
+                        let fmt = ImageFormat::detect(&img_rel.target, &img_data);
+                        media.insert(img_rel.id.clone(), (img_data, fmt));
                     }
                 }
             }
@@ -174,7 +177,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
                 for img_rel in hf_rels.filter_by_type(&RelationshipType::Image) {
                     let img_path = zip::resolve_target(zip::part_directory(&path), &img_rel.target);
                     if let Some(img_data) = package.take_part(&img_path) {
-                        media.insert(img_rel.id.clone(), img_data);
+                        let fmt = ImageFormat::detect(&img_rel.target, &img_data);
+                        media.insert(img_rel.id.clone(), (img_data, fmt));
                     }
                 }
             }

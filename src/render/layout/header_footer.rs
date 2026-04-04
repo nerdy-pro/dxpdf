@@ -96,20 +96,36 @@ fn render_header(
 
     let result = stack_blocks(&hf.blocks, content_width, default_line_height, None);
 
-    let mut header_cmds: Vec<DrawCommand> = result
-        .commands
-        .into_iter()
-        .map(|mut cmd| {
-            cmd.shift(offset_x, offset_y);
-            cmd
-        })
-        .collect();
+    let mut header_cmds: Vec<DrawCommand> = Vec::new();
 
-    // Render floating images from the header (page-relative positions).
-    for fi in &hf.floating_images {
+    // §20.4.2.3 @behindDoc=true: paint behind text — emit before text commands.
+    for fi in hf.floating_images.iter().filter(|fi| fi.behind_doc) {
         let img_y = match fi.y {
             super::section::FloatingImageY::Absolute(y) => y,
-            super::section::FloatingImageY::RelativeToParagraph(offset) => offset_y + offset,
+            super::section::FloatingImageY::RelativeToParagraph(off) => offset_y + off,
+        };
+        header_cmds.push(DrawCommand::Image {
+            rect: crate::render::geometry::PtRect::from_xywh(
+                fi.x,
+                img_y,
+                fi.size.width,
+                fi.size.height,
+            ),
+            image_data: fi.image_data.clone(),
+        });
+    }
+
+    // Text / table commands.
+    for mut cmd in result.commands {
+        cmd.shift(offset_x, offset_y);
+        header_cmds.push(cmd);
+    }
+
+    // §20.4.2.3 @behindDoc=false: paint in front of text — emit after text commands.
+    for fi in hf.floating_images.iter().filter(|fi| !fi.behind_doc) {
+        let img_y = match fi.y {
+            super::section::FloatingImageY::Absolute(y) => y,
+            super::section::FloatingImageY::RelativeToParagraph(off) => offset_y + off,
         };
         header_cmds.push(DrawCommand::Image {
             rect: crate::render::geometry::PtRect::from_xywh(
@@ -142,16 +158,34 @@ fn render_footer(
     let result = stack_blocks(&hf.blocks, content_width, default_line_height, None);
 
     let footer_y = config.page_size.height - config.footer_margin - result.height;
+
+    // §20.4.2.3 @behindDoc=true: paint behind text.
+    for fi in hf.floating_images.iter().filter(|fi| fi.behind_doc) {
+        let img_y = match fi.y {
+            super::section::FloatingImageY::Absolute(y) => y,
+            super::section::FloatingImageY::RelativeToParagraph(off) => footer_y + off,
+        };
+        page.commands.push(DrawCommand::Image {
+            rect: crate::render::geometry::PtRect::from_xywh(
+                fi.x,
+                img_y,
+                fi.size.width,
+                fi.size.height,
+            ),
+            image_data: fi.image_data.clone(),
+        });
+    }
+
     for mut cmd in result.commands {
         cmd.shift(config.margins.left, footer_y);
         page.commands.push(cmd);
     }
 
-    // Render floating images from the footer.
-    for fi in &hf.floating_images {
+    // §20.4.2.3 @behindDoc=false: paint in front of text.
+    for fi in hf.floating_images.iter().filter(|fi| !fi.behind_doc) {
         let img_y = match fi.y {
             super::section::FloatingImageY::Absolute(y) => y,
-            super::section::FloatingImageY::RelativeToParagraph(offset) => footer_y + offset,
+            super::section::FloatingImageY::RelativeToParagraph(off) => footer_y + off,
         };
         page.commands.push(DrawCommand::Image {
             rect: crate::render::geometry::PtRect::from_xywh(
@@ -211,6 +245,7 @@ mod tests {
             metrics: TextMetrics {
                 ascent: Pt::new(10.0),
                 descent: Pt::new(4.0),
+                leading: Pt::ZERO,
             },
             hyperlink_url: None,
             baseline_offset: Pt::ZERO,
