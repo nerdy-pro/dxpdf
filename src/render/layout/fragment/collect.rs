@@ -10,7 +10,7 @@ use super::{
     SUBSCRIPT_HEIGHT_OFFSET_RATIO, SUPERSCRIPT_ASCENT_OFFSET_RATIO, SUPERSCRIPT_FONT_SIZE_RATIO,
     to_roman_lower,
 };
-use super::text::{emit_text_fragments, resolve_highlight_color};
+use super::text::{emit_text_fragments, resolve_highlight_color, TextRunStyle};
 
 /// §17.16.4.1: context for evaluating dynamic fields (PAGE, NUMPAGES).
 #[derive(Clone, Copy, Default)]
@@ -73,35 +73,44 @@ where
     }
 }
 
+/// Invariant context threaded through all recursive `collect_fragments` calls.
+pub struct FragmentCtx<'a> {
+    pub default_family: &'a str,
+    pub default_size: Pt,
+    pub default_color: RgbColor,
+    pub resolved_styles: Option<
+        &'a std::collections::HashMap<
+            crate::model::StyleId,
+            crate::render::resolve::styles::ResolvedStyle,
+        >,
+    >,
+    pub paragraph_run_defaults: Option<&'a RunProperties>,
+    pub theme: Option<&'a crate::model::Theme>,
+}
+
 /// Walk inline content and collect fragments.
 /// `measure_text` is a callback that measures text width/height/ascent for a given font.
 /// `resolved_styles` is used to look up character styles (w:rStyle) on text runs.
 ///
 /// Returns fragments suitable for the line-fitting algorithm.
-#[allow(clippy::too_many_arguments)]
 pub fn collect_fragments<F>(
     inlines: &[Inline],
-    default_family: &str,
-    default_size: Pt,
-    default_color: RgbColor,
+    ctx: &FragmentCtx<'_>,
     hyperlink_url: Option<&str>,
     measure_text: &F,
-    resolved_styles: Option<
-        &std::collections::HashMap<
-            crate::model::StyleId,
-            crate::render::resolve::styles::ResolvedStyle,
-        >,
-    >,
-    // §17.3.1: paragraph style's run properties, merged as base for all runs.
-    paragraph_run_defaults: Option<&RunProperties>,
     footnote_counter: &mut u32,
     endnote_counter: &mut u32,
     field_ctx: FieldContext,
-    theme: Option<&crate::model::Theme>,
 ) -> Vec<Fragment>
 where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics), // (width, metrics)
 {
+    let default_family = ctx.default_family;
+    let default_size = ctx.default_size;
+    let default_color = ctx.default_color;
+    let resolved_styles = ctx.resolved_styles;
+    let paragraph_run_defaults = ctx.paragraph_run_defaults;
+    let theme = ctx.theme;
     let mut fragments = Vec::new();
     let mut field_depth: i32 = 0; // tracks nested complex field state
     let mut field_instr = String::new(); // accumulated instruction text for current complex field
@@ -202,18 +211,16 @@ where
 
                 // §17.16.19: if a field substitution is pending, use the
                 // substituted text with this TextRun's resolved formatting.
+                let text_style = TextRunStyle { color, shading, border, baseline_offset };
                 if field_sub_pending.is_some() {
                     let sub = field_sub_pending.take().unwrap();
                     field_sub_emitted = true;
                     emit_text_fragments(
                         &sub,
                         &font,
-                        color,
-                        shading,
-                        border,
+                        &text_style,
                         hyperlink_url,
                         measure_text,
-                        baseline_offset,
                         &mut fragments,
                     );
                 } else {
@@ -223,12 +230,9 @@ where
                                 emit_text_fragments(
                                     text,
                                     &font,
-                                    color,
-                                    shading,
-                                    border,
+                                    &text_style,
                                     hyperlink_url,
                                     measure_text,
-                                    baseline_offset,
                                     &mut fragments,
                                 );
                             }
@@ -279,17 +283,12 @@ where
                 };
                 let mut sub = collect_fragments(
                     &link.content,
-                    default_family,
-                    default_size,
-                    default_color,
+                    ctx,
                     url,
                     measure_text,
-                    resolved_styles,
-                    paragraph_run_defaults,
                     footnote_counter,
                     endnote_counter,
                     field_ctx,
-                    theme,
                 );
                 fragments.append(&mut sub);
             }
@@ -307,17 +306,12 @@ where
                 } else {
                     let mut sub = collect_fragments(
                         &field.content,
-                        default_family,
-                        default_size,
-                        default_color,
+                        ctx,
                         hyperlink_url,
                         measure_text,
-                        resolved_styles,
-                        paragraph_run_defaults,
                         footnote_counter,
                         endnote_counter,
                         field_ctx,
-                        theme,
                     );
                     fragments.append(&mut sub);
                 }
@@ -367,17 +361,12 @@ where
                 if let Some(ref fallback) = ac.fallback {
                     let mut sub = collect_fragments(
                         fallback,
-                        default_family,
-                        default_size,
-                        default_color,
+                        ctx,
                         hyperlink_url,
                         measure_text,
-                        resolved_styles,
-                        paragraph_run_defaults,
                         footnote_counter,
                         endnote_counter,
                         field_ctx,
-                        theme,
                     );
                     fragments.append(&mut sub);
                 }
@@ -492,20 +481,22 @@ where
                     if let Some(ref text_box) = shape.text_box {
                         for block in &text_box.content {
                             if let Block::Paragraph(p) = block {
-                                let para_run_defaults = p.mark_run_properties.as_ref();
-                                let mut sub = collect_fragments(
-                                    &p.content,
+                                let pict_ctx = FragmentCtx {
                                     default_family,
                                     default_size,
                                     default_color,
+                                    resolved_styles,
+                                    paragraph_run_defaults: p.mark_run_properties.as_ref(),
+                                    theme,
+                                };
+                                let mut sub = collect_fragments(
+                                    &p.content,
+                                    &pict_ctx,
                                     hyperlink_url,
                                     measure_text,
-                                    resolved_styles,
-                                    para_run_defaults,
                                     footnote_counter,
                                     endnote_counter,
                                     field_ctx,
-                                    theme,
                                 );
                                 fragments.append(&mut sub);
                             }
@@ -536,6 +527,17 @@ mod tests {
         )
     }
 
+    fn default_ctx(size: f32) -> FragmentCtx<'static> {
+        FragmentCtx {
+            default_family: "Default",
+            default_size: Pt::new(size),
+            default_color: RgbColor::BLACK,
+            resolved_styles: None,
+            paragraph_run_defaults: None,
+            theme: None,
+        }
+    }
+
     fn text_run(text: &str) -> Inline {
         Inline::TextRun(Box::new(TextRun {
             style_id: None,
@@ -564,19 +566,15 @@ mod tests {
     #[test]
     fn single_text_run() {
         let inlines = vec![text_run("hello")];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -587,19 +585,15 @@ mod tests {
     #[test]
     fn text_run_uses_run_font() {
         let inlines = vec![text_run_with_font("hi", "Arial", 24)];
+        let ctx = default_ctx(10.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(10.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         if let Fragment::Text { font, .. } = &frags[0] {
@@ -618,19 +612,15 @@ mod tests {
             content: vec![RunElement::Tab],
             rsids: RevisionIds::default(),
         }))];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -645,19 +635,15 @@ mod tests {
             content: vec![RunElement::LineBreak(BreakKind::TextWrapping)],
             rsids: RevisionIds::default(),
         }))];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -670,19 +656,15 @@ mod tests {
             target: HyperlinkTarget::External(RelId::new("rId1")),
             content: vec![text_run("click me")],
         })];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 2, "split into 'click ' and 'me'");
@@ -721,19 +703,15 @@ mod tests {
                 fld_lock: None,
             }),
         ];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         // Should only have the "3" result, not "PAGE"
@@ -758,19 +736,15 @@ mod tests {
             Inline::EndnoteRefMark,
             // LastRenderedPageBreak is now inside RunElement, not Inline
         ];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         // BookmarkStart produces a Bookmark fragment, text run produces a Text fragment.
@@ -792,19 +766,15 @@ mod tests {
             }],
             fallback: Some(vec![text_run("fallback")]),
         })];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -821,19 +791,15 @@ mod tests {
             content: vec![RunElement::Text(String::new())],
             rsids: RevisionIds::default(),
         }))];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
         assert!(frags.is_empty());
     }
@@ -844,19 +810,15 @@ mod tests {
             font: "Wingdings".into(),
             char_code: 0x46, // 'F'
         })];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -874,19 +836,15 @@ mod tests {
             },
             content: vec![text_run("5")],
         })];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 1);
@@ -898,19 +856,15 @@ mod tests {
     #[test]
     fn multi_word_text_run_splits_into_fragments() {
         let inlines = vec![text_run("hello world foo")];
+        let ctx = default_ctx(12.0);
         let frags = collect_fragments(
             &inlines,
-            "Default",
-            Pt::new(12.0),
-            RgbColor::BLACK,
+            &ctx,
             None,
             &dummy_measure,
-            None,
-            None,
             &mut 0,
             &mut 0,
             FieldContext::default(),
-            None,
         );
 
         assert_eq!(frags.len(), 3);

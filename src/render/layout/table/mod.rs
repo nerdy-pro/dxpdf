@@ -338,23 +338,30 @@ fn measure_table_rows(
     }
 }
 
+/// Layered command buffers for table rendering: shading, content, borders.
+struct TableCommandBuffers<'a> {
+    commands: &'a mut Vec<DrawCommand>,
+    content_commands: &'a mut Vec<DrawCommand>,
+    border_commands: &'a mut Vec<DrawCommand>,
+}
+
 /// Emit draw commands for a range of measured rows.
 ///
 /// `top_border_override`: if `Some`, the first row in the range gets this border
 /// as its top edge. Used for page-split tables where the measured top borders were
 /// suppressed (adjacent table collapse) or resolved away (conflict resolution),
 /// but the continuation slice still needs a visible top boundary.
-#[allow(clippy::too_many_arguments)]
 fn emit_table_rows(
     measured: &MeasuredTable,
     rows: &[TableRowInput],
     row_range: std::ops::Range<usize>,
     cursor_y: &mut Pt,
-    commands: &mut Vec<DrawCommand>,
-    content_commands: &mut Vec<DrawCommand>,
-    border_commands: &mut Vec<DrawCommand>,
+    bufs: &mut TableCommandBuffers<'_>,
     top_border_override: Option<TableBorderLine>,
 ) {
+    let commands = &mut *bufs.commands;
+    let content_commands = &mut *bufs.content_commands;
+    let border_commands = &mut *bufs.border_commands;
     let num_rows = measured.rows.len();
     let range_start = row_range.start;
     for row_idx in row_range {
@@ -465,9 +472,11 @@ pub fn layout_table(
         rows,
         0..measured.rows.len(),
         &mut cursor_y,
-        &mut commands,
-        &mut content_commands,
-        &mut border_commands,
+        &mut TableCommandBuffers {
+            commands: &mut commands,
+            content_commands: &mut content_commands,
+            border_commands: &mut border_commands,
+        },
         None,
     );
 
@@ -489,13 +498,22 @@ pub struct TableSlice {
     pub size: PtSize,
 }
 
+/// Pagination parameters for `layout_table_paginated`.
+pub struct TablePaginationConfig {
+    /// Available height on the first page.
+    pub available_height: Pt,
+    /// Full page height for continuation pages.
+    pub page_height: Pt,
+    /// Whether to suppress the first row's top border (adjacent table collapse).
+    pub suppress_first_row_top: bool,
+}
+
 /// Lay out a table with page splitting at row boundaries.
 ///
 /// §17.4.49: header rows repeat on each continuation page.
 /// §17.4.1: `cantSplit` rows are kept together (moved to next page if needed).
 ///
 /// Returns one `TableSlice` per page.
-#[allow(clippy::too_many_arguments)]
 pub fn layout_table_paginated(
     rows: &[TableRowInput],
     col_widths: &[Pt],
@@ -503,10 +521,11 @@ pub fn layout_table_paginated(
     default_line_height: Pt,
     borders: Option<&TableBorderConfig>,
     measure_text: super::paragraph::MeasureTextFn<'_>,
-    available_height: Pt,
-    page_height: Pt,
-    suppress_first_row_top: bool,
+    pagination: &TablePaginationConfig,
 ) -> Vec<TableSlice> {
+    let available_height = pagination.available_height;
+    let page_height = pagination.page_height;
+    let suppress_first_row_top = pagination.suppress_first_row_top;
     if rows.is_empty() || col_widths.is_empty() {
         return vec![TableSlice {
             commands: Vec::new(),
@@ -607,9 +626,11 @@ pub fn layout_table_paginated(
                     rows,
                     range.clone(),
                     &mut cursor_y,
-                    &mut commands,
-                    &mut content_commands,
-                    &mut border_commands,
+                    &mut TableCommandBuffers {
+                        commands: &mut commands,
+                        content_commands: &mut content_commands,
+                        border_commands: &mut border_commands,
+                    },
                     top_override,
                 );
             }

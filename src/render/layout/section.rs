@@ -10,7 +10,7 @@ use super::float::ActiveFloat;
 use super::fragment::Fragment;
 use super::page::PageConfig;
 use super::paragraph::{layout_paragraph, ParagraphBorderStyle, ParagraphStyle};
-use super::table::{layout_table, TableRowInput};
+use super::table::{layout_table, TablePaginationConfig, TableRowInput};
 use super::BoxConstraints;
 use crate::model::StyleId;
 use crate::render::dimension::Pt;
@@ -726,9 +726,11 @@ pub fn layout_section(
                     ctx.default_line_height,
                     border_config.as_ref(),
                     ctx.measure_text,
-                    available,
-                    config.content_height(),
-                    suppress_top,
+                    &TablePaginationConfig {
+                        available_height: available,
+                        page_height: config.content_height(),
+                        suppress_first_row_top: suppress_top,
+                    },
                 );
 
                 // §17.4.28 / §17.4.51: compute table x position.

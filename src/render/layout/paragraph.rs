@@ -236,15 +236,14 @@ pub fn layout_paragraph(
     // Per-line float adjustment: fit one line at a time, computing the available
     // width for each line based on its absolute y position on the page.
     // Each line stores its (float_left, float_right) adjustments for rendering.
-    let line_placements = compute_line_placements(
-        fragments,
-        style,
+    let params = LineLayoutParams {
         content_width,
         first_line_adjustment,
         drop_cap_indent,
         drop_cap_lines,
         default_line_height,
-    );
+    };
+    let line_placements = compute_line_placements(fragments, style, &params);
 
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
@@ -320,11 +319,7 @@ pub fn layout_paragraph(
         &line_placements,
         fragments,
         style,
-        content_width,
-        first_line_adjustment,
-        drop_cap_indent,
-        drop_cap_lines,
-        default_line_height,
+        &params,
         measure_text,
     );
 
@@ -353,22 +348,32 @@ pub fn layout_paragraph(
 
 // ── Extracted helpers ─────────────────────────────────────────────────────────
 
+/// Shared layout parameters threaded through `compute_line_placements` and
+/// `emit_line_commands`.
+struct LineLayoutParams {
+    content_width: Pt,
+    first_line_adjustment: Pt,
+    drop_cap_indent: Pt,
+    drop_cap_lines: usize,
+    default_line_height: Pt,
+}
+
 /// Fit all fragments into lines, computing per-line float adjustments when
 /// active floats are present.
 ///
 /// When `style.page_floats` is non-empty each line is fitted individually so
 /// the available width can vary depending on the line's absolute y position.
 /// When there are no floats a single call to `fit_lines_with_first` is used.
-#[allow(clippy::too_many_arguments)]
 fn compute_line_placements(
     fragments: &[Fragment],
     style: &ParagraphStyle,
-    content_width: Pt,
-    first_line_adjustment: Pt,
-    drop_cap_indent: Pt,
-    drop_cap_lines: usize,
-    default_line_height: Pt,
+    params: &LineLayoutParams,
 ) -> Vec<LinePlacement> {
+    let content_width = params.content_width;
+    let first_line_adjustment = params.first_line_adjustment;
+    let drop_cap_indent = params.drop_cap_indent;
+    let drop_cap_lines = params.drop_cap_lines;
+    let default_line_height = params.default_line_height;
     if style.page_floats.is_empty() {
         // No floats — use standard line fitting.
         let first_line_width = (content_width - first_line_adjustment).max(Pt::ZERO);
@@ -461,20 +466,20 @@ fn compute_line_placements(
 ///
 /// Handles per-fragment shading, run borders, text, hyperlinks, underlines,
 /// images, tab stops (with leaders), bookmarks, and drop-cap indent offsets.
-#[allow(clippy::too_many_arguments)]
 fn emit_line_commands(
     commands: &mut Vec<DrawCommand>,
     cursor_y: &mut Pt,
     line_placements: &[LinePlacement],
     fragments: &[Fragment],
     style: &ParagraphStyle,
-    content_width: Pt,
-    first_line_adjustment: Pt,
-    drop_cap_indent: Pt,
-    drop_cap_lines: usize,
-    default_line_height: Pt,
+    params: &LineLayoutParams,
     measure_text: MeasureTextFn<'_>,
 ) {
+    let content_width = params.content_width;
+    let first_line_adjustment = params.first_line_adjustment;
+    let drop_cap_indent = params.drop_cap_indent;
+    let drop_cap_lines = params.drop_cap_lines;
+    let default_line_height = params.default_line_height;
     for (line_idx, lp) in line_placements.iter().enumerate() {
         let line = &lp.line;
 
@@ -717,7 +722,6 @@ fn emit_line_commands(
                             x,
                             new_x,
                             *cursor_y + line.ascent,
-                            line_height,
                             measure_text,
                             default_line_height,
                         );
@@ -930,14 +934,12 @@ fn find_next_tab_stop(
 }
 
 /// Emit leader characters (dots, hyphens, etc.) between tab start and end.
-#[allow(clippy::too_many_arguments)]
 fn emit_tab_leader(
     commands: &mut Vec<DrawCommand>,
     leader: crate::model::TabLeader,
     x_start: Pt,
     x_end: Pt,
     baseline_y: Pt,
-    _line_height: Pt,
     measure_text: MeasureTextFn<'_>,
     default_line_height: Pt,
 ) {

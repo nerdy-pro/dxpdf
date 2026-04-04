@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::model::{self, Block, Paragraph};
 use crate::render::dimension::Pt;
-use crate::render::layout::fragment::{collect_fragments, FontProps, Fragment};
+use crate::render::layout::fragment::{collect_fragments, FontProps, Fragment, FragmentCtx};
 use crate::render::layout::paragraph::DropCapInfo;
 use crate::render::layout::section::LayoutBlock;
 use crate::render::resolve::color::{resolve_color, ColorContext, RgbColor};
@@ -554,19 +554,22 @@ pub(super) fn build_fragments(
             ctx.measurer.measure(text, font)
         };
 
-    let mut fragments = collect_fragments(
-        &para.content,
-        &default_family,
+    let frag_ctx = FragmentCtx {
+        default_family: &default_family,
         default_size,
         default_color,
+        resolved_styles: Some(&ctx.resolved.styles),
+        paragraph_run_defaults: Some(&run_defaults),
+        theme: ctx.resolved.theme.as_ref(),
+    };
+    let mut fragments = collect_fragments(
+        &para.content,
+        &frag_ctx,
         None,
         &measure,
-        Some(&ctx.resolved.styles),
-        Some(&run_defaults),
         &mut state.footnote_counter,
         &mut state.endnote_counter,
         state.field_ctx,
-        ctx.resolved.theme.as_ref(),
     );
     populate_image_data(&mut fragments, ctx.media());
     populate_underline_metrics(&mut fragments, ctx.measurer);

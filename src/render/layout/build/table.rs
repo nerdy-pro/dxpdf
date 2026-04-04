@@ -7,7 +7,7 @@ use crate::render::layout::table::{
     compute_column_widths, CellBorderConfig, CellBorderOverride, TableCellInput, TableRowInput,
 };
 use crate::render::resolve::color::{resolve_color, ColorContext};
-use crate::render::resolve::conditional::{resolve_cell_conditional, CellConditionalFormatting};
+use crate::render::resolve::conditional::{resolve_cell_conditional, CellConditionalFormatting, CellGridPosition};
 use crate::render::resolve::styles::ResolvedStyle;
 
 use super::block::build_paragraph_block;
@@ -138,14 +138,16 @@ pub(super) fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext, st
                 .enumerate()
                 .map(|(col_idx, cell)| {
                     let cond = resolve_cell_conditional(
-                        row_idx,
-                        col_idx,
-                        num_rows,
-                        num_cells,
+                        &CellGridPosition {
+                            row_idx,
+                            col_idx,
+                            num_rows,
+                            num_cols: num_cells,
+                            row_band_size,
+                            col_band_size,
+                        },
                         tbl_look,
                         style_overrides,
-                        row_band_size,
-                        col_band_size,
                     );
 
                     // Compute available width for nested content.

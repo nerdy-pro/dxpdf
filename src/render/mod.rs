@@ -22,7 +22,7 @@ use crate::model::Document;
 use crate::model::Block;
 use crate::render::layout::build::{build_section_blocks, default_line_height, BuildContext, BuildState};
 use crate::render::layout::draw_command::LayoutedPage;
-use crate::render::layout::header_footer::render_headers_footers;
+use crate::render::layout::header_footer::{HeaderFooterBlocks, PageRange, render_headers_footers};
 use crate::render::layout::page::PageConfig;
 use crate::render::layout::section::layout_section;
 use crate::render::resolve::ResolvedDocument;
@@ -211,13 +211,17 @@ pub fn layout_document(
         render_headers_footers(
             &mut all_pages[info.page_range.clone()],
             &info.config,
-            info.header_blocks,
-            info.footer_blocks,
+            &HeaderFooterBlocks {
+                header: info.header_blocks,
+                footer: info.footer_blocks,
+            },
             &ctx,
             &mut state,
             dlh,
-            info.page_range.start,
-            total_pages,
+            &PageRange {
+                page_base: info.page_range.start,
+                total_pages,
+            },
         );
     }
 

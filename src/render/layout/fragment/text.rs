@@ -65,6 +65,14 @@ pub(super) fn resolve_highlight_color(hl: crate::model::HighlightColor) -> RgbCo
     }
 }
 
+/// Resolved styling for a single text fragment.
+pub(super) struct TextRunStyle {
+    pub color: RgbColor,
+    pub shading: Option<RgbColor>,
+    pub border: Option<FragmentBorder>,
+    pub baseline_offset: Pt,
+}
+
 /// Split text into word-level chunks for line breaking.
 /// Whitespace is kept attached to the preceding word: "hello world" → ["hello ", "world"].
 /// This allows the line fitter to break between fragments at word boundaries.
@@ -104,16 +112,12 @@ fn split_into_words(text: &str) -> Vec<&str> {
 }
 
 /// Split text into word-level fragments and push to the output vec.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_text_fragments<F>(
     text: &str,
     font: &FontProps,
-    color: RgbColor,
-    shading: Option<RgbColor>,
-    border: Option<FragmentBorder>,
+    style: &TextRunStyle,
     hyperlink_url: Option<&str>,
     measure_text: &F,
-    baseline_offset: Pt,
     fragments: &mut Vec<Fragment>,
 ) where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
@@ -140,14 +144,14 @@ pub(super) fn emit_text_fragments<F>(
         fragments.push(Fragment::Text {
             text: Rc::from(word),
             font: font.clone(),
-            color,
-            shading,
-            border,
+            color: style.color,
+            shading: style.shading,
+            border: style.border,
             width: w,
             trimmed_width: tw,
             metrics: m,
             hyperlink_url: hyperlink_url.map(String::from),
-            baseline_offset,
+            baseline_offset: style.baseline_offset,
             text_offset: Pt::ZERO,
         });
     }
