@@ -332,14 +332,10 @@ fn adjust_margins_for_header_footer(
             .floating_images
             .iter()
             .filter(|fi| fi.wrap_top_and_bottom)
-            .map(|fi| {
-                match fi.y {
-                    layout::section::FloatingImageY::Absolute(y) => {
-                        config.page_size.height - y
-                    }
-                    layout::section::FloatingImageY::RelativeToParagraph(off) => {
-                        config.footer_margin + off + fi.size.height
-                    }
+            .map(|fi| match fi.y {
+                layout::section::FloatingImageY::Absolute(y) => config.page_size.height - y,
+                layout::section::FloatingImageY::RelativeToParagraph(off) => {
+                    config.footer_margin + off + fi.size.height
                 }
             })
             .fold(dimension::Pt::ZERO, |a, b| a.max(b));

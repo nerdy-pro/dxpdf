@@ -530,9 +530,7 @@ fn emit_line_commands(
             match style.alignment {
                 Alignment::Center => remaining * 0.5,
                 Alignment::End => remaining,
-                Alignment::Both
-                    if !line.has_break && line_idx < line_placements.len() - 1 =>
-                {
+                Alignment::Both if !line.has_break && line_idx < line_placements.len() - 1 => {
                     Pt::ZERO
                 }
                 _ => Pt::ZERO,
