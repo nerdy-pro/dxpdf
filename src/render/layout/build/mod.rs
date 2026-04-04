@@ -6,6 +6,8 @@
 
 pub(super) mod block;
 pub(super) mod convert;
+pub(super) mod floating;
+pub(super) mod list_label;
 pub(super) mod table;
 
 use std::collections::HashMap;
@@ -21,13 +23,11 @@ use crate::render::resolve::images::MediaEntry;
 use crate::render::resolve::sections::ResolvedSection;
 use crate::render::resolve::ResolvedDocument;
 
-use block::{
-    build_block, build_fragments, collect_endnotes, extract_floating_images,
-    find_vml_absolute_position,
-};
+use block::{build_block, build_fragments, collect_endnotes};
 use convert::{
     doc_font_family, doc_font_size, paragraph_style_from_props, resolve_paragraph_defaults,
 };
+use floating::{extract_floating_images, find_vml_absolute_position};
 use table::build_table;
 
 /// §17.8.3.2: OOXML fallback font when no theme or doc defaults specify one.
