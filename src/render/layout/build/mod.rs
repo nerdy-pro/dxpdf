@@ -9,7 +9,6 @@ pub(super) mod convert;
 pub(super) mod table;
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use crate::model::{self, Block};
 use crate::render::dimension::Pt;
@@ -18,6 +17,7 @@ use crate::render::layout::measurer::TextMeasurer;
 use crate::render::layout::page::PageConfig;
 use crate::render::layout::paragraph::ParagraphStyle;
 use crate::render::layout::section::LayoutBlock;
+use crate::render::resolve::images::MediaEntry;
 use crate::render::resolve::sections::ResolvedSection;
 use crate::render::resolve::ResolvedDocument;
 
@@ -44,7 +44,7 @@ pub struct BuildContext<'a> {
 }
 
 impl BuildContext<'_> {
-    pub(super) fn media(&self) -> &HashMap<model::RelId, Rc<[u8]>> {
+    pub(super) fn media(&self) -> &HashMap<model::RelId, MediaEntry> {
         &self.resolved.media
     }
 }

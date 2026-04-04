@@ -102,7 +102,7 @@ pub(super) fn build_paragraph_block(
                     let label_frag = Fragment::Image {
                         size,
                         rel_id: rel_id.as_str().to_string(),
-                        image_data: Some(Rc::clone(image_bytes)),
+                        image_data: Some(image_bytes.clone()),
                     };
                     Some((label_frag, size.height))
                 });
@@ -647,7 +647,7 @@ pub(super) fn extract_floating_images(
             };
 
             let image_data = match ctx.resolved.media.get(rel_id) {
-                Some(bytes) => Rc::clone(bytes),
+                Some(entry) => entry.clone(),
                 None => {
                     eprintln!(
                         "Anchor image: rel_id={} NOT FOUND in media (media has {} entries)",

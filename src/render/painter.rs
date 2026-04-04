@@ -9,6 +9,7 @@ use crate::render::dimension::Pt;
 use crate::render::error::RenderError;
 use crate::render::fonts;
 use crate::render::layout::draw_command::{DrawCommand, LayoutedPage};
+use crate::render::resolve::images::MediaEntry;
 use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 
 /// Target resolution for embedded images (pixels per inch).
@@ -121,15 +122,24 @@ fn render_page(
                 canvas.draw_line(start, end, &paint);
             }
             DrawCommand::Image { rect, image_data } => {
-                let ptr_key: *const [u8] = Rc::as_ptr(image_data);
+                let ptr_key: *const [u8] = Rc::as_ptr(&image_data.data);
                 if let Some(image) = image_cache.get(&ptr_key) {
                     canvas.draw_image_rect(image, None, to_rect(*rect), &Paint::default());
                 } else {
-                    let skia_data = Data::new_copy(image_data);
-                    if let Some(image) = skia_safe::Image::from_encoded(skia_data) {
+                    let decoded = decode_image(image_data);
+                    if let Some(image) = decoded {
                         let image = downsample_if_oversize(image, *rect);
                         canvas.draw_image_rect(&image, None, to_rect(*rect), &Paint::default());
                         image_cache.insert(ptr_key, image);
+                    } else {
+                        let magic = &image_data.data[..image_data.data.len().min(4)];
+                        log::warn!(
+                            "[paint] unsupported image format {:?} — could not decode {} bytes \
+                             (magic: {:02x?}); image will be blank",
+                            image_data.format,
+                            image_data.data.len(),
+                            magic,
+                        );
                     }
                 }
             }
@@ -158,6 +168,18 @@ fn render_page(
                 canvas.annotate_named_destination(to_point(*position), &name_data);
             }
         }
+    }
+}
+
+/// Decode a `MediaEntry` to a Skia image, dispatching on format.
+///
+/// Returns `None` if the format is unsupported or the data is malformed.
+fn decode_image(entry: &MediaEntry) -> Option<skia_safe::Image> {
+    use crate::model::ImageFormat;
+    match entry.format {
+        ImageFormat::Emf => crate::render::emf::decode_emf_bitmap(&entry.data),
+        // All other formats are handled by Skia's built-in decoder.
+        _ => skia_safe::Image::from_encoded(Data::new_copy(&entry.data)),
     }
 }
 

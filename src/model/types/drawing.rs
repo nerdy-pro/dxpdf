@@ -6,6 +6,62 @@ use crate::model::geometry::{EdgeInsets, Offset, Size};
 use super::content::Block;
 use super::identifiers::RelId;
 
+/// Format of an embedded image, detected from the OOXML relationship target path
+/// (§M.1.1) with magic-byte fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    Bmp,
+    Tiff,
+    /// Windows Enhanced Metafile (MS-EMF).
+    Emf,
+    /// Windows Metafile (MS-WMF).
+    Wmf,
+    Svg,
+    WebP,
+    Unknown,
+}
+
+impl ImageFormat {
+    /// Detect format from the relationship target file extension (OOXML §M.1.1)
+    /// with magic-byte fallback for unrecognised or missing extensions.
+    pub fn detect(target_path: &str, data: &[u8]) -> Self {
+        let ext = target_path
+            .rsplit('.')
+            .next()
+            .map(|e| e.to_ascii_lowercase());
+        match ext.as_deref() {
+            Some("png") => Self::Png,
+            Some("jpg" | "jpeg") => Self::Jpeg,
+            Some("gif") => Self::Gif,
+            Some("bmp") => Self::Bmp,
+            Some("tif" | "tiff") => Self::Tiff,
+            Some("emf") => Self::Emf,
+            Some("wmf") => Self::Wmf,
+            Some("svg" | "svgz") => Self::Svg,
+            Some("webp") => Self::WebP,
+            _ => Self::detect_by_magic(data),
+        }
+    }
+
+    /// Magic-byte detection for the most common raster formats.
+    fn detect_by_magic(data: &[u8]) -> Self {
+        match data {
+            [0x89, b'P', b'N', b'G', ..] => Self::Png,
+            [0xFF, 0xD8, 0xFF, ..] => Self::Jpeg,
+            [b'G', b'I', b'F', b'8', ..] => Self::Gif,
+            [b'B', b'M', ..] => Self::Bmp,
+            // EMF header: RecordType=0x00000001 followed by size, then EMF signature 0x464D4520
+            [0x01, 0x00, 0x00, 0x00, _, _, _, _, 0x20, 0x45, 0x4D, 0x46, ..] => Self::Emf,
+            [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Self::WebP,
+            [b'<', ..] => Self::Svg,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Image {
     /// §20.4.2.7: drawing extent.

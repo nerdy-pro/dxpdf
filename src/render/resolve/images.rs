@@ -1,6 +1,18 @@
 //! Image extraction — navigate DrawingML hierarchy to extract image RelIds.
 
-use crate::model::{GraphicContent, Image, RelId};
+use std::rc::Rc;
+
+use crate::model::{GraphicContent, Image, ImageFormat, RelId};
+
+/// Resolved image entry — shared bytes with detected format.
+///
+/// All references to the same image share one `Rc<[u8]>` allocation,
+/// enabling pointer-based deduplication in the painter cache.
+#[derive(Clone, Debug)]
+pub struct MediaEntry {
+    pub data: Rc<[u8]>,
+    pub format: ImageFormat,
+}
 
 /// Extract the embedded image relationship ID from a DrawingML Image.
 /// Navigates: Image → graphic → Picture → blip_fill → blip → embed.

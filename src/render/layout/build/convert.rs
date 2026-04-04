@@ -15,6 +15,7 @@ use crate::render::layout::table::{
 };
 use crate::render::resolve::color::{resolve_color, ColorContext, RgbColor};
 use crate::render::resolve::fonts::effective_font;
+use crate::render::resolve::images::MediaEntry;
 use crate::render::resolve::properties::merge_paragraph_properties;
 use crate::render::resolve::ResolvedDocument;
 
@@ -353,7 +354,7 @@ pub(super) fn split_oversized_fragments(
 /// Populate image data on Fragment::Image fragments from the media map.
 pub(super) fn populate_image_data(
     fragments: &mut [Fragment],
-    media: &HashMap<model::RelId, Rc<[u8]>>,
+    media: &HashMap<model::RelId, MediaEntry>,
 ) {
     for frag in fragments.iter_mut() {
         if let Fragment::Image {
@@ -361,8 +362,8 @@ pub(super) fn populate_image_data(
         } = frag
         {
             if image_data.is_none() {
-                if let Some(bytes) = media.get(&model::RelId::new(rel_id.as_str())) {
-                    *image_data = Some(Rc::clone(bytes));
+                if let Some(entry) = media.get(&model::RelId::new(rel_id.as_str())) {
+                    *image_data = Some(entry.clone());
                 }
             }
         }

@@ -9,6 +9,7 @@
 //! 3. **Paint** — emit draw commands to Skia PDF canvas (requires `skia-safe`)
 
 pub mod dimension;
+pub(crate) mod emf;
 pub mod error;
 pub mod fonts;
 pub mod geometry;

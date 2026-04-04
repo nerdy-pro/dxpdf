@@ -9,6 +9,7 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::PtSize;
 use crate::render::resolve::color::RgbColor;
 use crate::render::resolve::fonts::effective_font;
+use crate::render::resolve::images::MediaEntry;
 
 mod collect;
 mod text;
@@ -96,7 +97,7 @@ pub enum Fragment {
     Image {
         size: PtSize,
         rel_id: String,
-        image_data: Option<std::rc::Rc<[u8]>>,
+        image_data: Option<MediaEntry>,
     },
     Tab {
         line_height: Pt,
