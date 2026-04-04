@@ -79,7 +79,10 @@ pub struct FontSlot {
 impl FontSlot {
     /// Construct a slot from a plain font-family name with no theme reference.
     pub fn from_name(name: impl Into<String>) -> Self {
-        FontSlot { explicit: Some(name.into()), theme: None }
+        FontSlot {
+            explicit: Some(name.into()),
+            theme: None,
+        }
     }
 
     /// Merge `base` into `self`: fill any `None` field from `base`.

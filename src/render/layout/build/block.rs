@@ -296,8 +296,11 @@ pub(super) fn build_paragraph_block(
     }
 
     // §17.3.1.11: detect drop cap paragraph.
-    if let Some(model::FrameKind::DropCap { style, lines, h_space: dc_h_space }) =
-        merged_props.frame_properties
+    if let Some(model::FrameKind::DropCap {
+        style,
+        lines,
+        h_space: dc_h_space,
+    }) = merged_props.frame_properties
     {
         let drop_cap_lines = lines;
         let width: Pt = fragments.iter().map(|f| f.width()).sum();
@@ -417,7 +420,11 @@ pub(super) fn build_note_content(
     content: &[Block],
     ctx: &BuildContext,
     state: &mut BuildState,
-) -> Vec<(String, Vec<Fragment>, crate::render::layout::paragraph::ParagraphStyle)> {
+) -> Vec<(
+    String,
+    Vec<Fragment>,
+    crate::render::layout::paragraph::ParagraphStyle,
+)> {
     let mut results = Vec::new();
     for (i, block) in content.iter().enumerate() {
         if let model::Block::Paragraph(p) = block {
@@ -470,7 +477,11 @@ pub(super) fn build_note_content(
 pub(super) fn collect_endnotes(
     ctx: &BuildContext,
     state: &mut BuildState,
-    endnotes: &mut Vec<(String, Vec<Fragment>, crate::render::layout::paragraph::ParagraphStyle)>,
+    endnotes: &mut Vec<(
+        String,
+        Vec<Fragment>,
+        crate::render::layout::paragraph::ParagraphStyle,
+    )>,
 ) {
     // IDs 0 and 1 are reserved for separator and continuation separator.
     let mut en_ids: Vec<_> = ctx
@@ -483,7 +494,13 @@ pub(super) fn collect_endnotes(
     for (i, note_id) in en_ids.iter().enumerate() {
         let display = crate::render::layout::fragment::to_roman_lower((i + 1) as u32);
         if let Some(content) = ctx.resolved.endnotes.get(note_id) {
-            endnotes.extend(build_note_content(note_id.value(), &display, content, ctx, state));
+            endnotes.extend(build_note_content(
+                note_id.value(),
+                &display,
+                content,
+                ctx,
+                state,
+            ));
         }
     }
 }

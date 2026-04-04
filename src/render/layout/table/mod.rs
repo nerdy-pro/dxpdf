@@ -17,7 +17,10 @@ mod grid;
 
 pub use grid::compute_column_widths;
 
-use borders::{border_width, emit_cell_borders, resolve_cell_effective_borders, resolve_border_conflict, CellBorders};
+use borders::{
+    border_width, emit_cell_borders, resolve_border_conflict, resolve_cell_effective_borders,
+    CellBorders,
+};
 use grid::{build_row_groups, cell_index_at_grid_col, expand_rows_for_vmerge, is_vmerge_continue};
 
 /// §17.4.81: row height rule.

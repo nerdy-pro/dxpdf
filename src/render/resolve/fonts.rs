@@ -73,7 +73,10 @@ pub fn collect_font_families(doc: &Document) -> Vec<String> {
 /// By the time this is called, theme references will have been resolved
 /// into the `explicit` field by [`resolve_font_set_themes`].
 pub fn effective_font(fonts: &FontSet) -> Option<&str> {
-    fonts.ascii.explicit.as_deref()
+    fonts
+        .ascii
+        .explicit
+        .as_deref()
         .or(fonts.high_ansi.explicit.as_deref())
         .or(fonts.east_asian.explicit.as_deref())
         .or(fonts.complex_script.explicit.as_deref())
@@ -126,7 +129,12 @@ fn add_nonempty(set: &mut HashSet<String>, s: &str) {
 }
 
 fn collect_from_fontset(set: &mut HashSet<String>, fonts: &FontSet) {
-    for slot in [&fonts.ascii, &fonts.high_ansi, &fonts.east_asian, &fonts.complex_script] {
+    for slot in [
+        &fonts.ascii,
+        &fonts.high_ansi,
+        &fonts.east_asian,
+        &fonts.complex_script,
+    ] {
         if let Some(ref f) = slot.explicit {
             add_nonempty(set, f);
         }

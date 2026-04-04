@@ -7,7 +7,9 @@ use crate::render::layout::table::{
     compute_column_widths, CellBorderConfig, CellBorderOverride, TableCellInput, TableRowInput,
 };
 use crate::render::resolve::color::{resolve_color, ColorContext};
-use crate::render::resolve::conditional::{resolve_cell_conditional, CellConditionalFormatting, CellGridPosition};
+use crate::render::resolve::conditional::{
+    resolve_cell_conditional, CellConditionalFormatting, CellGridPosition,
+};
 use crate::render::resolve::styles::ResolvedStyle;
 
 use super::block::build_paragraph_block;
@@ -31,7 +33,12 @@ pub(super) struct BuiltTable {
 
 /// Recursively build a table: resolve styles, conditional formatting, and
 /// recurse into each cell's content blocks.
-pub(super) fn build_table(t: &Table, available_width: Pt, ctx: &BuildContext, state: &mut BuildState) -> BuiltTable {
+pub(super) fn build_table(
+    t: &Table,
+    available_width: Pt,
+    ctx: &BuildContext,
+    state: &mut BuildState,
+) -> BuiltTable {
     // §17.4.14: grid column widths.
     let num_cols = if t.grid.is_empty() {
         t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)
@@ -358,7 +365,8 @@ fn build_table_cell(
     let content_width = (inner_width - border_inset_h).max(Pt::ZERO);
 
     // Recurse into cell content blocks.
-    let cell_blocks = build_cell_blocks(&cell.content, table_style, cond, content_width, ctx, state);
+    let cell_blocks =
+        build_cell_blocks(&cell.content, table_style, cond, content_width, ctx, state);
 
     TableCellInput {
         blocks: cell_blocks,
@@ -406,9 +414,14 @@ fn build_cell_blocks(
                 {
                     continue;
                 }
-                if let Some(lb) =
-                    build_paragraph_block(p, ctx, state, &mut pending_dropcap, table_style, Some(cond))
-                {
+                if let Some(lb) = build_paragraph_block(
+                    p,
+                    ctx,
+                    state,
+                    &mut pending_dropcap,
+                    table_style,
+                    Some(cond),
+                ) {
                     // Split oversized text fragments for narrow cells.
                     let lb = if let LayoutBlock::Paragraph {
                         fragments,

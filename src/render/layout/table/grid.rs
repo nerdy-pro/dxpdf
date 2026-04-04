@@ -1,6 +1,6 @@
 use crate::render::dimension::Pt;
 
-use super::{MeasuredTable, TableCellInput, TableRowInput, VerticalMergeState, CellLayoutEntry};
+use super::{CellLayoutEntry, MeasuredTable, TableCellInput, TableRowInput, VerticalMergeState};
 
 /// A group of rows that must stay together during page splitting.
 pub(super) struct RowGroup {
@@ -129,10 +129,7 @@ pub(super) fn is_vmerge_continue(row: &TableRowInput, grid_col: usize) -> bool {
 }
 
 /// Return the cell index (not grid column) for the cell covering `grid_col`.
-pub(super) fn cell_index_at_grid_col(
-    row: &TableRowInput,
-    target_grid_col: usize,
-) -> Option<usize> {
+pub(super) fn cell_index_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<usize> {
     let mut col = 0;
     for (i, cell) in row.cells.iter().enumerate() {
         let span = cell.grid_span.max(1) as usize;

@@ -84,7 +84,9 @@ pub fn parse_paragraph_properties(
                     b"spacing" => {
                         props.spacing = Some(parse_paragraph_spacing(e)?);
                     }
-                    b"jc" => { props.alignment = opt_val(e, parse_alignment)?; }
+                    b"jc" => {
+                        props.alignment = opt_val(e, parse_alignment)?;
+                    }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
@@ -117,19 +119,45 @@ pub fn parse_paragraph_properties(
                         sect_props = Some(sp);
                     }
                     // Empty-only: no children
-                    b"keepNext"           => { props.keep_next           = toggle_attr(e)?; }
-                    b"keepLines"          => { props.keep_lines          = toggle_attr(e)?; }
-                    b"widowControl"       => { props.widow_control       = toggle_attr(e)?; }
-                    b"pageBreakBefore"    => { props.page_break_before   = toggle_attr(e)?; }
-                    b"suppressAutoHyphens"=> { props.suppress_auto_hyphens = toggle_attr(e)?; }
-                    b"contextualSpacing"  => { props.contextual_spacing  = toggle_attr(e)?; }
-                    b"bidi"               => { props.bidi                = toggle_attr(e)?; }
-                    b"wordWrap"           => { props.word_wrap           = toggle_attr(e)?; }
-                    b"textAlignment"      => { props.text_alignment      = opt_val(e, parse_text_alignment)?; }
-                    b"cnfStyle"           => { props.cnf_style           = Some(parse_cnf_style(e)?); }
-                    b"framePr"            => { props.frame_properties    = Some(parse_frame_kind(e)?); }
-                    b"autoSpaceDE"        => { props.auto_space_de       = toggle_attr(e)?; }
-                    b"autoSpaceDN"        => { props.auto_space_dn       = toggle_attr(e)?; }
+                    b"keepNext" => {
+                        props.keep_next = toggle_attr(e)?;
+                    }
+                    b"keepLines" => {
+                        props.keep_lines = toggle_attr(e)?;
+                    }
+                    b"widowControl" => {
+                        props.widow_control = toggle_attr(e)?;
+                    }
+                    b"pageBreakBefore" => {
+                        props.page_break_before = toggle_attr(e)?;
+                    }
+                    b"suppressAutoHyphens" => {
+                        props.suppress_auto_hyphens = toggle_attr(e)?;
+                    }
+                    b"contextualSpacing" => {
+                        props.contextual_spacing = toggle_attr(e)?;
+                    }
+                    b"bidi" => {
+                        props.bidi = toggle_attr(e)?;
+                    }
+                    b"wordWrap" => {
+                        props.word_wrap = toggle_attr(e)?;
+                    }
+                    b"textAlignment" => {
+                        props.text_alignment = opt_val(e, parse_text_alignment)?;
+                    }
+                    b"cnfStyle" => {
+                        props.cnf_style = Some(parse_cnf_style(e)?);
+                    }
+                    b"framePr" => {
+                        props.frame_properties = Some(parse_frame_kind(e)?);
+                    }
+                    b"autoSpaceDE" => {
+                        props.auto_space_de = toggle_attr(e)?;
+                    }
+                    b"autoSpaceDN" => {
+                        props.auto_space_dn = toggle_attr(e)?;
+                    }
                     // §17.6.18: an empty sectPr is valid (inherits all defaults).
                     b"sectPr" => {
                         let rsids = parse_section_rsids(e)?;
@@ -183,9 +211,13 @@ pub fn parse_run_properties(
                         }
                     }
                     b"szCs" => {}
-                    b"b"   => { props.bold   = toggle_attr(e)?; }
+                    b"b" => {
+                        props.bold = toggle_attr(e)?;
+                    }
                     b"bCs" => {}
-                    b"i"   => { props.italic = toggle_attr(e)?; }
+                    b"i" => {
+                        props.italic = toggle_attr(e)?;
+                    }
                     b"iCs" => {}
                     b"u" => {
                         if let Some(val) = xml::optional_attr(e, b"val")? {
@@ -217,7 +249,9 @@ pub fn parse_run_properties(
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
-                    b"vertAlign" => { props.vertical_align = opt_val(e, parse_vertical_align)?; }
+                    b"vertAlign" => {
+                        props.vertical_align = opt_val(e, parse_vertical_align)?;
+                    }
                     b"spacing" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             props.spacing = Some(Dimension::new(val));
@@ -228,11 +262,21 @@ pub fn parse_run_properties(
                             props.kerning = Some(Dimension::new(val));
                         }
                     }
-                    b"caps"      => { props.all_caps   = toggle_attr(e)?; }
-                    b"smallCaps" => { props.small_caps = toggle_attr(e)?; }
-                    b"vanish"    => { props.vanish     = toggle_attr(e)?; }
-                    b"noProof"   => { props.no_proof   = toggle_attr(e)?; }
-                    b"webHidden" => { props.web_hidden = toggle_attr(e)?; }
+                    b"caps" => {
+                        props.all_caps = toggle_attr(e)?;
+                    }
+                    b"smallCaps" => {
+                        props.small_caps = toggle_attr(e)?;
+                    }
+                    b"vanish" => {
+                        props.vanish = toggle_attr(e)?;
+                    }
+                    b"noProof" => {
+                        props.no_proof = toggle_attr(e)?;
+                    }
+                    b"webHidden" => {
+                        props.web_hidden = toggle_attr(e)?;
+                    }
                     b"position" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
                             props.position = Some(Dimension::new(val));
@@ -245,11 +289,21 @@ pub fn parse_run_properties(
                             bidi: xml::optional_attr(e, b"bidi")?,
                         });
                     }
-                    b"rtl"     => { props.rtl     = toggle_attr(e)?; }
-                    b"emboss"  => { props.emboss  = toggle_attr(e)?; }
-                    b"imprint" => { props.imprint = toggle_attr(e)?; }
-                    b"outline" => { props.outline = toggle_attr(e)?; }
-                    b"shadow"  => { props.shadow  = toggle_attr(e)?; }
+                    b"rtl" => {
+                        props.rtl = toggle_attr(e)?;
+                    }
+                    b"emboss" => {
+                        props.emboss = toggle_attr(e)?;
+                    }
+                    b"imprint" => {
+                        props.imprint = toggle_attr(e)?;
+                    }
+                    b"outline" => {
+                        props.outline = toggle_attr(e)?;
+                    }
+                    b"shadow" => {
+                        props.shadow = toggle_attr(e)?;
+                    }
                     b"bdr" => {
                         props.border = Some(parse_border(e)?);
                     }
@@ -296,20 +350,42 @@ pub fn parse_table_properties(
                             Some(parse_edge_insets_twips(reader, buf, b"tblCellMar")?);
                     }
                     // attrs-only — valid as Start or Empty
-                    b"jc"               => { props.alignment          = opt_val(e, parse_alignment)?; }
-                    b"tblW"             => { props.width               = Some(parse_table_measure(e)?); }
-                    b"tblLayout"        => { props.layout              = opt_val(e, |v| Ok(match v {
-                        "fixed" => TableLayout::Fixed,
-                        "autofit" | "auto" => TableLayout::Auto,
-                        other => return Err(invalid_value("tblLayout/val", other)),
-                    }))?; }
-                    b"tblInd"           => { props.indent              = Some(parse_table_measure(e)?); }
-                    b"tblCellSpacing"   => { props.cell_spacing        = Some(parse_table_measure(e)?); }
-                    b"tblLook"          => { props.look                = Some(parse_table_look(e)?); }
-                    b"tblStyleRowBandSize" => { props.style_row_band_size = xml::optional_attr_u32(e, b"val")?; }
-                    b"tblStyleColBandSize" => { props.style_col_band_size = xml::optional_attr_u32(e, b"val")?; }
-                    b"tblpPr"           => { props.positioning         = Some(parse_table_positioning(e)?); }
-                    b"tblOverlap"       => { props.overlap             = opt_val(e, parse_table_overlap)?; }
+                    b"jc" => {
+                        props.alignment = opt_val(e, parse_alignment)?;
+                    }
+                    b"tblW" => {
+                        props.width = Some(parse_table_measure(e)?);
+                    }
+                    b"tblLayout" => {
+                        props.layout = opt_val(e, |v| {
+                            Ok(match v {
+                                "fixed" => TableLayout::Fixed,
+                                "autofit" | "auto" => TableLayout::Auto,
+                                other => return Err(invalid_value("tblLayout/val", other)),
+                            })
+                        })?;
+                    }
+                    b"tblInd" => {
+                        props.indent = Some(parse_table_measure(e)?);
+                    }
+                    b"tblCellSpacing" => {
+                        props.cell_spacing = Some(parse_table_measure(e)?);
+                    }
+                    b"tblLook" => {
+                        props.look = Some(parse_table_look(e)?);
+                    }
+                    b"tblStyleRowBandSize" => {
+                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblStyleColBandSize" => {
+                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
+                    }
+                    b"tblpPr" => {
+                        props.positioning = Some(parse_table_positioning(e)?);
+                    }
+                    b"tblOverlap" => {
+                        props.overlap = opt_val(e, parse_table_overlap)?;
+                    }
                     _ => xml::warn_unsupported_element("tblPr", local),
                 }
             }
@@ -348,9 +424,15 @@ pub fn parse_table_row_properties(
                             });
                         }
                     }
-                    b"tblHeader" => { props.is_header   = toggle_attr(e)?; }
-                    b"cantSplit"  => { props.cant_split  = toggle_attr(e)?; }
-                    b"jc"         => { props.justification = opt_val(e, parse_alignment)?; }
+                    b"tblHeader" => {
+                        props.is_header = toggle_attr(e)?;
+                    }
+                    b"cantSplit" => {
+                        props.cant_split = toggle_attr(e)?;
+                    }
+                    b"jc" => {
+                        props.justification = opt_val(e, parse_alignment)?;
+                    }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
@@ -404,7 +486,9 @@ pub fn parse_table_cell_properties(
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
                     }
-                    b"vAlign" => { props.vertical_align = opt_val(e, parse_cell_vertical_align)?; }
+                    b"vAlign" => {
+                        props.vertical_align = opt_val(e, parse_cell_vertical_align)?;
+                    }
                     b"vMerge" => {
                         let is_restart = xml::optional_attr(e, b"val")?
                             .map(|v| v == "restart")
@@ -418,8 +502,12 @@ pub fn parse_table_cell_properties(
                     b"gridSpan" => {
                         props.grid_span = xml::optional_attr_u32(e, b"val")?;
                     }
-                    b"textDirection" => { props.text_direction = opt_val(e, parse_text_direction)?; }
-                    b"noWrap"        => { props.no_wrap        = toggle_attr(e)?; }
+                    b"textDirection" => {
+                        props.text_direction = opt_val(e, parse_text_direction)?;
+                    }
+                    b"noWrap" => {
+                        props.no_wrap = toggle_attr(e)?;
+                    }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
@@ -537,9 +625,15 @@ pub fn parse_section_properties(
                                 .map(Dimension::new),
                         });
                     }
-                    b"titlePg"   => { props.title_page      = toggle_attr(e)?; }
-                    b"pgNumType" => { props.page_number_type = Some(parse_page_number_type(e)?); }
-                    b"type"      => { props.section_type     = opt_val(e, parse_section_type)?; }
+                    b"titlePg" => {
+                        props.title_page = toggle_attr(e)?;
+                    }
+                    b"pgNumType" => {
+                        props.page_number_type = Some(parse_page_number_type(e)?);
+                    }
+                    b"type" => {
+                        props.section_type = opt_val(e, parse_section_type)?;
+                    }
                     _ => xml::warn_unsupported_element("sectPr", local),
                 }
             }
@@ -1208,24 +1302,24 @@ fn parse_cnf_style(e: &BytesStart<'_>) -> Result<CnfStyle> {
 
     // Individual attributes take precedence over the `val` string.
     let pairs: &[(&[u8], CnfStyle)] = &[
-        (b"firstRow",            CnfStyle::FIRST_ROW),
-        (b"lastRow",             CnfStyle::LAST_ROW),
-        (b"firstColumn",         CnfStyle::FIRST_COLUMN),
-        (b"lastColumn",          CnfStyle::LAST_COLUMN),
-        (b"oddVBand",            CnfStyle::ODD_V_BAND),
-        (b"evenVBand",           CnfStyle::EVEN_V_BAND),
-        (b"oddHBand",            CnfStyle::ODD_H_BAND),
-        (b"evenHBand",           CnfStyle::EVEN_H_BAND),
+        (b"firstRow", CnfStyle::FIRST_ROW),
+        (b"lastRow", CnfStyle::LAST_ROW),
+        (b"firstColumn", CnfStyle::FIRST_COLUMN),
+        (b"lastColumn", CnfStyle::LAST_COLUMN),
+        (b"oddVBand", CnfStyle::ODD_V_BAND),
+        (b"evenVBand", CnfStyle::EVEN_V_BAND),
+        (b"oddHBand", CnfStyle::ODD_H_BAND),
+        (b"evenHBand", CnfStyle::EVEN_H_BAND),
         (b"firstRowFirstColumn", CnfStyle::FIRST_ROW_FIRST_COLUMN),
-        (b"firstRowLastColumn",  CnfStyle::FIRST_ROW_LAST_COLUMN),
-        (b"lastRowFirstColumn",  CnfStyle::LAST_ROW_FIRST_COLUMN),
-        (b"lastRowLastColumn",   CnfStyle::LAST_ROW_LAST_COLUMN),
+        (b"firstRowLastColumn", CnfStyle::FIRST_ROW_LAST_COLUMN),
+        (b"lastRowFirstColumn", CnfStyle::LAST_ROW_FIRST_COLUMN),
+        (b"lastRowLastColumn", CnfStyle::LAST_ROW_LAST_COLUMN),
     ];
     for &(attr, flag) in pairs {
         match xml::optional_attr_bool(e, attr)? {
-            Some(true)  => flags |= flag,
+            Some(true) => flags |= flag,
             Some(false) => flags &= !flag,
-            None        => {}   // absent — leave the val-seeded bit unchanged
+            None => {} // absent — leave the val-seeded bit unchanged
         }
     }
 

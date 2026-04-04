@@ -24,7 +24,9 @@ use block::{
     build_block, build_fragments, collect_endnotes, extract_floating_images,
     find_vml_absolute_position,
 };
-use convert::{doc_font_family, doc_font_size, paragraph_style_from_props, resolve_paragraph_defaults};
+use convert::{
+    doc_font_family, doc_font_size, paragraph_style_from_props, resolve_paragraph_defaults,
+};
 use table::build_table;
 
 /// §17.8.3.2: OOXML fallback font when no theme or doc defaults specify one.
@@ -61,7 +63,6 @@ pub struct BuildState {
     pub field_ctx: crate::render::layout::fragment::FieldContext,
 }
 
-
 // ── Public entry point ──────────────────────────────────────────────────────
 
 /// Built section output — layout blocks plus endnotes.
@@ -82,7 +83,15 @@ pub fn build_section_blocks(
     let blocks: Vec<LayoutBlock> = section
         .blocks
         .iter()
-        .filter_map(|block| build_block(block, config.content_width(), ctx, state, &mut pending_dropcap))
+        .filter_map(|block| {
+            build_block(
+                block,
+                config.content_width(),
+                ctx,
+                state,
+                &mut pending_dropcap,
+            )
+        })
         .collect();
 
     // Collect endnotes (rendered at document end).

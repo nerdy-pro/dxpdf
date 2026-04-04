@@ -245,7 +245,13 @@ pub fn layout_section(
     let num_cols = config.num_columns();
     let page_bottom = config.page_size.height - config.margins.bottom;
 
-    let ctx = LayoutCtx { config, measure_text, separator_indent, default_line_height, page_bottom };
+    let ctx = LayoutCtx {
+        config,
+        measure_text,
+        separator_indent,
+        default_line_height,
+        page_bottom,
+    };
     let mut state = PageLayoutState::new(config, continuation, page_bottom);
 
     // Column-aware constraints and x-offset for the current column.
@@ -312,8 +318,7 @@ pub fn layout_section(
                     && effective_style.style_id.is_some()
                     && effective_style.style_id == state.prev_style_id
                 {
-                    state.cursor_y -=
-                        state.prev_space_after + effective_style.space_before;
+                    state.cursor_y -= state.prev_space_after + effective_style.space_before;
                 } else {
                     let collapse = state.prev_space_after.min(effective_style.space_before);
                     state.cursor_y -= collapse;
@@ -410,7 +415,8 @@ pub fn layout_section(
                 // the current cursor — floats below shouldn't affect text above.
                 let mut effective_floats = state.page_floats.clone();
                 let y_threshold = state.cursor_y + effective_style.space_before;
-                let deduped: Vec<ActiveFloat> = state.current_page_abs_floats
+                let deduped: Vec<ActiveFloat> = state
+                    .current_page_abs_floats
                     .iter()
                     .filter(|af| af.page_y_start <= y_threshold)
                     .filter(|af| {
@@ -512,7 +518,8 @@ pub fn layout_section(
                 if effective_style.keep_next
                     && state.cursor_y > state.column_top
                     && block_idx + 1 < blocks.len()
-                    && num_cols <= 1 // skip for multi-column (too complex)
+                    && num_cols <= 1
+                // skip for multi-column (too complex)
                 {
                     let next_fits = match &blocks[block_idx + 1] {
                         LayoutBlock::Paragraph {
@@ -527,8 +534,7 @@ pub fn layout_section(
                             let next_constraints = col_constraints(state.current_col);
                             next_eff.page_y = next_cursor;
                             next_eff.page_x = col_x(state.current_col);
-                            next_eff.page_content_width =
-                                config.columns[state.current_col].width;
+                            next_eff.page_content_width = config.columns[state.current_col].width;
                             let next_para = layout_paragraph(
                                 next_frags,
                                 &next_constraints,
@@ -674,9 +680,7 @@ pub fn layout_section(
                             crate::model::TableAnchor::Text => {
                                 state.last_para_start_y + fi.y_offset
                             }
-                            crate::model::TableAnchor::Margin => {
-                                config.margins.top + fi.y_offset
-                            }
+                            crate::model::TableAnchor::Margin => config.margins.top + fi.y_offset,
                             crate::model::TableAnchor::Page => fi.y_offset,
                         };
                         anchor_y.max(state.cursor_y)
@@ -713,8 +717,7 @@ pub fn layout_section(
                 // §17.4.38: consecutive non-floating tables with the same style
                 // are treated as one merged table — the second table's top border
                 // is suppressed so the shared edge is drawn once.
-                let suppress_top =
-                    style_id.is_some() && *style_id == state.prev_table_style_id;
+                let suppress_top = style_id.is_some() && *style_id == state.prev_table_style_id;
 
                 // Non-floating table: paginated row-level splitting.
                 // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.

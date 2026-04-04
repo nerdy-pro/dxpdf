@@ -20,9 +20,11 @@ pub mod skia_conv;
 use crate::model::Document;
 
 use crate::model::Block;
-use crate::render::layout::build::{build_section_blocks, default_line_height, BuildContext, BuildState};
+use crate::render::layout::build::{
+    build_section_blocks, default_line_height, BuildContext, BuildState,
+};
 use crate::render::layout::draw_command::LayoutedPage;
-use crate::render::layout::header_footer::{HeaderFooterBlocks, PageRange, render_headers_footers};
+use crate::render::layout::header_footer::{render_headers_footers, HeaderFooterBlocks, PageRange};
 use crate::render::layout::page::PageConfig;
 use crate::render::layout::section::layout_section;
 use crate::render::resolve::ResolvedDocument;

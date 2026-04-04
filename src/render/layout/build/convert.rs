@@ -247,7 +247,9 @@ fn convert_model_border(b: &model::Border) -> TableBorderLine {
 }
 
 /// Convert a model cell border to a `CellBorderOverride`.
-pub(super) fn convert_cell_border_override(b: &Option<model::Border>) -> Option<CellBorderOverride> {
+pub(super) fn convert_cell_border_override(
+    b: &Option<model::Border>,
+) -> Option<CellBorderOverride> {
     b.as_ref().map(|b| {
         if b.style == model::BorderStyle::None {
             CellBorderOverride::Nil
@@ -349,7 +351,10 @@ pub(super) fn split_oversized_fragments(
 }
 
 /// Populate image data on Fragment::Image fragments from the media map.
-pub(super) fn populate_image_data(fragments: &mut [Fragment], media: &HashMap<model::RelId, Vec<u8>>) {
+pub(super) fn populate_image_data(
+    fragments: &mut [Fragment],
+    media: &HashMap<model::RelId, Vec<u8>>,
+) {
     for frag in fragments.iter_mut() {
         if let Fragment::Image {
             rel_id, image_data, ..

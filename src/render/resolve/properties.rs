@@ -20,13 +20,38 @@ pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
     target.fonts.ascii.merge_from(&base.fonts.ascii);
     target.fonts.high_ansi.merge_from(&base.fonts.high_ansi);
     target.fonts.east_asian.merge_from(&base.fonts.east_asian);
-    target.fonts.complex_script.merge_from(&base.fonts.complex_script);
+    target
+        .fonts
+        .complex_script
+        .merge_from(&base.fonts.complex_script);
 
-    merge_fields!(target, base,
-        font_size, bold, italic, underline, strike, color, highlight,
-        shading, vertical_align, spacing, kerning, all_caps, small_caps,
-        vanish, no_proof, web_hidden, rtl, emboss, imprint, outline,
-        shadow, position, lang, border,
+    merge_fields!(
+        target,
+        base,
+        font_size,
+        bold,
+        italic,
+        underline,
+        strike,
+        color,
+        highlight,
+        shading,
+        vertical_align,
+        spacing,
+        kerning,
+        all_caps,
+        small_caps,
+        vanish,
+        no_proof,
+        web_hidden,
+        rtl,
+        emboss,
+        imprint,
+        outline,
+        shadow,
+        position,
+        lang,
+        border,
     );
 }
 
@@ -59,11 +84,26 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
         (None, Some(_)) => target.spacing = base.spacing,
         _ => {}
     }
-    merge_fields!(target, base,
-        numbering, borders, shading,
-        keep_next, keep_lines, widow_control, page_break_before, suppress_auto_hyphens,
-        contextual_spacing, bidi, word_wrap, outline_level, text_alignment,
-        cnf_style, frame_properties, auto_space_de, auto_space_dn,
+    merge_fields!(
+        target,
+        base,
+        numbering,
+        borders,
+        shading,
+        keep_next,
+        keep_lines,
+        widow_control,
+        page_break_before,
+        suppress_auto_hyphens,
+        contextual_spacing,
+        bidi,
+        word_wrap,
+        outline_level,
+        text_alignment,
+        cnf_style,
+        frame_properties,
+        auto_space_de,
+        auto_space_dn,
     );
 
     // §17.3.1.38: merge tab stops at the individual-stop level.

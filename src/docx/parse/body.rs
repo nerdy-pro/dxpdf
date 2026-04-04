@@ -467,7 +467,13 @@ fn parse_run(
                         content.push(Inline::EndnoteRefMark);
                     }
                     b"fldChar" => {
-                        flush_run(&mut elements, &char_style_id, &run_props, &run_rsids, content);
+                        flush_run(
+                            &mut elements,
+                            &char_style_id,
+                            &run_props,
+                            &run_rsids,
+                            content,
+                        );
                         content.push(Inline::FieldChar(parse_fld_char(e)?));
                     }
                     _ => xml::warn_unsupported_element("run", local),

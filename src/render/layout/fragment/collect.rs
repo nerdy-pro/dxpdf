@@ -5,12 +5,11 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::PtSize;
 use crate::render::resolve::color::RgbColor;
 
-use super::{
-    font_props_from_run, Fragment, FragmentBorder, FontProps, TextMetrics,
-    SUBSCRIPT_HEIGHT_OFFSET_RATIO, SUPERSCRIPT_ASCENT_OFFSET_RATIO, SUPERSCRIPT_FONT_SIZE_RATIO,
-    to_roman_lower,
-};
 use super::text::{emit_text_fragments, resolve_highlight_color, TextRunStyle};
+use super::{
+    font_props_from_run, to_roman_lower, FontProps, Fragment, FragmentBorder, TextMetrics,
+    SUBSCRIPT_HEIGHT_OFFSET_RATIO, SUPERSCRIPT_ASCENT_OFFSET_RATIO, SUPERSCRIPT_FONT_SIZE_RATIO,
+};
 
 /// §17.16.4.1: context for evaluating dynamic fields (PAGE, NUMPAGES).
 #[derive(Clone, Copy, Default)]
@@ -211,7 +210,12 @@ where
 
                 // §17.16.19: if a field substitution is pending, use the
                 // substituted text with this TextRun's resolved formatting.
-                let text_style = TextRunStyle { color, shading, border, baseline_offset };
+                let text_style = TextRunStyle {
+                    color,
+                    shading,
+                    border,
+                    baseline_offset,
+                };
                 if field_sub_pending.is_some() {
                     let sub = field_sub_pending.take().unwrap();
                     field_sub_emitted = true;

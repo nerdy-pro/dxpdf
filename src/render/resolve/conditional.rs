@@ -364,7 +364,14 @@ mod tests {
             Some(true),
         )];
         let result = resolve_cell_conditional(
-            &CellGridPosition { row_idx: 0, col_idx: 2, num_rows: 6, num_cols: 6, row_band_size: 1, col_band_size: 1 },
+            &CellGridPosition {
+                row_idx: 0,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
             None,
             &overrides,
         );
@@ -381,7 +388,14 @@ mod tests {
             None,
         )];
         let result = resolve_cell_conditional(
-            &CellGridPosition { row_idx: 1, col_idx: 2, num_rows: 6, num_cols: 6, row_band_size: 1, col_band_size: 1 },
+            &CellGridPosition {
+                row_idx: 1,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
             None,
             &overrides,
         );
@@ -406,7 +420,14 @@ mod tests {
             make_override(TableStyleOverrideType::NwCell, Some(blue_shading()), None),
         ];
         let result = resolve_cell_conditional(
-            &CellGridPosition { row_idx: 0, col_idx: 0, num_rows: 6, num_cols: 6, row_band_size: 1, col_band_size: 1 },
+            &CellGridPosition {
+                row_idx: 0,
+                col_idx: 0,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
             None,
             &overrides,
         );
@@ -424,7 +445,14 @@ mod tests {
     #[test]
     fn no_overrides_returns_empty() {
         let result = resolve_cell_conditional(
-            &CellGridPosition { row_idx: 2, col_idx: 2, num_rows: 6, num_cols: 6, row_band_size: 1, col_band_size: 1 },
+            &CellGridPosition {
+                row_idx: 2,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
             None,
             &[],
         );

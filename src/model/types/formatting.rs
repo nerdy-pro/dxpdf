@@ -221,9 +221,16 @@ impl CnfStyle {
         ];
         s.bytes()
             .zip(flags.iter())
-            .fold(CnfStyle::empty(), |acc, (ch, &flag)| {
-                if ch == b'1' { acc | flag } else { acc }
-            })
+            .fold(
+                CnfStyle::empty(),
+                |acc, (ch, &flag)| {
+                    if ch == b'1' {
+                        acc | flag
+                    } else {
+                        acc
+                    }
+                },
+            )
     }
 }
 

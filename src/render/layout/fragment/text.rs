@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::render::dimension::Pt;
 use crate::render::resolve::color::RgbColor;
 
-use super::{Fragment, FragmentBorder, FontProps, TextMetrics};
+use super::{FontProps, Fragment, FragmentBorder, TextMetrics};
 
 /// §17.18.40 ST_HighlightColor: map highlight enum to RGB.
 /// These are the fixed palette colors defined in the OOXML spec.
