@@ -353,7 +353,7 @@ pub(super) fn split_oversized_fragments(
 /// Populate image data on Fragment::Image fragments from the media map.
 pub(super) fn populate_image_data(
     fragments: &mut [Fragment],
-    media: &HashMap<model::RelId, Vec<u8>>,
+    media: &HashMap<model::RelId, Rc<[u8]>>,
 ) {
     for frag in fragments.iter_mut() {
         if let Fragment::Image {
@@ -362,7 +362,7 @@ pub(super) fn populate_image_data(
         {
             if image_data.is_none() {
                 if let Some(bytes) = media.get(&model::RelId::new(rel_id.as_str())) {
-                    *image_data = Some(bytes.as_slice().into());
+                    *image_data = Some(Rc::clone(bytes));
                 }
             }
         }

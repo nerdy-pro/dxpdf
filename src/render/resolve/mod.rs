@@ -10,6 +10,7 @@ pub mod sections;
 pub mod styles;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::model::{
     Block, Document, NoteId, NumId, NumPicBullet, NumPicBulletId, ParagraphProperties, RelId,
@@ -34,7 +35,7 @@ pub struct ResolvedDocument {
     /// All unique font families referenced in the document.
     pub font_families: Vec<String>,
     /// Embedded media (images) — raw bytes keyed by relationship ID.
-    pub media: HashMap<RelId, Vec<u8>>,
+    pub media: HashMap<RelId, Rc<[u8]>>,
     /// §17.9.21: picture bullet definitions keyed by numPicBulletId.
     pub pic_bullets: HashMap<NumPicBulletId, NumPicBullet>,
     /// Theme (for color resolution during paint).
@@ -74,7 +75,11 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         styles,
         numbering,
         font_families,
-        media: doc.media.clone(),
+        media: doc
+            .media
+            .iter()
+            .map(|(k, v)| (k.clone(), Rc::from(v.as_slice())))
+            .collect(),
         pic_bullets: doc.numbering.pic_bullets.clone(),
         doc_defaults_paragraph: doc.styles.doc_defaults_paragraph.clone(),
         doc_defaults_run: doc.styles.doc_defaults_run.clone(),
@@ -250,7 +255,10 @@ mod tests {
 
         let resolved = resolve(&doc);
         assert!(resolved.media.contains_key(&RelId::new("rId1")));
-        assert_eq!(resolved.media[&RelId::new("rId1")], vec![0xFF, 0xD8, 0xFF]);
+        assert_eq!(
+            &*resolved.media[&RelId::new("rId1")],
+            &[0xFF_u8, 0xD8, 0xFF][..]
+        );
     }
 
     #[test]

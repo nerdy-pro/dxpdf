@@ -9,6 +9,7 @@ pub(super) mod convert;
 pub(super) mod table;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::model::{self, Block};
 use crate::render::dimension::Pt;
@@ -43,7 +44,7 @@ pub struct BuildContext<'a> {
 }
 
 impl BuildContext<'_> {
-    pub(super) fn media(&self) -> &HashMap<model::RelId, Vec<u8>> {
+    pub(super) fn media(&self) -> &HashMap<model::RelId, Rc<[u8]>> {
         &self.resolved.media
     }
 }
