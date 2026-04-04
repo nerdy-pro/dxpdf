@@ -1,115 +1,18 @@
-//! Section layout — sequence blocks vertically into pages.
-//!
-//! Takes measured blocks (paragraphs with fragments, tables with cells),
-//! fits them into pages respecting page size and margins, handles page breaks.
+//! Core section layout — the `layout_section()` function and its private state types.
 
-use super::draw_command::{DrawCommand, LayoutedPage};
-use super::float::ActiveFloat;
-use super::fragment::Fragment;
-use super::page::PageConfig;
-use super::paragraph::{layout_paragraph, ParagraphBorderStyle, ParagraphStyle};
-use super::table::{layout_table, TablePaginationConfig, TableRowInput};
-use super::BoxConstraints;
+use super::super::draw_command::{DrawCommand, LayoutedPage};
+use super::super::float;
+use super::super::page::PageConfig;
+use super::super::paragraph::{layout_paragraph, ParagraphBorderStyle, ParagraphStyle};
+use super::super::table::{layout_table, TablePaginationConfig};
+use super::super::BoxConstraints;
+use super::helpers::{render_page_footnotes, split_at_column_breaks, table_x_offset};
+use super::types::{ContinuationState, FloatingImageY, LayoutBlock};
+use super::FLOAT_DEDUP_EPSILON_PT;
+use super::FOOTNOTE_SEPARATOR_GAP;
 use crate::model::StyleId;
 use crate::render::dimension::Pt;
-use crate::render::geometry::{PtRect, PtSize};
-use crate::render::resolve::images::MediaEntry;
-
-// ── Footnote rendering constants ─────────────────────────────────────────────
-
-/// §17.11.23: footnote separator width as a fraction of the content area.
-/// Word renders the separator at one-third of the text column width.
-const FOOTNOTE_SEPARATOR_RATIO: f32 = 0.33;
-
-/// Thickness of the footnote separator line (pt).
-const FOOTNOTE_SEPARATOR_LINE_WIDTH: Pt = Pt::new(0.5);
-
-/// Vertical gap between the footnote separator and the first footnote paragraph.
-/// Also used as the initial height budget for the separator region (pt).
-const FOOTNOTE_SEPARATOR_GAP: Pt = Pt::new(4.0);
-
-// ── Float deduplication ───────────────────────────────────────────────────────
-
-/// Position tolerance for deduplicating floating images (pt).
-/// Two float entries within this distance on every axis are treated as identical.
-const FLOAT_DEDUP_EPSILON_PT: f32 = 0.1;
-
-/// §17.4.58 / §17.4.59: positioning data for a floating table.
-#[derive(Debug, Clone)]
-pub struct TableFloatInfo {
-    /// Gap between the table's right edge and surrounding text.
-    pub right_gap: Pt,
-    /// Gap between the table's bottom edge and surrounding text.
-    pub bottom_gap: Pt,
-    /// §17.4.58: horizontal alignment override (tblpXSpec).
-    pub x_align: Option<crate::model::TableXAlign>,
-    /// §17.4.59: absolute Y offset from the vertical anchor.
-    pub y_offset: Pt,
-    /// §17.4.58: vertical anchor reference (text / margin / page).
-    pub vert_anchor: crate::model::TableAnchor,
-}
-
-/// A floating (anchor) image to be positioned absolutely on the page.
-#[derive(Clone)]
-pub struct FloatingImage {
-    pub image_data: MediaEntry,
-    pub size: PtSize,
-    /// Resolved absolute x position on the page.
-    pub x: Pt,
-    /// Resolved absolute y position on the page (may be relative to paragraph).
-    pub y: FloatingImageY,
-    /// §20.4.2.18: wrapTopAndBottom — text only above/below, not beside.
-    pub wrap_top_and_bottom: bool,
-    /// §20.4.2.3 distL/distR: horizontal distance from surrounding text.
-    pub dist_left: Pt,
-    pub dist_right: Pt,
-    /// §20.4.2.3 @behindDoc: image is painted behind document text.
-    pub behind_doc: bool,
-}
-
-/// Vertical position for a floating image.
-#[derive(Clone, Copy)]
-pub enum FloatingImageY {
-    /// Absolute page position.
-    Absolute(Pt),
-    /// Relative to the paragraph's y position (offset added to cursor_y).
-    RelativeToParagraph(Pt),
-}
-
-/// A block ready for layout — either a paragraph or a table.
-pub enum LayoutBlock {
-    Paragraph {
-        fragments: Vec<Fragment>,
-        style: ParagraphStyle,
-        /// §17.3.1.23: force a page break before this paragraph.
-        page_break_before: bool,
-        /// Footnotes referenced in this paragraph — rendered at page bottom.
-        footnotes: Vec<(Vec<Fragment>, ParagraphStyle)>,
-        /// §20.4.2.3: floating images anchored to this paragraph.
-        floating_images: Vec<FloatingImage>,
-    },
-    Table {
-        rows: Vec<TableRowInput>,
-        col_widths: Vec<Pt>,
-        /// §17.4.38: resolved table border configuration.
-        border_config: Option<super::table::TableBorderConfig>,
-        /// §17.4.51: table indentation from left margin.
-        indent: Pt,
-        /// §17.4.28: table horizontal alignment.
-        alignment: Option<crate::model::Alignment>,
-        /// §17.4.58: floating table positioning — if present, text wraps around it.
-        float_info: Option<TableFloatInfo>,
-        /// §17.4.38: table style reference for adjacent table border collapse.
-        style_id: Option<crate::model::StyleId>,
-    },
-}
-
-/// §17.6.22: continuation state for `Continuous` section breaks.
-/// Allows a new section to continue on the current page.
-pub struct ContinuationState {
-    pub page: LayoutedPage,
-    pub cursor_y: Pt,
-}
+use crate::render::geometry::PtRect;
 
 // ── Layout context and mutable page state ────────────────────────────────────
 
@@ -117,7 +20,7 @@ pub struct ContinuationState {
 /// Bundles the parameters that are constant for the lifetime of a `layout_section` call.
 struct LayoutCtx<'cx> {
     config: &'cx PageConfig,
-    measure_text: super::paragraph::MeasureTextFn<'cx>,
+    measure_text: super::super::paragraph::MeasureTextFn<'cx>,
     separator_indent: Pt,
     default_line_height: Pt,
     /// Absolute bottom boundary of the printable area (page height − bottom margin).
@@ -140,7 +43,10 @@ struct PageLayoutState<'doc> {
     /// Effective bottom boundary — reduced as footnotes are reserved.
     bottom: Pt,
     /// Footnotes accumulated for the current page.
-    page_footnotes: Vec<(&'doc [Fragment], &'doc ParagraphStyle)>,
+    page_footnotes: Vec<(
+        &'doc [super::super::fragment::Fragment],
+        &'doc ParagraphStyle,
+    )>,
     /// §17.3.1.33: true until the structural first content block is placed.
     first_on_section_page: bool,
     /// §17.3.1.9: space_after of the previous paragraph for spacing collapse.
@@ -150,9 +56,9 @@ struct PageLayoutState<'doc> {
     /// §17.3.1.24: borders of the previous paragraph for border grouping.
     prev_borders: Option<ParagraphBorderStyle>,
     /// Active floats on the current page (text wraps around these).
-    page_floats: Vec<ActiveFloat>,
+    page_floats: Vec<float::ActiveFloat>,
     /// Forward-scanned absolute floats from future paragraphs on this page.
-    current_page_abs_floats: Vec<ActiveFloat>,
+    current_page_abs_floats: Vec<float::ActiveFloat>,
     /// True when `current_page_abs_floats` needs rebuilding (e.g. after a page break).
     abs_floats_dirty: bool,
     /// Index of the first block on the current page (for forward scanning).
@@ -237,7 +143,7 @@ impl<'doc> PageLayoutState<'doc> {
 pub fn layout_section(
     blocks: &[LayoutBlock],
     config: &PageConfig,
-    measure_text: super::paragraph::MeasureTextFn<'_>,
+    measure_text: super::super::paragraph::MeasureTextFn<'_>,
     separator_indent: Pt,
     default_line_height: Pt,
     continuation: Option<ContinuationState>,
@@ -283,7 +189,7 @@ pub fn layout_section(
                 let first_text = fragments
                     .iter()
                     .find_map(|f| {
-                        if let Fragment::Text { text, .. } = f {
+                        if let super::super::fragment::Fragment::Text { text, .. } = f {
                             Some(&**text)
                         } else {
                             None
@@ -353,12 +259,12 @@ pub fn layout_section(
                         }
                     } else {
                         // §20.4.2.3: use distL/distR for text distance from float.
-                        let float_entry = ActiveFloat {
+                        let float_entry = float::ActiveFloat {
                             page_x: fi.x - fi.dist_left,
                             page_y_start: y_start,
                             page_y_end: y_end,
                             width: fi.size.width + fi.dist_left + fi.dist_right,
-                            source: super::float::FloatSource::Image,
+                            source: float::FloatSource::Image,
                         };
                         log::debug!(
                             "[layout]   register image float: x={:.1} y={:.1}-{:.1} w={:.1}",
@@ -372,7 +278,7 @@ pub fn layout_section(
                 }
 
                 // Prune expired floats.
-                super::float::prune_floats(&mut state.page_floats, state.cursor_y);
+                float::prune_floats(&mut state.page_floats, state.cursor_y);
 
                 // Forward-scan absolute floats from upcoming paragraphs on the
                 // current page. Only rescan when the page changes.
@@ -397,12 +303,12 @@ pub fn layout_section(
                                     continue; // handled as block spacers, not floats
                                 }
                                 if let FloatingImageY::Absolute(img_y) = fi.y {
-                                    state.current_page_abs_floats.push(ActiveFloat {
+                                    state.current_page_abs_floats.push(float::ActiveFloat {
                                         page_x: fi.x - fi.dist_left,
                                         page_y_start: img_y,
                                         page_y_end: img_y + fi.size.height,
                                         width: fi.size.width + fi.dist_left + fi.dist_right,
-                                        source: super::float::FloatSource::Image,
+                                        source: float::FloatSource::Image,
                                     });
                                 }
                             }
@@ -416,7 +322,7 @@ pub fn layout_section(
                 // the current cursor — floats below shouldn't affect text above.
                 let mut effective_floats = state.page_floats.clone();
                 let y_threshold = state.cursor_y + effective_style.space_before;
-                let deduped: Vec<ActiveFloat> = state
+                let deduped: Vec<float::ActiveFloat> = state
                     .current_page_abs_floats
                     .iter()
                     .filter(|af| af.page_y_start <= y_threshold)
@@ -449,7 +355,7 @@ pub fn layout_section(
                         state.cursor_y = state.cursor_y.max(ef.page_y_end);
                     }
                 }
-                super::float::prune_floats(&mut effective_floats, state.cursor_y);
+                float::prune_floats(&mut effective_floats, state.cursor_y);
 
                 effective_style.page_floats = effective_floats;
                 effective_style.page_y = state.cursor_y;
@@ -603,11 +509,10 @@ pub fn layout_section(
 
                 // Collect footnotes for this page and reduce the available bottom.
                 if !footnotes.is_empty() {
-                    let fn_constraints =
-                        super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
+                    let fn_constraints = BoxConstraints::tight_width(content_width, Pt::INFINITY);
                     let sep_height = FOOTNOTE_SEPARATOR_GAP;
                     for (fn_frags, fn_style) in footnotes {
-                        let fn_para = super::paragraph::layout_paragraph(
+                        let fn_para = layout_paragraph(
                             fn_frags,
                             &fn_constraints,
                             fn_style,
@@ -703,12 +608,12 @@ pub fn layout_section(
                         (table.size.width + fi.right_gap).raw()
                     );
                     // §17.4.56: register as float for text wrapping.
-                    state.page_floats.push(ActiveFloat {
+                    state.page_floats.push(float::ActiveFloat {
                         page_x: table_x,
                         page_y_start: float_y_start,
                         page_y_end: float_y_end,
                         width: table.size.width + fi.right_gap,
-                        source: super::float::FloatSource::Table {
+                        source: float::FloatSource::Table {
                             owner_block_idx: block_idx,
                         },
                     });
@@ -723,7 +628,7 @@ pub fn layout_section(
                 // Non-floating table: paginated row-level splitting.
                 // §17.4.49 / §17.4.1: split at row boundaries, repeat headers.
                 let available = state.bottom - state.cursor_y;
-                let slices = super::table::layout_table_paginated(
+                let slices = super::super::table::layout_table_paginated(
                     rows,
                     col_widths,
                     &col_constraints(state.current_col),
@@ -770,633 +675,4 @@ pub fn layout_section(
 
     // Flush remaining footnotes and push the last page.
     state.finalize(&ctx)
-}
-
-// ── Shared block stacker ────────────────────────────────────────────────────
-
-/// Result of stacking blocks vertically.
-pub struct StackResult {
-    /// Draw commands positioned relative to the stacking origin (0,0).
-    pub commands: Vec<DrawCommand>,
-    /// Total height consumed by all blocks.
-    pub height: Pt,
-}
-
-/// Stack blocks vertically within a fixed-width area.
-///
-/// This is the shared core used by both page-level layout (`layout_section`)
-/// and cell-level layout. It handles:
-/// - Paragraph layout with spacing collapse and space_before suppression
-/// - Table layout
-/// - Floating image registration and text wrapping
-///
-/// It does NOT handle page breaks, column breaks, or footnote collection —
-/// those are page-level concerns managed by `layout_section`.
-pub fn stack_blocks(
-    blocks: &[LayoutBlock],
-    content_width: Pt,
-    default_line_height: Pt,
-    measure_text: super::paragraph::MeasureTextFn<'_>,
-) -> StackResult {
-    let constraints = super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
-    let mut commands = Vec::new();
-    let mut cursor_y = Pt::ZERO;
-    let mut prev_space_after = Pt::ZERO;
-    let mut prev_style_id: Option<crate::model::StyleId> = None;
-    let mut page_floats: Vec<super::float::ActiveFloat> = Vec::new();
-
-    for block in blocks {
-        match block {
-            LayoutBlock::Paragraph {
-                fragments,
-                style,
-                floating_images,
-                ..
-            } => {
-                let mut effective_style = style.clone();
-
-                // Spacing collapse.
-                if effective_style.contextual_spacing
-                    && effective_style.style_id.is_some()
-                    && effective_style.style_id == prev_style_id
-                {
-                    cursor_y -= prev_space_after + effective_style.space_before;
-                } else {
-                    let collapse = prev_space_after.min(effective_style.space_before);
-                    cursor_y -= collapse;
-                }
-
-                // Register floating images.
-                let content_top = cursor_y + effective_style.space_before;
-                for fi in floating_images.iter() {
-                    let (y_start, y_end) = match fi.y {
-                        FloatingImageY::RelativeToParagraph(offset) => {
-                            (content_top + offset, content_top + offset + fi.size.height)
-                        }
-                        FloatingImageY::Absolute(img_y) => (img_y, img_y + fi.size.height),
-                    };
-                    if fi.wrap_top_and_bottom {
-                        let img_y = match fi.y {
-                            FloatingImageY::Absolute(y) => y,
-                            FloatingImageY::RelativeToParagraph(offset) => content_top + offset,
-                        };
-                        commands.push(DrawCommand::Image {
-                            rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
-                            image_data: fi.image_data.clone(),
-                        });
-                        if y_end > cursor_y {
-                            cursor_y = y_end;
-                        }
-                    } else {
-                        page_floats.push(super::float::ActiveFloat {
-                            page_x: fi.x - fi.dist_left,
-                            page_y_start: y_start,
-                            page_y_end: y_end,
-                            width: fi.size.width + fi.dist_left + fi.dist_right,
-                            source: super::float::FloatSource::Image,
-                        });
-                    }
-                }
-
-                super::float::prune_floats(&mut page_floats, cursor_y);
-
-                effective_style.page_floats = page_floats.clone();
-                effective_style.page_y = cursor_y;
-                effective_style.page_x = Pt::ZERO;
-                effective_style.page_content_width = content_width;
-
-                let para = layout_paragraph(
-                    fragments,
-                    &constraints,
-                    &effective_style,
-                    default_line_height,
-                    measure_text,
-                );
-
-                for mut cmd in para.commands {
-                    cmd.shift_y(cursor_y);
-                    commands.push(cmd);
-                }
-
-                cursor_y += para.size.height;
-
-                // Emit non-wrapTopAndBottom floating images.
-                let para_content_top = cursor_y - para.size.height + effective_style.space_before;
-                for fi in floating_images {
-                    if fi.wrap_top_and_bottom {
-                        continue;
-                    }
-                    let img_y = match fi.y {
-                        FloatingImageY::Absolute(y) => y,
-                        FloatingImageY::RelativeToParagraph(offset) => para_content_top + offset,
-                    };
-                    commands.push(DrawCommand::Image {
-                        rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
-                        image_data: fi.image_data.clone(),
-                    });
-                    // Extend cursor to encompass the image so table cells
-                    // expand to contain floating images.
-                    let img_bottom = img_y + fi.size.height;
-                    if img_bottom > cursor_y {
-                        cursor_y = img_bottom;
-                    }
-                }
-
-                prev_space_after = effective_style.space_after;
-                prev_style_id = effective_style.style_id.clone();
-            }
-            LayoutBlock::Table {
-                rows,
-                col_widths,
-                border_config,
-                indent,
-                alignment,
-                ..
-            } => {
-                // stack_blocks is used for table cells and header/footer —
-                // no adjacent table collapse in these contexts.
-                let table = layout_table(
-                    rows,
-                    col_widths,
-                    &constraints,
-                    default_line_height,
-                    border_config.as_ref(),
-                    measure_text,
-                    false,
-                );
-
-                let table_x = table_x_offset(
-                    *alignment,
-                    *indent,
-                    table.size.width,
-                    content_width,
-                    Pt::ZERO,
-                );
-
-                for mut cmd in table.commands {
-                    cmd.shift_y(cursor_y);
-                    cmd.shift_x(table_x);
-                    commands.push(cmd);
-                }
-
-                cursor_y += table.size.height;
-                prev_space_after = Pt::ZERO;
-                prev_style_id = None;
-            }
-        }
-    }
-
-    StackResult {
-        commands,
-        height: cursor_y,
-    }
-}
-
-// ── Helper functions ────────────────────────────────────────────────────────
-
-/// Split a fragment slice at `Fragment::ColumnBreak` markers.
-/// Returns a vec of slices; the column break fragments themselves are excluded.
-fn split_at_column_breaks(fragments: &[Fragment]) -> Vec<&[Fragment]> {
-    let has_break = fragments.iter().any(|f| matches!(f, Fragment::ColumnBreak));
-    if !has_break {
-        return vec![fragments];
-    }
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    for (i, frag) in fragments.iter().enumerate() {
-        if matches!(frag, Fragment::ColumnBreak) {
-            chunks.push(&fragments[start..i]);
-            start = i + 1;
-        }
-    }
-    chunks.push(&fragments[start..]);
-    chunks
-}
-
-fn render_page_footnotes(
-    page: &mut LayoutedPage,
-    config: &PageConfig,
-    footnotes: &[(&[Fragment], &ParagraphStyle)],
-    default_line_height: Pt,
-    measure_text: super::paragraph::MeasureTextFn<'_>,
-    separator_indent: Pt,
-) {
-    use super::draw_command::DrawCommand;
-    use super::paragraph::layout_paragraph;
-
-    let content_width = config.content_width();
-    let constraints = super::BoxConstraints::tight_width(content_width, Pt::INFINITY);
-    let page_bottom = config.page_size.height - config.margins.bottom;
-
-    // Layout all footnotes to compute total height.
-    let mut footnote_layouts = Vec::new();
-    let mut total_height = FOOTNOTE_SEPARATOR_GAP; // separator line + gap above first note
-    for (frags, style) in footnotes {
-        let para = layout_paragraph(
-            frags,
-            &constraints,
-            style,
-            default_line_height,
-            measure_text,
-        );
-        total_height += para.size.height;
-        footnote_layouts.push(para);
-    }
-
-    let footnote_top = page_bottom - total_height;
-
-    // §17.11.23: separator line positioned per default paragraph indent.
-    let sep_x = config.margins.left + separator_indent;
-    let sep_width = content_width * FOOTNOTE_SEPARATOR_RATIO;
-    page.commands.push(DrawCommand::Line {
-        line: crate::render::geometry::PtLineSegment::new(
-            crate::render::geometry::PtOffset::new(sep_x, footnote_top),
-            crate::render::geometry::PtOffset::new(sep_x + sep_width, footnote_top),
-        ),
-        color: crate::render::resolve::color::RgbColor::BLACK,
-        width: FOOTNOTE_SEPARATOR_LINE_WIDTH,
-    });
-
-    // Render footnote paragraphs.
-    let mut cursor_y = footnote_top + FOOTNOTE_SEPARATOR_GAP;
-    for para in footnote_layouts {
-        for mut cmd in para.commands {
-            cmd.shift_y(cursor_y);
-            cmd.shift_x(config.margins.left);
-            page.commands.push(cmd);
-        }
-        cursor_y += para.size.height;
-    }
-}
-
-/// §17.4.28: compute the table's x offset based on alignment and indent.
-fn table_x_offset(
-    alignment: Option<crate::model::Alignment>,
-    indent: Pt,
-    table_width: Pt,
-    content_width: Pt,
-    margin_left: Pt,
-) -> Pt {
-    use crate::model::Alignment;
-    match alignment {
-        Some(Alignment::Center) => margin_left + (content_width - table_width) * 0.5,
-        Some(Alignment::End) => margin_left + content_width - table_width,
-        _ => margin_left + indent,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::render::geometry::{PtEdgeInsets, PtSize};
-    use crate::render::layout::draw_command::DrawCommand;
-    use crate::render::layout::fragment::{FontProps, TextMetrics};
-    use crate::render::layout::table::TableCellInput;
-    use crate::render::resolve::color::RgbColor;
-    use std::rc::Rc;
-
-    fn text_frag(text: &str, width: f32, height: f32) -> Fragment {
-        Fragment::Text {
-            text: text.into(),
-            font: FontProps {
-                family: Rc::from("Test"),
-                size: Pt::new(12.0),
-                bold: false,
-                italic: false,
-                underline: false,
-                char_spacing: Pt::ZERO,
-                underline_position: Pt::ZERO,
-                underline_thickness: Pt::ZERO,
-            },
-            color: RgbColor::BLACK,
-            width: Pt::new(width),
-            trimmed_width: Pt::new(width),
-            metrics: TextMetrics {
-                ascent: Pt::new(height * 0.7),
-                descent: Pt::new(height * 0.3),
-                leading: Pt::ZERO,
-            },
-            hyperlink_url: None,
-            shading: None,
-            border: None,
-            baseline_offset: Pt::ZERO,
-            text_offset: Pt::ZERO,
-        }
-    }
-
-    fn para_block(text: &str, width: f32) -> LayoutBlock {
-        LayoutBlock::Paragraph {
-            fragments: vec![text_frag(text, width, 14.0)],
-            style: ParagraphStyle::default(),
-            page_break_before: false,
-            footnotes: vec![],
-            floating_images: vec![],
-        }
-    }
-
-    fn small_config() -> PageConfig {
-        use crate::render::layout::page::ColumnGeometry;
-        PageConfig {
-            page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
-            margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
-            header_margin: Pt::new(5.0),
-            footer_margin: Pt::new(5.0),
-            columns: vec![ColumnGeometry {
-                x_offset: Pt::ZERO,
-                width: Pt::new(180.0),
-            }],
-        }
-    }
-
-    #[test]
-    fn empty_blocks_produces_one_empty_page() {
-        let pages = layout_section(&[], &small_config(), None, Pt::ZERO, Pt::new(14.0), None);
-        assert_eq!(pages.len(), 1);
-        assert!(pages[0].commands.is_empty());
-    }
-
-    #[test]
-    fn single_paragraph_on_one_page() {
-        let blocks = vec![para_block("hello", 30.0)];
-        let pages = layout_section(
-            &blocks,
-            &small_config(),
-            None,
-            Pt::ZERO,
-            Pt::new(14.0),
-            None,
-        );
-
-        assert_eq!(pages.len(), 1);
-        let text_count = pages[0]
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Text { .. }))
-            .count();
-        assert_eq!(text_count, 1);
-    }
-
-    #[test]
-    fn text_positioned_at_margins() {
-        let blocks = vec![para_block("hello", 30.0)];
-        let config = small_config();
-        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
-
-        if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
-            assert!(
-                position.x.raw() >= config.margins.left.raw(),
-                "x should be at least left margin"
-            );
-            assert!(
-                position.y.raw() >= config.margins.top.raw(),
-                "y should be at least top margin"
-            );
-        }
-    }
-
-    #[test]
-    fn page_break_when_content_overflows() {
-        // Page: 100pt tall, margins 10 each → 80pt content area
-        // Each paragraph: 14pt tall
-        // 6 paragraphs = 84pt > 80pt → should break to 2 pages
-        let blocks: Vec<_> = (0..6).map(|i| para_block(&format!("p{i}"), 30.0)).collect();
-        let pages = layout_section(
-            &blocks,
-            &small_config(),
-            None,
-            Pt::ZERO,
-            Pt::new(14.0),
-            None,
-        );
-
-        assert_eq!(pages.len(), 2, "should overflow to 2 pages");
-
-        let page1_texts: Vec<_> = pages[0]
-            .commands
-            .iter()
-            .filter_map(|c| match c {
-                DrawCommand::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
-        let page2_texts: Vec<_> = pages[1]
-            .commands
-            .iter()
-            .filter_map(|c| match c {
-                DrawCommand::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
-
-        assert_eq!(page1_texts.len(), 5, "5 paras fit on page 1 (5*14=70 < 80)");
-        assert_eq!(page2_texts.len(), 1, "1 para on page 2");
-    }
-
-    #[test]
-    fn page_size_set_on_layouted_page() {
-        let config = small_config();
-        let pages = layout_section(&[], &config, None, Pt::ZERO, Pt::new(14.0), None);
-        assert_eq!(pages[0].page_size, config.page_size);
-    }
-
-    #[test]
-    fn many_paragraphs_produce_multiple_pages() {
-        // 20 paragraphs at 14pt each = 280pt
-        // Content area = 80pt → need 4 pages (80/14 = 5.7 paras per page)
-        let blocks: Vec<_> = (0..20)
-            .map(|i| para_block(&format!("p{i}"), 30.0))
-            .collect();
-        let pages = layout_section(
-            &blocks,
-            &small_config(),
-            None,
-            Pt::ZERO,
-            Pt::new(14.0),
-            None,
-        );
-
-        assert_eq!(pages.len(), 4);
-    }
-
-    #[test]
-    fn table_on_page() {
-        let blocks = vec![LayoutBlock::Table {
-            rows: vec![TableRowInput {
-                cells: vec![TableCellInput {
-                    blocks: vec![LayoutBlock::Paragraph {
-                        fragments: vec![text_frag("cell", 30.0, 14.0)],
-                        style: ParagraphStyle::default(),
-                        page_break_before: false,
-                        footnotes: vec![],
-                        floating_images: vec![],
-                    }],
-                    margins: PtEdgeInsets::ZERO,
-                    grid_span: 1,
-                    shading: None,
-                    cell_borders: None,
-                    vertical_merge: None,
-                    vertical_align: crate::render::layout::table::CellVAlign::Top,
-                }],
-                height_rule: None,
-                is_header: None,
-                cant_split: None,
-            }],
-            col_widths: vec![Pt::new(100.0)],
-            border_config: None,
-            indent: Pt::ZERO,
-            alignment: None,
-            float_info: None,
-            style_id: None,
-        }];
-
-        let pages = layout_section(
-            &blocks,
-            &small_config(),
-            None,
-            Pt::ZERO,
-            Pt::new(14.0),
-            None,
-        );
-        assert_eq!(pages.len(), 1);
-
-        let text_count = pages[0]
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Text { .. }))
-            .count();
-        assert_eq!(text_count, 1);
-    }
-
-    // ── §17.3.1.33 space_before suppression tests ──────────────────────
-
-    #[test]
-    fn space_before_suppressed_for_first_paragraph_of_section() {
-        let style = ParagraphStyle {
-            space_before: Pt::new(24.0),
-            ..Default::default()
-        };
-        let blocks = vec![LayoutBlock::Paragraph {
-            fragments: vec![text_frag("heading", 50.0, 14.0)],
-            style,
-            page_break_before: false,
-            footnotes: vec![],
-            floating_images: vec![],
-        }];
-        let config = small_config();
-        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
-
-        // First paragraph on the section's initial page: space_before suppressed.
-        if let Some(DrawCommand::Text { position, .. }) = pages[0].commands.first() {
-            assert!(
-                position.y.raw() < config.margins.top.raw() + 24.0,
-                "space_before should be suppressed: y={}",
-                position.y.raw()
-            );
-        }
-    }
-
-    #[test]
-    fn space_before_preserved_for_page_break_before() {
-        let heading_style = ParagraphStyle {
-            space_before: Pt::new(24.0),
-            ..Default::default()
-        };
-
-        let blocks = vec![
-            para_block("first page", 30.0),
-            LayoutBlock::Paragraph {
-                fragments: vec![text_frag("heading", 50.0, 14.0)],
-                style: heading_style,
-                page_break_before: true,
-                footnotes: vec![],
-                floating_images: vec![],
-            },
-        ];
-        let config = small_config();
-        let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
-
-        assert!(pages.len() >= 2, "should have at least 2 pages");
-        let heading_y = pages[1]
-            .commands
-            .iter()
-            .find_map(|c| match c {
-                DrawCommand::Text { position, text, .. } if &**text == "heading" => {
-                    Some(position.y)
-                }
-                _ => None,
-            })
-            .expect("heading should be on page 2");
-        // §17.3.1.33: space_before is preserved — pageBreakBefore paragraphs
-        // are not the structural first of the section.
-        assert!(
-            heading_y.raw() > config.margins.top.raw() + 20.0,
-            "space_before should be preserved for pageBreakBefore: y={}",
-            heading_y.raw(),
-        );
-    }
-
-    // ── §17.3.1.24 paragraph border grouping tests ─────────────────────
-
-    #[test]
-    fn identical_borders_suppress_second_top() {
-        use crate::render::layout::paragraph::{BorderLine, ParagraphBorderStyle};
-        let border = Some(ParagraphBorderStyle {
-            top: Some(BorderLine {
-                width: Pt::new(0.5),
-                color: RgbColor::BLACK,
-                space: Pt::new(1.0),
-            }),
-            bottom: None,
-            left: None,
-            right: None,
-        });
-        let style1 = ParagraphStyle {
-            borders: border.clone(),
-            ..Default::default()
-        };
-        let style2 = ParagraphStyle {
-            borders: border,
-            ..Default::default()
-        };
-
-        let blocks = vec![
-            LayoutBlock::Paragraph {
-                fragments: vec![text_frag("para1", 30.0, 14.0)],
-                style: style1,
-                page_break_before: false,
-                footnotes: vec![],
-                floating_images: vec![],
-            },
-            LayoutBlock::Paragraph {
-                fragments: vec![text_frag("para2", 30.0, 14.0)],
-                style: style2,
-                page_break_before: false,
-                footnotes: vec![],
-                floating_images: vec![],
-            },
-        ];
-        let pages = layout_section(
-            &blocks,
-            &small_config(),
-            None,
-            Pt::ZERO,
-            Pt::new(14.0),
-            None,
-        );
-
-        // Count Line draw commands (border lines).
-        // Only the first paragraph should draw its top border; the second's
-        // top border is suppressed by §17.3.1.24 grouping.
-        let line_cmds: Vec<_> = pages[0]
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Line { .. }))
-            .collect();
-        assert_eq!(
-            line_cmds.len(),
-            1,
-            "only one top border line (grouped): got {}",
-            line_cmds.len()
-        );
-    }
 }
