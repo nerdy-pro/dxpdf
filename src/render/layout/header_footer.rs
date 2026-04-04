@@ -11,62 +11,69 @@ use crate::model::Block;
 
 use crate::render::dimension::Pt;
 
-use super::build::{build_header_footer_content, BuildContext, HeaderFooterContent};
+use super::build::{build_header_footer_content, BuildContext, BuildState, HeaderFooterContent};
 use super::draw_command::{DrawCommand, LayoutedPage};
 use super::page::PageConfig;
 use super::section::stack_blocks;
 
+/// Header and footer block content to render on each page.
+pub struct HeaderFooterBlocks<'a> {
+    pub header: Option<&'a [Block]>,
+    pub footer: Option<&'a [Block]>,
+}
+
+/// Page numbering context for header/footer field evaluation.
+pub struct PageRange {
+    /// 0-based index of the first page in this section within the document.
+    pub page_base: usize,
+    /// Total page count in the document.
+    pub total_pages: usize,
+}
+
 /// Render headers and footers onto already-laid-out pages.
 ///
-/// `header_blocks` / `footer_blocks` are the raw DOCX blocks; content is
+/// `hf_blocks` contains the raw DOCX header/footer blocks; content is
 /// rebuilt per-page so that field values (PAGE, NUMPAGES) are correct.
-/// `page_base` is the 0-based index of the first page in `pages` within
-/// the overall document (for multi-section PAGE numbering).
-#[allow(clippy::too_many_arguments)]
 pub fn render_headers_footers(
     pages: &mut [LayoutedPage],
     config: &PageConfig,
-    header_blocks: Option<&[Block]>,
-    footer_blocks: Option<&[Block]>,
+    hf_blocks: &HeaderFooterBlocks<'_>,
     ctx: &BuildContext,
+    state: &mut BuildState,
     default_line_height: Pt,
-    page_base: usize,
-    total_pages: usize,
+    page_range: &PageRange,
 ) {
     let content_width = config.content_width();
 
     for (page_idx, page) in pages.iter_mut().enumerate() {
-        let page_number = page_base + page_idx + 1; // 1-based
+        let page_number = page_range.page_base + page_idx + 1; // 1-based
 
         // Header
-        if let Some(blocks) = header_blocks {
+        if let Some(blocks) = hf_blocks.header {
             // Set per-page field context for PAGE/NUMPAGES evaluation.
-            ctx.field_ctx_cell
-                .set(crate::render::layout::fragment::FieldContext {
-                    page_number: Some(page_number),
-                    num_pages: Some(total_pages),
-                });
+            state.field_ctx = crate::render::layout::fragment::FieldContext {
+                page_number: Some(page_number),
+                num_pages: Some(page_range.total_pages),
+            };
 
-            let hf = build_header_footer_content(blocks, ctx);
+            let hf = build_header_footer_content(blocks, ctx, state);
             render_header(page, config, &hf, content_width, default_line_height);
         }
 
         // Footer
-        if let Some(blocks) = footer_blocks {
-            ctx.field_ctx_cell
-                .set(crate::render::layout::fragment::FieldContext {
-                    page_number: Some(page_number),
-                    num_pages: Some(total_pages),
-                });
+        if let Some(blocks) = hf_blocks.footer {
+            state.field_ctx = crate::render::layout::fragment::FieldContext {
+                page_number: Some(page_number),
+                num_pages: Some(page_range.total_pages),
+            };
 
-            let hf = build_header_footer_content(blocks, ctx);
+            let hf = build_header_footer_content(blocks, ctx, state);
             render_footer(page, config, &hf, content_width, default_line_height);
         }
     }
 
     // Reset field context after header/footer rendering.
-    ctx.field_ctx_cell
-        .set(crate::render::layout::fragment::FieldContext::default());
+    state.field_ctx = crate::render::layout::fragment::FieldContext::default();
 }
 
 /// Render a single header onto a page.

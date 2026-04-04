@@ -1,5 +1,3 @@
-#![allow(clippy::collapsible_if, clippy::collapsible_match)]
-
 pub mod docx;
 pub mod error;
 pub mod field;

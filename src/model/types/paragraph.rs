@@ -48,20 +48,45 @@ pub struct ParagraphProperties {
     /// §17.3.1.8: table conditional formatting applied to this paragraph.
     pub cnf_style: Option<CnfStyle>,
     /// §17.3.1.11: text frame (legacy positioned text region).
-    pub frame_properties: Option<FrameProperties>,
+    pub frame_properties: Option<FrameKind>,
     /// §17.3.1.2: auto-space East Asian text with Latin text.
     pub auto_space_de: Option<bool>,
     /// §17.3.1.3: auto-space East Asian text with numbers.
     pub auto_space_dn: Option<bool>,
 }
 
-/// §17.3.1.11: text frame properties — legacy floating positioned text.
+/// §17.3.1.11: frame kind — a paragraph is either a drop cap or a floating text box.
+///
+/// OOXML `w:framePr` conflates these two uses; the presence and value of `w:dropCap`
+/// determines which kind a given `framePr` represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FrameProperties {
-    /// §17.18.16 ST_DropCap: drop cap type.
-    pub drop_cap: Option<DropCap>,
-    /// Number of lines the drop cap spans.
-    pub lines: Option<u32>,
+pub enum FrameKind {
+    /// The paragraph's first character(s) are rendered as a drop cap.
+    DropCap {
+        /// Whether the cap is inline (`Drop`) or in the margin (`Margin`).
+        style: DropCap,
+        /// Number of body-text lines the cap letter spans (default 3).
+        lines: u32,
+        /// Horizontal space between cap and body text, in twips.
+        h_space: Option<Dimension<Twips>>,
+    },
+    /// Legacy floating text frame — positioned outside normal flow.
+    TextBox(TextBoxPositioning),
+}
+
+/// §17.18.16 ST_DropCap — the two active drop-cap styles.
+/// (`dropCap="none"` is represented by the absence of `FrameKind::DropCap`.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropCap {
+    /// Cap is inline, to the left of the paragraph text.
+    Drop,
+    /// Cap is placed in the page margin.
+    Margin,
+}
+
+/// Positioning attributes for a legacy floating text frame (`w:framePr` without drop cap).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct TextBoxPositioning {
     /// Frame width in twips.
     pub width: Option<Dimension<Twips>>,
     /// Frame height in twips.
@@ -86,14 +111,6 @@ pub struct FrameProperties {
     pub y: Option<Dimension<Twips>>,
     /// §17.18.109 ST_YAlign: vertical alignment.
     pub y_align: Option<TableYAlign>,
-}
-
-/// §17.18.16 ST_DropCap
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DropCap {
-    None,
-    Drop,
-    Margin,
 }
 
 /// §17.18.104 ST_Wrap — text wrapping for frames.

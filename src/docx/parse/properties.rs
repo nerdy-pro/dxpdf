@@ -20,6 +20,29 @@ fn invalid_value(attr: &str, value: &str) -> ParseError {
 }
 use crate::docx::xml;
 
+/// Read a `w:val` boolean attribute, defaulting to `true` when the attribute is
+/// absent (OOXML §17.17.4 "toggle property" semantics: presence alone means on).
+///
+/// Returns `Ok(Some(bool))` always; `Ok(None)` is never produced because toggle
+/// properties with no `val` mean `true`, and absence of the element itself is
+/// handled at the call site (the arm simply won't match).
+#[inline]
+fn toggle_attr(e: &BytesStart<'_>) -> Result<Option<bool>> {
+    Ok(Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true)))
+}
+
+/// Read a `w:val` string attribute and map it through `f`, returning
+/// `Ok(None)` when the attribute is absent.
+///
+/// Equivalent to `xml::optional_attr(e, b"val")?.map(|v| f(&v)).transpose()`.
+#[inline]
+fn opt_val<T, F>(e: &BytesStart<'_>, f: F) -> Result<Option<T>>
+where
+    F: FnOnce(&str) -> Result<T>,
+{
+    xml::optional_attr(e, b"val")?.map(|v| f(&v)).transpose()
+}
+
 // ── Paragraph Properties ─────────────────────────────────────────────────────
 
 /// Parsed result of a `w:pPr` element.
@@ -44,11 +67,14 @@ pub fn parse_paragraph_properties(
     let mut sect_props: Option<SectionProperties> = None;
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Empty(ref e) | Event::Start(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
+                    // attrs-only — valid as Start or Empty
                     b"pStyle" => {
                         style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                     }
@@ -59,116 +85,78 @@ pub fn parse_paragraph_properties(
                         props.spacing = Some(parse_paragraph_spacing(e)?);
                     }
                     b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
-                    }
-                    b"numPr" => {
-                        props.numbering = Some(parse_numbering_pr(reader, buf)?);
-                    }
-                    b"tabs" => {
-                        props.tabs = parse_tabs(reader, buf)?;
-                    }
-                    b"pBdr" => {
-                        props.borders = Some(parse_paragraph_borders(reader, buf)?);
+                        props.alignment = opt_val(e, parse_alignment)?;
                     }
                     b"shd" => {
                         props.shading = Some(parse_shading(e)?);
-                    }
-                    b"rPr" => {
-                        let (rp, _) = parse_run_properties(reader, buf)?;
-                        run_props = Some(rp);
                     }
                     b"outlineLvl" => {
                         if let Some(val) = xml::optional_attr_u32(e, b"val")? {
                             props.outline_level = OutlineLevel::from_ooxml(val as u8);
                         }
                     }
+                    // Start-only: have child elements
+                    b"numPr" if is_start => {
+                        props.numbering = Some(parse_numbering_pr(reader, buf)?);
+                    }
+                    b"tabs" if is_start => {
+                        props.tabs = parse_tabs(reader, buf)?;
+                    }
+                    b"pBdr" if is_start => {
+                        props.borders = Some(parse_paragraph_borders(reader, buf)?);
+                    }
+                    b"rPr" if is_start => {
+                        let (rp, _) = parse_run_properties(reader, buf)?;
+                        run_props = Some(rp);
+                    }
                     // §17.6.18: sectPr inside pPr defines the section that ends
                     // with this paragraph. Contains pgSz, pgMar, cols, headerReference,
                     // footerReference, titlePg, type, pgNumType, docGrid, etc.
-                    b"sectPr" => {
+                    b"sectPr" if is_start => {
                         let rsids = parse_section_rsids(e)?;
                         let mut sp = parse_section_properties(reader, buf)?;
                         sp.rsids = rsids;
                         sect_props = Some(sp);
                     }
-                    _ => xml::warn_unsupported_element("pPr", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"pStyle" => {
-                        style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                    }
-                    b"ind" => {
-                        props.indentation = Some(parse_indentation(e)?);
-                    }
-                    b"spacing" => {
-                        props.spacing = Some(parse_paragraph_spacing(e)?);
-                    }
-                    b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
-                    }
-                    b"shd" => {
-                        props.shading = Some(parse_shading(e)?);
-                    }
+                    // Empty-only: no children
                     b"keepNext" => {
-                        props.keep_next = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.keep_next = toggle_attr(e)?;
                     }
                     b"keepLines" => {
-                        props.keep_lines =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.keep_lines = toggle_attr(e)?;
                     }
                     b"widowControl" => {
-                        props.widow_control =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.widow_control = toggle_attr(e)?;
                     }
                     b"pageBreakBefore" => {
-                        props.page_break_before =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.page_break_before = toggle_attr(e)?;
                     }
                     b"suppressAutoHyphens" => {
-                        props.suppress_auto_hyphens =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.suppress_auto_hyphens = toggle_attr(e)?;
                     }
                     b"contextualSpacing" => {
-                        props.contextual_spacing =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.contextual_spacing = toggle_attr(e)?;
                     }
                     b"bidi" => {
-                        props.bidi = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.bidi = toggle_attr(e)?;
                     }
                     b"wordWrap" => {
-                        props.word_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.word_wrap = toggle_attr(e)?;
                     }
                     b"textAlignment" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_alignment = Some(parse_text_alignment(&val)?);
-                        }
+                        props.text_alignment = opt_val(e, parse_text_alignment)?;
                     }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
                     }
                     b"framePr" => {
-                        props.frame_properties = Some(parse_frame_properties(e)?);
+                        props.frame_properties = Some(parse_frame_kind(e)?);
                     }
                     b"autoSpaceDE" => {
-                        props.auto_space_de =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.auto_space_de = toggle_attr(e)?;
                     }
                     b"autoSpaceDN" => {
-                        props.auto_space_dn =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
-                    }
-                    b"outlineLvl" => {
-                        if let Some(val) = xml::optional_attr_u32(e, b"val")? {
-                            props.outline_level = OutlineLevel::from_ooxml(val as u8);
-                        }
+                        props.auto_space_dn = toggle_attr(e)?;
                     }
                     // §17.6.18: an empty sectPr is valid (inherits all defaults).
                     b"sectPr" => {
@@ -224,11 +212,11 @@ pub fn parse_run_properties(
                     }
                     b"szCs" => {}
                     b"b" => {
-                        props.bold = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.bold = toggle_attr(e)?;
                     }
                     b"bCs" => {}
                     b"i" => {
-                        props.italic = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.italic = toggle_attr(e)?;
                     }
                     b"iCs" => {}
                     b"u" => {
@@ -262,9 +250,7 @@ pub fn parse_run_properties(
                         props.shading = Some(parse_shading(e)?);
                     }
                     b"vertAlign" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_vertical_align(&val)?);
-                        }
+                        props.vertical_align = opt_val(e, parse_vertical_align)?;
                     }
                     b"spacing" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
@@ -277,21 +263,19 @@ pub fn parse_run_properties(
                         }
                     }
                     b"caps" => {
-                        props.all_caps = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.all_caps = toggle_attr(e)?;
                     }
                     b"smallCaps" => {
-                        props.small_caps =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.small_caps = toggle_attr(e)?;
                     }
                     b"vanish" => {
-                        props.vanish = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.vanish = toggle_attr(e)?;
                     }
                     b"noProof" => {
-                        props.no_proof = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.no_proof = toggle_attr(e)?;
                     }
                     b"webHidden" => {
-                        props.web_hidden =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.web_hidden = toggle_attr(e)?;
                     }
                     b"position" => {
                         if let Some(val) = xml::optional_attr_i64(e, b"val")? {
@@ -306,19 +290,19 @@ pub fn parse_run_properties(
                         });
                     }
                     b"rtl" => {
-                        props.rtl = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.rtl = toggle_attr(e)?;
                     }
                     b"emboss" => {
-                        props.emboss = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.emboss = toggle_attr(e)?;
                     }
                     b"imprint" => {
-                        props.imprint = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.imprint = toggle_attr(e)?;
                     }
                     b"outline" => {
-                        props.outline = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.outline = toggle_attr(e)?;
                     }
                     b"shadow" => {
-                        props.shadow = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.shadow = toggle_attr(e)?;
                     }
                     b"bdr" => {
                         props.border = Some(parse_border(e)?);
@@ -346,8 +330,10 @@ pub fn parse_table_properties(
     let mut style_id: Option<StyleId> = None;
 
     loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
+        let event = xml::next_event(reader, buf)?;
+        let is_start = matches!(event, Event::Start(_));
+        match event {
+            Event::Empty(ref e) | Event::Start(ref e) => {
                 let qn = e.name();
                 let local = xml::local_name(qn.as_ref());
                 match local {
@@ -355,57 +341,29 @@ pub fn parse_table_properties(
                         props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
                         style_id.clone_from(&props.style_id);
                     }
-                    b"tblBorders" => {
+                    // Start-only: have child elements
+                    b"tblBorders" if is_start => {
                         props.borders = Some(parse_table_borders(reader, buf)?);
                     }
-                    b"tblCellMar" => {
+                    b"tblCellMar" if is_start => {
                         props.cell_margins =
                             Some(parse_edge_insets_twips(reader, buf, b"tblCellMar")?);
                     }
-                    b"tblLook" => {
-                        props.look = Some(parse_table_look(e)?);
-                    }
-                    b"tblStyleRowBandSize" => {
-                        props.style_row_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblStyleColBandSize" => {
-                        props.style_col_band_size = xml::optional_attr_u32(e, b"val")?;
-                    }
-                    b"tblpPr" => {
-                        props.positioning = Some(parse_table_positioning(e)?);
-                    }
-                    b"tblOverlap" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.overlap = Some(parse_table_overlap(&val)?);
-                        }
-                    }
-                    _ => xml::warn_unsupported_element("tblPr", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"tblStyle" => {
-                        props.style_id = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                        style_id.clone_from(&props.style_id);
-                    }
+                    // attrs-only — valid as Start or Empty
                     b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.alignment = Some(parse_alignment(&val)?);
-                        }
+                        props.alignment = opt_val(e, parse_alignment)?;
                     }
                     b"tblW" => {
                         props.width = Some(parse_table_measure(e)?);
                     }
                     b"tblLayout" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.layout = Some(match val.as_str() {
+                        props.layout = opt_val(e, |v| {
+                            Ok(match v {
                                 "fixed" => TableLayout::Fixed,
                                 "autofit" | "auto" => TableLayout::Auto,
                                 other => return Err(invalid_value("tblLayout/val", other)),
-                            });
-                        }
+                            })
+                        })?;
                     }
                     b"tblInd" => {
                         props.indent = Some(parse_table_measure(e)?);
@@ -426,9 +384,7 @@ pub fn parse_table_properties(
                         props.positioning = Some(parse_table_positioning(e)?);
                     }
                     b"tblOverlap" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.overlap = Some(parse_table_overlap(&val)?);
-                        }
+                        props.overlap = opt_val(e, parse_table_overlap)?;
                     }
                     _ => xml::warn_unsupported_element("tblPr", local),
                 }
@@ -469,16 +425,13 @@ pub fn parse_table_row_properties(
                         }
                     }
                     b"tblHeader" => {
-                        props.is_header = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.is_header = toggle_attr(e)?;
                     }
                     b"cantSplit" => {
-                        props.cant_split =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.cant_split = toggle_attr(e)?;
                     }
                     b"jc" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.justification = Some(parse_alignment(&val)?);
-                        }
+                        props.justification = opt_val(e, parse_alignment)?;
                     }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
@@ -534,9 +487,7 @@ pub fn parse_table_cell_properties(
                         props.shading = Some(parse_shading(e)?);
                     }
                     b"vAlign" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.vertical_align = Some(parse_cell_vertical_align(&val)?);
-                        }
+                        props.vertical_align = opt_val(e, parse_cell_vertical_align)?;
                     }
                     b"vMerge" => {
                         let is_restart = xml::optional_attr(e, b"val")?
@@ -552,12 +503,10 @@ pub fn parse_table_cell_properties(
                         props.grid_span = xml::optional_attr_u32(e, b"val")?;
                     }
                     b"textDirection" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.text_direction = Some(parse_text_direction(&val)?);
-                        }
+                        props.text_direction = opt_val(e, parse_text_direction)?;
                     }
                     b"noWrap" => {
-                        props.no_wrap = Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.no_wrap = toggle_attr(e)?;
                     }
                     b"cnfStyle" => {
                         props.cnf_style = Some(parse_cnf_style(e)?);
@@ -677,16 +626,13 @@ pub fn parse_section_properties(
                         });
                     }
                     b"titlePg" => {
-                        props.title_page =
-                            Some(xml::optional_attr_bool(e, b"val")?.unwrap_or(true));
+                        props.title_page = toggle_attr(e)?;
                     }
                     b"pgNumType" => {
                         props.page_number_type = Some(parse_page_number_type(e)?);
                     }
                     b"type" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            props.section_type = Some(parse_section_type(&val)?);
-                        }
+                        props.section_type = opt_val(e, parse_section_type)?;
                     }
                     _ => xml::warn_unsupported_element("sectPr", local),
                 }
@@ -1001,17 +947,22 @@ fn parse_color_from_attr(e: &BytesStart<'_>) -> Result<Color> {
 
 fn parse_font_set(e: &BytesStart<'_>) -> Result<FontSet> {
     Ok(FontSet {
-        ascii: xml::optional_attr(e, b"ascii")?,
-        high_ansi: xml::optional_attr(e, b"hAnsi")?,
-        east_asian: xml::optional_attr(e, b"eastAsia")?,
-        complex_script: xml::optional_attr(e, b"cs")?,
-        ascii_theme: xml::optional_attr(e, b"asciiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
-        high_ansi_theme: xml::optional_attr(e, b"hAnsiTheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
-        east_asian_theme: xml::optional_attr(e, b"eastAsiaTheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
-        complex_script_theme: xml::optional_attr(e, b"cstheme")?
-            .and_then(|v| parse_theme_font_ref(&v)),
+        ascii: FontSlot {
+            explicit: xml::optional_attr(e, b"ascii")?,
+            theme: xml::optional_attr(e, b"asciiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        high_ansi: FontSlot {
+            explicit: xml::optional_attr(e, b"hAnsi")?,
+            theme: xml::optional_attr(e, b"hAnsiTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        east_asian: FontSlot {
+            explicit: xml::optional_attr(e, b"eastAsia")?,
+            theme: xml::optional_attr(e, b"eastAsiaTheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
+        complex_script: FontSlot {
+            explicit: xml::optional_attr(e, b"cs")?,
+            theme: xml::optional_attr(e, b"cstheme")?.and_then(|v| parse_theme_font_ref(&v)),
+        },
     })
 }
 
@@ -1337,23 +1288,42 @@ fn parse_text_alignment(val: &str) -> Result<TextAlignment> {
     }
 }
 
-/// §17.3.1.8: parse `w:cnfStyle` element attributes.
+/// §17.3.1.8: parse `w:cnfStyle` element attributes into a [`CnfStyle`] flag set.
+///
+/// The `val` binary string is parsed first (positions 0–11 → flags), then any
+/// explicit individual attributes override the corresponding bits, allowing
+/// producers that omit `val` to be handled correctly.
 fn parse_cnf_style(e: &BytesStart<'_>) -> Result<CnfStyle> {
-    Ok(CnfStyle {
-        val: xml::optional_attr(e, b"val")?,
-        first_row: xml::optional_attr_bool(e, b"firstRow")?,
-        last_row: xml::optional_attr_bool(e, b"lastRow")?,
-        first_column: xml::optional_attr_bool(e, b"firstColumn")?,
-        last_column: xml::optional_attr_bool(e, b"lastColumn")?,
-        odd_v_band: xml::optional_attr_bool(e, b"oddVBand")?,
-        even_v_band: xml::optional_attr_bool(e, b"evenVBand")?,
-        odd_h_band: xml::optional_attr_bool(e, b"oddHBand")?,
-        even_h_band: xml::optional_attr_bool(e, b"evenHBand")?,
-        first_row_first_column: xml::optional_attr_bool(e, b"firstRowFirstColumn")?,
-        first_row_last_column: xml::optional_attr_bool(e, b"firstRowLastColumn")?,
-        last_row_first_column: xml::optional_attr_bool(e, b"lastRowFirstColumn")?,
-        last_row_last_column: xml::optional_attr_bool(e, b"lastRowLastColumn")?,
-    })
+    // Seed from the legacy 12-char binary string if present.
+    let mut flags = match xml::optional_attr(e, b"val")? {
+        Some(s) => CnfStyle::from_val_str(&s),
+        None => CnfStyle::empty(),
+    };
+
+    // Individual attributes take precedence over the `val` string.
+    let pairs: &[(&[u8], CnfStyle)] = &[
+        (b"firstRow", CnfStyle::FIRST_ROW),
+        (b"lastRow", CnfStyle::LAST_ROW),
+        (b"firstColumn", CnfStyle::FIRST_COLUMN),
+        (b"lastColumn", CnfStyle::LAST_COLUMN),
+        (b"oddVBand", CnfStyle::ODD_V_BAND),
+        (b"evenVBand", CnfStyle::EVEN_V_BAND),
+        (b"oddHBand", CnfStyle::ODD_H_BAND),
+        (b"evenHBand", CnfStyle::EVEN_H_BAND),
+        (b"firstRowFirstColumn", CnfStyle::FIRST_ROW_FIRST_COLUMN),
+        (b"firstRowLastColumn", CnfStyle::FIRST_ROW_LAST_COLUMN),
+        (b"lastRowFirstColumn", CnfStyle::LAST_ROW_FIRST_COLUMN),
+        (b"lastRowLastColumn", CnfStyle::LAST_ROW_LAST_COLUMN),
+    ];
+    for &(attr, flag) in pairs {
+        match xml::optional_attr_bool(e, attr)? {
+            Some(true) => flags |= flag,
+            Some(false) => flags &= !flag,
+            None => {} // absent — leave the val-seeded bit unchanged
+        }
+    }
+
+    Ok(flags)
 }
 
 /// §17.4.58: parse `w:tblpPr` attributes.
@@ -1410,17 +1380,26 @@ fn parse_table_overlap(val: &str) -> Result<TableOverlap> {
     }
 }
 
-/// §17.3.1.11: parse `w:framePr` attributes.
-fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
-    Ok(FrameProperties {
-        drop_cap: match xml::optional_attr(e, b"dropCap")?.as_deref() {
-            Some("none") => Some(DropCap::None),
-            Some("drop") => Some(DropCap::Drop),
-            Some("margin") => Some(DropCap::Margin),
-            Some(other) => return Err(invalid_value("framePr/dropCap", other)),
-            None => None,
-        },
-        lines: xml::optional_attr_u32(e, b"lines")?,
+/// §17.3.1.11: parse `w:framePr` attributes into a [`FrameKind`].
+///
+/// When `w:dropCap` is `"drop"` or `"margin"` the element represents a drop cap;
+/// otherwise it is a floating text-box frame.
+fn parse_frame_kind(e: &BytesStart<'_>) -> Result<FrameKind> {
+    let drop_cap = match xml::optional_attr(e, b"dropCap")?.as_deref() {
+        Some("drop") => Some(DropCap::Drop),
+        Some("margin") => Some(DropCap::Margin),
+        _ => None, // "none" or absent — not a drop cap
+    };
+
+    if let Some(style) = drop_cap {
+        return Ok(FrameKind::DropCap {
+            style,
+            lines: xml::optional_attr_u32(e, b"lines")?.unwrap_or(3),
+            h_space: xml::optional_attr_i64(e, b"hSpace")?.map(Dimension::new),
+        });
+    }
+
+    Ok(FrameKind::TextBox(TextBoxPositioning {
         width: xml::optional_attr_i64(e, b"w")?.map(Dimension::new),
         height: xml::optional_attr_i64(e, b"h")?.map(Dimension::new),
         height_rule: match xml::optional_attr(e, b"hRule")?.as_deref() {
@@ -1477,7 +1456,7 @@ fn parse_frame_properties(e: &BytesStart<'_>) -> Result<FrameProperties> {
             Some(other) => return Err(invalid_value("framePr/yAlign", other)),
             None => None,
         },
-    })
+    }))
 }
 
 /// §17.6.12: parse `w:pgNumType` attributes.

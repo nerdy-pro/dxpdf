@@ -228,7 +228,7 @@ fn dump(name: &str, doc: &Document) {
                 if let Some(ref u) = rp.underline {
                     print!(" underline={u:?}");
                 }
-                if let Some(ref f) = rp.fonts.ascii {
+                if let Some(ref f) = rp.fonts.ascii.explicit {
                     print!(" font=\"{f}\"");
                 }
                 print!(" color={:?}", rp.color);

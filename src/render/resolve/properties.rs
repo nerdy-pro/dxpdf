@@ -5,38 +5,54 @@
 
 use crate::model::{ParagraphProperties, RunProperties, TabAlignment, TableProperties};
 
+/// Fill any `None` fields in `$target` from the corresponding fields in `$base`.
+///
+/// Expands to a sequence of `merge_opt(&mut $target.$field, &$base.$field)` calls.
+macro_rules! merge_fields {
+    ($target:expr, $base:expr, $($field:ident),+ $(,)?) => {
+        $(merge_opt(&mut $target.$field, &$base.$field);)+
+    };
+}
+
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
 pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
-    // FontSet: merge each sub-field independently
-    merge_opt(&mut target.fonts.ascii, &base.fonts.ascii);
-    merge_opt(&mut target.fonts.high_ansi, &base.fonts.high_ansi);
-    merge_opt(&mut target.fonts.east_asian, &base.fonts.east_asian);
-    merge_opt(&mut target.fonts.complex_script, &base.fonts.complex_script);
+    // FontSet: delegate to FontSlot::merge_from so each slot handles its own fields.
+    target.fonts.ascii.merge_from(&base.fonts.ascii);
+    target.fonts.high_ansi.merge_from(&base.fonts.high_ansi);
+    target.fonts.east_asian.merge_from(&base.fonts.east_asian);
+    target
+        .fonts
+        .complex_script
+        .merge_from(&base.fonts.complex_script);
 
-    merge_opt(&mut target.font_size, &base.font_size);
-    merge_opt(&mut target.bold, &base.bold);
-    merge_opt(&mut target.italic, &base.italic);
-    merge_opt(&mut target.underline, &base.underline);
-    merge_opt(&mut target.strike, &base.strike);
-    merge_opt(&mut target.color, &base.color);
-    merge_opt(&mut target.highlight, &base.highlight);
-    merge_opt(&mut target.shading, &base.shading);
-    merge_opt(&mut target.vertical_align, &base.vertical_align);
-    merge_opt(&mut target.spacing, &base.spacing);
-    merge_opt(&mut target.kerning, &base.kerning);
-    merge_opt(&mut target.all_caps, &base.all_caps);
-    merge_opt(&mut target.small_caps, &base.small_caps);
-    merge_opt(&mut target.vanish, &base.vanish);
-    merge_opt(&mut target.no_proof, &base.no_proof);
-    merge_opt(&mut target.web_hidden, &base.web_hidden);
-    merge_opt(&mut target.rtl, &base.rtl);
-    merge_opt(&mut target.emboss, &base.emboss);
-    merge_opt(&mut target.imprint, &base.imprint);
-    merge_opt(&mut target.outline, &base.outline);
-    merge_opt(&mut target.shadow, &base.shadow);
-    merge_opt(&mut target.position, &base.position);
-    merge_opt(&mut target.lang, &base.lang);
-    merge_opt(&mut target.border, &base.border);
+    merge_fields!(
+        target,
+        base,
+        font_size,
+        bold,
+        italic,
+        underline,
+        strike,
+        color,
+        highlight,
+        shading,
+        vertical_align,
+        spacing,
+        kerning,
+        all_caps,
+        small_caps,
+        vanish,
+        no_proof,
+        web_hidden,
+        rtl,
+        emboss,
+        imprint,
+        outline,
+        shadow,
+        position,
+        lang,
+        border,
+    );
 }
 
 /// Merge `base` into `target`: any `None` field in `target` gets filled from `base`.
@@ -68,26 +84,27 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
         (None, Some(_)) => target.spacing = base.spacing,
         _ => {}
     }
-    merge_opt(&mut target.numbering, &base.numbering);
-    merge_opt(&mut target.borders, &base.borders);
-    merge_opt(&mut target.shading, &base.shading);
-    merge_opt(&mut target.keep_next, &base.keep_next);
-    merge_opt(&mut target.keep_lines, &base.keep_lines);
-    merge_opt(&mut target.widow_control, &base.widow_control);
-    merge_opt(&mut target.page_break_before, &base.page_break_before);
-    merge_opt(
-        &mut target.suppress_auto_hyphens,
-        &base.suppress_auto_hyphens,
+    merge_fields!(
+        target,
+        base,
+        numbering,
+        borders,
+        shading,
+        keep_next,
+        keep_lines,
+        widow_control,
+        page_break_before,
+        suppress_auto_hyphens,
+        contextual_spacing,
+        bidi,
+        word_wrap,
+        outline_level,
+        text_alignment,
+        cnf_style,
+        frame_properties,
+        auto_space_de,
+        auto_space_dn,
     );
-    merge_opt(&mut target.contextual_spacing, &base.contextual_spacing);
-    merge_opt(&mut target.bidi, &base.bidi);
-    merge_opt(&mut target.word_wrap, &base.word_wrap);
-    merge_opt(&mut target.outline_level, &base.outline_level);
-    merge_opt(&mut target.text_alignment, &base.text_alignment);
-    merge_opt(&mut target.cnf_style, &base.cnf_style);
-    merge_opt(&mut target.frame_properties, &base.frame_properties);
-    merge_opt(&mut target.auto_space_de, &base.auto_space_de);
-    merge_opt(&mut target.auto_space_dn, &base.auto_space_dn);
 
     // §17.3.1.38: merge tab stops at the individual-stop level.
     // Child Clear entries remove matching positions from the parent.
@@ -207,15 +224,15 @@ mod tests {
     fn merge_run_fonts_merged_field_by_field() {
         let mut target = RunProperties {
             fonts: FontSet {
-                ascii: Some("Arial".into()),
+                ascii: FontSlot::from_name("Arial"),
                 ..Default::default()
             },
             ..Default::default()
         };
         let base = RunProperties {
             fonts: FontSet {
-                ascii: Some("Times".into()),
-                east_asian: Some("SimSun".into()),
+                ascii: FontSlot::from_name("Times"),
+                east_asian: FontSlot::from_name("SimSun"),
                 ..Default::default()
             },
             ..Default::default()
@@ -223,12 +240,12 @@ mod tests {
         merge_run_properties(&mut target, &base);
 
         assert_eq!(
-            target.fonts.ascii.as_deref(),
+            target.fonts.ascii.explicit.as_deref(),
             Some("Arial"),
             "target's ascii should win"
         );
         assert_eq!(
-            target.fonts.east_asian.as_deref(),
+            target.fonts.east_asian.explicit.as_deref(),
             Some("SimSun"),
             "east_asian should come from base"
         );
@@ -239,11 +256,10 @@ mod tests {
         // Ensure merge touches every field by setting all in base, none in target.
         let base = RunProperties {
             fonts: FontSet {
-                ascii: Some("F".into()),
-                high_ansi: Some("F".into()),
-                east_asian: Some("F".into()),
-                complex_script: Some("F".into()),
-                ..Default::default()
+                ascii: FontSlot::from_name("F"),
+                high_ansi: FontSlot::from_name("F"),
+                east_asian: FontSlot::from_name("F"),
+                complex_script: FontSlot::from_name("F"),
             },
             font_size: Some(Dimension::<HalfPoints>::new(24)),
             bold: Some(true),
@@ -309,10 +325,10 @@ mod tests {
         assert!(target.position.is_some());
         assert!(target.lang.is_some());
         assert!(target.border.is_some());
-        assert!(target.fonts.ascii.is_some());
-        assert!(target.fonts.high_ansi.is_some());
-        assert!(target.fonts.east_asian.is_some());
-        assert!(target.fonts.complex_script.is_some());
+        assert!(target.fonts.ascii.explicit.is_some());
+        assert!(target.fonts.high_ansi.explicit.is_some());
+        assert!(target.fonts.east_asian.explicit.is_some());
+        assert!(target.fonts.complex_script.explicit.is_some());
         assert!(target.font_size.is_some());
     }
 
@@ -507,21 +523,7 @@ mod tests {
             word_wrap: Some(true),
             outline_level: Some(OutlineLevel::new(1)),
             text_alignment: Some(TextAlignment::Center),
-            cnf_style: Some(CnfStyle {
-                val: None,
-                first_row: Some(true),
-                last_row: None,
-                first_column: None,
-                last_column: None,
-                odd_v_band: None,
-                even_v_band: None,
-                odd_h_band: None,
-                even_h_band: None,
-                first_row_first_column: None,
-                first_row_last_column: None,
-                last_row_first_column: None,
-                last_row_last_column: None,
-            }),
+            cnf_style: Some(CnfStyle::FIRST_ROW),
             frame_properties: None,
             auto_space_de: Some(true),
             auto_space_dn: Some(true),

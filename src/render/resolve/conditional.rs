@@ -17,6 +17,16 @@ pub struct CellConditionalFormatting {
     pub paragraph_properties: Option<ParagraphProperties>,
 }
 
+/// Grid position and dimension context for a single cell.
+pub struct CellGridPosition {
+    pub row_idx: usize,
+    pub col_idx: usize,
+    pub num_rows: usize,
+    pub num_cols: usize,
+    pub row_band_size: u32,
+    pub col_band_size: u32,
+}
+
 /// §17.7.6: resolve conditional formatting for a cell at (row, col).
 ///
 /// Overlays applicable `tblStylePr` overrides in priority order per §17.7.6:
@@ -26,25 +36,19 @@ pub struct CellConditionalFormatting {
 /// 4. First/Last Column
 /// 5. First/Last Row
 /// 6. Corner cells (highest)
-#[allow(clippy::too_many_arguments)]
 pub fn resolve_cell_conditional(
-    row_idx: usize,
-    col_idx: usize,
-    num_rows: usize,
-    num_cols: usize,
+    pos: &CellGridPosition,
     look: Option<&TableLook>,
     overrides: &[TableStyleOverride],
-    row_band_size: u32,
-    col_band_size: u32,
 ) -> CellConditionalFormatting {
     let regions = applicable_regions(
-        row_idx,
-        col_idx,
-        num_rows,
-        num_cols,
+        pos.row_idx,
+        pos.col_idx,
+        pos.num_rows,
+        pos.num_cols,
         look,
-        row_band_size,
-        col_band_size,
+        pos.row_band_size,
+        pos.col_band_size,
     );
 
     let mut result = CellConditionalFormatting::default();
@@ -359,7 +363,18 @@ mod tests {
             Some(green_shading()),
             Some(true),
         )];
-        let result = resolve_cell_conditional(0, 2, 6, 6, None, &overrides, 1, 1);
+        let result = resolve_cell_conditional(
+            &CellGridPosition {
+                row_idx: 0,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
+            None,
+            &overrides,
+        );
         assert!(result.cell_properties.is_some());
         assert!(result.cell_properties.as_ref().unwrap().shading.is_some());
         assert!(result.run_properties.as_ref().unwrap().bold == Some(true));
@@ -372,7 +387,18 @@ mod tests {
             Some(blue_shading()),
             None,
         )];
-        let result = resolve_cell_conditional(1, 2, 6, 6, None, &overrides, 1, 1);
+        let result = resolve_cell_conditional(
+            &CellGridPosition {
+                row_idx: 1,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
+            None,
+            &overrides,
+        );
         let shading = result
             .cell_properties
             .as_ref()
@@ -393,7 +419,18 @@ mod tests {
             ),
             make_override(TableStyleOverrideType::NwCell, Some(blue_shading()), None),
         ];
-        let result = resolve_cell_conditional(0, 0, 6, 6, None, &overrides, 1, 1);
+        let result = resolve_cell_conditional(
+            &CellGridPosition {
+                row_idx: 0,
+                col_idx: 0,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
+            None,
+            &overrides,
+        );
         // NW corner has higher priority than FirstRow.
         let shading = result
             .cell_properties
@@ -407,7 +444,18 @@ mod tests {
 
     #[test]
     fn no_overrides_returns_empty() {
-        let result = resolve_cell_conditional(2, 2, 6, 6, None, &[], 1, 1);
+        let result = resolve_cell_conditional(
+            &CellGridPosition {
+                row_idx: 2,
+                col_idx: 2,
+                num_rows: 6,
+                num_cols: 6,
+                row_band_size: 1,
+                col_band_size: 1,
+            },
+            None,
+            &[],
+        );
         assert!(result.cell_properties.is_none());
         assert!(result.run_properties.is_none());
     }

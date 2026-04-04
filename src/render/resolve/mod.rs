@@ -117,7 +117,7 @@ mod tests {
                 style_id: None,
                 properties: RunProperties {
                     fonts: FontSet {
-                        ascii: Some("TestFont".into()),
+                        ascii: FontSlot::from_name("TestFont"),
                         ..Default::default()
                     },
                     ..Default::default()

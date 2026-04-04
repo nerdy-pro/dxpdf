@@ -14,6 +14,24 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::{PtOffset, PtSize};
 use crate::render::resolve::color::RgbColor;
 
+// ── Tab leader rendering constants ────────────────────────────────────────────
+
+/// Maximum font size used when measuring/drawing tab leader characters (pt).
+/// Caps at 12pt so leaders remain legible regardless of paragraph line height.
+const LEADER_FONT_SIZE_CAP: Pt = Pt::new(12.0);
+
+/// Fallback width for a single leader character when no measurer is available (pt).
+const LEADER_CHAR_WIDTH_FALLBACK: Pt = Pt::new(4.0);
+
+/// A fitted line together with the per-line float adjustments that were active when it was placed.
+struct LinePlacement {
+    line: super::line::FittedLine,
+    /// Width stolen from the left by an active float.
+    float_left: Pt,
+    /// Width stolen from the right by an active float.
+    float_right: Pt,
+}
+
 /// §17.3.1.38: a resolved tab stop for layout.
 #[derive(Clone, Debug)]
 pub struct TabStopDef {
@@ -218,98 +236,14 @@ pub fn layout_paragraph(
     // Per-line float adjustment: fit one line at a time, computing the available
     // width for each line based on its absolute y position on the page.
     // Each line stores its (float_left, float_right) adjustments for rendering.
-    let has_floats = !style.page_floats.is_empty();
-
-    struct LinePlacement {
-        line: super::line::FittedLine,
-        float_left: Pt,
-        float_right: Pt,
-    }
-
-    let line_placements: Vec<LinePlacement> = if has_floats {
-        let mut placements = Vec::new();
-        let mut frag_idx = 0;
-        let mut line_y = style.space_before;
-
-        while frag_idx < fragments.len() {
-            let abs_y = style.page_y + line_y;
-            let (fl, fr) = super::float::float_adjustments_with_height(
-                &style.page_floats,
-                abs_y,
-                default_line_height,
-                style.page_x,
-                style.page_content_width,
-            );
-            let float_reduction = fl + fr;
-            let available = (content_width - float_reduction).max(Pt::ZERO);
-
-            let is_first = placements.is_empty();
-            let dc_adj = if placements.len() < drop_cap_lines {
-                drop_cap_indent
-            } else {
-                Pt::ZERO
-            };
-            let line_width = if is_first {
-                (available - first_line_adjustment).max(Pt::ZERO)
-            } else {
-                (available - dc_adj).max(Pt::ZERO)
-            };
-
-            // Fit one line at this width.
-            let remaining = &fragments[frag_idx..];
-            let fitted = super::line::fit_lines_with_first(remaining, line_width, line_width);
-            let fitted_line = if let Some(first) = fitted.into_iter().next() {
-                super::line::FittedLine {
-                    start: first.start + frag_idx,
-                    end: first.end + frag_idx,
-                    width: first.width,
-                    height: first.height,
-                    text_height: first.text_height,
-                    ascent: first.ascent,
-                    has_break: first.has_break,
-                }
-            } else {
-                break;
-            };
-
-            let natural = if fitted_line.height > Pt::ZERO {
-                fitted_line.height
-            } else {
-                default_line_height
-            };
-            let text_h = if fitted_line.text_height > Pt::ZERO {
-                fitted_line.text_height
-            } else {
-                default_line_height
-            };
-            let lh = resolve_line_height(natural, text_h, &style.line_spacing);
-
-            frag_idx = fitted_line.end;
-            placements.push(LinePlacement {
-                line: fitted_line,
-                float_left: fl,
-                float_right: fr,
-            });
-            line_y += lh;
-        }
-        placements
-    } else {
-        // No floats — use standard line fitting.
-        let first_line_width = (content_width - first_line_adjustment).max(Pt::ZERO);
-        let remaining_width = if drop_cap_indent > Pt::ZERO {
-            content_width - drop_cap_indent
-        } else {
-            content_width
-        };
-        super::line::fit_lines_with_first(fragments, first_line_width, remaining_width)
-            .into_iter()
-            .map(|line| LinePlacement {
-                line,
-                float_left: Pt::ZERO,
-                float_right: Pt::ZERO,
-            })
-            .collect()
+    let params = LineLayoutParams {
+        content_width,
+        first_line_adjustment,
+        drop_cap_indent,
+        drop_cap_lines,
+        default_line_height,
     };
+    let line_placements = compute_line_placements(fragments, style, &params);
 
     let mut commands = Vec::new();
     let mut cursor_y = style.space_before;
@@ -379,8 +313,173 @@ pub fn layout_paragraph(
         }
     }
 
-    let mut accum_line_height = Pt::ZERO;
+    emit_line_commands(
+        &mut commands,
+        &mut cursor_y,
+        &line_placements,
+        fragments,
+        style,
+        &params,
+        measure_text,
+    );
 
+    // §17.3.1.24: paragraph border and shading coordinate system.
+    // Borders sit at the paragraph indent edges. The border `space` is the
+    // distance between the border line and the text content. Top/bottom
+    // border space expands the bordered area vertically.
+    cursor_y = emit_paragraph_borders_and_shading(
+        &mut commands,
+        style,
+        constraints,
+        cursor_y,
+        default_line_height,
+        line_placements.is_empty(),
+    );
+
+    let total_height = constraints
+        .constrain(PtSize::new(constraints.max_width, cursor_y))
+        .height;
+
+    ParagraphLayout {
+        commands,
+        size: PtSize::new(constraints.max_width, total_height),
+    }
+}
+
+// ── Extracted helpers ─────────────────────────────────────────────────────────
+
+/// Shared layout parameters threaded through `compute_line_placements` and
+/// `emit_line_commands`.
+struct LineLayoutParams {
+    content_width: Pt,
+    first_line_adjustment: Pt,
+    drop_cap_indent: Pt,
+    drop_cap_lines: usize,
+    default_line_height: Pt,
+}
+
+/// Fit all fragments into lines, computing per-line float adjustments when
+/// active floats are present.
+///
+/// When `style.page_floats` is non-empty each line is fitted individually so
+/// the available width can vary depending on the line's absolute y position.
+/// When there are no floats a single call to `fit_lines_with_first` is used.
+fn compute_line_placements(
+    fragments: &[Fragment],
+    style: &ParagraphStyle,
+    params: &LineLayoutParams,
+) -> Vec<LinePlacement> {
+    let content_width = params.content_width;
+    let first_line_adjustment = params.first_line_adjustment;
+    let drop_cap_indent = params.drop_cap_indent;
+    let drop_cap_lines = params.drop_cap_lines;
+    let default_line_height = params.default_line_height;
+    if style.page_floats.is_empty() {
+        // No floats — use standard line fitting.
+        let first_line_width = (content_width - first_line_adjustment).max(Pt::ZERO);
+        let remaining_width = if drop_cap_indent > Pt::ZERO {
+            content_width - drop_cap_indent
+        } else {
+            content_width
+        };
+        return super::line::fit_lines_with_first(fragments, first_line_width, remaining_width)
+            .into_iter()
+            .map(|line| LinePlacement {
+                line,
+                float_left: Pt::ZERO,
+                float_right: Pt::ZERO,
+            })
+            .collect();
+    }
+
+    // Active floats — fit one line at a time so available width can change.
+    let mut placements = Vec::new();
+    let mut frag_idx = 0;
+    let mut line_y = style.space_before;
+
+    while frag_idx < fragments.len() {
+        let abs_y = style.page_y + line_y;
+        let (fl, fr) = super::float::float_adjustments_with_height(
+            &style.page_floats,
+            abs_y,
+            default_line_height,
+            style.page_x,
+            style.page_content_width,
+        );
+        let float_reduction = fl + fr;
+        let available = (content_width - float_reduction).max(Pt::ZERO);
+
+        let is_first = placements.is_empty();
+        let dc_adj = if placements.len() < drop_cap_lines {
+            drop_cap_indent
+        } else {
+            Pt::ZERO
+        };
+        let line_width = if is_first {
+            (available - first_line_adjustment).max(Pt::ZERO)
+        } else {
+            (available - dc_adj).max(Pt::ZERO)
+        };
+
+        // Fit one line at this width.
+        let remaining = &fragments[frag_idx..];
+        let fitted = super::line::fit_lines_with_first(remaining, line_width, line_width);
+        let fitted_line = if let Some(first) = fitted.into_iter().next() {
+            super::line::FittedLine {
+                start: first.start + frag_idx,
+                end: first.end + frag_idx,
+                width: first.width,
+                height: first.height,
+                text_height: first.text_height,
+                ascent: first.ascent,
+                has_break: first.has_break,
+            }
+        } else {
+            break;
+        };
+
+        let natural = if fitted_line.height > Pt::ZERO {
+            fitted_line.height
+        } else {
+            default_line_height
+        };
+        let text_h = if fitted_line.text_height > Pt::ZERO {
+            fitted_line.text_height
+        } else {
+            default_line_height
+        };
+        let lh = resolve_line_height(natural, text_h, &style.line_spacing);
+
+        frag_idx = fitted_line.end;
+        placements.push(LinePlacement {
+            line: fitted_line,
+            float_left: fl,
+            float_right: fr,
+        });
+        line_y += lh;
+    }
+    placements
+}
+
+/// Emit `DrawCommand`s for all lines in a paragraph, advancing `cursor_y`
+/// by the total line height consumed.
+///
+/// Handles per-fragment shading, run borders, text, hyperlinks, underlines,
+/// images, tab stops (with leaders), bookmarks, and drop-cap indent offsets.
+fn emit_line_commands(
+    commands: &mut Vec<DrawCommand>,
+    cursor_y: &mut Pt,
+    line_placements: &[LinePlacement],
+    fragments: &[Fragment],
+    style: &ParagraphStyle,
+    params: &LineLayoutParams,
+    measure_text: MeasureTextFn<'_>,
+) {
+    let content_width = params.content_width;
+    let first_line_adjustment = params.first_line_adjustment;
+    let drop_cap_indent = params.drop_cap_indent;
+    let drop_cap_lines = params.drop_cap_lines;
+    let default_line_height = params.default_line_height;
     for (line_idx, lp) in line_placements.iter().enumerate() {
         let line = &lp.line;
 
@@ -449,7 +548,7 @@ pub fn layout_paragraph(
                     // §17.3.2.32: render run-level shading behind text.
                     // Uses text bounds (ascent+descent), not full line height.
                     if let Some(bg_color) = shading {
-                        let text_top = cursor_y + line.ascent - metrics.ascent;
+                        let text_top = *cursor_y + line.ascent - metrics.ascent;
                         commands.push(DrawCommand::Rect {
                             rect: crate::render::geometry::PtRect::from_xywh(
                                 x,
@@ -464,7 +563,7 @@ pub fn layout_paragraph(
                     // §17.3.2.4: render run-level border (box around text).
                     // Uses text bounds, not full line height.
                     if let Some(bdr) = border {
-                        let text_top = cursor_y + line.ascent - metrics.ascent;
+                        let text_top = *cursor_y + line.ascent - metrics.ascent;
                         let bx = x - bdr.space;
                         let by = text_top;
                         let bw = *width + bdr.space * 2.0;
@@ -508,7 +607,7 @@ pub fn layout_paragraph(
                         });
                     }
 
-                    let y = cursor_y + line.ascent + *baseline_offset;
+                    let y = *cursor_y + line.ascent + *baseline_offset;
                     commands.push(DrawCommand::Text {
                         position: PtOffset::new(x + *text_offset, y),
                         text: text.clone(),
@@ -523,7 +622,7 @@ pub fn layout_paragraph(
                     if let Some(url) = hyperlink_url {
                         let rect = crate::render::geometry::PtRect::from_xywh(
                             x,
-                            cursor_y,
+                            *cursor_y,
                             *width,
                             line_height,
                         );
@@ -570,7 +669,7 @@ pub fn layout_paragraph(
                         commands.push(DrawCommand::Image {
                             rect: crate::render::geometry::PtRect::from_xywh(
                                 x,
-                                cursor_y,
+                                *cursor_y,
                                 size.width,
                                 size.height,
                             ),
@@ -618,12 +717,11 @@ pub fn layout_paragraph(
                     // Emit leader characters between tab start and tab position.
                     if let Some(ts) = tab_stop {
                         emit_tab_leader(
-                            &mut commands,
+                            commands,
                             ts.leader,
                             x,
                             new_x,
-                            cursor_y + line.ascent,
-                            line_height,
+                            *cursor_y + line.ascent,
                             measure_text,
                             default_line_height,
                         );
@@ -634,17 +732,29 @@ pub fn layout_paragraph(
                 Fragment::LineBreak { .. } | Fragment::ColumnBreak => {}
                 Fragment::Bookmark { name } => {
                     commands.push(DrawCommand::NamedDestination {
-                        position: PtOffset::new(x, cursor_y),
+                        position: PtOffset::new(x, *cursor_y),
                         name: name.clone(),
                     });
                 }
             }
         }
 
-        cursor_y += line_height;
-        accum_line_height += line_height;
+        *cursor_y += line_height;
     }
+}
 
+/// Emit paragraph border and shading commands, then advance the cursor for
+/// border bottom space, `space_after`, and the empty-paragraph minimum height.
+///
+/// Returns the updated `cursor_y` after all spacing has been applied.
+fn emit_paragraph_borders_and_shading(
+    commands: &mut Vec<DrawCommand>,
+    style: &ParagraphStyle,
+    constraints: &BoxConstraints,
+    cursor_y: Pt,
+    default_line_height: Pt,
+    no_lines: bool,
+) -> Pt {
     // §17.3.1.24: paragraph border and shading coordinate system.
     // Borders sit at the paragraph indent edges. The border `space` is the
     // distance between the border line and the text content. Top/bottom
@@ -727,12 +837,11 @@ pub fn layout_paragraph(
     }
 
     // §17.3.1.24: bottom border space adds to paragraph height.
-    cursor_y += border_space_bottom;
-    cursor_y += style.space_after;
+    let mut cursor_y = cursor_y + border_space_bottom + style.space_after;
 
     // If no lines, still consume default height + spacing.
     // Apply the paragraph's line spacing rule to the default line height.
-    if line_placements.is_empty() {
+    if no_lines {
         let line_h = resolve_line_height(
             default_line_height,
             default_line_height,
@@ -741,14 +850,7 @@ pub fn layout_paragraph(
         cursor_y = style.space_before + line_h + style.space_after;
     }
 
-    let total_height = constraints
-        .constrain(PtSize::new(constraints.max_width, cursor_y))
-        .height;
-
-    ParagraphLayout {
-        commands,
-        size: PtSize::new(constraints.max_width, total_height),
-    }
+    cursor_y
 }
 
 /// Split text fragments wider than `max_width` into per-character fragments.
@@ -832,14 +934,12 @@ fn find_next_tab_stop(
 }
 
 /// Emit leader characters (dots, hyphens, etc.) between tab start and end.
-#[allow(clippy::too_many_arguments)]
 fn emit_tab_leader(
     commands: &mut Vec<DrawCommand>,
     leader: crate::model::TabLeader,
     x_start: Pt,
     x_end: Pt,
     baseline_y: Pt,
-    _line_height: Pt,
     measure_text: MeasureTextFn<'_>,
     default_line_height: Pt,
 ) {
@@ -863,7 +963,7 @@ fn emit_tab_leader(
     // Use a small font to get the leader char width.
     let leader_font = super::fragment::FontProps {
         family: std::rc::Rc::from("Times New Roman"),
-        size: default_line_height.min(Pt::new(12.0)),
+        size: default_line_height.min(LEADER_FONT_SIZE_CAP),
         bold: false,
         italic: false,
         underline: false,
@@ -875,7 +975,7 @@ fn emit_tab_leader(
     let char_width = if let Some(m) = measure_text {
         m(leader_char, &leader_font).0
     } else {
-        Pt::new(4.0) // fallback estimate
+        LEADER_CHAR_WIDTH_FALLBACK
     };
 
     if char_width <= Pt::ZERO {

@@ -63,22 +63,50 @@ pub enum ThemeFontRef {
     MinorBidi,
 }
 
+/// One script-category font slot — an explicit family name and/or a theme reference.
+///
+/// §17.3.2.26: when a theme reference is present it is resolved to an actual
+/// font name (written into `explicit`) during the resolve phase, overwriting
+/// any explicit name — theme references take precedence.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct FontSlot {
+    /// Explicitly named font family (e.g. `"Calibri"`).
+    pub explicit: Option<String>,
+    /// Theme font reference — resolved to a concrete name during the resolve phase.
+    pub theme: Option<ThemeFontRef>,
+}
+
+impl FontSlot {
+    /// Construct a slot from a plain font-family name with no theme reference.
+    pub fn from_name(name: impl Into<String>) -> Self {
+        FontSlot {
+            explicit: Some(name.into()),
+            theme: None,
+        }
+    }
+
+    /// Merge `base` into `self`: fill any `None` field from `base`.
+    ///
+    /// Only the `explicit` name is propagated through inheritance — theme
+    /// references are resolved into `explicit` before the merge step, so
+    /// carrying the raw `ThemeFontRef` through the cascade is unnecessary.
+    pub fn merge_from(&mut self, base: &FontSlot) {
+        if self.explicit.is_none() {
+            self.explicit = base.explicit.clone();
+        }
+    }
+}
+
 /// Font family names for each script category.
 ///
-/// Each slot has an explicit font name and/or a theme reference.
-/// §17.3.2.26: when both are present, the theme reference takes
-/// precedence and must be resolved against the document's theme.
+/// Each field is a [`FontSlot`] that bundles the explicit name and an optional
+/// theme reference for that category, keeping related data co-located.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct FontSet {
-    pub ascii: Option<String>,
-    pub high_ansi: Option<String>,
-    pub east_asian: Option<String>,
-    pub complex_script: Option<String>,
-    /// §17.3.2.26: theme font references (resolved during the resolve phase).
-    pub ascii_theme: Option<ThemeFontRef>,
-    pub high_ansi_theme: Option<ThemeFontRef>,
-    pub east_asian_theme: Option<ThemeFontRef>,
-    pub complex_script_theme: Option<ThemeFontRef>,
+    pub ascii: FontSlot,
+    pub high_ansi: FontSlot,
+    pub east_asian: FontSlot,
+    pub complex_script: FontSlot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

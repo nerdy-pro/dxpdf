@@ -16,6 +16,7 @@ exclude = ["test-cases/", "test-files/", "scripts/", "VISUAL_COMPARISON.md", "BE
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+bitflags = "2"
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 skia-safe = "0.93"

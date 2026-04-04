@@ -174,24 +174,64 @@ pub enum TabLeader {
 
 // ── Conditional Formatting ───────────────────────────────────────────────────
 
-/// §17.3.1.8: conditional formatting bit flags indicating which table style
-/// regions apply to an element (paragraph, row, or cell).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CnfStyle {
-    /// Legacy 12-character binary string (e.g., "101000000000").
-    pub val: Option<String>,
-    pub first_row: Option<bool>,
-    pub last_row: Option<bool>,
-    pub first_column: Option<bool>,
-    pub last_column: Option<bool>,
-    pub odd_v_band: Option<bool>,
-    pub even_v_band: Option<bool>,
-    pub odd_h_band: Option<bool>,
-    pub even_h_band: Option<bool>,
-    pub first_row_first_column: Option<bool>,
-    pub first_row_last_column: Option<bool>,
-    pub last_row_first_column: Option<bool>,
-    pub last_row_last_column: Option<bool>,
+bitflags::bitflags! {
+    /// §17.3.1.8: conditional formatting region flags indicating which table
+    /// style regions apply to an element (paragraph, row, or cell).
+    ///
+    /// The 12 bits correspond to the positional regions defined in ST_CnfType.
+    /// The legacy `val` binary string (e.g. `"100000000000"`) maps to these
+    /// bits left-to-right: bit 0 = firstRow, …, bit 11 = lastRowLastColumn.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+    pub struct CnfStyle: u16 {
+        const FIRST_ROW              = 1 << 0;
+        const LAST_ROW               = 1 << 1;
+        const FIRST_COLUMN           = 1 << 2;
+        const LAST_COLUMN            = 1 << 3;
+        const ODD_V_BAND             = 1 << 4;
+        const EVEN_V_BAND            = 1 << 5;
+        const ODD_H_BAND             = 1 << 6;
+        const EVEN_H_BAND            = 1 << 7;
+        const FIRST_ROW_FIRST_COLUMN = 1 << 8;
+        const FIRST_ROW_LAST_COLUMN  = 1 << 9;
+        const LAST_ROW_FIRST_COLUMN  = 1 << 10;
+        const LAST_ROW_LAST_COLUMN   = 1 << 11;
+    }
+}
+
+impl CnfStyle {
+    /// Parse the legacy 12-character `val` binary string (§17.3.1.8).
+    ///
+    /// Each character position maps to a flag left-to-right: `'1'` sets the
+    /// flag, `'0'` or any other character leaves it unset. Characters beyond
+    /// position 11 are ignored.
+    pub fn from_val_str(s: &str) -> Self {
+        let flags = [
+            CnfStyle::FIRST_ROW,
+            CnfStyle::LAST_ROW,
+            CnfStyle::FIRST_COLUMN,
+            CnfStyle::LAST_COLUMN,
+            CnfStyle::ODD_V_BAND,
+            CnfStyle::EVEN_V_BAND,
+            CnfStyle::ODD_H_BAND,
+            CnfStyle::EVEN_H_BAND,
+            CnfStyle::FIRST_ROW_FIRST_COLUMN,
+            CnfStyle::FIRST_ROW_LAST_COLUMN,
+            CnfStyle::LAST_ROW_FIRST_COLUMN,
+            CnfStyle::LAST_ROW_LAST_COLUMN,
+        ];
+        s.bytes()
+            .zip(flags.iter())
+            .fold(
+                CnfStyle::empty(),
+                |acc, (ch, &flag)| {
+                    if ch == b'1' {
+                        acc | flag
+                    } else {
+                        acc
+                    }
+                },
+            )
+    }
 }
 
 // ── Text Alignment ───────────────────────────────────────────────────────────

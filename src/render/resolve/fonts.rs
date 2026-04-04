@@ -67,41 +67,37 @@ pub fn collect_font_families(doc: &Document) -> Vec<String> {
 }
 
 /// Extract the effective font family from a FontSet.
-/// Priority: ascii > high_ansi > east_asian > complex_script.
+///
+/// Returns the first `explicit` name that is set, in priority order:
+/// ascii > high_ansi > east_asian > complex_script (§17.3.2.26).
+/// By the time this is called, theme references will have been resolved
+/// into the `explicit` field by [`resolve_font_set_themes`].
 pub fn effective_font(fonts: &FontSet) -> Option<&str> {
     fonts
         .ascii
+        .explicit
         .as_deref()
-        .or(fonts.high_ansi.as_deref())
-        .or(fonts.east_asian.as_deref())
-        .or(fonts.complex_script.as_deref())
+        .or(fonts.high_ansi.explicit.as_deref())
+        .or(fonts.east_asian.explicit.as_deref())
+        .or(fonts.complex_script.explicit.as_deref())
 }
 
 /// §17.3.2.26: resolve theme font references in a FontSet.
 ///
-/// For each slot where a theme reference is present, resolve it to the
-/// actual font family name from the theme. The resolved name is written
-/// into the corresponding name field (ascii, high_ansi, etc.), overwriting
+/// For each slot that carries a theme reference, look up the concrete font
+/// family name from the theme and write it into `slot.explicit`, overwriting
 /// any explicit name — theme references take precedence per §17.3.2.26.
 pub fn resolve_font_set_themes(fonts: &mut FontSet, theme: &crate::model::Theme) {
-    if let Some(ref tf) = fonts.ascii_theme {
-        if let Some(name) = resolve_theme_font_ref(tf, theme) {
-            fonts.ascii = Some(name);
-        }
-    }
-    if let Some(ref tf) = fonts.high_ansi_theme {
-        if let Some(name) = resolve_theme_font_ref(tf, theme) {
-            fonts.high_ansi = Some(name);
-        }
-    }
-    if let Some(ref tf) = fonts.east_asian_theme {
-        if let Some(name) = resolve_theme_font_ref(tf, theme) {
-            fonts.east_asian = Some(name);
-        }
-    }
-    if let Some(ref tf) = fonts.complex_script_theme {
-        if let Some(name) = resolve_theme_font_ref(tf, theme) {
-            fonts.complex_script = Some(name);
+    for slot in [
+        &mut fonts.ascii,
+        &mut fonts.high_ansi,
+        &mut fonts.east_asian,
+        &mut fonts.complex_script,
+    ] {
+        if let Some(ref tf) = slot.theme {
+            if let Some(name) = resolve_theme_font_ref(tf, theme) {
+                slot.explicit = Some(name);
+            }
         }
     }
 }
@@ -133,17 +129,15 @@ fn add_nonempty(set: &mut HashSet<String>, s: &str) {
 }
 
 fn collect_from_fontset(set: &mut HashSet<String>, fonts: &FontSet) {
-    if let Some(ref f) = fonts.ascii {
-        add_nonempty(set, f);
-    }
-    if let Some(ref f) = fonts.high_ansi {
-        add_nonempty(set, f);
-    }
-    if let Some(ref f) = fonts.east_asian {
-        add_nonempty(set, f);
-    }
-    if let Some(ref f) = fonts.complex_script {
-        add_nonempty(set, f);
+    for slot in [
+        &fonts.ascii,
+        &fonts.high_ansi,
+        &fonts.east_asian,
+        &fonts.complex_script,
+    ] {
+        if let Some(ref f) = slot.explicit {
+            add_nonempty(set, f);
+        }
     }
 }
 
@@ -221,7 +215,7 @@ mod tests {
             style_id: None,
             properties: RunProperties {
                 fonts: FontSet {
-                    ascii: Some(font.into()),
+                    ascii: FontSlot::from_name(font),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -246,8 +240,8 @@ mod tests {
     #[test]
     fn effective_font_prefers_ascii() {
         let fs = FontSet {
-            ascii: Some("Arial".into()),
-            high_ansi: Some("Times".into()),
+            ascii: FontSlot::from_name("Arial"),
+            high_ansi: FontSlot::from_name("Times"),
             ..Default::default()
         };
         assert_eq!(effective_font(&fs), Some("Arial"));
@@ -256,7 +250,7 @@ mod tests {
     #[test]
     fn effective_font_falls_back_to_high_ansi() {
         let fs = FontSet {
-            high_ansi: Some("Times".into()),
+            high_ansi: FontSlot::from_name("Times"),
             ..Default::default()
         };
         assert_eq!(effective_font(&fs), Some("Times"));
@@ -265,7 +259,7 @@ mod tests {
     #[test]
     fn effective_font_falls_back_to_east_asian() {
         let fs = FontSet {
-            east_asian: Some("SimSun".into()),
+            east_asian: FontSlot::from_name("SimSun"),
             ..Default::default()
         };
         assert_eq!(effective_font(&fs), Some("SimSun"));
@@ -294,7 +288,7 @@ mod tests {
         let mut doc = empty_doc();
         doc.styles.doc_defaults_run = RunProperties {
             fonts: FontSet {
-                ascii: Some("Cambria".into()),
+                ascii: FontSlot::from_name("Cambria"),
                 ..Default::default()
             },
             ..Default::default()
@@ -365,7 +359,7 @@ mod tests {
                 paragraph_properties: None,
                 run_properties: Some(RunProperties {
                     fonts: FontSet {
-                        ascii: Some("Verdana".into()),
+                        ascii: FontSlot::from_name("Verdana"),
                         ..Default::default()
                     },
                     ..Default::default()
