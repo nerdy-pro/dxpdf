@@ -14,7 +14,11 @@ use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 /// Render laid-out pages to PDF bytes via Skia.
 pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u8>, RenderError> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
-    let mut doc = pdf::new_document(&mut pdf_bytes, None);
+    let pdf_metadata = pdf::Metadata {
+        encoding_quality: Some(85),
+        ..Default::default()
+    };
+    let mut doc = pdf::new_document(&mut pdf_bytes, Some(&pdf_metadata));
     let mut font_cache = fonts::FontCache::new();
     // Cache decoded Skia images across pages, keyed by Rc pointer identity.
     // Avoids re-copying and re-decoding the same image bytes on every page
