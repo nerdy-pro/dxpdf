@@ -33,9 +33,7 @@ pub(crate) fn tokenize(input: &str) -> Result<Vec<Token>, FieldParseError> {
         if bytes[i] == b'"' {
             let start = i;
             i += 1; // skip opening quote
-            let mut s = String::new();
             while i < len && bytes[i] != b'"' {
-                s.push(bytes[i] as char);
                 i += 1;
             }
             if i >= len {
@@ -287,11 +285,8 @@ pub fn parse(input: &str) -> Result<FieldInstruction, FieldParseError> {
 
 /// Take the first word/quoted argument from the remaining tokens, if present.
 fn take_first_arg(tokens: &mut Vec<Token>) -> Option<String> {
-    if tokens.is_empty() {
-        return None;
-    }
-    match &tokens[0] {
-        Token::Word(s, _) | Token::Quoted(s, _) => {
+    match tokens.first() {
+        Some(Token::Word(s, _) | Token::Quoted(s, _)) => {
             let val = s.clone();
             tokens.remove(0);
             Some(val)

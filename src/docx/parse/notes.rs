@@ -69,14 +69,14 @@ fn parse_note_content(
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"p" => {
-                        let (para, sect) = body::parse_paragraph_public(e, reader, buf)?;
+                        let (para, sect) = body::parse_paragraph(e, reader, buf)?;
                         blocks.push(Block::Paragraph(Box::new(para)));
                         if let Some(sp) = sect {
                             blocks.push(Block::SectionBreak(Box::new(sp)));
                         }
                     }
                     b"tbl" => {
-                        let table = body::parse_table_public(reader, buf)?;
+                        let table = body::parse_table(reader, buf)?;
                         blocks.push(Block::Table(Box::new(table)));
                     }
                     _ => {
