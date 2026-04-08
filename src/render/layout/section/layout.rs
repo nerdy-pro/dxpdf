@@ -183,7 +183,7 @@ pub fn layout_section(
                     state.prev_space_after = Pt::ZERO;
                 }
 
-                let mut effective_style = style.clone();
+                let mut effective_style = style.clone_for_layout();
 
                 // Log paragraph info.
                 let first_text = fragments
@@ -434,7 +434,7 @@ pub fn layout_section(
                             style: next_style,
                             ..
                         } => {
-                            let mut next_eff = next_style.clone();
+                            let mut next_eff = next_style.clone_for_layout();
                             let next_collapse =
                                 effective_style.space_after.min(next_eff.space_before);
                             let next_cursor = state.cursor_y - next_collapse;
