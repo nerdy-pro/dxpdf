@@ -252,7 +252,7 @@ where
                                 });
                             }
                             RunElement::PageBreak => {
-                                fragments.push(Fragment::LineBreak {
+                                fragments.push(Fragment::PageBreak {
                                     line_height: font.size,
                                 });
                             }

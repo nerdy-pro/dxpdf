@@ -7,23 +7,35 @@ use super::super::paragraph::{layout_paragraph, ParagraphStyle};
 use super::{FOOTNOTE_SEPARATOR_GAP, FOOTNOTE_SEPARATOR_LINE_WIDTH, FOOTNOTE_SEPARATOR_RATIO};
 use crate::render::dimension::Pt;
 
-/// Split a fragment slice at `Fragment::ColumnBreak` markers.
-/// Returns a vec of slices; the column break fragments themselves are excluded.
-pub(super) fn split_at_column_breaks(fragments: &[Fragment]) -> Vec<&[Fragment]> {
-    let has_break = fragments.iter().any(|f| matches!(f, Fragment::ColumnBreak));
+/// Split a fragment slice at break markers of a given kind.
+/// Returns a vec of slices; the break fragments themselves are excluded.
+fn split_at_breaks(fragments: &[Fragment], is_break: fn(&Fragment) -> bool) -> Vec<&[Fragment]> {
+    let has_break = fragments.iter().any(is_break);
     if !has_break {
         return vec![fragments];
     }
     let mut chunks = Vec::new();
     let mut start = 0;
     for (i, frag) in fragments.iter().enumerate() {
-        if matches!(frag, Fragment::ColumnBreak) {
+        if is_break(frag) {
             chunks.push(&fragments[start..i]);
             start = i + 1;
         }
     }
     chunks.push(&fragments[start..]);
     chunks
+}
+
+/// Split a fragment slice at `Fragment::ColumnBreak` markers.
+/// Returns a vec of slices; the column break fragments themselves are excluded.
+pub(super) fn split_at_column_breaks(fragments: &[Fragment]) -> Vec<&[Fragment]> {
+    split_at_breaks(fragments, |f| matches!(f, Fragment::ColumnBreak))
+}
+
+/// §17.3.3.1: split a fragment slice at `Fragment::PageBreak` markers.
+/// Returns a vec of slices; the page break fragments themselves are excluded.
+pub(super) fn split_at_page_breaks(fragments: &[Fragment]) -> Vec<&[Fragment]> {
+    split_at_breaks(fragments, Fragment::is_page_break)
 }
 
 pub(super) fn render_page_footnotes(
