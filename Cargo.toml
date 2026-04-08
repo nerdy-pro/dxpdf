@@ -1,6 +1,6 @@
 [package]
 name = "dxpdf"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "A fast DOCX-to-PDF converter powered by Skia"
 license = "MIT"
