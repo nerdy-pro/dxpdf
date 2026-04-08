@@ -420,9 +420,9 @@ pub(super) fn split_oversized_fragments(
     measure: MeasureTextFn<'_>,
 ) -> Vec<Fragment> {
     // Fast path: check if any fragment actually needs splitting.
-    let needs_split = fragments.iter().any(|f| {
-        matches!(f, Fragment::Text { width, text, .. } if *width > max_width && text.len() > 1)
-    });
+    let needs_split = fragments.iter().any(
+        |f| matches!(f, Fragment::Text { width, text, .. } if *width > max_width && text.len() > 1),
+    );
     if !needs_split {
         return fragments.to_vec();
     }
