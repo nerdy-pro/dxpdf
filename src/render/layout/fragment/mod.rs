@@ -118,6 +118,10 @@ pub enum Fragment {
     },
     /// §17.3.3.1: column break — forces content to the next column.
     ColumnBreak,
+    /// §17.3.3.1: page break — forces content to the next page.
+    PageBreak {
+        line_height: Pt,
+    },
     /// Named destination (bookmark target) — zero-width marker.
     Bookmark {
         name: String,
@@ -130,9 +134,10 @@ impl Fragment {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
-            Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => {
-                Pt::ZERO
-            }
+            Fragment::LineBreak { .. }
+            | Fragment::ColumnBreak
+            | Fragment::PageBreak { .. }
+            | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
@@ -148,13 +153,24 @@ impl Fragment {
         match self {
             Fragment::Text { metrics, .. } => metrics.height(),
             Fragment::Image { size, .. } => size.height,
-            Fragment::Tab { line_height, .. } | Fragment::LineBreak { line_height } => *line_height,
+            Fragment::Tab { line_height, .. }
+            | Fragment::LineBreak { line_height }
+            | Fragment::PageBreak { line_height } => *line_height,
             Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
         }
     }
 
     pub fn is_line_break(&self) -> bool {
-        matches!(self, Fragment::LineBreak { .. } | Fragment::ColumnBreak)
+        matches!(
+            self,
+            Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::PageBreak { .. }
+        )
+    }
+
+    /// §17.3.3.1: true if this fragment is a page break that forces
+    /// subsequent content to the next page.
+    pub fn is_page_break(&self) -> bool {
+        matches!(self, Fragment::PageBreak { .. })
     }
 
     /// Get font properties if this is a text fragment.

@@ -6,7 +6,9 @@ use super::super::page::PageConfig;
 use super::super::paragraph::{layout_paragraph, ParagraphBorderStyle, ParagraphStyle};
 use super::super::table::{layout_table, TablePaginationConfig};
 use super::super::BoxConstraints;
-use super::helpers::{render_page_footnotes, split_at_column_breaks, table_x_offset};
+use super::helpers::{
+    render_page_footnotes, split_at_column_breaks, split_at_page_breaks, table_x_offset,
+};
 use super::types::{ContinuationState, FloatingImageY, LayoutBlock};
 use super::FLOAT_DEDUP_EPSILON_PT;
 use super::FOOTNOTE_SEPARATOR_GAP;
@@ -67,6 +69,9 @@ struct PageLayoutState<'doc> {
     last_para_start_y: Pt,
     /// §17.4.38: style_id of the previous table for adjacent border collapse.
     prev_table_style_id: Option<StyleId>,
+    /// §17.3.3.1: an inline page break at the end of a paragraph defers the
+    /// page break to the start of the next block.
+    pending_page_break: bool,
 }
 
 impl<'doc> PageLayoutState<'doc> {
@@ -93,6 +98,7 @@ impl<'doc> PageLayoutState<'doc> {
             abs_floats_dirty: true,
             page_start_block: 0,
             prev_table_style_id: None,
+            pending_page_break: false,
         }
     }
 
@@ -169,6 +175,16 @@ pub fn layout_section(
     let col_x = |col: usize| -> Pt { config.margins.left + config.columns[col].x_offset };
 
     for (block_idx, block) in blocks.iter().enumerate() {
+        // §17.3.3.1: a deferred inline page break from the previous block
+        // forces this block onto a new page.
+        if state.pending_page_break {
+            state.pending_page_break = false;
+            if state.cursor_y > config.margins.top {
+                state.push_new_page(block_idx, &ctx);
+                state.prev_space_after = Pt::ZERO;
+            }
+        }
+
         match block {
             LayoutBlock::Paragraph {
                 fragments,
@@ -362,62 +378,104 @@ pub fn layout_section(
                 effective_style.page_x = page_x;
                 effective_style.page_content_width = col_width;
 
-                // §17.6.4: split paragraph at column breaks for multi-column layout.
-                let frag_chunks = split_at_column_breaks(fragments);
+                // §17.3.3.1: split paragraph at inline page breaks first,
+                // then §17.6.4: split each page-chunk at column breaks.
+                let page_chunks = split_at_page_breaks(fragments);
                 let mut para_start_y = state.cursor_y;
                 state.last_para_start_y = state.cursor_y;
 
-                for (chunk_idx, chunk) in frag_chunks.iter().enumerate() {
-                    // Advance to the next column for chunks after a column break.
-                    if chunk_idx > 0 {
-                        if state.current_col + 1 < num_cols {
-                            state.current_col += 1;
-                        } else {
-                            // All columns full — new page, reset to column 0.
-                            state.push_new_page(block_idx, &ctx);
-                        }
-                        state.cursor_y = state.column_top;
+                // §17.3.3.1: track whether an unresolved page break remains
+                // after processing all chunks, so it can be deferred to the
+                // next block.
+                let mut unresolved_page_break = false;
+
+                for (page_chunk_idx, page_chunk) in page_chunks.iter().enumerate() {
+                    if page_chunk_idx > 0 {
+                        unresolved_page_break = true;
+                    }
+
+                    // §17.3.3.1: skip empty chunks — they carry no renderable
+                    // content. A page break whose leading or trailing side is
+                    // empty simply means "nothing on this side of the break."
+                    if page_chunk.is_empty() {
+                        continue;
+                    }
+
+                    // §17.3.3.1: force a new page for non-empty chunks that
+                    // follow a page break.
+                    if unresolved_page_break {
+                        state.push_new_page(block_idx, &ctx);
+                        state.prev_space_after = Pt::ZERO;
+                        para_start_y = state.cursor_y;
+                        effective_style.page_y = state.cursor_y;
                         effective_style.page_x = col_x(state.current_col);
                         effective_style.page_content_width =
                             config.columns[state.current_col].width;
+                        effective_style.page_floats = Vec::new();
                     }
 
-                    let constraints = col_constraints(state.current_col);
-                    let para = layout_paragraph(
-                        chunk,
-                        &constraints,
-                        &effective_style,
-                        ctx.default_line_height,
-                        ctx.measure_text,
-                    );
+                    let col_chunks = split_at_column_breaks(page_chunk);
 
-                    // Column/page overflow: advance column, then page.
-                    if state.cursor_y + para.size.height > state.bottom
-                        && state.cursor_y > state.column_top
-                    {
-                        if state.current_col + 1 < num_cols {
-                            state.current_col += 1;
+                    for (chunk_idx, chunk) in col_chunks.iter().enumerate() {
+                        // Advance to the next column for chunks after a column break.
+                        if chunk_idx > 0 {
+                            if state.current_col + 1 < num_cols {
+                                state.current_col += 1;
+                            } else {
+                                // All columns full — new page, reset to column 0.
+                                state.push_new_page(block_idx, &ctx);
+                            }
                             state.cursor_y = state.column_top;
-                        } else {
-                            state.push_new_page(block_idx, &ctx);
+                            effective_style.page_x = col_x(state.current_col);
+                            effective_style.page_content_width =
+                                config.columns[state.current_col].width;
                         }
-                        // Update para_start_y after page/column change so
-                        // floating images use the correct position.
-                        para_start_y = state.cursor_y;
-                    }
 
-                    log::debug!(
-                        "[layout]   chunk[{chunk_idx}] placed at y={:.1} x={:.1} height={:.1}",
-                        state.cursor_y.raw(),
-                        col_x(state.current_col).raw(),
-                        para.size.height.raw()
-                    );
-                    for mut cmd in para.commands {
-                        cmd.shift_y(state.cursor_y);
-                        cmd.shift_x(col_x(state.current_col));
-                        state.current_page.commands.push(cmd);
+                        let constraints = col_constraints(state.current_col);
+                        let para = layout_paragraph(
+                            chunk,
+                            &constraints,
+                            &effective_style,
+                            ctx.default_line_height,
+                            ctx.measure_text,
+                        );
+
+                        // Column/page overflow: advance column, then page.
+                        if state.cursor_y + para.size.height > state.bottom
+                            && state.cursor_y > state.column_top
+                        {
+                            if state.current_col + 1 < num_cols {
+                                state.current_col += 1;
+                                state.cursor_y = state.column_top;
+                            } else {
+                                state.push_new_page(block_idx, &ctx);
+                            }
+                            // Update para_start_y after page/column change so
+                            // floating images use the correct position.
+                            para_start_y = state.cursor_y;
+                        }
+
+                        log::debug!(
+                            "[layout]   page_chunk[{page_chunk_idx}] col_chunk[{chunk_idx}] placed at y={:.1} x={:.1} height={:.1}",
+                            state.cursor_y.raw(),
+                            col_x(state.current_col).raw(),
+                            para.size.height.raw()
+                        );
+                        for mut cmd in para.commands {
+                            cmd.shift_y(state.cursor_y);
+                            cmd.shift_x(col_x(state.current_col));
+                            state.current_page.commands.push(cmd);
+                        }
+                        state.cursor_y += para.size.height;
                     }
-                    state.cursor_y += para.size.height;
+                    // The page break has been consumed by this non-empty chunk.
+                    unresolved_page_break = false;
+                }
+
+                // §17.3.3.1: if the paragraph ended with a page break and
+                // no non-empty chunk followed, defer the break to the next block.
+                if unresolved_page_break {
+                    state.pending_page_break = true;
                 }
 
                 // §17.3.1.14: keepNext — if this paragraph has keep_next, check
