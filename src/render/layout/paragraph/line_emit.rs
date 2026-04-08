@@ -397,7 +397,8 @@ pub(super) fn emit_line_commands(
 
                     x = new_x;
                 }
-                Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::PageBreak { .. } => {}
+                Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::PageBreak { .. } => {
+                }
                 Fragment::Bookmark { name } => {
                     commands.push(DrawCommand::NamedDestination {
                         position: PtOffset::new(x, *cursor_y),

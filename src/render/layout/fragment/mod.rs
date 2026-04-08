@@ -138,7 +138,7 @@ impl Fragment {
             | Fragment::ColumnBreak
             | Fragment::PageBreak { .. }
             | Fragment::Bookmark { .. } => Pt::ZERO,
-        }   
+        }
     }
 
     /// Width for overflow checking — excludes trailing whitespace on text fragments.
