@@ -374,6 +374,163 @@ pub struct GeomGuide {
     pub formula: String,
 }
 
+// ── §20.1.9.8 CT_CustomGeometry2D ──────────────────────────────────────────
+
+/// §20.1.9.8 CT_CustomGeometry2D — user-defined shape geometry.
+///
+/// The coordinate system is defined by the `path` element's `w` and `h`
+/// attributes. Guides in `av_list` are user-adjustable values (shipped with
+/// the authored shape); guides in `gd_list` are computed from formulas
+/// referencing other guides, `w`/`h`, and the spec's named constants.
+#[derive(Clone, Debug, Default)]
+pub struct CustomGeometry {
+    /// §20.1.9.1 avLst — adjust-value list (user-editable guides).
+    pub av_list: Vec<GeomGuide>,
+    /// §20.1.9.10 gdLst — computed-guide list.
+    pub gd_list: Vec<GeomGuide>,
+    /// §20.1.9.1 ahLst — adjust-handle list.
+    pub ah_list: Vec<AdjustHandle>,
+    /// §20.1.9.7 cxnLst — connection sites.
+    pub cxn_list: Vec<ConnectionSite>,
+    /// §20.1.9.22 rect — text rectangle within the shape.
+    pub rect: Option<TextRect>,
+    /// §20.1.9.15 pathLst — the actual path(s).
+    pub paths: Vec<PathDef>,
+}
+
+/// §20.1.9.15 CT_Path2D — one path in a custom geometry.
+#[derive(Clone, Debug)]
+pub struct PathDef {
+    /// Path-local coordinate width in EMUs.
+    pub w: Dimension<Emu>,
+    /// Path-local coordinate height in EMUs.
+    pub h: Dimension<Emu>,
+    /// §20.1.10.45: path fill mode.
+    pub fill: PathFillMode,
+    /// §20.1.9.15 @stroke — whether the path is stroked.
+    pub stroke: bool,
+    /// §20.1.9.15 @extrusionOk — whether 3D extrusion is permitted.
+    pub extrusion_ok: bool,
+    /// Path verbs (moveTo/lnTo/cubicBezTo/quadBezTo/arcTo/close) in order.
+    pub commands: Vec<PathCommand>,
+}
+
+/// §20.1.10.45 ST_PathFillMode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PathFillMode {
+    /// No fill (`"none"`).
+    None,
+    /// Normal fill (`"norm"`). Default per spec.
+    #[default]
+    Norm,
+    /// `"lighten"`.
+    Lighten,
+    /// `"lightenLess"`.
+    LightenLess,
+    /// `"darken"`.
+    Darken,
+    /// `"darkenLess"`.
+    DarkenLess,
+}
+
+/// §20.1.9.14 / §20.1.9.2 / §20.1.9.19 / §20.1.9.3 / §20.1.9.4 — path verbs.
+#[derive(Clone, Debug)]
+pub enum PathCommand {
+    /// §20.1.9.14 moveTo.
+    MoveTo(AdjPoint),
+    /// §20.1.9.13 lnTo.
+    LineTo(AdjPoint),
+    /// §20.1.9.2 cubicBezTo — three control points (two controls + endpoint).
+    CubicBezTo(AdjPoint, AdjPoint, AdjPoint),
+    /// §20.1.9.19 quadBezTo — two control points (control + endpoint).
+    QuadBezTo(AdjPoint, AdjPoint),
+    /// §20.1.9.3 arcTo — elliptical arc.
+    ArcTo {
+        /// Horizontal radius (any AdjCoord expression).
+        wr: AdjCoord,
+        /// Vertical radius.
+        hr: AdjCoord,
+        /// Start angle (any AdjAngle expression).
+        start_angle: AdjAngle,
+        /// Swing angle (arc sweep).
+        swing_angle: AdjAngle,
+    },
+    /// §20.1.9.4 close — close the current subpath.
+    Close,
+}
+
+/// §20.1.9.12 CT_AdjPoint2D — a point in path-local coordinates.
+#[derive(Clone, Debug)]
+pub struct AdjPoint {
+    pub x: AdjCoord,
+    pub y: AdjCoord,
+}
+
+/// Coordinate value: either a literal integer (EMU when positional, raw
+/// integer for size attributes) or a guide-name reference that the evaluator
+/// resolves via the enclosing `PathDef`/`CustomGeometry` guide scope.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AdjCoord {
+    Lit(i64),
+    Guide(String),
+}
+
+/// §20.1.10.4 ST_AdjAngle — angle value (shares the `AdjCoord` shape).
+pub type AdjAngle = AdjCoord;
+
+/// §20.1.9.1 CT_AdjustHandleList — each entry may be XY or polar. For Tier 0
+/// we capture the raw structure (positions + guide references); evaluators
+/// can derive concrete handle positions from the enclosing geometry.
+#[derive(Clone, Debug)]
+pub enum AdjustHandle {
+    /// §20.1.9.1.1 ahXY.
+    XY {
+        guide_ref_x: Option<String>,
+        guide_ref_y: Option<String>,
+        min_x: Option<AdjCoord>,
+        max_x: Option<AdjCoord>,
+        min_y: Option<AdjCoord>,
+        max_y: Option<AdjCoord>,
+        position: AdjPoint,
+    },
+    /// §20.1.9.1.2 ahPolar.
+    Polar {
+        guide_ref_r: Option<String>,
+        guide_ref_ang: Option<String>,
+        min_r: Option<AdjCoord>,
+        max_r: Option<AdjCoord>,
+        min_ang: Option<AdjAngle>,
+        max_ang: Option<AdjAngle>,
+        position: AdjPoint,
+    },
+}
+
+/// §20.1.9.7 CT_ConnectionSite — attachment point on a shape boundary.
+#[derive(Clone, Debug)]
+pub struct ConnectionSite {
+    /// §20.1.9.7 @ang — angle of the connection site (any AdjAngle expression).
+    pub angle: AdjAngle,
+    pub position: AdjPoint,
+}
+
+/// §20.1.9.22 CT_GeomRect — text bounds within a shape, as AdjCoord.
+#[derive(Clone, Debug)]
+pub struct TextRect {
+    pub left: AdjCoord,
+    pub top: AdjCoord,
+    pub right: AdjCoord,
+    pub bottom: AdjCoord,
+}
+
+/// The unified geometry reference for a shape — either a preset or fully
+/// custom. Phase 3 lands the type; Phase 4 migrates `ShapeProperties` to use
+/// it in place of the current `preset_geometry` field.
+#[derive(Clone, Debug)]
+pub enum ShapeGeometry {
+    Preset(PresetGeometryDef),
+    Custom(CustomGeometry),
+}
+
 /// §20.1.10.56 ST_ShapeType — preset shape types (subset).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PresetShapeType {
