@@ -65,6 +65,30 @@ pub(super) fn build_paragraph_block(
     // §17.9.22: inject list label if paragraph has a numbering reference.
     super::list_label::inject_list_label(p, &mut fragments, &mut merged_props, ctx, state);
 
+    // §17.3.1.29: a paragraph with no runs still occupies one line — the
+    // paragraph mark (¶) has a font-sized line height. Inject a LineBreak
+    // so the layout phase treats it as a real line. Without this, an empty
+    // paragraph's fragments are split by `split_at_page_breaks` into a
+    // single empty page-chunk, which `section::layout_section` drops,
+    // collapsing the line to zero height.
+    //
+    // Table cells use §17.4.66 (trailing-empty-after-table is structural
+    // and suppressed) in `build_cell_blocks` — that skip runs before this
+    // function, so genuinely structural terminators never reach us.
+    // Headers/footers have their own injection in
+    // `build_header_footer_content` (§17.10.1) and do not call this.
+    if fragments.is_empty() {
+        let (family, mut size, ..) =
+            resolve_paragraph_defaults(p, ctx.resolved, table_style.is_some());
+        if let Some(ref mrp) = p.mark_run_properties {
+            if let Some(fs) = mrp.font_size {
+                size = Pt::from(fs);
+            }
+        }
+        let line_height = ctx.measurer.default_line_height(&family, size);
+        fragments.push(Fragment::LineBreak { line_height });
+    }
+
     // Word suppresses Hyperlink character style (blue/underline) for ToC
     // entries in print view. Strip visual hyperlink styling but keep the
     // click annotation URL.
