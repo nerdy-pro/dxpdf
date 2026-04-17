@@ -335,8 +335,8 @@ pub struct ShapeProperties {
     pub bw_mode: Option<BlackWhiteMode>,
     /// §20.1.7.6: 2D transform.
     pub transform: Option<Transform2D>,
-    /// §20.1.9.18: preset geometry.
-    pub preset_geometry: Option<PresetGeometryDef>,
+    /// §20.1.9.18 prstGeom or §20.1.9.8 custGeom — shape geometry.
+    pub geometry: Option<ShapeGeometry>,
     /// Fill type (noFill, solidFill, etc.).
     pub fill: Option<DrawingFill>,
     /// §20.1.2.2.24: outline/line properties.
@@ -523,8 +523,8 @@ pub struct TextRect {
 }
 
 /// The unified geometry reference for a shape — either a preset or fully
-/// custom. Phase 3 lands the type; Phase 4 migrates `ShapeProperties` to use
-/// it in place of the current `preset_geometry` field.
+/// custom. Populated by `parse_shape_properties` from either `<a:prstGeom>`
+/// or `<a:custGeom>`.
 #[derive(Clone, Debug)]
 pub enum ShapeGeometry {
     Preset(PresetGeometryDef),

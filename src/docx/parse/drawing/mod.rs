@@ -6,6 +6,7 @@ mod anchor;
 mod color;
 mod effect;
 mod fill;
+mod geometry;
 mod inline;
 mod picture;
 mod shape;
@@ -15,6 +16,7 @@ pub use anchor::parse_anchor_image;
 pub use color::parse_color_choice;
 pub use effect::parse_effect_list;
 pub use fill::parse_drawing_fill;
+pub use geometry::parse_custom_geometry;
 pub use inline::parse_inline_image;
 pub use stroke::parse_outline;
 

@@ -214,7 +214,7 @@ pub(super) fn parse_shape_properties(
         .map(|s| parse_black_white_mode(&s))
         .transpose()?;
     let mut transform = None;
-    let mut preset_geometry = None;
+    let mut geometry: Option<ShapeGeometry> = None;
     let mut fill: Option<DrawingFill> = None;
     let mut outline: Option<Outline> = None;
     let mut effect_list = None;
@@ -229,7 +229,14 @@ pub(super) fn parse_shape_properties(
                         transform = Some(parse_transform_2d(e, reader, buf)?);
                     }
                     b"prstGeom" => {
-                        preset_geometry = Some(parse_preset_geometry(e, reader, buf)?);
+                        geometry = Some(ShapeGeometry::Preset(parse_preset_geometry(
+                            e, reader, buf,
+                        )?));
+                    }
+                    b"custGeom" => {
+                        geometry = Some(ShapeGeometry::Custom(
+                            super::geometry::parse_custom_geometry(reader, buf)?,
+                        ));
                     }
                     b"ln" => {
                         outline = Some(super::stroke::parse_outline(reader, buf, e)?);
@@ -241,7 +248,7 @@ pub(super) fn parse_shape_properties(
                     b"effectLst" => {
                         effect_list = Some(super::effect::parse_effect_list(reader, buf)?);
                     }
-                    b"custGeom" | b"effectDag" | b"scene3d" | b"sp3d" | b"extLst" => {
+                    b"effectDag" | b"scene3d" | b"sp3d" | b"extLst" => {
                         xml::warn_unsupported_element("spPr", &local_owned);
                         xml::skip_to_end(reader, buf, &local_owned)?;
                     }
@@ -270,7 +277,7 @@ pub(super) fn parse_shape_properties(
     Ok(ShapeProperties {
         bw_mode,
         transform,
-        preset_geometry,
+        geometry,
         fill,
         effect_list,
         outline,
@@ -655,10 +662,10 @@ mod tests {
                 </a:ln>
             </a:spPr>"#,
         );
-        assert!(matches!(
-            sp.preset_geometry.as_ref().unwrap().preset,
-            PresetShapeType::Rect
-        ));
+        let Some(ShapeGeometry::Preset(preset)) = sp.geometry.as_ref() else {
+            panic!("expected preset geometry")
+        };
+        assert!(matches!(preset.preset, PresetShapeType::Rect));
         assert!(matches!(
             sp.fill,
             Some(DrawingFill::Solid(DrawingColor::Srgb { rgb: 0x4472C4, .. }))
@@ -722,6 +729,27 @@ mod tests {
         assert!(matches!(sp.fill, Some(DrawingFill::None)));
         assert!(sp.outline.is_none());
         assert!(sp.effect_list.is_none());
+    }
+
+    #[test]
+    fn sp_pr_custom_geometry_dispatch() {
+        let sp = parse_sp_pr(
+            r#"<a:spPr xmlns:a="urn:a">
+                <a:custGeom>
+                    <a:pathLst>
+                        <a:path w="100" h="50">
+                            <a:moveTo><a:pt x="0" y="0"/></a:moveTo>
+                            <a:lnTo><a:pt x="100" y="50"/></a:lnTo>
+                        </a:path>
+                    </a:pathLst>
+                </a:custGeom>
+            </a:spPr>"#,
+        );
+        let Some(ShapeGeometry::Custom(g)) = sp.geometry.as_ref() else {
+            panic!("expected custom geometry")
+        };
+        assert_eq!(g.paths.len(), 1);
+        assert_eq!(g.paths[0].commands.len(), 2);
     }
 
     #[test]
