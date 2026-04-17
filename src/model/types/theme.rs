@@ -80,7 +80,7 @@ pub struct ThemeScriptFont {
 }
 
 /// ISO 15924 script codes used in OOXML theme font schemes (§20.1.4.1.16).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ScriptTag {
     Arab,
     Armn,
@@ -130,5 +130,5 @@ pub enum ScriptTag {
     Viet,
     Yiii,
     /// Unrecognized script code — preserved as-is.
-    Other(u32),
+    Other(Box<str>),
 }
