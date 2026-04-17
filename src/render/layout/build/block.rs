@@ -220,6 +220,7 @@ pub(super) fn build_paragraph_block(
     // In cell context, positions are cell-relative instead of page-relative.
     let cell_context = table_style.is_some();
     let floating_images = extract_floating_images(p, ctx, state, cell_context);
+    let floating_shapes = super::floating::extract_floating_shapes(p, ctx, state, cell_context);
 
     Some(LayoutBlock::Paragraph {
         fragments,
@@ -227,6 +228,7 @@ pub(super) fn build_paragraph_block(
         page_break_before,
         footnotes: para_footnotes,
         floating_images,
+        floating_shapes,
     })
 }
 

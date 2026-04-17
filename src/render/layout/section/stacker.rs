@@ -46,6 +46,7 @@ pub fn stack_blocks(
                 fragments,
                 style,
                 floating_images,
+                floating_shapes,
                 ..
             } => {
                 let mut effective_style = style.clone_for_layout();
@@ -134,6 +135,31 @@ pub fn stack_blocks(
                     let img_bottom = img_y + fi.size.height;
                     if img_bottom > cursor_y {
                         cursor_y = img_bottom;
+                    }
+                }
+
+                // Emit floating shapes (DrawingML). Tier 0 does not wrap
+                // text around shapes; they paint at their resolved anchor
+                // position.
+                for fs in floating_shapes {
+                    let shape_y = match fs.y {
+                        FloatingImageY::Absolute(y) => y,
+                        FloatingImageY::RelativeToParagraph(offset) => para_content_top + offset,
+                    };
+                    commands.push(DrawCommand::Path {
+                        origin: crate::render::geometry::PtOffset::new(fs.x, shape_y),
+                        rotation: fs.rotation,
+                        flip_h: fs.flip_h,
+                        flip_v: fs.flip_v,
+                        extent: fs.size,
+                        paths: fs.paths.clone(),
+                        fill: fs.fill.clone(),
+                        stroke: fs.stroke.clone(),
+                        effects: fs.effects.clone(),
+                    });
+                    let shape_bottom = shape_y + fs.size.height;
+                    if shape_bottom > cursor_y {
+                        cursor_y = shape_bottom;
                     }
                 }
 

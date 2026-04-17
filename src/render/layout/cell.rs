@@ -95,6 +95,7 @@ mod tests {
             page_break_before: false,
             footnotes: vec![],
             floating_images: vec![],
+            floating_shapes: vec![],
         }
     }
 
@@ -155,6 +156,7 @@ mod tests {
             page_break_before: false,
             footnotes: vec![],
             floating_images: vec![],
+            floating_shapes: vec![],
         }];
         let margins = PtEdgeInsets::new(Pt::ZERO, Pt::new(30.0), Pt::ZERO, Pt::new(30.0));
         let result = layout_cell(&blocks, Pt::new(100.0), &margins, Pt::new(14.0), None);

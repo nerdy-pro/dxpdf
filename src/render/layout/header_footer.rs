@@ -138,6 +138,25 @@ fn render_header(
         });
     }
 
+    // Floating shapes (DrawingML). Tier 0 paints them without wrap logic.
+    for fs in &hf.floating_shapes {
+        let shape_y = match fs.y {
+            super::section::FloatingImageY::Absolute(y) => y,
+            super::section::FloatingImageY::RelativeToParagraph(off) => offset_y + off,
+        };
+        header_cmds.push(DrawCommand::Path {
+            origin: crate::render::geometry::PtOffset::new(fs.x, shape_y),
+            rotation: fs.rotation,
+            flip_h: fs.flip_h,
+            flip_v: fs.flip_v,
+            extent: fs.size,
+            paths: fs.paths.clone(),
+            fill: fs.fill.clone(),
+            stroke: fs.stroke.clone(),
+            effects: fs.effects.clone(),
+        });
+    }
+
     // Prepend header commands before body content.
     header_cmds.append(&mut page.commands);
     page.commands = header_cmds;
@@ -197,6 +216,25 @@ fn render_footer(
             image_data: fi.image_data.clone(),
         });
     }
+
+    // Floating shapes (DrawingML).
+    for fs in &hf.floating_shapes {
+        let shape_y = match fs.y {
+            super::section::FloatingImageY::Absolute(y) => y,
+            super::section::FloatingImageY::RelativeToParagraph(off) => footer_y + off,
+        };
+        page.commands.push(DrawCommand::Path {
+            origin: crate::render::geometry::PtOffset::new(fs.x, shape_y),
+            rotation: fs.rotation,
+            flip_h: fs.flip_h,
+            flip_v: fs.flip_v,
+            extent: fs.size,
+            paths: fs.paths.clone(),
+            fill: fs.fill.clone(),
+            stroke: fs.stroke.clone(),
+            effects: fs.effects.clone(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -217,9 +255,11 @@ mod tests {
                 page_break_before: false,
                 footnotes: vec![],
                 floating_images: vec![],
+                floating_shapes: vec![],
             }],
             absolute_position: None,
             floating_images: vec![],
+            floating_shapes: vec![],
         }
     }
 
@@ -290,6 +330,7 @@ mod tests {
             blocks: vec![],
             absolute_position: None,
             floating_images: vec![],
+            floating_shapes: vec![],
         };
         render_header(
             &mut pages[0],

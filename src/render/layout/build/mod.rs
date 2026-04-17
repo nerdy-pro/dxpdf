@@ -110,6 +110,8 @@ pub struct HeaderFooterContent {
     pub absolute_position: Option<(Pt, Pt)>,
     /// Floating (anchor) images from header/footer paragraphs.
     pub floating_images: Vec<crate::render::layout::section::FloatingImage>,
+    /// Floating DrawingML shapes from header/footer paragraphs.
+    pub floating_shapes: Vec<crate::render::layout::section::FloatingShape>,
 }
 
 /// Build header/footer content from blocks.
@@ -124,6 +126,7 @@ pub fn build_header_footer_content(
 ) -> HeaderFooterContent {
     let mut layout_blocks = Vec::new();
     let mut all_floating_images = Vec::new();
+    let mut all_floating_shapes = Vec::new();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
     let available_width = state.page_config.content_width();
@@ -147,6 +150,8 @@ pub fn build_header_footer_content(
                 // Extract floating (anchor) images — positioned page-relative.
                 let floats = extract_floating_images(p, ctx, state, false);
                 all_floating_images.extend(floats);
+                let shape_floats = floating::extract_floating_shapes(p, ctx, state, false);
+                all_floating_shapes.extend(shape_floats);
 
                 // §17.10.1: empty non-last paragraphs in headers/footers still
                 // occupy a line height (from the paragraph mark's font size).
@@ -167,6 +172,7 @@ pub fn build_header_footer_content(
                     page_break_before: false,
                     footnotes: vec![],
                     floating_images: vec![], // handled separately above
+                    floating_shapes: vec![], // handled separately above
                 });
             }
             Block::Table(t) => {
@@ -189,6 +195,7 @@ pub fn build_header_footer_content(
         blocks: layout_blocks,
         absolute_position,
         floating_images: all_floating_images,
+        floating_shapes: all_floating_shapes,
     }
 }
 

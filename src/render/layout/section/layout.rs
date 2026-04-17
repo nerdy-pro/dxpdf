@@ -192,6 +192,7 @@ pub fn layout_section(
                 page_break_before,
                 footnotes,
                 floating_images,
+                floating_shapes,
             } => {
                 // §17.3.1.23: force a new page before this paragraph.
                 if *page_break_before && state.cursor_y > config.margins.top {
@@ -562,6 +563,28 @@ pub fn layout_section(
                     state.current_page.commands.push(DrawCommand::Image {
                         rect: PtRect::from_xywh(fi.x, img_y, fi.size.width, fi.size.height),
                         image_data: fi.image_data.clone(),
+                    });
+                }
+
+                // Emit floating DrawingML shapes. Tier 0 does not yet wrap
+                // text around shapes; they render at their anchor position.
+                for fs in floating_shapes {
+                    let shape_y = match fs.y {
+                        FloatingImageY::Absolute(y) => y,
+                        FloatingImageY::RelativeToParagraph(offset) => {
+                            para_start_y + effective_style.space_before + offset
+                        }
+                    };
+                    state.current_page.commands.push(DrawCommand::Path {
+                        origin: crate::render::geometry::PtOffset::new(fs.x, shape_y),
+                        rotation: fs.rotation,
+                        flip_h: fs.flip_h,
+                        flip_v: fs.flip_v,
+                        extent: fs.size,
+                        paths: fs.paths.clone(),
+                        fill: fs.fill.clone(),
+                        stroke: fs.stroke.clone(),
+                        effects: fs.effects.clone(),
                     });
                 }
 

@@ -429,6 +429,7 @@ fn build_cell_blocks(
                         page_break_before,
                         footnotes,
                         floating_images,
+                        floating_shapes,
                     } = lb
                     {
                         let fragments = split_oversized_fragments(fragments, inner_width, ctx);
@@ -438,6 +439,7 @@ fn build_cell_blocks(
                             page_break_before,
                             footnotes,
                             floating_images,
+                            floating_shapes,
                         }
                     } else {
                         lb

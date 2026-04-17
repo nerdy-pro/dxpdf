@@ -1,12 +1,14 @@
 //! Pure data types for section layout.
 
-use super::super::draw_command::LayoutedPage;
+use super::super::draw_command::{LayoutedPage, ResolvedEffect, ResolvedFill, ResolvedStroke};
 use super::super::fragment::Fragment;
 use super::super::paragraph::ParagraphStyle;
 use super::super::table::TableRowInput;
+use crate::model::dimension::{Dimension, SixtieThousandthDeg};
 use crate::render::dimension::Pt;
 use crate::render::geometry::PtSize;
 use crate::render::resolve::images::MediaEntry;
+use crate::render::resolve::shape_geometry::SubPath;
 
 /// §17.4.58 / §17.4.59: positioning data for a floating table.
 #[derive(Debug, Clone)]
@@ -50,7 +52,51 @@ pub enum FloatingImageY {
     RelativeToParagraph(Pt),
 }
 
+/// A floating (anchor) DrawingML shape to be positioned absolutely on the
+/// page. The geometry is already evaluated into path-local Pt subpaths; the
+/// painter applies origin + rotation + flip.
+///
+/// Parallels `FloatingImage` — the stacker treats them the same way for
+/// placement, differing only in the emitted `DrawCommand` variant.
+#[derive(Clone)]
+pub struct FloatingShape {
+    /// Resolved absolute x position on the page (top-left of the shape).
+    pub x: Pt,
+    /// Resolved absolute y position on the page.
+    pub y: FloatingImageY,
+    /// Shape bounding-box size in Pt.
+    pub size: PtSize,
+    /// §20.1.7.6 @rot — rotation around the shape's center, in 60000ths
+    /// of a degree.
+    pub rotation: Dimension<SixtieThousandthDeg>,
+    /// §20.1.7.6 @flipH — mirror horizontally.
+    pub flip_h: bool,
+    /// §20.1.7.6 @flipV — mirror vertically.
+    pub flip_v: bool,
+    /// §20.4.2.18: wrapTopAndBottom — content only above/below.
+    pub wrap_top_and_bottom: bool,
+    /// §20.4.2.3 distL/distR — horizontal distance from surrounding text.
+    pub dist_left: Pt,
+    pub dist_right: Pt,
+    /// §20.4.2.3 @behindDoc — painted behind document text.
+    pub behind_doc: bool,
+    /// Path subpaths in shape-local Pt (already scaled into `size`).
+    pub paths: Vec<SubPath>,
+    /// Resolved fill.
+    pub fill: ResolvedFill,
+    /// Optional resolved stroke.
+    pub stroke: Option<ResolvedStroke>,
+    /// Resolved post-processing effects (painter may defer all in Tier 0).
+    pub effects: Vec<ResolvedEffect>,
+}
+
 /// A block ready for layout — either a paragraph or a table.
+///
+/// The `Paragraph` variant is intentionally larger than `Table` (it carries
+/// fragments, floats, and resolved style inline). Boxing would add an
+/// allocation per block without a measurable benefit for this codebase,
+/// where the Vec holding these is the dominant allocation.
+#[allow(clippy::large_enum_variant)]
 pub enum LayoutBlock {
     Paragraph {
         fragments: Vec<Fragment>,
@@ -61,6 +107,8 @@ pub enum LayoutBlock {
         footnotes: Vec<(Vec<Fragment>, ParagraphStyle)>,
         /// §20.4.2.3: floating images anchored to this paragraph.
         floating_images: Vec<FloatingImage>,
+        /// §14.5 / §20.1.2.2.35: floating DrawingML shapes anchored to this paragraph.
+        floating_shapes: Vec<FloatingShape>,
     },
     Table {
         rows: Vec<TableRowInput>,

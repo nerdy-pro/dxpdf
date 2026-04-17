@@ -75,7 +75,10 @@ pub enum PathVerb {
 ///    `rect`; callers should log once and fall back to a stub bounding box),
 ///  * the extent is zero in either dimension (nothing to draw).
 pub fn build_geometry(geometry: &ShapeGeometry, extent: PtSize) -> Option<ShapePath> {
-    if extent.width <= Pt::ZERO || extent.height <= Pt::ZERO {
+    // Reject only fully zero-extent shapes. Lines are commonly authored as
+    // `cx=0, cy=N` (vertical) or `cx=N, cy=0` (horizontal); both are valid
+    // and must render.
+    if extent.width <= Pt::ZERO && extent.height <= Pt::ZERO {
         return None;
     }
     match geometry {

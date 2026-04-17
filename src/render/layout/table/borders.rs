@@ -296,6 +296,7 @@ mod tests {
                 page_break_before: false,
                 footnotes: vec![],
                 floating_images: vec![],
+                floating_shapes: vec![],
             }],
             margins: PtEdgeInsets::ZERO,
             grid_span: 1,

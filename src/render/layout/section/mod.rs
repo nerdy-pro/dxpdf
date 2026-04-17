@@ -82,6 +82,7 @@ mod tests {
             page_break_before: false,
             footnotes: vec![],
             floating_images: vec![],
+            floating_shapes: vec![],
         }
     }
 
@@ -220,6 +221,7 @@ mod tests {
                         page_break_before: false,
                         footnotes: vec![],
                         floating_images: vec![],
+                        floating_shapes: vec![],
                     }],
                     margins: PtEdgeInsets::ZERO,
                     grid_span: 1,
@@ -272,6 +274,7 @@ mod tests {
             page_break_before: false,
             footnotes: vec![],
             floating_images: vec![],
+            floating_shapes: vec![],
         }];
         let config = small_config();
         let pages = layout_section(&blocks, &config, None, Pt::ZERO, Pt::new(14.0), None);
@@ -301,6 +304,7 @@ mod tests {
                 page_break_before: true,
                 footnotes: vec![],
                 floating_images: vec![],
+                floating_shapes: vec![],
             },
         ];
         let config = small_config();
@@ -357,6 +361,7 @@ mod tests {
                 page_break_before: false,
                 footnotes: vec![],
                 floating_images: vec![],
+                floating_shapes: vec![],
             },
             LayoutBlock::Paragraph {
                 fragments: vec![text_frag("para2", 30.0, 14.0)],
@@ -364,6 +369,7 @@ mod tests {
                 page_break_before: false,
                 footnotes: vec![],
                 floating_images: vec![],
+                floating_shapes: vec![],
             },
         ];
         let pages = layout_section(
