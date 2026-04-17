@@ -2,6 +2,7 @@
 
 pub mod color;
 pub mod conditional;
+pub mod drawing_color;
 pub mod fonts;
 pub mod images;
 pub mod numbering;

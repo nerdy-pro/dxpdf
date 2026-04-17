@@ -3,11 +3,13 @@
 //! Follows the actual XML nesting per OOXML spec rather than flat event scanning.
 
 mod anchor;
+mod color;
 mod inline;
 mod picture;
 mod shape;
 
 pub use anchor::parse_anchor_image;
+pub use color::parse_color_choice;
 pub use inline::parse_inline_image;
 
 use quick_xml::events::{BytesStart, Event};

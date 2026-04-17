@@ -11,3 +11,5 @@ Technical reference for DOCX-to-PDF rendering decisions in dxpdf, organized by O
 - [Fields](fields.md) — §17.16.18 complex/simple fields, PAGE/NUMPAGES evaluation
 - [Headers and Footers](headers-footers.md) — §17.10.1 rendering, table support, per-page fields
 - [Line Spacing](line-spacing.md) — §17.3.1.33 line/lineRule, Auto/Exact/AtLeast modes
+- [DrawingML Plan](drawingml-plan.md) — §20 shapes/fills/outlines/effects — tiered implementation plan, recommended cut-point, architectural decisions
+- [DrawingML Tier 0](drawingml-tier-0.md) — foundational infrastructure: color ADT, fills/strokes/effects, geometry generator, FloatingShape — standalone blueprint
