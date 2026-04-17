@@ -128,9 +128,7 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
             target.tabs.retain(|t| t.position != tab.position);
             target.tabs.push(*tab);
         }
-        target
-            .tabs
-            .sort_by(|a, b| a.position.raw().cmp(&b.position.raw()));
+        target.tabs.sort_by_key(|t| t.position.raw());
     }
 }
 

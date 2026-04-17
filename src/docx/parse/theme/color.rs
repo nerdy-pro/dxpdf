@@ -116,10 +116,8 @@ fn parse_color_choice(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<O
                 }
                 depth += 1;
             }
-            Event::Empty(ref e) => {
-                if depth == 1 {
-                    capture_rgb_or_warn(e, &mut rgb)?;
-                }
+            Event::Empty(ref e) if depth == 1 => {
+                capture_rgb_or_warn(e, &mut rgb)?;
             }
             Event::End(_) => {
                 depth -= 1;
