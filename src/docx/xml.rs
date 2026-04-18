@@ -140,7 +140,7 @@ pub fn read_text_content(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Resul
     loop {
         match next_event(reader, buf)? {
             Event::Text(e) => {
-                text.push_str(&e.unescape()?);
+                text.push_str(&e.decode()?);
             }
             Event::End(_) | Event::Eof => break,
             _ => {}

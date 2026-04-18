@@ -6,10 +6,11 @@
 
 mod script;
 
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 
 use crate::docx::error::Result;
 use crate::docx::model::{Theme, ThemeColorScheme, ThemeFontScheme, ThemeScriptFont};
+use crate::docx::parse::primitives::HexColor;
 use crate::docx::parse::serde_xml::from_xml;
 
 use self::script::parse_script_tag;
@@ -84,35 +85,6 @@ struct SrgbClr {
 struct SysClr {
     #[serde(rename = "@lastClr", default)]
     last_clr: Option<HexColor>,
-}
-
-/// OOXML hex color attribute value (§17.3.4.1 ST_HexColor): either the literal
-/// `"auto"` sentinel or a 6-digit RGB hex. Invalid hex fails deserialization.
-#[derive(Clone, Copy, Debug)]
-enum HexColor {
-    Auto,
-    Rgb(u32),
-}
-
-impl HexColor {
-    fn rgb(self) -> Option<u32> {
-        match self {
-            HexColor::Auto => None,
-            HexColor::Rgb(v) => Some(v),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for HexColor {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        if s.eq_ignore_ascii_case("auto") {
-            return Ok(HexColor::Auto);
-        }
-        u32::from_str_radix(&s, 16)
-            .map(HexColor::Rgb)
-            .map_err(serde::de::Error::custom)
-    }
 }
 
 impl ColorChoice {

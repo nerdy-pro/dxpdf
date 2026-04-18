@@ -18,6 +18,9 @@ pub enum ParseError {
     #[error("invalid UTF-8 in XML content: {0}")]
     Utf8(#[from] std::str::Utf8Error),
 
+    #[error("XML encoding error: {0}")]
+    Encoding(#[from] quick_xml::encoding::EncodingError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

@@ -5,6 +5,7 @@ pub mod drawing;
 pub mod fonts;
 pub mod notes;
 pub mod numbering;
+pub mod primitives;
 pub mod properties;
 pub mod serde_xml;
 pub mod settings;

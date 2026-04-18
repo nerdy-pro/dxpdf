@@ -14,3 +14,4 @@ Technical reference for DOCX-to-PDF rendering decisions in dxpdf, organized by O
 - [DrawingML Plan](drawingml-plan.md) — §20 shapes/fills/outlines/effects — tiered implementation plan, recommended cut-point, architectural decisions
 - [DrawingML Tier 0](drawingml-tier-0.md) — foundational infrastructure: color ADT, fills/strokes/effects, geometry generator, FloatingShape — standalone blueprint
 - [DrawingML Tier 0 — Phase 2](drawingml-tier-0-phase-2.md) — detailed plan for fill / stroke / effect ADTs + parsers
+- [Serde Migration Plan](serde-migration-plan.md) — full plan to replace event-driven OOXML parsing with serde schemas; phases, risks, decisions
