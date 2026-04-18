@@ -249,7 +249,7 @@ fn parse_textbox(
                 match local {
                     b"txbxContent" => {
                         let (blocks, _) =
-                            super::body::parse_block_content(reader, buf, b"txbxContent")?;
+                            super::body_legacy::parse_block_content(reader, buf, b"txbxContent")?;
                         content = blocks;
                     }
                     _ => {

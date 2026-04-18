@@ -84,7 +84,7 @@ fn parse_wsp_txbx(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Vec<B
                 let local = xml::local_name(qn.as_ref());
                 match local {
                     b"txbxContent" => {
-                        let (content, _) = crate::docx::parse::body::parse_block_content(
+                        let (content, _) = crate::docx::parse::body_legacy::parse_block_content(
                             reader,
                             buf,
                             b"txbxContent",
