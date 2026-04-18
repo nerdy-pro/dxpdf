@@ -7,8 +7,9 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::docx::error::{ParseError, Result};
+use crate::docx::relationships::Relationships;
 use crate::docx::xml;
-use crate::docx::zip::{PackageContents, Relationships};
+use crate::docx::zip::PackageContents;
 
 use crate::model::{EmbeddedFont, EmbeddedFontVariant, RelId};
 

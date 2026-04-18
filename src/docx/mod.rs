@@ -16,6 +16,7 @@ pub mod model {
 
 pub mod error;
 pub mod parse;
+pub mod relationships;
 pub mod xml;
 pub mod zip;
 
