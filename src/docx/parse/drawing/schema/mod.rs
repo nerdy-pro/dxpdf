@@ -4,3 +4,5 @@
 //! as higher-level container parsers are migrated in later sub-phases.
 
 pub mod color;
+pub mod fill;
+pub mod stroke;
