@@ -5,6 +5,7 @@
 //! (e.g., `Dimension<U>`) but never leak serde into the model layer.
 
 pub mod colors;
+pub mod st_enums;
 pub mod toggles;
 pub mod units;
 
