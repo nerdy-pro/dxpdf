@@ -14,7 +14,7 @@ use super::convert::{
     paragraph_style_from_props, populate_image_data, populate_underline_metrics,
     resolve_paragraph_defaults,
 };
-use super::floating::extract_floating_images;
+use super::floating::{extract_floating_images, AnchorFrame};
 use super::table::build_table;
 use super::{BuildContext, BuildState};
 
@@ -216,11 +216,17 @@ pub(super) fn build_paragraph_block(
         }
     }
 
-    // §20.4.2.3: extract floating (anchor) images from this paragraph.
-    // In cell context, positions are cell-relative instead of page-relative.
-    let cell_context = table_style.is_some();
-    let floating_images = extract_floating_images(p, ctx, state, cell_context);
-    let floating_shapes = super::floating::extract_floating_shapes(p, ctx, state, cell_context);
+    // §20.4.2.3: extract floating (anchor) images and shapes from this
+    // paragraph. Table cells emit their commands through `stack_blocks`,
+    // which shifts them into page coordinates, so anchors inside a cell use
+    // the stack frame. Body paragraphs emit in page-absolute coordinates.
+    let frame = if table_style.is_some() {
+        AnchorFrame::Stack
+    } else {
+        AnchorFrame::Page
+    };
+    let floating_images = extract_floating_images(p, ctx, state, frame);
+    let floating_shapes = super::floating::extract_floating_shapes(p, ctx, state, frame);
 
     Some(LayoutBlock::Paragraph {
         fragments,

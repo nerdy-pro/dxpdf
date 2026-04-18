@@ -27,7 +27,7 @@ use block::{build_block, build_fragments, collect_endnotes};
 use convert::{
     doc_font_family, doc_font_size, paragraph_style_from_props, resolve_paragraph_defaults,
 };
-use floating::{extract_floating_images, find_vml_absolute_position};
+use floating::{extract_floating_images, find_vml_absolute_position, AnchorFrame};
 use table::build_table;
 
 /// §17.8.3.2: OOXML fallback font when no theme or doc defaults specify one.
@@ -150,17 +150,28 @@ pub fn build_header_footer_content(
                         }
                     }
                 }
-                // Extract floating (anchor) images — positioned page-relative.
-                // Images use the hf-level list for z-order handling (behindDoc
-                // splits the emission around text commands).
-                let para_floats = extract_floating_images(p, ctx, state, false);
+                // §20.4.2.3: extract floating (anchor) images. Images are
+                // collected at the header/footer level and emitted by
+                // `render_header`/`render_footer` *outside* of `stack_blocks`
+                // — that's how z-ordering against the text (behindDoc) is
+                // implemented. Because the caller does not apply the stack
+                // shift to these commands, their coordinates must be
+                // page-absolute.
+                let para_floats = extract_floating_images(p, ctx, state, AnchorFrame::Page);
                 let has_float_images = !para_floats.is_empty();
                 all_floating_images.extend(para_floats);
-                // Shapes, by contrast, travel on the paragraph so
-                // `stack_blocks` can anchor them to the owning paragraph's
-                // y coordinate. In Tier 0 all shapes are in-front-of-doc,
-                // so per-paragraph emission preserves the desired z-order.
-                let paragraph_shapes = floating::extract_floating_shapes(p, ctx, state, false);
+                // Shapes, by contrast, travel on the owning paragraph so
+                // `stack_blocks` can anchor them to the paragraph's y
+                // coordinate. `stack_blocks` emits every command in
+                // stack-frame-relative space and `render_footer` /
+                // `render_header` later shift the whole batch by
+                // `margins.left` — so shapes must be resolved in the stack
+                // frame (not page-absolute), otherwise `margins.left` would
+                // be applied twice. §17.10.1: z-ordering against the
+                // surrounding text in Tier 0 is paragraph-granular, matching
+                // the stack-frame emission order.
+                let paragraph_shapes =
+                    floating::extract_floating_shapes(p, ctx, state, AnchorFrame::Stack);
 
                 // §17.10.1: empty non-last paragraphs in headers/footers still
                 // occupy a line height (from the paragraph mark's font size).
