@@ -341,9 +341,10 @@ fn resolve_anchor_y(
             };
             let (area_top, area_height) = match relative_from {
                 AnchorRelativeFrom::Page => (Pt::ZERO, page_height),
-                AnchorRelativeFrom::Margin => {
-                    (margin_top, (page_height - margin_top - margin_bottom).max(Pt::ZERO))
-                }
+                AnchorRelativeFrom::Margin => (
+                    margin_top,
+                    (page_height - margin_top - margin_bottom).max(Pt::ZERO),
+                ),
                 // §20.4.2.11: topMargin = area from page top to top margin edge.
                 AnchorRelativeFrom::TopMargin => (Pt::ZERO, margin_top),
                 // §20.4.2.11: bottomMargin = area from bottom margin edge to page bottom.
