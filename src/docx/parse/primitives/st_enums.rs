@@ -258,6 +258,20 @@ impl From<StJc> for Alignment {
     }
 }
 
+// ── StLineSpacingRule (§17.18.48) ─────────────────────────────────────────
+//
+// No `From` impl: the model's `LineSpacing` is a discriminated union that
+// combines the rule with the value. The conversion happens at the owning
+// schema (see `parse::properties::paragraph::SpacingXml`).
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StLineSpacingRule {
+    Auto,
+    Exact,
+    AtLeast,
+}
+
 // ── StNumberFormat (§17.18.59) ────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
