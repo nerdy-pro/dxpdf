@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Deserializer};
 
+use crate::docx::model::Color;
+
 /// OOXML `ST_HexColor` (§17.3.4.1): `"auto"` or 6-digit RGB hex.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HexColor {
@@ -23,6 +25,15 @@ impl HexColor {
         match self {
             HexColor::Auto => None,
             HexColor::Rgb(v) => Some(v),
+        }
+    }
+}
+
+impl From<HexColor> for Color {
+    fn from(h: HexColor) -> Self {
+        match h {
+            HexColor::Auto => Self::Auto,
+            HexColor::Rgb(v) => Self::Rgb(v),
         }
     }
 }

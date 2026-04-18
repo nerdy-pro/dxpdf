@@ -5,6 +5,7 @@
 
 mod paragraph;
 mod run;
+pub mod schema;
 mod section;
 mod table;
 

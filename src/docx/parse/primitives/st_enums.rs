@@ -18,8 +18,9 @@ use serde::Deserialize;
 
 use crate::docx::model::{
     Alignment, BorderStyle, BreakClear, CellVerticalAlign, FieldCharType, FrameWrap, HeightRule,
-    HighlightColor, NumberFormat, PageOrientation, SectionType, ShadingPattern, TableLayout,
-    TableOverlap, TextAlignment, TextDirection, ThemeFontRef, UnderlineStyle, VerticalAlign,
+    HighlightColor, NumberFormat, PageOrientation, SectionType, ShadingPattern, TabAlignment,
+    TabLeader, TableLayout, TableOverlap, TextAlignment, TextDirection, ThemeFontRef,
+    UnderlineStyle, VerticalAlign,
 };
 
 // ── StBorderType (§17.18.2) ───────────────────────────────────────────────
@@ -432,6 +433,60 @@ impl From<StShd> for ShadingPattern {
             StShd::Pct87 => Self::Pct87,
             StShd::Pct90 => Self::Pct90,
             StShd::Pct95 => Self::Pct95,
+        }
+    }
+}
+
+// ── StTabJc (§17.18.85 tab alignment) ─────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StTabJc {
+    Left,
+    Center,
+    Right,
+    Decimal,
+    Bar,
+    Clear,
+    /// Legacy — treated as `Left`.
+    Num,
+}
+
+impl From<StTabJc> for TabAlignment {
+    fn from(s: StTabJc) -> Self {
+        match s {
+            StTabJc::Left | StTabJc::Num => Self::Left,
+            StTabJc::Center => Self::Center,
+            StTabJc::Right => Self::Right,
+            StTabJc::Decimal => Self::Decimal,
+            StTabJc::Bar => Self::Bar,
+            StTabJc::Clear => Self::Clear,
+        }
+    }
+}
+
+// ── StTabTlc (§17.18.86 tab leader character) ─────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StTabTlc {
+    None,
+    Dot,
+    Hyphen,
+    Underscore,
+    Heavy,
+    MiddleDot,
+}
+
+impl From<StTabTlc> for TabLeader {
+    fn from(s: StTabTlc) -> Self {
+        match s {
+            StTabTlc::None => Self::None,
+            StTabTlc::Dot => Self::Dot,
+            StTabTlc::Hyphen => Self::Hyphen,
+            StTabTlc::Underscore => Self::Underscore,
+            StTabTlc::Heavy => Self::Heavy,
+            StTabTlc::MiddleDot => Self::MiddleDot,
         }
     }
 }

@@ -101,15 +101,14 @@ impl From<SpacingXml> for ParagraphSpacing {
 
 impl From<PPrXml> for ParagraphProperties {
     fn from(x: PPrXml) -> Self {
-        let mut p = ParagraphProperties::default();
-        p.alignment = x.jc.map(|j| j.val.into());
-        p.indentation = x.ind.map(Into::into);
-        p.spacing = x.spacing.map(Into::into);
-        p.keep_next = x.keep_next.map(|OnOff(b)| b);
-        p.outline_level = x
-            .outline_lvl
-            .and_then(|v| OutlineLevel::from_ooxml(v.val));
-        p
+        ParagraphProperties {
+            alignment: x.jc.map(|j| j.val.into()),
+            indentation: x.ind.map(Into::into),
+            spacing: x.spacing.map(Into::into),
+            keep_next: x.keep_next.map(|OnOff(b)| b),
+            outline_level: x.outline_lvl.and_then(|v| OutlineLevel::from_ooxml(v.val)),
+            ..ParagraphProperties::default()
+        }
     }
 }
 
