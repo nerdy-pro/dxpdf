@@ -160,7 +160,7 @@ pub(crate) enum RunChildXml {
     #[serde(rename = "lastRenderedPageBreak")]
     LastRenderedPageBreak,
     #[serde(rename = "drawing")]
-    Drawing(DrawingPlaceholder),
+    Drawing(DrawingXml),
     #[serde(rename = "pict")]
     Pict(PictPlaceholder),
     #[serde(rename = "sym")]
@@ -253,13 +253,18 @@ pub(crate) struct BookmarkEndXml {
     pub id: i64,
 }
 
-/// Placeholder — the actual `Image` is produced by the legacy drawing
-/// parser in the pre-pass and injected at merge time.
-#[derive(Deserialize, Default)]
-pub(crate) struct DrawingPlaceholder {}
+/// `<w:drawing>` wrapper — contains exactly one `<wp:inline>` or
+/// `<wp:anchor>` child (both modelled in `drawing/schema/anchor.rs`).
+#[derive(Deserialize)]
+pub(crate) struct DrawingXml {
+    #[serde(rename = "inline", default)]
+    pub inline: Option<crate::docx::parse::drawing::schema::anchor::InlineXml>,
+    #[serde(rename = "anchor", default)]
+    pub anchor: Option<crate::docx::parse::drawing::schema::anchor::AnchorXml>,
+}
 
-/// Placeholder — the actual `Pict` is produced by the legacy VML parser
-/// in the pre-pass.
+/// Placeholder — VML `<w:pict>` is still handled by the pre-pass in body.rs
+/// until Phase 6 migrates the VML parser to serde.
 #[derive(Deserialize, Default)]
 pub(crate) struct PictPlaceholder {}
 
@@ -314,7 +319,7 @@ pub(crate) struct FallbackXml {
 #[derive(Deserialize)]
 pub(crate) enum McContentXml {
     #[serde(rename = "drawing")]
-    Drawing(DrawingPlaceholder),
+    Drawing(DrawingXml),
     #[serde(rename = "pict")]
     Pict(PictPlaceholder),
 }

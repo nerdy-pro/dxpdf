@@ -18,7 +18,7 @@ use crate::docx::parse::body_schema::*;
 use crate::docx::parse::serde_xml::from_xml;
 use crate::docx::xml;
 
-use super::{drawing, vml};
+use super::vml;
 
 /// Parse `w:document > w:body`, returning blocks and final section properties.
 pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
@@ -47,25 +47,23 @@ pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
     Ok(blocks)
 }
 
-// ── Two-pass: pre-extract <w:drawing> / <w:pict> sub-trees ────────────────
+// ── Pict-only pre-pass ────────────────────────────────────────────────────
+//
+// Drawings are now handled inline via `DrawingXml` in the serde tree; only
+// VML picts still need a pre-pass since the VML parser is still event-driven
+// (Phase 6 will migrate it).
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum Embed {
-    Drawing(Option<Image>),
-    Pict(Pict),
-}
+pub(crate) struct Embed(pub(crate) Pict);
 
-/// Iterate the raw XML in document order. For each top-level `<w:drawing>`
-/// or `<w:pict>` found, hand off to the legacy parser and record the result.
-/// The result vector is consumed in the same document order by the serde
-/// post-pass.
+/// Scan the raw XML for `<w:pict>` sub-trees in document order; parse each
+/// via the legacy VML parser. Drawings are NOT extracted here — serde builds
+/// them directly from the schema.
 ///
 /// `body_tag` narrows the scan to contents of that root; pass `b""` to scan
 /// the whole document (used for headers/footers where the root varies).
 pub(crate) fn extract_embeds(data: &[u8], body_tag: &[u8]) -> Result<Vec<Embed>> {
     let mut reader = Reader::from_reader(data);
-    // For the pre-pass we want whitespace-preserving, like serde does.
     let mut buf = Vec::new();
     let mut out = Vec::new();
 
@@ -84,17 +82,8 @@ pub(crate) fn extract_embeds(data: &[u8], body_tag: &[u8]) -> Result<Vec<Embed>>
         match xml::next_event(&mut reader, &mut buf)? {
             Event::Start(ref e) => {
                 let local: Vec<u8> = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
-                    b"drawing" => {
-                        out.push(Embed::Drawing(parse_drawing_sub_tree(
-                            &mut reader,
-                            &mut buf,
-                        )?));
-                    }
-                    b"pict" => {
-                        out.push(Embed::Pict(vml::parse_pict(&mut reader, &mut buf)?));
-                    }
-                    _ => {}
+                if local.as_slice() == b"pict" {
+                    out.push(Embed(vml::parse_pict(&mut reader, &mut buf)?));
                 }
             }
             Event::End(ref e) if !body_tag.is_empty() && xml::local_name(e.name().as_ref()) == body_tag => {
@@ -105,28 +94,6 @@ pub(crate) fn extract_embeds(data: &[u8], body_tag: &[u8]) -> Result<Vec<Embed>>
         }
     }
     Ok(out)
-}
-
-/// Mirror of legacy `parse_drawing` — finds inline/anchor child and produces
-/// an `Image`.
-fn parse_drawing_sub_tree(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option<Image>> {
-    let mut image: Option<Image> = None;
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let local: Vec<u8> = xml::local_name(e.name().as_ref()).to_vec();
-                match local.as_slice() {
-                    b"inline" => image = drawing::parse_inline_image(e, reader, buf)?,
-                    b"anchor" => image = drawing::parse_anchor_image(e, reader, buf)?,
-                    _ => xml::skip_to_end(reader, buf, &local)?,
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"drawing" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"drawing")),
-            _ => {}
-        }
-    }
-    Ok(image)
 }
 
 // ── Top-level document schema wrapper ────────────────────────────────────
@@ -302,15 +269,15 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
             RunChildXml::Br(br) => acc.push(run_break(br)),
             RunChildXml::Cr => acc.push(RunElement::LineBreak(BreakKind::TextWrapping)),
             RunChildXml::LastRenderedPageBreak => acc.push(RunElement::LastRenderedPageBreak),
-            RunChildXml::Drawing(_) => {
+            RunChildXml::Drawing(d) => {
                 flush(&mut acc, out);
-                if let Some(Embed::Drawing(Some(img))) = ctx.next_embed() {
+                if let Some(img) = drawing_to_image(d, ctx) {
                     out.push(Inline::Image(Box::new(img)));
                 }
             }
             RunChildXml::Pict(_) => {
                 flush(&mut acc, out);
-                if let Some(Embed::Pict(pict)) = ctx.next_embed() {
+                if let Some(Embed(pict)) = ctx.next_embed() {
                     out.push(Inline::Pict(pict));
                 }
             }
@@ -490,19 +457,28 @@ fn convert_mc_content(items: Vec<McContentXml>, ctx: &mut ConvertCtx) -> Vec<Inl
     let mut out = Vec::new();
     for i in items {
         match i {
-            McContentXml::Drawing(_) => {
-                if let Some(Embed::Drawing(Some(img))) = ctx.next_embed() {
+            McContentXml::Drawing(d) => {
+                if let Some(img) = drawing_to_image(d, ctx) {
                     out.push(Inline::Image(Box::new(img)));
                 }
             }
             McContentXml::Pict(_) => {
-                if let Some(Embed::Pict(p)) = ctx.next_embed() {
+                if let Some(Embed(p)) = ctx.next_embed() {
                     out.push(Inline::Pict(p));
                 }
             }
         }
     }
     out
+}
+
+/// Convert a serde-parsed `<w:drawing>` into the model's `Image`. Returns
+/// `None` when neither `<wp:inline>` nor `<wp:anchor>` is present.
+fn drawing_to_image(d: crate::docx::parse::body_schema::DrawingXml, ctx: &mut ConvertCtx) -> Option<Image> {
+    if let Some(inline) = d.inline {
+        return Some(inline.into_image(ctx));
+    }
+    d.anchor.map(|a| a.into_image(ctx))
 }
 
 fn convert_table(t: TableXml, ctx: &mut ConvertCtx) -> Table {
