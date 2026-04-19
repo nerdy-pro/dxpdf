@@ -107,6 +107,11 @@ pub(crate) struct ParaXml {
 }
 
 /// Children of `<w:p>` excluding `<w:pPr>` (which is captured separately).
+///
+/// OOXML allows many annotation and revision-tracking elements at this level
+/// (proofErr, smartTag, ins/del, moveFrom/moveTo, commentRangeStart/End,
+/// permStart/End, customXml, sdt, ...). We only model the ones we render;
+/// the `Other` catch-all lets serde discard everything else cleanly.
 #[derive(Deserialize)]
 pub(crate) enum ParaChildXml {
     #[serde(rename = "r")]
@@ -123,6 +128,8 @@ pub(crate) enum ParaChildXml {
     /// enum still has to handle it if it appears in `$value` ordering.
     #[serde(rename = "pPr")]
     PPr(Box<PPrXml>),
+    #[serde(other)]
+    Other,
 }
 
 // ── run ────────────────────────────────────────────────────────────────────

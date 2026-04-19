@@ -157,6 +157,7 @@ fn convert_paragraph(p: ParaXml, ctx: &mut ConvertCtx) -> (Paragraph, Option<Sec
                 content.push(Inline::BookmarkEnd(BookmarkId::new(b.id)));
             }
             ParaChildXml::PPr(_) => {} // already captured above
+            ParaChildXml::Other => {}
         }
     }
 
@@ -313,6 +314,7 @@ fn convert_hyperlink(h: HyperlinkXml, ctx: &mut ConvertCtx) -> Hyperlink {
                 content.push(Inline::BookmarkEnd(BookmarkId::new(b.id)));
             }
             ParaChildXml::PPr(_) => {}
+            ParaChildXml::Other => {}
         }
     }
     Hyperlink { target, content }
@@ -347,6 +349,7 @@ fn convert_fld_simple(f: FldSimpleXml, ctx: &mut ConvertCtx) -> Field {
                 content.push(Inline::BookmarkEnd(BookmarkId::new(b.id)));
             }
             ParaChildXml::PPr(_) => {}
+            ParaChildXml::Other => {}
         }
     }
     Field {

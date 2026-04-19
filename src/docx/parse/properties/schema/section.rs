@@ -17,6 +17,11 @@ use crate::docx::parse::primitives::st_enums::{
 use crate::docx::parse::primitives::OnOff;
 
 /// `<w:sectPr>` root.
+///
+/// Children are collected into a single `$value` Vec rather than as named
+/// fields because real DOCX files commonly interleave `<w:headerReference>`
+/// and `<w:footerReference>` (one h+f pair per `type`), and quick-xml's
+/// serde deserializer rejects non-contiguous repeats of a named field.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct SectPrXml {
     #[serde(rename = "@rsidR", default)]
@@ -26,24 +31,32 @@ pub(crate) struct SectPrXml {
     #[serde(rename = "@rsidSect", default)]
     rsid_sect: Option<String>,
 
-    #[serde(rename = "pgSz", default)]
-    pg_sz: Option<PgSzXml>,
-    #[serde(rename = "pgMar", default)]
-    pg_mar: Option<PgMarXml>,
-    #[serde(default)]
-    cols: Option<ColsXml>,
-    #[serde(rename = "docGrid", default)]
-    doc_grid: Option<DocGridXml>,
-    #[serde(rename = "headerReference", default)]
-    header_refs: Vec<HfRefXml>,
-    #[serde(rename = "footerReference", default)]
-    footer_refs: Vec<HfRefXml>,
-    #[serde(rename = "titlePg", default)]
-    title_pg: Option<OnOff>,
-    #[serde(rename = "type", default)]
-    ty: Option<ValStSectionMark>,
-    #[serde(rename = "pgNumType", default)]
-    pg_num_type: Option<PgNumTypeXml>,
+    #[serde(rename = "$value", default)]
+    children: Vec<SectChildXml>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) enum SectChildXml {
+    #[serde(rename = "pgSz")]
+    PgSz(PgSzXml),
+    #[serde(rename = "pgMar")]
+    PgMar(PgMarXml),
+    #[serde(rename = "cols")]
+    Cols(ColsXml),
+    #[serde(rename = "docGrid")]
+    DocGrid(DocGridXml),
+    #[serde(rename = "headerReference")]
+    HeaderRef(HfRefXml),
+    #[serde(rename = "footerReference")]
+    FooterRef(HfRefXml),
+    #[serde(rename = "titlePg")]
+    TitlePg(OnOff),
+    #[serde(rename = "type")]
+    Type(ValStSectionMark),
+    #[serde(rename = "pgNumType")]
+    PgNumType(PgNumTypeXml),
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -177,7 +190,7 @@ impl From<StChapSep> for ChapterSeparator {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
-struct ValStSectionMark {
+pub(crate) struct ValStSectionMark {
     #[serde(rename = "@val")]
     val: StSectionMark,
 }
@@ -249,17 +262,41 @@ impl From<PgNumTypeXml> for PageNumberType {
 
 impl From<SectPrXml> for SectionProperties {
     fn from(x: SectPrXml) -> Self {
-        let (header_refs, footer_refs) = split_hf_refs(&x.header_refs, &x.footer_refs);
+        let mut page_size: Option<PgSzXml> = None;
+        let mut page_margins: Option<PgMarXml> = None;
+        let mut cols: Option<ColsXml> = None;
+        let mut doc_grid: Option<DocGridXml> = None;
+        let mut header_refs = SectionHeaderFooterRefs::default();
+        let mut footer_refs = SectionHeaderFooterRefs::default();
+        let mut title_page: Option<bool> = None;
+        let mut section_type: Option<SectionType> = None;
+        let mut page_number_type: Option<PgNumTypeXml> = None;
+
+        for child in x.children {
+            match child {
+                SectChildXml::PgSz(v) => page_size = Some(v),
+                SectChildXml::PgMar(v) => page_margins = Some(v),
+                SectChildXml::Cols(v) => cols = Some(v),
+                SectChildXml::DocGrid(v) => doc_grid = Some(v),
+                SectChildXml::HeaderRef(r) => assign_hf_ref(&mut header_refs, r),
+                SectChildXml::FooterRef(r) => assign_hf_ref(&mut footer_refs, r),
+                SectChildXml::TitlePg(OnOff(b)) => title_page = Some(b),
+                SectChildXml::Type(v) => section_type = Some(SectionType::from(v.val)),
+                SectChildXml::PgNumType(v) => page_number_type = Some(v),
+                SectChildXml::Other => {}
+            }
+        }
+
         Self {
-            page_size: x.pg_sz.map(Into::into),
-            page_margins: x.pg_mar.map(Into::into),
-            columns: x.cols.map(Into::into),
-            doc_grid: x.doc_grid.map(Into::into),
+            page_size: page_size.map(Into::into),
+            page_margins: page_margins.map(Into::into),
+            columns: cols.map(Into::into),
+            doc_grid: doc_grid.map(Into::into),
             header_refs,
             footer_refs,
-            title_page: x.title_pg.map(|OnOff(b)| b),
-            section_type: x.ty.map(|v| SectionType::from(v.val)),
-            page_number_type: x.pg_num_type.map(Into::into),
+            title_page,
+            section_type,
+            page_number_type: page_number_type.map(Into::into),
             rsids: SectionRevisionIds {
                 r: x.rsid_r.as_deref().and_then(RevisionSaveId::from_hex),
                 r_pr: x.rsid_r_pr.as_deref().and_then(RevisionSaveId::from_hex),
@@ -269,23 +306,13 @@ impl From<SectPrXml> for SectionProperties {
     }
 }
 
-fn split_hf_refs(
-    headers: &[HfRefXml],
-    footers: &[HfRefXml],
-) -> (SectionHeaderFooterRefs, SectionHeaderFooterRefs) {
-    let collect = |refs: &[HfRefXml]| {
-        let mut out = SectionHeaderFooterRefs::default();
-        for r in refs {
-            let rel = RelId::new(&r.id);
-            match r.ty {
-                Some(StHdrFtr::First) => out.first = Some(rel),
-                Some(StHdrFtr::Even) => out.even = Some(rel),
-                Some(StHdrFtr::Default) | None => out.default = Some(rel),
-            }
-        }
-        out
-    };
-    (collect(headers), collect(footers))
+fn assign_hf_ref(out: &mut SectionHeaderFooterRefs, r: HfRefXml) {
+    let rel = RelId::new(&r.id);
+    match r.ty {
+        Some(StHdrFtr::First) => out.first = Some(rel),
+        Some(StHdrFtr::Even) => out.even = Some(rel),
+        Some(StHdrFtr::Default) | None => out.default = Some(rel),
+    }
 }
 
 #[cfg(test)]
@@ -354,6 +381,28 @@ mod tests {
         assert_eq!(s.header_refs.default.as_ref().map(|r| r.as_str()), Some("rId1"));
         assert_eq!(s.header_refs.first.as_ref().map(|r| r.as_str()), Some("rId2"));
         assert_eq!(s.footer_refs.default.as_ref().map(|r| r.as_str()), Some("rId3"));
+    }
+
+    #[test]
+    fn header_footer_refs_interleaved() {
+        // Real docs commonly interleave header/footer refs by type
+        // (even headers+footers, then default headers+footers, then first).
+        let s = parse(
+            r#"<sectPr>
+                <headerReference id="rId6" type="even"/>
+                <headerReference id="rId7" type="default"/>
+                <footerReference id="rId8" type="even"/>
+                <footerReference id="rId9" type="default"/>
+                <headerReference id="rId10" type="first"/>
+                <footerReference id="rId11" type="first"/>
+            </sectPr>"#,
+        );
+        assert_eq!(s.header_refs.even.as_ref().map(|r| r.as_str()), Some("rId6"));
+        assert_eq!(s.header_refs.default.as_ref().map(|r| r.as_str()), Some("rId7"));
+        assert_eq!(s.header_refs.first.as_ref().map(|r| r.as_str()), Some("rId10"));
+        assert_eq!(s.footer_refs.even.as_ref().map(|r| r.as_str()), Some("rId8"));
+        assert_eq!(s.footer_refs.default.as_ref().map(|r| r.as_str()), Some("rId9"));
+        assert_eq!(s.footer_refs.first.as_ref().map(|r| r.as_str()), Some("rId11"));
     }
 
     #[test]
