@@ -3,6 +3,7 @@
 //! procedural parsers in `drawing/` and will progressively replace them
 //! as higher-level container parsers are migrated in later sub-phases.
 
+pub mod anchor;
 pub mod color;
 pub mod effect;
 pub mod fill;
