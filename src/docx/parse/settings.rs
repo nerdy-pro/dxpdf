@@ -1,99 +1,69 @@
 //! Parser for `word/settings.xml`.
 
-use log::warn;
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
-use crate::docx::dimension::Dimension;
+use crate::docx::dimension::{Dimension, Twips};
 use crate::docx::error::Result;
 use crate::docx::model::{DocumentSettings, RevisionSaveId};
-use crate::docx::xml;
+use crate::docx::parse::primitives::OnOff;
+use crate::docx::parse::serde_xml::from_xml;
 
-/// Parse `word/settings.xml`. Enters `<w:settings>`, parses until `</w:settings>`.
+/// Parse `word/settings.xml`. Entry point: deserializes into an intermediate
+/// schema, then maps to the model type.
 pub fn parse_settings(data: &[u8]) -> Result<DocumentSettings> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut settings = DocumentSettings::default();
-
-    // Find <w:settings> root element.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"settings" => break,
-            Event::Eof => return Ok(settings),
-            _ => {}
-        }
-    }
-
-    // Parse content scoped to </w:settings>.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                if local == b"rsids" {
-                    parse_rsids(&mut reader, &mut buf, &mut settings)?;
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"defaultTabStop" => {
-                        if let Some(val) = xml::optional_attr_i64(e, b"val")? {
-                            settings.default_tab_stop = Dimension::new(val);
-                        }
-                    }
-                    b"evenAndOddHeaders" => {
-                        let enabled = xml::optional_attr_bool(e, b"val")?.unwrap_or(true);
-                        settings.even_and_odd_headers = enabled;
-                    }
-                    _ => {}
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"settings" => break,
-            _ => {}
-        }
-    }
-
-    Ok(settings)
+    from_xml::<SettingsXml>(data).map(Into::into)
 }
 
-fn parse_rsids(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    settings: &mut DocumentSettings,
-) -> Result<()> {
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Empty(ref e) | Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"rsidRoot" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            settings.rsid_root = RevisionSaveId::from_hex(&val);
-                        }
-                    }
-                    b"rsid" => {
-                        if let Some(val) = xml::optional_attr(e, b"val")? {
-                            if let Some(rsid) = RevisionSaveId::from_hex(&val) {
-                                settings.rsids.push(rsid);
-                            }
-                        }
-                    }
-                    _ => {
-                        warn!(
-                            "rsids: unsupported element <{}>",
-                            String::from_utf8_lossy(local)
-                        );
-                    }
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rsids" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"rsids")),
-            _ => {}
+#[derive(Deserialize, Default)]
+struct SettingsXml {
+    #[serde(rename = "defaultTabStop", default)]
+    default_tab_stop: Option<DimensionVal<Twips>>,
+    #[serde(rename = "evenAndOddHeaders", default)]
+    even_and_odd_headers: Option<OnOff>,
+    #[serde(default)]
+    rsids: Option<RsidsXml>,
+}
+
+#[derive(Deserialize, Default)]
+struct RsidsXml {
+    #[serde(rename = "rsidRoot", default)]
+    rsid_root: Option<StringVal>,
+    #[serde(rename = "rsid", default)]
+    rsids: Vec<StringVal>,
+}
+
+#[derive(Deserialize)]
+#[serde(bound(deserialize = "U: crate::docx::dimension::Unit"))]
+struct DimensionVal<U: crate::docx::dimension::Unit> {
+    #[serde(rename = "@val")]
+    val: Dimension<U>,
+}
+
+#[derive(Deserialize)]
+struct StringVal {
+    #[serde(rename = "@val")]
+    val: String,
+}
+
+impl From<SettingsXml> for DocumentSettings {
+    fn from(x: SettingsXml) -> Self {
+        let mut s = DocumentSettings::default();
+        if let Some(t) = x.default_tab_stop {
+            s.default_tab_stop = t.val;
         }
+        if let Some(OnOff(on)) = x.even_and_odd_headers {
+            s.even_and_odd_headers = on;
+        }
+        if let Some(r) = x.rsids {
+            if let Some(root) = r.rsid_root {
+                s.rsid_root = RevisionSaveId::from_hex(&root.val);
+            }
+            s.rsids = r
+                .rsids
+                .into_iter()
+                .filter_map(|v| RevisionSaveId::from_hex(&v.val))
+                .collect();
+        }
+        s
     }
-    Ok(())
 }

@@ -2,96 +2,48 @@
 
 use std::collections::HashMap;
 
-use log::warn;
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
 use crate::docx::error::Result;
 use crate::docx::model::{Block, NoteId};
-use crate::docx::xml;
-
-use super::body;
+use crate::docx::parse::body;
+use crate::docx::parse::body_schema::BlockContainerXml;
+use crate::docx::parse::serde_xml::from_xml;
 
 /// Parse footnotes.xml or endnotes.xml into a map of note ID → blocks.
-/// `note_tag` is "footnote" or "endnote"; root element is "footnotes" or "endnotes".
-pub fn parse_notes(data: &[u8], note_tag: &str) -> Result<HashMap<NoteId, Vec<Block>>> {
-    let mut reader = Reader::from_reader(data);
-    // Do NOT trim text — whitespace in <w:t> runs is significant.
-    let mut buf = Vec::new();
-    let mut notes = HashMap::new();
-
-    let note_tag_bytes = note_tag.as_bytes();
-    let root_tag = format!("{note_tag}s");
-    let root_tag_bytes = root_tag.as_bytes();
-
-    // Find root element (<w:footnotes> or <w:endnotes>).
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == root_tag_bytes => break,
-            Event::Eof => return Ok(notes),
-            _ => {}
-        }
+///
+/// `note_tag` is informational — the schema accepts either `<w:footnote>` or
+/// `<w:endnote>` children under either root.
+pub fn parse_notes(data: &[u8], _note_tag: &str) -> Result<HashMap<NoteId, Vec<Block>>> {
+    if data.is_empty() {
+        return Ok(HashMap::new());
     }
-
-    // Parse scoped to root.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == note_tag_bytes => {
-                let id = xml::optional_attr(e, b"id")?.and_then(|s| s.parse::<i64>().ok());
-
-                if let Some(note_id) = id {
-                    let blocks = parse_note_content(&mut reader, &mut buf, note_tag_bytes)?;
-                    notes.insert(NoteId::new(note_id), blocks);
-                } else {
-                    xml::skip_to_end(&mut reader, &mut buf, note_tag_bytes)?;
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == root_tag_bytes => break,
-            Event::Eof => return Err(xml::unexpected_eof(root_tag_bytes)),
-            _ => {}
-        }
+    let file: NotesFileXml = from_xml(data)?;
+    let mut ctx = body::ConvertCtx::new();
+    let mut out = HashMap::new();
+    for note in file.entries {
+        let Some(id) = note.id else { continue };
+        let container = BlockContainerXml {
+            children: note.content,
+        };
+        let (blocks, _) = body::convert_container(container.children, &mut ctx);
+        out.insert(NoteId::new(id), blocks);
     }
-
-    Ok(notes)
+    Ok(out)
 }
 
-fn parse_note_content(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    end_tag: &[u8],
-) -> Result<Vec<Block>> {
-    let mut blocks = Vec::new();
+/// Matches both `<w:footnotes>` and `<w:endnotes>`. Their children are
+/// `<w:footnote>` or `<w:endnote>` respectively — we accept either tag.
+#[derive(Deserialize)]
+struct NotesFileXml {
+    #[serde(alias = "footnote", alias = "endnote", default)]
+    entries: Vec<NoteXml>,
+}
 
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"p" => {
-                        let (para, sect) = body::parse_paragraph(e, reader, buf)?;
-                        blocks.push(Block::Paragraph(Box::new(para)));
-                        if let Some(sp) = sect {
-                            blocks.push(Block::SectionBreak(Box::new(sp)));
-                        }
-                    }
-                    b"tbl" => {
-                        let table = body::parse_table(reader, buf)?;
-                        blocks.push(Block::Table(Box::new(table)));
-                    }
-                    _ => {
-                        warn!(
-                            "note: unsupported block element <{}>",
-                            String::from_utf8_lossy(local)
-                        );
-                    }
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == end_tag => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"container")),
-            _ => {}
-        }
-    }
-
-    Ok(blocks)
+#[derive(Deserialize)]
+struct NoteXml {
+    #[serde(rename = "@id", default)]
+    id: Option<i64>,
+    #[serde(rename = "$value", default)]
+    content: Vec<crate::docx::parse::body_schema::BlockChildXml>,
 }

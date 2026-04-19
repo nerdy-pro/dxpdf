@@ -1,110 +1,199 @@
 //! Parser for `word/theme/theme1.xml` (DrawingML theme).
 //!
-//! Hierarchical parsing per §20.1.6.9 `CT_OfficeStyleSheet`. Each sub-parser
-//! is a pure function over the XML reader; the root composes the results into
-//! a `Theme`.
+//! Hierarchical parsing per §20.1.6.9 `CT_OfficeStyleSheet`. Color transforms
+//! (`satMod`, `shade`, `tint`, `alpha`, `lumMod`, `lumOff`) are accepted
+//! syntactically but discarded — the resolved model stores only flat RGB.
 
-mod color;
-mod font;
 mod script;
 
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
 use crate::docx::error::Result;
-use crate::docx::model::{Theme, ThemeColorScheme};
-use crate::docx::xml;
+use crate::docx::model::{Theme, ThemeColorScheme, ThemeFontScheme, ThemeScriptFont};
+use crate::docx::parse::primitives::HexColor;
+use crate::docx::parse::serde_xml::from_xml;
 
-use self::font::FontSchemes;
+use self::script::parse_script_tag;
 
 pub fn parse_theme(data: &[u8]) -> Result<Theme> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut theme = Theme::default();
-
-    // Find <a:theme> root element; absent root → default theme.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"theme" => break,
-            Event::Eof => return Ok(theme),
-            _ => {}
-        }
+    if data.is_empty() {
+        return Ok(Theme::default());
     }
-
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"themeElements" => {
-                        let elements = parse_theme_elements(&mut reader, &mut buf)?;
-                        theme.color_scheme = elements.color_scheme;
-                        theme.major_font = elements.fonts.major;
-                        theme.minor_font = elements.fonts.minor;
-                    }
-                    // §20.1.6.7 / §20.1.6.8: siblings irrelevant for rendering — skip.
-                    b"objectDefaults" | b"extraClrSchemeLst" | b"extLst" => {
-                        xml::skip_to_end(&mut reader, &mut buf, local)?;
-                    }
-                    _ => {
-                        xml::warn_unsupported_element("theme", local);
-                        xml::skip_to_end(&mut reader, &mut buf, local)?;
-                    }
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                if !matches!(local, b"objectDefaults" | b"extraClrSchemeLst") {
-                    xml::warn_unsupported_element("theme", local);
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"theme" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"theme")),
-            _ => {}
-        }
-    }
-
-    Ok(theme)
+    from_xml::<ThemeXml>(data).map(Into::into)
 }
 
-struct ThemeElements {
-    color_scheme: ThemeColorScheme,
-    fonts: FontSchemes,
+#[derive(Deserialize, Default)]
+struct ThemeXml {
+    #[serde(rename = "themeElements", default)]
+    theme_elements: Option<ThemeElementsXml>,
 }
 
-fn parse_theme_elements(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<ThemeElements> {
-    let mut color_scheme = ThemeColorScheme::default();
-    let mut fonts = FontSchemes::default();
+#[derive(Deserialize, Default)]
+struct ThemeElementsXml {
+    #[serde(rename = "clrScheme", default)]
+    clr_scheme: Option<ClrSchemeXml>,
+    #[serde(rename = "fontScheme", default)]
+    font_scheme: Option<FontSchemeXml>,
+}
 
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"clrScheme" => color_scheme = color::parse_color_scheme(reader, buf)?,
-                    b"fontScheme" => fonts = font::parse_font_scheme(reader, buf)?,
-                    // §20.1.4.1.14: format scheme (fills, lines, effects) — skip.
-                    b"fmtScheme" => xml::skip_to_end(reader, buf, b"fmtScheme")?,
-                    _ => {
-                        xml::warn_unsupported_element("themeElements", local);
-                        xml::skip_to_end(reader, buf, local)?;
-                    }
+#[derive(Deserialize, Default)]
+struct ClrSchemeXml {
+    #[serde(default)]
+    dk1: Option<ColorChoice>,
+    #[serde(default)]
+    lt1: Option<ColorChoice>,
+    #[serde(default)]
+    dk2: Option<ColorChoice>,
+    #[serde(default)]
+    lt2: Option<ColorChoice>,
+    #[serde(default)]
+    accent1: Option<ColorChoice>,
+    #[serde(default)]
+    accent2: Option<ColorChoice>,
+    #[serde(default)]
+    accent3: Option<ColorChoice>,
+    #[serde(default)]
+    accent4: Option<ColorChoice>,
+    #[serde(default)]
+    accent5: Option<ColorChoice>,
+    #[serde(default)]
+    accent6: Option<ColorChoice>,
+    #[serde(default)]
+    hlink: Option<ColorChoice>,
+    #[serde(rename = "folHlink", default)]
+    fol_hlink: Option<ColorChoice>,
+}
+
+/// A slot's single color-choice element. §20.1.2.3 defines several; we resolve
+/// `srgbClr` and `sysClr` and ignore the rest (scRgbClr, hslClr, schemeClr,
+/// prstClr) by leaving their fields absent.
+#[derive(Deserialize, Default)]
+struct ColorChoice {
+    #[serde(rename = "srgbClr", default)]
+    srgb: Option<SrgbClr>,
+    #[serde(rename = "sysClr", default)]
+    sys: Option<SysClr>,
+}
+
+#[derive(Deserialize)]
+struct SrgbClr {
+    #[serde(rename = "@val")]
+    val: HexColor,
+}
+
+#[derive(Deserialize)]
+struct SysClr {
+    #[serde(rename = "@lastClr", default)]
+    last_clr: Option<HexColor>,
+}
+
+impl ColorChoice {
+    fn resolve(self) -> Option<u32> {
+        if let Some(s) = self.srgb {
+            return s.val.rgb();
+        }
+        if let Some(s) = self.sys {
+            return s.last_clr.and_then(HexColor::rgb);
+        }
+        None
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct FontSchemeXml {
+    #[serde(rename = "majorFont", default)]
+    major: Option<FontCollectionXml>,
+    #[serde(rename = "minorFont", default)]
+    minor: Option<FontCollectionXml>,
+}
+
+#[derive(Deserialize, Default)]
+struct FontCollectionXml {
+    #[serde(default)]
+    latin: Option<TypefaceXml>,
+    #[serde(default)]
+    ea: Option<TypefaceXml>,
+    #[serde(default)]
+    cs: Option<TypefaceXml>,
+    #[serde(rename = "font", default)]
+    fonts: Vec<ScriptFontXml>,
+}
+
+#[derive(Deserialize)]
+struct TypefaceXml {
+    #[serde(rename = "@typeface", default)]
+    typeface: String,
+}
+
+#[derive(Deserialize)]
+struct ScriptFontXml {
+    #[serde(rename = "@script")]
+    script: String,
+    #[serde(rename = "@typeface", default)]
+    typeface: String,
+}
+
+impl From<ThemeXml> for Theme {
+    fn from(x: ThemeXml) -> Self {
+        let mut theme = Theme::default();
+        if let Some(elements) = x.theme_elements {
+            if let Some(cs) = elements.clr_scheme {
+                theme.color_scheme = cs.into();
+            }
+            if let Some(fs) = elements.font_scheme {
+                if let Some(major) = fs.major {
+                    theme.major_font = major.into();
+                }
+                if let Some(minor) = fs.minor {
+                    theme.minor_font = minor.into();
                 }
             }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"themeElements" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"themeElements")),
-            _ => {}
+        }
+        theme
+    }
+}
+
+impl From<ClrSchemeXml> for ThemeColorScheme {
+    fn from(x: ClrSchemeXml) -> Self {
+        let mut s = ThemeColorScheme::default();
+        assign(&mut s.dark1, x.dk1);
+        assign(&mut s.light1, x.lt1);
+        assign(&mut s.dark2, x.dk2);
+        assign(&mut s.light2, x.lt2);
+        assign(&mut s.accent1, x.accent1);
+        assign(&mut s.accent2, x.accent2);
+        assign(&mut s.accent3, x.accent3);
+        assign(&mut s.accent4, x.accent4);
+        assign(&mut s.accent5, x.accent5);
+        assign(&mut s.accent6, x.accent6);
+        assign(&mut s.hyperlink, x.hlink);
+        assign(&mut s.followed_hyperlink, x.fol_hlink);
+        s
+    }
+}
+
+fn assign(slot: &mut u32, choice: Option<ColorChoice>) {
+    if let Some(rgb) = choice.and_then(ColorChoice::resolve) {
+        *slot = rgb;
+    }
+}
+
+impl From<FontCollectionXml> for ThemeFontScheme {
+    fn from(x: FontCollectionXml) -> Self {
+        Self {
+            latin: x.latin.map(|t| t.typeface).unwrap_or_default(),
+            east_asian: x.ea.map(|t| t.typeface).unwrap_or_default(),
+            complex_script: x.cs.map(|t| t.typeface).unwrap_or_default(),
+            script_fonts: x
+                .fonts
+                .into_iter()
+                .map(|f| ThemeScriptFont {
+                    script: parse_script_tag(&f.script),
+                    typeface: f.typeface,
+                })
+                .collect(),
         }
     }
-
-    Ok(ThemeElements {
-        color_scheme,
-        fonts,
-    })
 }
 
 #[cfg(test)]
@@ -173,5 +262,51 @@ mod tests {
         let theme = parse_theme(xml.as_bytes()).unwrap();
         assert_eq!(theme.color_scheme.dark1, 0);
         assert!(theme.minor_font.latin.is_empty());
+    }
+
+    #[test]
+    fn srgb_transforms_are_tolerated() {
+        let xml = r#"<a:theme xmlns:a="urn:a"><a:themeElements><a:clrScheme>
+            <a:accent1>
+                <a:srgbClr val="DEADBE">
+                    <a:shade val="75000"/>
+                    <a:satMod val="200000"/>
+                </a:srgbClr>
+            </a:accent1>
+        </a:clrScheme></a:themeElements></a:theme>"#;
+        let theme = parse_theme(xml.as_bytes()).unwrap();
+        assert_eq!(theme.color_scheme.accent1, 0xDEADBE);
+    }
+
+    #[test]
+    fn sys_clr_uses_last_clr() {
+        let xml = r#"<a:theme xmlns:a="urn:a"><a:themeElements><a:clrScheme>
+            <a:lt1><a:sysClr val="window" lastClr="ABCDEF"/></a:lt1>
+        </a:clrScheme></a:themeElements></a:theme>"#;
+        let theme = parse_theme(xml.as_bytes()).unwrap();
+        assert_eq!(theme.color_scheme.light1, 0xABCDEF);
+    }
+
+    #[test]
+    fn unknown_script_preserved_as_other() {
+        let xml = r#"<a:theme xmlns:a="urn:a"><a:themeElements><a:fontScheme>
+            <a:majorFont>
+                <a:latin typeface="L"/>
+                <a:ea typeface=""/>
+                <a:cs typeface=""/>
+                <a:font script="Xxxx" typeface="FallbackFace"/>
+            </a:majorFont>
+            <a:minorFont>
+                <a:latin typeface=""/>
+                <a:ea typeface=""/>
+                <a:cs typeface=""/>
+            </a:minorFont>
+        </a:fontScheme></a:themeElements></a:theme>"#;
+        let theme = parse_theme(xml.as_bytes()).unwrap();
+        assert_eq!(theme.major_font.script_fonts.len(), 1);
+        match &theme.major_font.script_fonts[0].script {
+            ScriptTag::Other(s) => assert_eq!(&**s, "Xxxx"),
+            other => panic!("expected Other, got {other:?}"),
+        }
     }
 }

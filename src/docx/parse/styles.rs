@@ -1,349 +1,303 @@
 //! Parser for `word/styles.xml` — parses style definitions as-is.
 //! No inheritance resolution — `basedOn` references are preserved.
 
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
 use crate::docx::error::Result;
 use crate::docx::model::*;
-use crate::docx::xml;
-
-use super::properties;
+use crate::docx::parse::properties::schema::paragraph::PPrXml;
+use crate::docx::parse::properties::schema::run::RPrXml;
+use crate::docx::parse::properties::schema::section::SectPrXml;
+use crate::docx::parse::properties::schema::table::{TblPrXml, TcPrXml, TrPrXml};
+use crate::docx::parse::serde_xml::from_xml;
 
 /// Parse `word/styles.xml` into a raw `StyleSheet`.
-/// Parse `word/styles.xml`. Enters `<w:styles>`, parses until `</w:styles>`.
 pub fn parse_styles(data: &[u8]) -> Result<StyleSheet> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-
-    let mut sheet = StyleSheet::default();
-
-    // Find <w:styles> root element.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"styles" => break,
-            Event::Eof => return Ok(sheet),
-            _ => {}
-        }
+    if data.is_empty() {
+        return Ok(StyleSheet::default());
     }
-
-    // Parse content scoped to </w:styles>.
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"docDefaults" => {
-                        parse_doc_defaults(&mut reader, &mut buf, &mut sheet)?;
-                    }
-                    b"style" => {
-                        if let Some((id, style)) = parse_style(e, &mut reader, &mut buf)? {
-                            sheet.styles.insert(id, style);
-                        }
-                    }
-                    b"latentStyles" => {
-                        sheet.latent_styles = Some(parse_latent_styles(e, &mut reader, &mut buf)?);
-                    }
-                    _ => xml::warn_unsupported_element("styles", local),
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"styles" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"styles")),
-            _ => {}
-        }
-    }
-
-    Ok(sheet)
+    from_xml::<StylesXml>(data).map(Into::into)
 }
 
-/// Parse `w:docDefaults`. Scoped to `</w:docDefaults>`.
-/// Children are §17.7.5.5 `w:rPrDefault` and §17.7.5.3 `w:pPrDefault`,
-/// each containing the actual `w:rPr` / `w:pPr`.
-fn parse_doc_defaults(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    sheet: &mut StyleSheet,
-) -> Result<()> {
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"rPrDefault" => {
-                        parse_rpr_default(reader, buf, sheet)?;
-                    }
-                    b"pPrDefault" => {
-                        parse_ppr_default(reader, buf, sheet)?;
-                    }
-                    _ => xml::warn_unsupported_element("docDefaults", local),
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"docDefaults" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"docDefaults")),
-            _ => {}
-        }
-    }
-    Ok(())
+#[derive(Deserialize, Default)]
+struct StylesXml {
+    #[serde(rename = "docDefaults", default)]
+    doc_defaults: Option<DocDefaultsXml>,
+    #[serde(rename = "latentStyles", default)]
+    latent_styles: Option<LatentStylesXml>,
+    #[serde(rename = "style", default)]
+    styles: Vec<StyleXml>,
 }
 
-/// §17.7.5.5: parse `w:rPrDefault` — contains `w:rPr`. Scoped to `</w:rPrDefault>`.
-fn parse_rpr_default(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    sheet: &mut StyleSheet,
-) -> Result<()> {
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"rPr" => {
-                let (parsed, _) = properties::parse_run_properties(reader, buf)?;
-                sheet.doc_defaults_run = parsed;
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"rPrDefault" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"rPrDefault")),
-            _ => {}
-        }
-    }
-    Ok(())
+#[derive(Deserialize)]
+struct DocDefaultsXml {
+    #[serde(rename = "rPrDefault", default)]
+    r_pr_default: Option<RPrDefaultXml>,
+    #[serde(rename = "pPrDefault", default)]
+    p_pr_default: Option<PPrDefaultXml>,
 }
 
-/// §17.7.5.3: parse `w:pPrDefault` — contains `w:pPr`. Scoped to `</w:pPrDefault>`.
-fn parse_ppr_default(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    sheet: &mut StyleSheet,
-) -> Result<()> {
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"pPr" => {
-                let parsed = properties::parse_paragraph_properties(reader, buf)?;
-                sheet.doc_defaults_paragraph = parsed.properties;
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"pPrDefault" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"pPrDefault")),
-            _ => {}
-        }
-    }
-    Ok(())
+#[derive(Deserialize)]
+struct RPrDefaultXml {
+    #[serde(rename = "rPr", default)]
+    r_pr: Option<RPrXml>,
 }
 
-fn parse_style(
-    start: &quick_xml::events::BytesStart<'_>,
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Option<(StyleId, Style)>> {
-    let style_type = match xml::optional_attr(start, b"type")?.as_deref() {
-        Some("paragraph") | None => StyleType::Paragraph,
-        Some("character") => StyleType::Character,
-        Some("table") => StyleType::Table,
-        Some("numbering") => StyleType::Numbering,
-        Some(other) => {
-            log::warn!("unknown style type: {other}");
-            xml::skip_to_end(reader, buf, b"style")?;
-            return Ok(None);
-        }
-    };
+#[derive(Deserialize)]
+struct PPrDefaultXml {
+    #[serde(rename = "pPr", default)]
+    p_pr: Option<PPrXml>,
+}
 
-    let id = match xml::optional_attr(start, b"styleId")? {
-        Some(id) => StyleId::new(id),
-        None => {
-            xml::skip_to_end(reader, buf, b"style")?;
-            return Ok(None);
-        }
-    };
+#[derive(Deserialize)]
+struct StyleXml {
+    /// `@w:type` — style kind. Absent defaults to `paragraph` per §17.7.
+    #[serde(rename = "@type", default = "default_style_type")]
+    ty: StStyleType,
+    #[serde(rename = "@styleId", default)]
+    style_id: Option<String>,
+    #[serde(rename = "@default", default)]
+    default: Option<AttrBool>,
 
-    let is_default = xml::optional_attr_bool(start, b"default")?.unwrap_or(false);
+    #[serde(rename = "name", default)]
+    name: Option<ValString>,
+    #[serde(rename = "basedOn", default)]
+    based_on: Option<ValString>,
+    #[serde(rename = "pPr", default)]
+    p_pr: Option<PPrXml>,
+    #[serde(rename = "rPr", default)]
+    r_pr: Option<RPrXml>,
+    #[serde(rename = "tblPr", default)]
+    tbl_pr: Option<TblPrXml>,
+    #[serde(rename = "tblStylePr", default)]
+    tbl_style_pr: Vec<TblStylePrXml>,
+}
 
-    let mut name: Option<String> = None;
-    let mut based_on: Option<StyleId> = None;
-    let mut ppr: Option<ParagraphProperties> = None;
-    let mut rpr: Option<RunProperties> = None;
-    let mut tbl_pr: Option<TableProperties> = None;
-    let mut overrides: Vec<TableStyleOverride> = Vec::new();
+fn default_style_type() -> StStyleType {
+    StStyleType::Paragraph
+}
 
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"pPr" => {
-                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
-                        ppr = Some(parsed.properties);
-                        if rpr.is_none() {
-                            rpr = parsed.run_properties;
-                        }
-                    }
-                    b"rPr" => {
-                        let (parsed, _) = properties::parse_run_properties(reader, buf)?;
-                        rpr = Some(parsed);
-                    }
-                    b"tblPr" => {
-                        let (parsed, _) = properties::parse_table_properties(reader, buf)?;
-                        tbl_pr = Some(parsed);
-                    }
-                    b"tblStylePr" => {
-                        if let Some(ovr) = parse_table_style_override(e, reader, buf)? {
-                            overrides.push(ovr);
-                        }
-                    }
-                    _ => xml::warn_unsupported_element("style", local),
-                }
-            }
-            Event::Empty(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                if local == b"basedOn" {
-                    based_on = xml::optional_attr(e, b"val")?.map(StyleId::new);
-                } else if local == b"name" {
-                    name = xml::optional_attr(e, b"val")?;
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"style" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"style")),
-            _ => {}
+#[derive(Deserialize)]
+struct TblStylePrXml {
+    #[serde(rename = "@type")]
+    ty: StTblStylePrType,
+    #[serde(rename = "pPr", default)]
+    p_pr: Option<PPrXml>,
+    #[serde(rename = "rPr", default)]
+    r_pr: Option<RPrXml>,
+    #[serde(rename = "tblPr", default)]
+    tbl_pr: Option<TblPrXml>,
+    #[serde(rename = "trPr", default)]
+    tr_pr: Option<TrPrXml>,
+    #[serde(rename = "tcPr", default)]
+    tc_pr: Option<TcPrXml>,
+}
+
+#[derive(Deserialize)]
+struct LatentStylesXml {
+    #[serde(rename = "@defLockedState", default)]
+    def_locked_state: Option<AttrBool>,
+    #[serde(rename = "@defUIPriority", default)]
+    def_ui_priority: Option<u32>,
+    #[serde(rename = "@defSemiHidden", default)]
+    def_semi_hidden: Option<AttrBool>,
+    #[serde(rename = "@defUnhideWhenUsed", default)]
+    def_unhide_when_used: Option<AttrBool>,
+    #[serde(rename = "@defQFormat", default)]
+    def_q_format: Option<AttrBool>,
+    #[serde(rename = "@count", default)]
+    count: Option<u32>,
+    #[serde(rename = "lsdException", default)]
+    exceptions: Vec<LsdExceptionXml>,
+}
+
+#[derive(Deserialize)]
+struct LsdExceptionXml {
+    #[serde(rename = "@name", default)]
+    name: Option<String>,
+    #[serde(rename = "@locked", default)]
+    locked: Option<AttrBool>,
+    #[serde(rename = "@uiPriority", default)]
+    ui_priority: Option<u32>,
+    #[serde(rename = "@semiHidden", default)]
+    semi_hidden: Option<AttrBool>,
+    #[serde(rename = "@unhideWhenUsed", default)]
+    unhide_when_used: Option<AttrBool>,
+    #[serde(rename = "@qFormat", default)]
+    q_format: Option<AttrBool>,
+}
+
+// ── ST enums local to styles ─────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StStyleType {
+    Paragraph,
+    Character,
+    Table,
+    Numbering,
+}
+
+impl From<StStyleType> for StyleType {
+    fn from(s: StStyleType) -> Self {
+        match s {
+            StStyleType::Paragraph => Self::Paragraph,
+            StStyleType::Character => Self::Character,
+            StStyleType::Table => Self::Table,
+            StStyleType::Numbering => Self::Numbering,
         }
     }
+}
 
-    Ok(Some((
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StTblStylePrType {
+    FirstRow,
+    LastRow,
+    FirstCol,
+    LastCol,
+    Band1Vert,
+    Band2Vert,
+    Band1Horz,
+    Band2Horz,
+    NeCell,
+    NwCell,
+    SeCell,
+    SwCell,
+    WholeTable,
+}
+
+impl From<StTblStylePrType> for TableStyleOverrideType {
+    fn from(s: StTblStylePrType) -> Self {
+        match s {
+            StTblStylePrType::FirstRow => Self::FirstRow,
+            StTblStylePrType::LastRow => Self::LastRow,
+            StTblStylePrType::FirstCol => Self::FirstCol,
+            StTblStylePrType::LastCol => Self::LastCol,
+            StTblStylePrType::Band1Vert => Self::Band1Vert,
+            StTblStylePrType::Band2Vert => Self::Band2Vert,
+            StTblStylePrType::Band1Horz => Self::Band1Horz,
+            StTblStylePrType::Band2Horz => Self::Band2Horz,
+            StTblStylePrType::NeCell => Self::NeCell,
+            StTblStylePrType::NwCell => Self::NwCell,
+            StTblStylePrType::SeCell => Self::SeCell,
+            StTblStylePrType::SwCell => Self::SwCell,
+            StTblStylePrType::WholeTable => Self::WholeTable,
+        }
+    }
+}
+
+// ── shared helpers ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ValString {
+    #[serde(rename = "@val")]
+    val: String,
+}
+
+use crate::docx::parse::primitives::AttrBool;
+
+// Suppress unused warnings on schema-private fields used only via serde.
+#[allow(dead_code)]
+const _: Option<SectPrXml> = None;
+
+// ── schema → model conversion ────────────────────────────────────────────
+
+impl From<StylesXml> for StyleSheet {
+    fn from(x: StylesXml) -> Self {
+        let mut sheet = StyleSheet::default();
+
+        if let Some(dd) = x.doc_defaults {
+            if let Some(r) = dd.r_pr_default.and_then(|d| d.r_pr) {
+                let (rp, _) = r.split();
+                sheet.doc_defaults_run = rp;
+            }
+            if let Some(p) = dd.p_pr_default.and_then(|d| d.p_pr) {
+                sheet.doc_defaults_paragraph = p.split().properties;
+            }
+        }
+
+        for s in x.styles {
+            if let Some((id, style)) = convert_style(s) {
+                sheet.styles.insert(id, style);
+            }
+        }
+
+        sheet.latent_styles = x.latent_styles.map(Into::into);
+        sheet
+    }
+}
+
+fn convert_style(s: StyleXml) -> Option<(StyleId, Style)> {
+    let id = StyleId::new(s.style_id?);
+    let style_type = StyleType::from(s.ty);
+    let is_default = s.default.map(|b| b.0).unwrap_or(false);
+
+    let (mut paragraph_properties, mut run_properties_from_ppr): (
+        Option<ParagraphProperties>,
+        Option<RunProperties>,
+    ) = (None, None);
+    if let Some(p) = s.p_pr {
+        let parsed = p.split();
+        paragraph_properties = Some(parsed.properties);
+        run_properties_from_ppr = parsed.run_properties;
+    }
+
+    let run_properties = s.r_pr.map(|r| r.split().0).or(run_properties_from_ppr);
+
+    let table_properties = s.tbl_pr.map(|t| t.split().0);
+
+    let table_style_overrides = s.tbl_style_pr.into_iter().map(convert_override).collect();
+
+    Some((
         id,
         Style {
-            name,
+            name: s.name.map(|v| v.val),
             style_type,
-            based_on,
+            based_on: s.based_on.map(|v| StyleId::new(v.val)),
             is_default,
-            paragraph_properties: ppr,
-            run_properties: rpr,
-            table_properties: tbl_pr,
-            table_style_overrides: overrides,
+            paragraph_properties,
+            run_properties,
+            table_properties,
+            table_style_overrides,
         },
-    )))
+    ))
 }
 
-/// §17.7.6.6: parse a `w:tblStylePr` element.
-fn parse_table_style_override(
-    start: &quick_xml::events::BytesStart<'_>,
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Option<TableStyleOverride>> {
-    let override_type = match xml::optional_attr(start, b"type")?.as_deref() {
-        Some("firstRow") => TableStyleOverrideType::FirstRow,
-        Some("lastRow") => TableStyleOverrideType::LastRow,
-        Some("firstCol") => TableStyleOverrideType::FirstCol,
-        Some("lastCol") => TableStyleOverrideType::LastCol,
-        Some("band1Vert") => TableStyleOverrideType::Band1Vert,
-        Some("band2Vert") => TableStyleOverrideType::Band2Vert,
-        Some("band1Horz") => TableStyleOverrideType::Band1Horz,
-        Some("band2Horz") => TableStyleOverrideType::Band2Horz,
-        Some("neCell") => TableStyleOverrideType::NeCell,
-        Some("nwCell") => TableStyleOverrideType::NwCell,
-        Some("seCell") => TableStyleOverrideType::SeCell,
-        Some("swCell") => TableStyleOverrideType::SwCell,
-        Some("wholeTable") => TableStyleOverrideType::WholeTable,
-        Some(other) => {
-            return Err(crate::docx::error::ParseError::InvalidAttributeValue {
-                attr: "tblStylePr/type".into(),
-                value: other.into(),
-                reason: "unsupported value per OOXML spec §17.18.89".into(),
-            });
-        }
-        None => {
-            xml::skip_to_end(reader, buf, b"tblStylePr")?;
-            return Ok(None);
-        }
-    };
-
-    let mut ppr: Option<ParagraphProperties> = None;
-    let mut rpr: Option<RunProperties> = None;
-    let mut tbl_pr: Option<TableProperties> = None;
-    let mut tr_pr: Option<TableRowProperties> = None;
-    let mut tc_pr: Option<TableCellProperties> = None;
-
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"pPr" => {
-                        let parsed = properties::parse_paragraph_properties(reader, buf)?;
-                        ppr = Some(parsed.properties);
-                    }
-                    b"rPr" => {
-                        let (parsed, _) = properties::parse_run_properties(reader, buf)?;
-                        rpr = Some(parsed);
-                    }
-                    b"tblPr" => {
-                        let (parsed, _) = properties::parse_table_properties(reader, buf)?;
-                        tbl_pr = Some(parsed);
-                    }
-                    b"trPr" => {
-                        tr_pr = Some(properties::parse_table_row_properties(reader, buf)?);
-                    }
-                    b"tcPr" => {
-                        tc_pr = Some(properties::parse_table_cell_properties(reader, buf)?);
-                    }
-                    _ => xml::warn_unsupported_element("tblStylePr", local),
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"tblStylePr" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"tblStylePr")),
-            _ => {}
-        }
+fn convert_override(x: TblStylePrXml) -> TableStyleOverride {
+    TableStyleOverride {
+        override_type: x.ty.into(),
+        paragraph_properties: x.p_pr.map(|p| p.split().properties),
+        run_properties: x.r_pr.map(|r| r.split().0),
+        table_properties: x.tbl_pr.map(|t| t.split().0),
+        table_row_properties: x.tr_pr.map(Into::into),
+        table_cell_properties: x.tc_pr.map(Into::into),
     }
-
-    Ok(Some(TableStyleOverride {
-        override_type,
-        paragraph_properties: ppr,
-        run_properties: rpr,
-        table_properties: tbl_pr,
-        table_row_properties: tr_pr,
-        table_cell_properties: tc_pr,
-    }))
 }
 
-/// §17.7.4.5: parse `w:latentStyles`. Scoped to `</w:latentStyles>`.
-fn parse_latent_styles(
-    start: &quick_xml::events::BytesStart<'_>,
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<LatentStyles> {
-    let mut exceptions = Vec::new();
-
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Empty(ref e) | Event::Start(ref e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"lsdException" => {
-                        exceptions.push(LatentStyleException {
-                            name: xml::optional_attr(e, b"name")?,
-                            locked: xml::optional_attr_bool(e, b"locked")?,
-                            ui_priority: xml::optional_attr_u32(e, b"uiPriority")?,
-                            semi_hidden: xml::optional_attr_bool(e, b"semiHidden")?,
-                            unhide_when_used: xml::optional_attr_bool(e, b"unhideWhenUsed")?,
-                            q_format: xml::optional_attr_bool(e, b"qFormat")?,
-                        });
-                    }
-                    _ => xml::warn_unsupported_element("latentStyles", local),
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"latentStyles" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"latentStyles")),
-            _ => {}
+impl From<LatentStylesXml> for LatentStyles {
+    fn from(x: LatentStylesXml) -> Self {
+        Self {
+            default_locked_state: x.def_locked_state.map(|b| b.0),
+            default_ui_priority: x.def_ui_priority,
+            default_semi_hidden: x.def_semi_hidden.map(|b| b.0),
+            default_unhide_when_used: x.def_unhide_when_used.map(|b| b.0),
+            default_q_format: x.def_q_format.map(|b| b.0),
+            count: x.count,
+            exceptions: x.exceptions.into_iter().map(Into::into).collect(),
         }
     }
+}
 
-    Ok(LatentStyles {
-        default_locked_state: xml::optional_attr_bool(start, b"defLockedState")?,
-        default_ui_priority: xml::optional_attr_u32(start, b"defUIPriority")?,
-        default_semi_hidden: xml::optional_attr_bool(start, b"defSemiHidden")?,
-        default_unhide_when_used: xml::optional_attr_bool(start, b"defUnhideWhenUsed")?,
-        default_q_format: xml::optional_attr_bool(start, b"defQFormat")?,
-        count: xml::optional_attr_u32(start, b"count")?,
-        exceptions,
-    })
+impl From<LsdExceptionXml> for LatentStyleException {
+    fn from(x: LsdExceptionXml) -> Self {
+        Self {
+            name: x.name,
+            locked: x.locked.map(|b| b.0),
+            ui_priority: x.ui_priority,
+            semi_hidden: x.semi_hidden.map(|b| b.0),
+            unhide_when_used: x.unhide_when_used.map(|b| b.0),
+            q_format: x.q_format.map(|b| b.0),
+        }
+    }
 }

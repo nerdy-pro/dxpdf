@@ -1,11 +1,14 @@
 //! DOCX parsing — all submodules that parse specific parts of the OOXML package.
 
 pub mod body;
+pub mod body_schema;
 pub mod drawing;
 pub mod fonts;
 pub mod notes;
 pub mod numbering;
+pub mod primitives;
 pub mod properties;
+pub mod serde_xml;
 pub mod settings;
 pub mod styles;
 pub mod theme;
@@ -15,7 +18,8 @@ use std::collections::HashMap;
 
 use crate::docx::error::{ParseError, Result};
 use crate::docx::model::*;
-use crate::docx::zip::{self, PackageContents, RelationshipType, Relationships};
+use crate::docx::relationships::{RelationshipType, Relationships};
+use crate::docx::zip::{self, PackageContents};
 
 /// Parse a DOCX file from raw bytes into a `Document`.
 pub fn parse(data: &[u8]) -> Result<Document> {
@@ -242,7 +246,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
 }
 
 /// Walk blocks and resolve `HyperlinkTarget::External(RelId)` to actual URLs.
-fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::docx::zip::Relationships) {
+fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::docx::relationships::Relationships) {
     for block in blocks {
         match block {
             Block::Paragraph(p) => resolve_hyperlinks_in_inlines(&mut p.content, rels),
@@ -260,7 +264,7 @@ fn resolve_hyperlinks(blocks: &mut [Block], rels: &crate::docx::zip::Relationshi
 
 fn resolve_hyperlinks_in_inlines(
     inlines: &mut [crate::model::Inline],
-    rels: &crate::docx::zip::Relationships,
+    rels: &crate::docx::relationships::Relationships,
 ) {
     use crate::model::{HyperlinkTarget, Inline, RelId};
 

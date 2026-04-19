@@ -17,7 +17,8 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 bitflags = "2"
-quick-xml = "0.37"
+quick-xml = { version = "0.39", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 skia-safe = "0.93"
 thiserror = "2"

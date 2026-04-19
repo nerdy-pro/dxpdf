@@ -3,12 +3,12 @@
 //! Parses `word/fontTable.xml` to discover embedded font references,
 //! then de-obfuscates `.odttf` files per §17.8.3.3.
 
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
 use crate::docx::error::{ParseError, Result};
-use crate::docx::xml;
-use crate::docx::zip::{PackageContents, Relationships};
+use crate::docx::parse::serde_xml::from_xml;
+use crate::docx::relationships::Relationships;
+use crate::docx::zip::PackageContents;
 
 use crate::model::{EmbeddedFont, EmbeddedFontVariant, RelId};
 
@@ -72,107 +72,56 @@ pub fn parse_embedded_fonts(
 
 /// Parse fontTable.xml and extract embedded font references.
 fn parse_font_table(data: &[u8]) -> Result<Vec<FontEmbedRef>> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
+    let ft: FontTableXml = from_xml(data)?;
     let mut refs = Vec::new();
-
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"font" => {
-                        let name = xml::required_attr(&e, b"name")?;
-                        parse_font_element(&mut reader, &mut buf, &name, &mut refs)?;
-                    }
-                    b"fonts" => {} // root element, descend
-                    other => {
-                        log::warn!(
-                            "fontTable: unexpected element <{}>",
-                            String::from_utf8_lossy(other)
-                        );
-                        xml::skip_element(&mut reader, &mut buf)?;
-                    }
-                }
+    for font in ft.fonts {
+        for (variant, embed) in [
+            (EmbeddedFontVariant::Regular, font.embed_regular),
+            (EmbeddedFontVariant::Bold, font.embed_bold),
+            (EmbeddedFontVariant::Italic, font.embed_italic),
+            (EmbeddedFontVariant::BoldItalic, font.embed_bold_italic),
+        ] {
+            if let Some(e) = embed {
+                refs.push(FontEmbedRef {
+                    family: font.name.clone(),
+                    variant,
+                    rel_id: e.id,
+                    font_key: e.font_key,
+                });
             }
-            Event::Eof => break,
-            _ => {}
         }
     }
-
     Ok(refs)
 }
 
-/// Parse a single `<w:font>` element, extracting embed references.
-fn parse_font_element(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    family: &str,
-    refs: &mut Vec<FontEmbedRef>,
-) -> Result<()> {
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Empty(e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                match local {
-                    b"embedRegular" | b"embedBold" | b"embedItalic" | b"embedBoldItalic" => {
-                        let variant = match local {
-                            b"embedRegular" => EmbeddedFontVariant::Regular,
-                            b"embedBold" => EmbeddedFontVariant::Bold,
-                            b"embedItalic" => EmbeddedFontVariant::Italic,
-                            b"embedBoldItalic" => EmbeddedFontVariant::BoldItalic,
-                            _ => unreachable!(),
-                        };
-                        let rel_id = xml::required_attr(&e, b"id")?;
-                        let font_key = xml::required_attr(&e, b"fontKey")?;
-                        refs.push(FontEmbedRef {
-                            family: family.to_string(),
-                            variant,
-                            rel_id,
-                            font_key,
-                        });
-                    }
-                    // §17.8.3: known child elements we skip.
-                    b"panose1" | b"charset" | b"family" | b"pitch" | b"sig" | b"altName"
-                    | b"notTrueType" => {}
-                    other => {
-                        log::warn!(
-                            "fontTable/<w:font name={family:?}>: unexpected empty element <{}>",
-                            String::from_utf8_lossy(other)
-                        );
-                    }
-                }
-            }
-            Event::Start(e) => {
-                let qn = e.name();
-                let local = xml::local_name(qn.as_ref());
-                // Known child elements that have content — skip their subtree.
-                if !matches!(
-                    local,
-                    b"panose1"
-                        | b"charset"
-                        | b"family"
-                        | b"pitch"
-                        | b"sig"
-                        | b"altName"
-                        | b"notTrueType"
-                ) {
-                    log::warn!(
-                        "fontTable/<w:font name={family:?}>: unexpected start element <{}>",
-                        String::from_utf8_lossy(local)
-                    );
-                }
-                xml::skip_element(reader, buf)?;
-            }
-            Event::End(_) => break, // </w:font>
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    Ok(())
+#[derive(Deserialize)]
+struct FontTableXml {
+    #[serde(rename = "font", default)]
+    fonts: Vec<FontEntryXml>,
+}
+
+#[derive(Deserialize)]
+struct FontEntryXml {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "embedRegular", default)]
+    embed_regular: Option<EmbedXml>,
+    #[serde(rename = "embedBold", default)]
+    embed_bold: Option<EmbedXml>,
+    #[serde(rename = "embedItalic", default)]
+    embed_italic: Option<EmbedXml>,
+    #[serde(rename = "embedBoldItalic", default)]
+    embed_bold_italic: Option<EmbedXml>,
+}
+
+#[derive(Deserialize)]
+struct EmbedXml {
+    /// Attribute `r:id` / `@id` depending on namespace handling. Try both.
+    #[serde(rename = "@id", alias = "@r:id")]
+    id: String,
+    /// Attribute `fontKey` — `w:` prefix stripped by quick-xml if present.
+    #[serde(rename = "@fontKey", alias = "@w:fontKey")]
+    font_key: String,
 }
 
 /// §17.8.3.3: Parse a fontKey GUID string into 16 bytes.
