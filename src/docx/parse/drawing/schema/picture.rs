@@ -2,9 +2,7 @@
 //!
 //! `<pic:pic>` has three children: non-visual picture properties
 //! (`<pic:nvPicPr>`), blip fill (`<pic:blipFill>`), and shape properties
-//! (`<pic:spPr>`). This schema covers the first two fully; `spPr` is carried
-//! as a placeholder and will be populated once Phase 5F lands
-//! `drawing/shape.rs`.
+//! (`<pic:spPr>`). All three are fully modeled.
 
 #![allow(dead_code, clippy::large_enum_variant)]
 
@@ -15,23 +13,17 @@ use crate::docx::model::{
 };
 
 use super::fill::{AttrBool, BlipFillXml};
+use super::shape::SpPrXml;
 
-#[derive(Debug, Deserialize)]
-pub struct PictureXml {
+#[derive(Deserialize)]
+pub(crate) struct PictureXml {
     #[serde(rename = "nvPicPr")]
-    pub nv_pic_pr: NvPicPrXml,
+    pub(crate) nv_pic_pr: NvPicPrXml,
     #[serde(rename = "blipFill")]
-    pub blip_fill: BlipFillXml,
-    /// Placeholder — `<pic:spPr>` mapping depends on shape-props schema
-    /// (Phase 5F). Captured but not yet converted into `ShapeProperties`.
+    pub(crate) blip_fill: BlipFillXml,
     #[serde(rename = "spPr", default)]
-    pub sp_pr: Option<SpPrPlaceholder>,
+    pub(crate) sp_pr: Option<SpPrXml>,
 }
-
-/// Placeholder for `<pic:spPr>`. Accepts any children; produces `None` in the
-/// `Picture`. Swap for a full schema after shape.rs migrates.
-#[derive(Debug, Deserialize, Default)]
-pub struct SpPrPlaceholder {}
 
 #[derive(Debug, Deserialize)]
 pub struct NvPicPrXml {
@@ -97,7 +89,7 @@ impl From<PictureXml> for Picture {
         Self {
             nv_pic_pr: x.nv_pic_pr.into(),
             blip_fill: x.blip_fill.into(),
-            shape_properties: None, // filled in when shape-props schema lands
+            shape_properties: x.sp_pr.map(Into::into),
         }
     }
 }
@@ -248,19 +240,26 @@ mod tests {
     }
 
     #[test]
-    fn picture_sp_pr_placeholder() {
-        // spPr present but complex; schema accepts and drops it for now.
+    fn picture_sp_pr_fully_parsed() {
+        use crate::docx::model::{PresetShapeType, ShapeGeometry};
         let p = parse(
             r#"<pic>
                 <nvPicPr><cNvPr id="5" name="with-sp"/></nvPicPr>
                 <blipFill><blip r:embed="rId5"/></blipFill>
                 <spPr>
-                    <xfrm rot="0"/>
-                    <prstGeom prst="rect"/>
+                    <xfrm rot="900000"><off x="10" y="20"/><ext cx="100" cy="200"/></xfrm>
+                    <prstGeom prst="roundRect"/>
                 </spPr>
             </pic>"#,
         );
-        assert!(p.shape_properties.is_none());
+        let sp = p.shape_properties.expect("spPr parsed");
+        let t = sp.transform.unwrap();
+        assert_eq!(t.rotation.unwrap().raw(), 900_000);
+        assert_eq!(t.extent.unwrap().width.raw(), 100);
+        match sp.geometry {
+            Some(ShapeGeometry::Preset(g)) => assert_eq!(g.preset, PresetShapeType::RoundRect),
+            other => panic!("expected Preset, got {other:?}"),
+        }
     }
 
     #[test]

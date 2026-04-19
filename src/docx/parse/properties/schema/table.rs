@@ -303,15 +303,7 @@ pub(crate) struct ValAttr<T> {
     val: T,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AttrBool(bool);
-
-impl<'de> Deserialize<'de> for AttrBool {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+use crate::docx::parse::primitives::AttrBool;
 
 #[cfg(test)]
 mod tests {

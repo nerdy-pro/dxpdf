@@ -10,4 +10,4 @@ pub mod toggles;
 pub mod units;
 
 pub use colors::{HexColor, RgbHexU32};
-pub use toggles::OnOff;
+pub use toggles::{AttrBool, OnOff};

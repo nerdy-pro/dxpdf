@@ -195,15 +195,7 @@ struct ValString {
     val: String,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AttrBool(bool);
-
-impl<'de> Deserialize<'de> for AttrBool {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+use crate::docx::parse::primitives::AttrBool;
 
 // Suppress unused warnings on schema-private fields used only via serde.
 #[allow(dead_code)]

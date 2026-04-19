@@ -14,19 +14,9 @@ use crate::docx::model::{
     GradientShadeProperties, GradientStop, PathShadeType, PatternFill, PresetPatternVal,
     RectAlignment, RelativeRect, StretchFill, TileFill, TileFlipMode,
 };
+pub use crate::docx::parse::primitives::AttrBool;
+
 use super::color::DrawingColorXml;
-
-/// Attribute-level boolean (distinct from `OnOff` which is for toggle
-/// elements). Accepts `"1"`, `"true"`, `"on"` as true; anything else false.
-#[derive(Clone, Copy, Debug)]
-pub struct AttrBool(pub bool);
-
-impl<'de> Deserialize<'de> for AttrBool {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
 
 // ── Top-level choice ──────────────────────────────────────────────────────
 

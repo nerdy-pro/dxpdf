@@ -370,12 +370,4 @@ pub(crate) struct TableCellXml {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AttrBool(pub bool);
-
-impl<'de> Deserialize<'de> for AttrBool {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+pub(crate) use crate::docx::parse::primitives::AttrBool;

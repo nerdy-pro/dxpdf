@@ -86,17 +86,7 @@ pub(crate) struct ColsXml {
     cols: Vec<ColXml>,
 }
 
-/// Attribute-level boolean (OOXML @w:equalWidth uses plain true/false on an
-/// attribute, not the toggle-element semantics of <w:b/>).
-#[derive(Clone, Copy, Debug)]
-struct OnOffFromAttr(bool);
-
-impl<'de> Deserialize<'de> for OnOffFromAttr {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+use crate::docx::parse::primitives::AttrBool as OnOffFromAttr;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 pub(crate) struct ColXml {

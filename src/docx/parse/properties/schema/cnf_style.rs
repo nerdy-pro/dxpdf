@@ -42,16 +42,7 @@ pub(crate) struct CnfStyleXml {
     last_row_last_column: Option<OnOffAttr>,
 }
 
-/// Scalar boolean attribute (distinct from the `<w:flag/>` element `OnOff`).
-#[derive(Clone, Copy, Debug)]
-struct OnOffAttr(bool);
-
-impl<'de> Deserialize<'de> for OnOffAttr {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(OnOffAttr(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+use crate::docx::parse::primitives::AttrBool as OnOffAttr;
 
 impl From<CnfStyleXml> for CnfStyle {
     fn from(x: CnfStyleXml) -> Self {

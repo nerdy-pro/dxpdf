@@ -218,17 +218,8 @@ impl<'de> Deserialize<'de> for AdjCoordXml {
     }
 }
 
-/// Attribute-level boolean that accepts `"1"`/`"0"`/`"true"`/`"false"`.
-/// Distinct from `OnOff` (toggle element).
-#[derive(Clone, Copy, Debug)]
-pub struct StrAttrBool(pub bool);
-
-impl<'de> Deserialize<'de> for StrAttrBool {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
-    }
-}
+/// Alias for the shared attribute-level boolean primitive.
+pub use crate::docx::parse::primitives::AttrBool as StrAttrBool;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

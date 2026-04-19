@@ -1,4 +1,4 @@
-//! OOXML `ST_OnOff` (§17.18.68) toggle element.
+//! OOXML `ST_OnOff` (§17.18.68) toggle element plus attribute-level booleans.
 //!
 //! A toggle element without `@val` is "on" by default — the element's
 //! presence alone asserts the property. With `@val`, the spec lists
@@ -7,6 +7,10 @@
 //! Per plan §Decisions, `OnOff` is the single spec-driven exception to
 //! strict enum handling: unknown `@val` values resolve to `true` rather than
 //! failing deserialization, matching legacy Word's tolerant toggle behavior.
+//!
+//! [`AttrBool`] is the attribute-level counterpart: a plain boolean
+//! attribute like `@rotWithShape="1"` that reads as a string and maps
+//! `"1"`/`"true"`/`"on"` to `true`, everything else to `false`.
 
 use serde::{Deserialize, Deserializer};
 
@@ -29,6 +33,18 @@ impl<'de> Deserialize<'de> for OnOff {
             Some(_) => true,
         };
         Ok(OnOff(on))
+    }
+}
+
+/// Attribute-level boolean. Accepts `"1"`, `"true"`, `"on"` as true;
+/// anything else (including `"0"`, `"false"`, `"off"`) as false.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AttrBool(pub bool);
+
+impl<'de> Deserialize<'de> for AttrBool {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self(matches!(s.as_str(), "1" | "true" | "on")))
     }
 }
 
