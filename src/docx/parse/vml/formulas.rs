@@ -35,7 +35,7 @@ pub(super) fn parse_formulas(
 }
 
 /// Parse a single VML formula equation string (e.g., "sum #0 0 10800").
-fn parse_formula(eqn: &str) -> Option<VmlFormula> {
+pub(super) fn parse_formula(eqn: &str) -> Option<VmlFormula> {
     let parts: Vec<&str> = eqn.split_whitespace().collect();
     if parts.is_empty() {
         return None;

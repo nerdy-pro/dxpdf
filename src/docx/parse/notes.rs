@@ -18,10 +18,8 @@ pub fn parse_notes(data: &[u8], _note_tag: &str) -> Result<HashMap<NoteId, Vec<B
     if data.is_empty() {
         return Ok(HashMap::new());
     }
-    // Two-pass: extract drawings/picts from the whole file once, then serde.
-    let embeds = body::extract_embeds(data, b"")?;
     let file: NotesFileXml = from_xml(data)?;
-    let mut ctx = body::ConvertCtx::new(embeds);
+    let mut ctx = body::ConvertCtx::new();
     let mut out = HashMap::new();
     for note in file.entries {
         let Some(id) = note.id else { continue };

@@ -162,7 +162,7 @@ pub(crate) enum RunChildXml {
     #[serde(rename = "drawing")]
     Drawing(DrawingXml),
     #[serde(rename = "pict")]
-    Pict(PictPlaceholder),
+    Pict(crate::docx::parse::vml::schema::PictXml),
     #[serde(rename = "sym")]
     Sym(SymXml),
     #[serde(rename = "instrText")]
@@ -263,10 +263,6 @@ pub(crate) struct DrawingXml {
     pub anchor: Option<crate::docx::parse::drawing::schema::anchor::AnchorXml>,
 }
 
-/// Placeholder — VML `<w:pict>` is still handled by the pre-pass in body.rs
-/// until Phase 6 migrates the VML parser to serde.
-#[derive(Deserialize, Default)]
-pub(crate) struct PictPlaceholder {}
 
 // ── hyperlink ──────────────────────────────────────────────────────────────
 
@@ -321,7 +317,7 @@ pub(crate) enum McContentXml {
     #[serde(rename = "drawing")]
     Drawing(DrawingXml),
     #[serde(rename = "pict")]
-    Pict(PictPlaceholder),
+    Pict(crate::docx::parse::vml::schema::PictXml),
 }
 
 // ── table ──────────────────────────────────────────────────────────────────

@@ -589,7 +589,7 @@ mod tests {
             inline: InlineXml,
         }
         let w: Wrap = quick_xml::de::from_str(&wrapped).unwrap();
-        let mut ctx = crate::docx::parse::body::ConvertCtx::new(Vec::new());
+        let mut ctx = crate::docx::parse::body::ConvertCtx::new();
         w.inline.into_image(&mut ctx)
     }
 
@@ -603,7 +603,7 @@ mod tests {
             anchor: AnchorXml,
         }
         let w: Wrap = quick_xml::de::from_str(&wrapped).unwrap();
-        let mut ctx = crate::docx::parse::body::ConvertCtx::new(Vec::new());
+        let mut ctx = crate::docx::parse::body::ConvertCtx::new();
         w.anchor.into_image(&mut ctx)
     }
 

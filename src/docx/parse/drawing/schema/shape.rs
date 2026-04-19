@@ -703,7 +703,7 @@ mod tests {
             wsp: WspXml,
         }
         let w: Wrap = quick_xml::de::from_str(xml).unwrap();
-        let mut ctx = crate::docx::parse::body::ConvertCtx::new(Vec::new());
+        let mut ctx = crate::docx::parse::body::ConvertCtx::new();
         let wsp = w.wsp.into_model(&mut ctx);
         assert_eq!(wsp.cnv_pr.unwrap().name, "Shape1");
         assert!(wsp.txbx_content.is_empty());
@@ -728,7 +728,7 @@ mod tests {
             wsp: WspXml,
         }
         let w: Wrap = quick_xml::de::from_str(xml).unwrap();
-        let mut ctx = crate::docx::parse::body::ConvertCtx::new(Vec::new());
+        let mut ctx = crate::docx::parse::body::ConvertCtx::new();
         let wsp = w.wsp.into_model(&mut ctx);
         assert_eq!(wsp.txbx_content.len(), 1);
         match &wsp.txbx_content[0] {

@@ -6,6 +6,7 @@
 mod color;
 mod formulas;
 mod path_commands;
+pub mod schema;
 mod style;
 
 use quick_xml::events::{BytesStart, Event};

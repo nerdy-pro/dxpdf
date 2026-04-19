@@ -1,33 +1,25 @@
 //! Parser for document body content: blocks (paragraphs, tables, section breaks)
 //! and inline content (text runs, images, hyperlinks, fields, etc.).
 //!
-//! Two-pass approach: the first pass is a focused event-driven scan that
-//! extracts `<w:drawing>` and `<w:pict>` sub-trees via the legacy DrawingML
-//! and VML parsers (neither of which is serde-ified yet); the second pass
-//! uses serde over the whole document and fills in the parsed
-//! drawings/picts in document order via an iterator context.
+//! Single-pass serde over the full document. Drawings and VML picts are
+//! serde-parsed inline via `DrawingXml` / `PictXml`; they produce their
+//! model values (`Image` / `Pict`) during the `convert_container` walk via
+//! the `ConvertCtx`.
 //!
 //! No style resolution or property merging — output is raw parsed data.
-
-use quick_xml::events::Event;
-use quick_xml::Reader;
 
 use crate::docx::error::Result;
 use crate::docx::model::*;
 use crate::docx::parse::body_schema::*;
 use crate::docx::parse::serde_xml::from_xml;
-use crate::docx::xml;
-
-use super::vml;
 
 /// Parse `w:document > w:body`, returning blocks and final section properties.
 pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
     if data.is_empty() {
         return Ok((Vec::new(), SectionProperties::default()));
     }
-    let embeds = extract_embeds(data, b"body")?;
     let doc: DocXml = from_xml(data)?;
-    let mut ctx = ConvertCtx::new(embeds);
+    let mut ctx = ConvertCtx::new();
     let (blocks, final_section) = convert_container(doc.body.children, &mut ctx);
     Ok((blocks, final_section.unwrap_or_default()))
 }
@@ -37,63 +29,10 @@ pub fn parse_blocks(data: &[u8]) -> Result<Vec<Block>> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    // Root element varies (hdr/ftr/footnote/etc.) — extract embeds scoped to
-    // whatever top-level element contains body content; drawings/picts live
-    // only at inline positions so a straight scan works.
-    let embeds = extract_embeds(data, b"")?;
     let container: BlockContainerXml = from_xml(data)?;
-    let mut ctx = ConvertCtx::new(embeds);
+    let mut ctx = ConvertCtx::new();
     let (blocks, _) = convert_container(container.children, &mut ctx);
     Ok(blocks)
-}
-
-// ── Pict-only pre-pass ────────────────────────────────────────────────────
-//
-// Drawings are now handled inline via `DrawingXml` in the serde tree; only
-// VML picts still need a pre-pass since the VML parser is still event-driven
-// (Phase 6 will migrate it).
-
-#[derive(Debug)]
-pub(crate) struct Embed(pub(crate) Pict);
-
-/// Scan the raw XML for `<w:pict>` sub-trees in document order; parse each
-/// via the legacy VML parser. Drawings are NOT extracted here — serde builds
-/// them directly from the schema.
-///
-/// `body_tag` narrows the scan to contents of that root; pass `b""` to scan
-/// the whole document (used for headers/footers where the root varies).
-pub(crate) fn extract_embeds(data: &[u8], body_tag: &[u8]) -> Result<Vec<Embed>> {
-    let mut reader = Reader::from_reader(data);
-    let mut buf = Vec::new();
-    let mut out = Vec::new();
-
-    // If a body_tag is specified, advance to it first.
-    if !body_tag.is_empty() {
-        loop {
-            match xml::next_event(&mut reader, &mut buf)? {
-                Event::Start(ref e) if xml::local_name(e.name().as_ref()) == body_tag => break,
-                Event::Eof => return Ok(out),
-                _ => {}
-            }
-        }
-    }
-
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) => {
-                let local: Vec<u8> = xml::local_name(e.name().as_ref()).to_vec();
-                if local.as_slice() == b"pict" {
-                    out.push(Embed(vml::parse_pict(&mut reader, &mut buf)?));
-                }
-            }
-            Event::End(ref e) if !body_tag.is_empty() && xml::local_name(e.name().as_ref()) == body_tag => {
-                break;
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    Ok(out)
 }
 
 // ── Top-level document schema wrapper ────────────────────────────────────
@@ -108,18 +47,17 @@ struct DocXml {
 
 // ── Conversion ────────────────────────────────────────────────────────────
 
+/// Conversion context. Previously carried a pre-pass iterator of parsed
+/// drawings/picts; now empty, since drawings and picts are serde-parsed
+/// inline. Kept as a type for future extensibility (e.g., if a later phase
+/// needs cross-node state during conversion).
 pub(crate) struct ConvertCtx {
-    embeds: std::vec::IntoIter<Embed>,
+    _private: (),
 }
 
 impl ConvertCtx {
-    pub(crate) fn new(embeds: Vec<Embed>) -> Self {
-        Self {
-            embeds: embeds.into_iter(),
-        }
-    }
-    fn next_embed(&mut self) -> Option<Embed> {
-        self.embeds.next()
+    pub(crate) fn new() -> Self {
+        Self { _private: () }
     }
 }
 
@@ -275,11 +213,9 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
                     out.push(Inline::Image(Box::new(img)));
                 }
             }
-            RunChildXml::Pict(_) => {
+            RunChildXml::Pict(p) => {
                 flush(&mut acc, out);
-                if let Some(Embed(pict)) = ctx.next_embed() {
-                    out.push(Inline::Pict(pict));
-                }
+                out.push(Inline::Pict(p.into_model(ctx)));
             }
             RunChildXml::Sym(s) => {
                 flush(&mut acc, out);
@@ -462,10 +398,8 @@ fn convert_mc_content(items: Vec<McContentXml>, ctx: &mut ConvertCtx) -> Vec<Inl
                     out.push(Inline::Image(Box::new(img)));
                 }
             }
-            McContentXml::Pict(_) => {
-                if let Some(Embed(p)) = ctx.next_embed() {
-                    out.push(Inline::Pict(p));
-                }
+            McContentXml::Pict(p) => {
+                out.push(Inline::Pict(p.into_model(ctx)));
             }
         }
     }
