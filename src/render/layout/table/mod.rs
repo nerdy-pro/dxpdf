@@ -648,4 +648,98 @@ mod tests {
         // Suppressed has 3 borders (bottom, left, right — no top).
         assert_eq!(suppressed_borders.len(), 3, "top border suppressed");
     }
+
+    #[test]
+    fn valign_bottom_on_vmerge_restart_uses_span_height() {
+        // §17.4.85 + §17.4.84: vAlign on a vMerge=Restart cell should
+        // apply across the whole merged span, not just the first row.
+        //
+        // Table: 2 rows × 2 cols.
+        //  Row 0: [restart "Total", top-align "header"]
+        //  Row 1: [continue,         top-align "value"]
+        // Default single-line height is 14pt per row → span = 28pt.
+        // Restart cell has bottom alignment, content height 14pt → text
+        // should sit 14pt below the cell's top, i.e. inside row 1.
+        let row0 = TableRowInput {
+            cells: vec![
+                TableCellInput {
+                    blocks: vec![LayoutBlock::Paragraph {
+                        fragments: vec![text_frag("Total", 20.0)],
+                        style: ParagraphStyle::default(),
+                        page_break_before: false,
+                        footnotes: vec![],
+                        floating_images: vec![],
+                        floating_shapes: vec![],
+                    }],
+                    margins: PtEdgeInsets::ZERO,
+                    grid_span: 1,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: Some(VerticalMergeState::Restart),
+                    vertical_align: CellVAlign::Bottom,
+                },
+                simple_cell("header"),
+            ],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        };
+        let row1 = TableRowInput {
+            cells: vec![
+                TableCellInput {
+                    blocks: vec![],
+                    margins: PtEdgeInsets::ZERO,
+                    grid_span: 1,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: Some(VerticalMergeState::Continue),
+                    vertical_align: CellVAlign::Top,
+                },
+                simple_cell("value"),
+            ],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        };
+        let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
+        let result = layout_table(
+            &[row0, row1],
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
+
+        // Text position for "Total" comes first (row 0, cell 0).
+        let total_y = result
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::Text { position, text, .. } if text.as_ref() == "Total" => {
+                    Some(position.y.raw())
+                }
+                _ => None,
+            })
+            .expect("Total text present");
+        let header_y = result
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::Text { position, text, .. } if text.as_ref() == "header" => {
+                    Some(position.y.raw())
+                }
+                _ => None,
+            })
+            .expect("header text present");
+
+        // "header" is top-aligned in row 0; "Total" should be bottom-
+        // aligned across the 2-row span, so roughly one row-height below.
+        assert!(
+            total_y > header_y + 10.0,
+            "Total (bottom-valigned merged) should sit well below header (top-valigned row 0): \
+             total_y={total_y}, header_y={header_y}"
+        );
+    }
 }

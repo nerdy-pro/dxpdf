@@ -6,7 +6,8 @@ use crate::render::geometry::PtRect;
 use crate::render::layout::draw_command::DrawCommand;
 
 use super::borders::{border_width, emit_cell_borders, CellBorders};
-use super::types::{CellVAlign, MeasuredTable, TableBorderLine, TableRowInput};
+use super::grid::is_vmerge_continue;
+use super::types::{CellVAlign, MeasuredTable, TableBorderLine, TableRowInput, VerticalMergeState};
 
 /// Layered command buffers for table rendering: shading, content, borders.
 pub(super) struct TableCommandBuffers<'a> {
@@ -65,10 +66,19 @@ pub(super) fn emit_table_rows(
             let dx = (border_width(b_left) - cell_input.margins.left).max(Pt::ZERO);
             let dy_border = (border_width(cell_top) - cell_input.margins.top).max(Pt::ZERO);
 
+            // §17.4.85: for vMerge=Restart cells, vAlign operates over the
+            // whole merged span, not just the starting row. Sum the heights
+            // (and intermediate border gaps) of all rows this cell spans.
+            let effective_h = if cell_input.vertical_merge == Some(VerticalMergeState::Restart) {
+                merged_span_height(measured, rows, row_idx, entry.grid_col)
+            } else {
+                row_height
+            };
+
             let content_h = entry.layout.content_height + cell_input.margins.vertical();
             let dy_valign = match cell_input.vertical_align {
-                CellVAlign::Bottom => (row_height - content_h - dy_border).max(Pt::ZERO),
-                CellVAlign::Center => ((row_height - content_h - dy_border) * 0.5).max(Pt::ZERO),
+                CellVAlign::Bottom => (effective_h - content_h - dy_border).max(Pt::ZERO),
+                CellVAlign::Center => ((effective_h - content_h - dy_border) * 0.5).max(Pt::ZERO),
                 CellVAlign::Top => Pt::ZERO,
             };
 
@@ -100,4 +110,25 @@ pub(super) fn emit_table_rows(
 
         *cursor_y += row_height + mr.border_gap_below;
     }
+}
+
+/// Total vertical space owned by a vMerge=Restart cell at `grid_col`.
+/// Includes the restart row's height and every `Continue` row below it,
+/// plus the `border_gap_below` of intermediate rows (the cell's own top/
+/// bottom borders between merged rows were suppressed in measurement, so
+/// the gap is driven by sibling columns only).
+fn merged_span_height(
+    measured: &MeasuredTable,
+    rows: &[TableRowInput],
+    start_row: usize,
+    grid_col: usize,
+) -> Pt {
+    let mut total = measured.rows[start_row].height;
+    let mut row = start_row + 1;
+    while row < rows.len() && is_vmerge_continue(&rows[row], grid_col) {
+        total += measured.rows[row - 1].border_gap_below;
+        total += measured.rows[row].height;
+        row += 1;
+    }
+    total
 }
