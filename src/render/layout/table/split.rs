@@ -4,7 +4,8 @@
 //! page boundaries. This module derives safe cut points from a row's
 //! already-laid-out cell commands and partitions those commands into a
 //! first slice (stays on the current page) and a second slice (flows to
-//! the next page, rebased to y=0).
+//! the next page). Both halves preserve the cell's top/bottom margins so
+//! the text doesn't collide with the cut-edge border.
 
 use crate::render::dimension::Pt;
 use crate::render::layout::draw_command::DrawCommand;
@@ -17,55 +18,92 @@ pub(super) struct RowCutInput<'a> {
     pub(super) mr: &'a MeasuredRow,
     pub(super) row: &'a TableRowInput,
     /// Space available for the row on the current page, measured from the
-    /// row's top edge. Excludes any top-border width for the row itself —
-    /// callers pass the usable content space.
+    /// row's top edge.
     pub(super) available: Pt,
 }
 
-/// Pick a Y cut (relative to the row's top edge) such that:
-///   - every cell's content that fits `available` stays in slice 1
-///   - slice 1 is at least one line tall (otherwise return `None`)
-///
-/// The cut is the maximum "last-fit baseline + line gap" across cells, so
-/// no cell loses a line that could have fit on the current page.
-///
-/// Returns `None` if **no** cell has any content line that fits. In that
-/// case the caller should move the whole row to the next page.
-pub(super) fn find_row_cut(input: &RowCutInput<'_>) -> Option<Pt> {
-    let mut row_cut = Pt::ZERO;
-    let mut any_line_fits = false;
+/// Per-cell split decision: where to partition the commands and how far
+/// to shift the tail commands so the continuation half has the cell's
+/// natural top margin.
+struct CellCut {
+    /// Partition threshold: commands with primary-Y strictly less than
+    /// this value stay on the first half.
+    content_cut_y: Pt,
+    /// Amount by which second-half commands are shifted up so that the
+    /// first surviving line lands at `margin_top + ascent` in the
+    /// continuation cell.
+    shift: Pt,
+}
 
-    for (entry, cell) in input.mr.entries.iter().zip(&input.row.cells) {
-        let cell_cut = cut_for_cell(entry, cell.margins.top, input.available);
-        if let Some(c) = cell_cut {
-            any_line_fits = true;
-            if c > row_cut {
-                row_cut = c;
-            }
+impl CellCut {
+    /// "Don't split" sentinel — all commands stay on the first half.
+    fn keep_all() -> Self {
+        Self {
+            content_cut_y: Pt::new(f32::INFINITY),
+            shift: Pt::ZERO,
         }
-    }
-
-    if any_line_fits && row_cut < input.available {
-        Some(row_cut)
-    } else if any_line_fits {
-        // row_cut ≥ available means the last-fit line sits exactly on the
-        // boundary — still OK to cut there.
-        Some(input.available)
-    } else {
-        None
     }
 }
 
-/// For a single cell, determine the largest "line-bottom" Y (in cell-local
-/// coordinates, including the cell's top margin) such that all content up
-/// to that Y fits in `available`.
+/// Aggregate split decision for a whole row.
+pub(super) struct SplitCut {
+    /// Row-level first-half height (max across cells of per-cell first
+    /// half heights). Each cell's visible box in the first half extends
+    /// from the row top to this Y.
+    first_half_height: Pt,
+    /// One per cell, in the same order as `row.cells`.
+    cells: Vec<CellCut>,
+}
+
+/// Pick a row cut that fits in `available`, honoring each cell's top and
+/// bottom margins so the cut-edge border gets the natural padding Word
+/// preserves on split cells.
 ///
-/// Lines are identified by collecting the baseline Y values of `Text`
-/// commands in the cell layout. The line bottom is approximated as the
-/// midpoint between consecutive baselines, with the last line's bottom
-/// taken as the cell's total content height.
-fn cut_for_cell(entry: &CellLayoutEntry, margin_top: Pt, available: Pt) -> Option<Pt> {
-    // Baselines of all text lines in this cell, sorted ascending.
+/// Returns `None` when no cell has at least one line that fits within
+/// `available - margins.vertical()`.
+pub(super) fn find_row_cut(input: &RowCutInput<'_>) -> Option<SplitCut> {
+    let mut cells: Vec<CellCut> = Vec::with_capacity(input.row.cells.len());
+    let mut first_half_height = Pt::ZERO;
+    let mut any_fits = false;
+
+    for (entry, cell) in input.mr.entries.iter().zip(&input.row.cells) {
+        match cut_for_cell(
+            entry,
+            cell.margins.top,
+            cell.margins.bottom,
+            input.available,
+        ) {
+            Some((cut, half_h)) => {
+                any_fits = true;
+                if half_h > first_half_height {
+                    first_half_height = half_h;
+                }
+                cells.push(cut);
+            }
+            None => cells.push(CellCut::keep_all()),
+        }
+    }
+
+    if !any_fits {
+        return None;
+    }
+    Some(SplitCut {
+        first_half_height,
+        cells,
+    })
+}
+
+/// For a single cell, choose the largest prefix of lines that fits in
+/// `available`. Returns the `CellCut` and the first-half height this cell
+/// needs (midpoint between the last-fit baseline and the next, plus the
+/// cell's bottom margin — the visual equivalent of half a line gap of
+/// breathing room before the cut-edge border).
+fn cut_for_cell(
+    entry: &CellLayoutEntry,
+    _margin_top: Pt,
+    margin_bottom: Pt,
+    available: Pt,
+) -> Option<(CellCut, Pt)> {
     let mut baselines: Vec<Pt> = entry
         .layout
         .commands
@@ -82,64 +120,83 @@ fn cut_for_cell(entry: &CellLayoutEntry, margin_top: Pt, available: Pt) -> Optio
     });
     baselines.dedup_by(|a, b| (a.raw() - b.raw()).abs() < 0.01);
 
-    if baselines.is_empty() {
-        // Empty cell: any cut height is OK. Return 0 (contributes nothing).
-        return Some(Pt::ZERO);
+    // Need at least two baselines to have somewhere to cut between.
+    if baselines.len() < 2 {
+        return None;
     }
 
-    // Compute the "bottom" of each line: midpoint to the next baseline,
-    // or the cell's content height for the last line.
-    let cell_bottom = margin_top + entry.layout.content_height;
-    let mut line_bottoms: Vec<Pt> = Vec::with_capacity(baselines.len());
-    for i in 0..baselines.len() {
-        let b = if i + 1 < baselines.len() {
-            Pt::new((baselines[i].raw() + baselines[i + 1].raw()) * 0.5)
-        } else {
-            cell_bottom
-        };
-        line_bottoms.push(b);
+    // Bottom of the first-half box must land below the last-fit line
+    // with room for the cell's bottom margin.
+    let budget = available - margin_bottom;
+    if budget <= Pt::ZERO {
+        return None;
     }
 
-    // Find the largest line_bottom that fits in `available`.
-    let mut best: Option<Pt> = None;
-    for b in &line_bottoms {
-        if *b <= available {
-            best = Some(*b);
+    let first = baselines[0];
+    // Find the largest k such that the midpoint between baselines[k] and
+    // baselines[k+1] fits in `budget`. The midpoint is where the border
+    // will sit (giving half a line-gap of padding above it).
+    let mut best_k: Option<usize> = None;
+    for k in 0..baselines.len() - 1 {
+        let midpoint = Pt::new((baselines[k].raw() + baselines[k + 1].raw()) * 0.5);
+        if midpoint <= budget {
+            best_k = Some(k);
         } else {
             break;
         }
     }
-    best
+    let k = best_k?;
+
+    let midpoint = Pt::new((baselines[k].raw() + baselines[k + 1].raw()) * 0.5);
+    // Shift the second half so line k+1 lands at the cell's natural first-
+    // line baseline (`margin_top + ascent` = `baselines[0]`).
+    let shift = baselines[k + 1] - first;
+    let half_h = midpoint + margin_bottom;
+    Some((
+        CellCut {
+            content_cut_y: baselines[k + 1],
+            shift,
+        },
+        half_h,
+    ))
 }
 
-/// A row cut into two halves at a common Y. Each half is a full
-/// `MeasuredRow` ready to pass back to `emit_table_rows`.
+/// A row cut into two halves. Each half is a full `MeasuredRow` ready to
+/// pass to `emit_one_row`.
 pub(super) struct SplitRow {
     pub(super) first: MeasuredRow,
     pub(super) second: MeasuredRow,
 }
 
-/// Split a row's cells at `cut_y` (relative to the row's top). Commands
-/// whose "primary Y" is strictly below `cut_y` go to the first half;
-/// remaining commands are re-based so the second half starts at y=0.
+/// Split a row using `cut`. Each cell's commands are partitioned at the
+/// cell's own `content_cut_y`; the tail is shifted so its first line
+/// lands at the cell's natural `margin_top + ascent` in the
+/// continuation.
 ///
-/// Borders: the first half loses its bottom border; the second half loses
-/// its top border. The logical cell continues unbroken — the cut edge is
-/// drawn as no border on either side.
-pub(super) fn split_row_at(mr: &MeasuredRow, cut_y: Pt) -> SplitRow {
+/// Borders: Word preserves the full border box on each half. First half
+/// keeps all original borders. Second half inherits a top border from
+/// the original top if set, otherwise falls back to the original bottom
+/// (same inside-horizontal style used by conflict resolution on
+/// mid-table rows).
+pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
+    let first_h = cut.first_half_height;
+    // The largest shift across cells is the amount of content consumed by
+    // the first half. Whatever's left in the original row height is what
+    // the continuation needs to render (top/bottom margins are already
+    // included in `mr.height`, so no additional padding is needed).
+    let max_shift = cut.cells.iter().map(|c| c.shift).fold(Pt::ZERO, Pt::max);
+    let second_h = (mr.height - max_shift).max(Pt::ZERO);
+
     let mut first_entries: Vec<CellLayoutEntry> = Vec::with_capacity(mr.entries.len());
     let mut second_entries: Vec<CellLayoutEntry> = Vec::with_capacity(mr.entries.len());
 
-    let total_h = mr.height;
-    let first_h = cut_y;
-    let second_h = (total_h - cut_y).max(Pt::ZERO);
-
-    for entry in &mr.entries {
-        let (first_cmds, second_cmds) = partition_commands(&entry.layout.commands, cut_y);
+    for (entry, cc) in mr.entries.iter().zip(cut.cells.iter()) {
+        let (first_cmds, second_cmds) =
+            partition_commands(&entry.layout.commands, cc.content_cut_y, cc.shift);
         first_entries.push(CellLayoutEntry {
             layout: crate::render::layout::cell::CellLayout {
                 commands: first_cmds,
-                content_height: (entry.layout.content_height).min(first_h),
+                content_height: entry.layout.content_height.min(first_h),
             },
             cell_x: entry.cell_x,
             cell_w: entry.cell_w,
@@ -148,7 +205,7 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut_y: Pt) -> SplitRow {
         second_entries.push(CellLayoutEntry {
             layout: crate::render::layout::cell::CellLayout {
                 commands: second_cmds,
-                content_height: (entry.layout.content_height - first_h).max(Pt::ZERO),
+                content_height: (entry.layout.content_height - cc.shift).max(Pt::ZERO),
             },
             cell_x: entry.cell_x,
             cell_w: entry.cell_w,
@@ -156,22 +213,12 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut_y: Pt) -> SplitRow {
         });
     }
 
-    // Borders: drop bottom on first, drop top on second.
-    let first_borders: Vec<CellBorders> = mr
-        .borders
-        .iter()
-        .map(|b| CellBorders {
-            top: b.top,
-            bottom: None,
-            left: b.left,
-            right: b.right,
-        })
-        .collect();
+    let first_borders: Vec<CellBorders> = mr.borders.to_vec();
     let second_borders: Vec<CellBorders> = mr
         .borders
         .iter()
         .map(|b| CellBorders {
-            top: None,
+            top: b.top.or(b.bottom),
             bottom: b.bottom,
             left: b.left,
             right: b.right,
@@ -183,8 +230,6 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut_y: Pt) -> SplitRow {
             entries: first_entries,
             borders: first_borders,
             height: first_h,
-            // No border gap beneath the first half — it sits at the page
-            // bottom. Any sibling row below starts on the next page.
             border_gap_below: Pt::ZERO,
         },
         second: MeasuredRow {
@@ -196,10 +241,14 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut_y: Pt) -> SplitRow {
     }
 }
 
-/// Split a command list at `cut_y` based on each command's primary Y.
-/// Commands with primary_y < cut_y go to the first half; others go to the
-/// second half with y shifted up by `cut_y`.
-fn partition_commands(commands: &[DrawCommand], cut_y: Pt) -> (Vec<DrawCommand>, Vec<DrawCommand>) {
+/// Split a command list at `cut_y`. Commands whose primary Y < `cut_y`
+/// go to the first half; the rest land in the second half shifted up by
+/// `shift` so they start at the continuation cell's natural top margin.
+fn partition_commands(
+    commands: &[DrawCommand],
+    cut_y: Pt,
+    shift: Pt,
+) -> (Vec<DrawCommand>, Vec<DrawCommand>) {
     let mut first = Vec::new();
     let mut second = Vec::new();
     for cmd in commands {
@@ -207,7 +256,7 @@ fn partition_commands(commands: &[DrawCommand], cut_y: Pt) -> (Vec<DrawCommand>,
             first.push(cmd.clone());
         } else {
             let mut c = cmd.clone();
-            c.shift_y(-cut_y);
+            c.shift_y(-shift);
             second.push(c);
         }
     }

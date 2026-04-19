@@ -178,8 +178,8 @@ pub fn layout_table_paginated(
                 row: &rows[row_idx],
                 available: remaining,
             };
-            if let Some(cut_y) = find_row_cut(&cut_input) {
-                let parts = split_row_at(&measured.rows[row_idx], cut_y);
+            if let Some(cut) = find_row_cut(&cut_input) {
+                let parts = split_row_at(&measured.rows[row_idx], &cut);
                 current_slice.push(SliceItem::Split {
                     row_idx,
                     mr: parts.first,
@@ -204,15 +204,14 @@ pub fn layout_table_paginated(
                         });
                         break;
                     }
-                    let avail = remaining;
                     let sub_cut_input = RowCutInput {
                         mr: &pending,
                         row: &rows[row_idx],
-                        available: avail,
+                        available: remaining,
                     };
                     match find_row_cut(&sub_cut_input) {
-                        Some(sub_cut_y) => {
-                            let sub = split_row_at(&pending, sub_cut_y);
+                        Some(sub_cut) => {
+                            let sub = split_row_at(&pending, &sub_cut);
                             current_slice.push(SliceItem::Continuation {
                                 row_idx,
                                 mr: sub.first,
