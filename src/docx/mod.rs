@@ -17,7 +17,6 @@ pub mod model {
 pub mod error;
 pub mod parse;
 pub mod relationships;
-pub mod xml;
 pub mod zip;
 
 /// Parse a DOCX file from raw bytes into a fully resolved `Document`.
