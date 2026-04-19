@@ -1,38 +1,6 @@
 //! VML formula parsing.
 
-use quick_xml::events::Event;
-use quick_xml::Reader;
-
-use crate::docx::error::Result;
 use crate::docx::model::*;
-use crate::docx::xml;
-
-/// VML §14.1.2.6: parse `v:formulas` — list of `v:f` formula equations.
-pub(super) fn parse_formulas(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-) -> Result<Vec<VmlFormula>> {
-    let mut formulas = Vec::new();
-
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Empty(ref e) if xml::local_name(e.name().as_ref()) == b"f" => {
-                if let Some(eqn) = xml::optional_attr(e, b"eqn")? {
-                    if let Some(f) = parse_formula(&eqn) {
-                        formulas.push(f);
-                    } else {
-                        log::warn!("vml-formula: failed to parse {:?}", eqn);
-                    }
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"formulas" => break,
-            Event::Eof => return Err(xml::unexpected_eof(b"formulas")),
-            _ => {}
-        }
-    }
-
-    Ok(formulas)
-}
 
 /// Parse a single VML formula equation string (e.g., "sum #0 0 10800").
 pub(super) fn parse_formula(eqn: &str) -> Option<VmlFormula> {

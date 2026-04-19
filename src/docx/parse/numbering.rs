@@ -1,95 +1,25 @@
-//! Parser for `word/numbering.xml` — parses definitions as-is, no resolution.
-//!
-//! Two-pass approach:
-//! 1. `extract_pic_bullet_picts` — event-driven scan that pairs each
-//!    `<w:numPicBullet w:numPicBulletId="N">` with its inner `<w:pict>`,
-//!    parsed via the existing VML parser.
-//! 2. `from_xml::<NumberingXml>` — serde pass over the rest of the document.
-//!
-//! Step 2's output is merged with step 1's pict map to produce the final
-//! `NumberingDefinitions`. VML parsing stays untouched until Phase 6.
+//! Parser for `word/numbering.xml` — single-pass serde over the whole file.
+//! Picture bullets' `<w:pict>` contents are deserialized via the VML schema.
 
-use std::collections::HashMap;
-
-use quick_xml::events::Event;
-use quick_xml::Reader;
 use serde::Deserialize;
 
 use crate::docx::error::Result;
 use crate::docx::model::{
     AbstractNumId, AbstractNumbering, Alignment, Indentation, NumId, NumPicBullet,
     NumPicBulletId, NumberFormat, NumberingDefinitions, NumberingInstance,
-    NumberingLevelDefinition, Pict, RunProperties,
+    NumberingLevelDefinition, RunProperties,
 };
 use crate::docx::parse::primitives::st_enums::{StJc, StNumberFormat};
 use crate::docx::parse::properties::schema::paragraph::PPrXml;
 use crate::docx::parse::properties::schema::run::RPrXml;
 use crate::docx::parse::serde_xml::from_xml;
-use crate::docx::parse::vml;
-use crate::docx::xml;
 
 pub fn parse_numbering(data: &[u8]) -> Result<NumberingDefinitions> {
     if data.is_empty() {
         return Ok(NumberingDefinitions::default());
     }
-    let pict_map = extract_pic_bullet_picts(data)?;
     let schema: NumberingXml = from_xml(data)?;
-    let mut defs: NumberingDefinitions = schema.into();
-    for (id, pict) in pict_map {
-        if let Some(bullet) = defs.pic_bullets.get_mut(&id) {
-            bullet.pict = Some(pict);
-        }
-    }
-    Ok(defs)
-}
-
-/// Scan raw XML for `<w:numPicBullet w:numPicBulletId="N">…<w:pict>…</w:pict>…</w:numPicBullet>`
-/// and parse each inner pict via the legacy VML parser. Returns `{ id → Pict }`.
-fn extract_pic_bullet_picts(data: &[u8]) -> Result<HashMap<NumPicBulletId, Pict>> {
-    let mut reader = Reader::from_reader(data);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut out = HashMap::new();
-
-    loop {
-        match xml::next_event(&mut reader, &mut buf)? {
-            Event::Start(ref e) if xml::local_name(e.name().as_ref()) == b"numPicBullet" => {
-                let Some(id) = xml::optional_attr_i64(e, b"numPicBulletId")? else {
-                    xml::skip_to_end(&mut reader, &mut buf, b"numPicBullet")?;
-                    continue;
-                };
-                if let Some(pict) = find_pict_within(&mut reader, &mut buf)? {
-                    out.insert(NumPicBulletId::new(id), pict);
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    Ok(out)
-}
-
-/// Inside a `<w:numPicBullet>`, consume events until `</w:numPicBullet>`.
-/// If a `<w:pict>` Start is seen, hand off to `vml::parse_pict`.
-fn find_pict_within(reader: &mut Reader<&[u8]>, buf: &mut Vec<u8>) -> Result<Option<Pict>> {
-    let mut found: Option<Pict> = None;
-    loop {
-        match xml::next_event(reader, buf)? {
-            Event::Start(ref e) => {
-                let name = e.name();
-                let local_owned: Vec<u8> = xml::local_name(name.as_ref()).to_vec();
-                if local_owned == b"pict" && found.is_none() {
-                    found = Some(vml::parse_pict(reader, buf)?);
-                } else {
-                    xml::skip_to_end(reader, buf, &local_owned)?;
-                }
-            }
-            Event::End(ref e) if xml::local_name(e.name().as_ref()) == b"numPicBullet" => break,
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    Ok(found)
+    Ok(schema.into())
 }
 
 // ── serde schema ──────────────────────────────────────────────────────────
@@ -156,6 +86,8 @@ struct LvlOverrideXml {
 struct NumPicBulletXml {
     #[serde(rename = "@numPicBulletId")]
     num_pic_bullet_id: i64,
+    #[serde(rename = "pict", default)]
+    pict: Option<crate::docx::parse::vml::schema::PictXml>,
 }
 
 #[derive(Deserialize)]
@@ -184,11 +116,14 @@ impl From<NumberingXml> for NumberingDefinitions {
         for n in x.nums {
             defs.numbering_instances.insert(NumId::new(n.num_id), convert_num(n));
         }
+        // Picture bullets may contain a VML `<w:pict>` (e.g., an imagedata
+        // reference). Numbering has no body content, so no embeds crossing
+        // into body convert — pass an empty ctx.
+        let mut ctx = crate::docx::parse::body::ConvertCtx::new();
         for bullet in x.num_pic_bullets {
             let id = NumPicBulletId::new(bullet.num_pic_bullet_id);
-            // pict filled in by pre-pass
-            defs.pic_bullets
-                .insert(id, NumPicBullet { id, pict: None });
+            let pict = bullet.pict.map(|p| p.into_model(&mut ctx));
+            defs.pic_bullets.insert(id, NumPicBullet { id, pict });
         }
         defs
     }
