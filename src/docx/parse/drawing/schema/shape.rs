@@ -17,10 +17,11 @@ use crate::docx::dimension::{Dimension, Emu, SixtieThousandthDeg};
 use crate::docx::geometry::Offset;
 use crate::docx::model::{
     BlackWhiteMode, Block, BodyProperties, DrawingFill, GeomGuide, PresetGeometryDef,
-    PresetShapeType, ShapeGeometry, ShapeProperties, TextAnchoringType, TextAutoFit,
-    TextVerticalType, TextWrappingType, Transform2D, WordProcessingShape,
+    PresetShapeType, ShapeGeometry, ShapeProperties, StyleMatrixRef, TextAnchoringType,
+    TextAutoFit, TextVerticalType, TextWrappingType, Transform2D, WordProcessingShape,
 };
 
+use super::color::DrawingColorXml;
 use super::effect::EffectListXml;
 use super::fill::{AttrBool, DrawingFillXml};
 use super::geometry::CustomGeometryXml;
@@ -452,10 +453,44 @@ pub(crate) struct WspXml {
     pub(crate) cnv_cn_pr: Option<super::fill::Empty>,
     #[serde(rename = "spPr", default)]
     pub(crate) sp_pr: Option<SpPrXml>,
+    #[serde(rename = "style", default)]
+    pub(crate) style: Option<ShapeStyleXml>,
     #[serde(rename = "bodyPr", default)]
     pub(crate) body_pr: Option<BodyPrXml>,
     #[serde(rename = "txbx", default)]
     pub(crate) txbx: Option<TxbxXml>,
+}
+
+// ── wps:style (§20.1.4.1.4 CT_ShapeStyle) ─────────────────────────────────
+//
+// References into the theme's style matrices. Only `effectRef` is consumed
+// today; the other siblings (`lnRef`, `fillRef`, `fontRef`) are siblings
+// whose schema differs (`fontRef/@idx` is a string enum, not a number), so
+// they're silently skipped via serde's default unknown-element behavior.
+
+#[derive(Deserialize, Default)]
+pub(crate) struct ShapeStyleXml {
+    #[serde(rename = "effectRef", default)]
+    pub(crate) effect_ref: Option<StyleMatrixRefXml>,
+}
+
+/// §20.1.4.2.19 CT_StyleMatrixReference — `idx` + optional color for
+/// `phClr` substitution within the referenced theme style.
+#[derive(Deserialize)]
+pub(crate) struct StyleMatrixRefXml {
+    #[serde(rename = "@idx")]
+    pub(crate) idx: u32,
+    #[serde(rename = "$value", default)]
+    pub(crate) color: Option<DrawingColorXml>,
+}
+
+impl From<StyleMatrixRefXml> for StyleMatrixRef {
+    fn from(x: StyleMatrixRefXml) -> Self {
+        Self {
+            idx: x.idx,
+            color: x.color.map(Into::into),
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -488,6 +523,10 @@ impl WspXml {
         WordProcessingShape {
             cnv_pr: self.cnv_pr.map(Into::into),
             shape_properties: self.sp_pr.map(Into::into),
+            style_effect_ref: self
+                .style
+                .and_then(|s| s.effect_ref)
+                .map(Into::into),
             body_pr: self.body_pr.map(Into::into),
             txbx_content,
         }

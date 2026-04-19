@@ -171,6 +171,7 @@ mod tests {
             graphic: Some(GraphicContent::WordProcessingShape(WordProcessingShape {
                 cnv_pr: None,
                 shape_properties: None,
+                style_effect_ref: None,
                 body_pr: None,
                 txbx_content: vec![],
             })),

@@ -4,14 +4,15 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use skia_safe::{
-    path_effect::PathEffect, pdf, Color4f, Data, FontMgr, Paint, Path, PathBuilder, PathFillType,
+    path_effect::PathEffect, pdf, BlurStyle, Color4f, Data, FontMgr, MaskFilter, Paint, Path,
+    PathBuilder, PathFillType,
 };
 
 use crate::render::dimension::Pt;
 use crate::render::error::RenderError;
 use crate::render::fonts;
 use crate::render::layout::draw_command::{
-    DrawCommand, LayoutedPage, ResolvedDashPattern, ResolvedFill, ResolvedLineCap,
+    DrawCommand, LayoutedPage, ResolvedDashPattern, ResolvedEffect, ResolvedFill, ResolvedLineCap,
     ResolvedLineJoin, ResolvedStroke,
 };
 use crate::render::resolve::drawing_color::Rgba;
@@ -183,7 +184,7 @@ fn render_page(
                 paths,
                 fill,
                 stroke,
-                effects: _,
+                effects,
             } => {
                 canvas.save();
                 // Translate to the shape's origin.
@@ -205,13 +206,18 @@ fn render_page(
                     canvas.translate((-cx, -cy));
                 }
                 let skia_path = build_skia_path(paths);
+                let strokable = build_skia_path_stroked_only(paths);
+                // §20.1.8 effects render beneath the shape itself, in the
+                // order they appear in the effect list.
+                for effect in effects {
+                    paint_effect(canvas, effect, fill, stroke.as_ref(), &skia_path, &strokable);
+                }
                 if let Some(paint) = fill_to_paint(fill) {
                     canvas.draw_path(&skia_path, &paint);
                 }
                 if let Some(stroke) = stroke.as_ref() {
                     let paint = stroke_to_paint(stroke);
                     // Only stroke subpaths whose .stroked flag is set.
-                    let strokable = build_skia_path_stroked_only(paths);
                     canvas.draw_path(&strokable, &paint);
                 }
                 canvas.restore();
@@ -352,6 +358,74 @@ fn stroke_to_paint(stroke: &ResolvedStroke) -> Paint {
 
 fn rgba_to_color4f(c: Rgba) -> Color4f {
     Color4f::new(c.r, c.g, c.b, c.a)
+}
+
+/// Paint a shape effect beneath the shape itself. The effect color is the
+/// one already resolved from the effect's `<a:srgbClr>` / `<a:schemeClr>`
+/// plus color transforms; the fill/stroke silhouette drives the shadow's
+/// shape.
+fn paint_effect(
+    canvas: &skia_safe::Canvas,
+    effect: &ResolvedEffect,
+    fill: &ResolvedFill,
+    stroke: Option<&ResolvedStroke>,
+    shape_path: &Path,
+    strokable_path: &Path,
+) {
+    match effect {
+        ResolvedEffect::OuterShadow {
+            blur_radius,
+            offset,
+            color,
+        } => {
+            // §20.1.8.45: a Gaussian blur. Skia's mask-filter sigma ≈
+            // radius / 2 — the conventional approximation used by other
+            // renderers (LibreOffice, Chromium's CSS filter).
+            let sigma = (blur_radius.raw() * 0.5).max(0.0);
+            let mask = if sigma > 0.0 {
+                MaskFilter::blur(BlurStyle::Normal, sigma, None)
+            } else {
+                None
+            };
+            canvas.save();
+            canvas.translate((offset.x.raw(), offset.y.raw()));
+            // Fill silhouette (when the shape has a fill).
+            if !matches!(fill, ResolvedFill::None) {
+                let mut paint = Paint::default();
+                paint.set_anti_alias(true);
+                paint.set_style(skia_safe::PaintStyle::Fill);
+                paint.set_color4f(rgba_to_color4f(*color), None);
+                if let Some(m) = mask.clone() {
+                    paint.set_mask_filter(m);
+                }
+                canvas.draw_path(shape_path, &paint);
+            }
+            // Stroke silhouette — cast the shadow from the stroke's own
+            // outline so line-preset shapes cast a visible shadow.
+            if let Some(s) = stroke {
+                let mut paint = Paint::default();
+                paint.set_anti_alias(true);
+                paint.set_style(skia_safe::PaintStyle::Stroke);
+                paint.set_stroke_width(s.width.raw());
+                paint.set_stroke_cap(match s.cap {
+                    ResolvedLineCap::Butt => skia_safe::PaintCap::Butt,
+                    ResolvedLineCap::Round => skia_safe::PaintCap::Round,
+                    ResolvedLineCap::Square => skia_safe::PaintCap::Square,
+                });
+                paint.set_stroke_join(match s.join {
+                    ResolvedLineJoin::Round => skia_safe::PaintJoin::Round,
+                    ResolvedLineJoin::Bevel => skia_safe::PaintJoin::Bevel,
+                    ResolvedLineJoin::Miter => skia_safe::PaintJoin::Miter,
+                });
+                paint.set_color4f(rgba_to_color4f(*color), None);
+                if let Some(m) = mask.clone() {
+                    paint.set_mask_filter(m);
+                }
+                canvas.draw_path(strokable_path, &paint);
+            }
+            canvas.restore();
+        }
+    }
 }
 
 /// Decode a `MediaEntry` to a Skia image, dispatching on format.

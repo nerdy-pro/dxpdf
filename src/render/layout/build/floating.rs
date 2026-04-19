@@ -182,7 +182,11 @@ pub(super) fn extract_floating_shapes(
             None => continue, // Unimplemented preset or empty geometry.
         };
 
-        let visuals = resolve_shape_visuals(shape_props, ctx.resolved.theme.as_ref());
+        let visuals = resolve_shape_visuals(
+            shape_props,
+            wsp.style_effect_ref.as_ref(),
+            ctx.resolved.theme.as_ref(),
+        );
 
         // §20.1.7.6 transform attributes (rotation/flip) live on the shape's
         // `spPr/xfrm`; anchor position is independent.

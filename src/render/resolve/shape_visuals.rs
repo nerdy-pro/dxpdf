@@ -11,7 +11,7 @@ use crate::model::dimension::{Dimension, Emu};
 use crate::model::{
     DrawingFill, Effect, GlowEffect, InnerShadowEffect, LineCap, LineDash, LineJoin,
     OuterShadowEffect, Outline, PathFillMode, PresetShadowEffect, ReflectionEffect,
-    ShapeProperties, SoftEdgeEffect, Theme,
+    ShapeProperties, SoftEdgeEffect, StyleMatrixRef, Theme,
 };
 use crate::render::dimension::Pt;
 use crate::render::geometry::PtOffset;
@@ -30,8 +30,15 @@ pub struct ResolvedVisuals {
 
 /// Resolve the visual aspect of a shape (fill, outline, effects) into the
 /// painter-ready types. Missing `ShapeProperties` → empty / `None` visuals.
+///
+/// `style_effect_ref` is the `wps:style/effectRef` on the enclosing shape.
+/// Per Word's rendering behavior — which the OOXML spec is ambiguous about —
+/// a present-but-empty `<a:effectLst/>` on spPr falls through to the theme
+/// effect style. Only when the direct effectLst has children do we treat it
+/// as an explicit override.
 pub fn resolve_shape_visuals(
     props: Option<&ShapeProperties>,
+    style_effect_ref: Option<&StyleMatrixRef>,
     theme: Option<&Theme>,
 ) -> ResolvedVisuals {
     let ctx = DrawingColorContext::new(theme);
@@ -57,17 +64,47 @@ pub fn resolve_shape_visuals(
         .as_ref()
         .and_then(|o| resolve_outline(o, &ctx));
 
-    let effects = props
+    let direct_effects = props
         .effect_list
         .as_ref()
-        .map(|el| resolve_effects(&el.effects, &ctx))
-        .unwrap_or_default();
+        .map(|el| el.effects.as_slice())
+        .unwrap_or(&[]);
+    let effects = if !direct_effects.is_empty() {
+        resolve_effects(direct_effects, &ctx)
+    } else {
+        resolve_theme_effects(style_effect_ref, theme, &ctx)
+    };
 
     ResolvedVisuals {
         fill,
         stroke,
         effects,
     }
+}
+
+/// Consult the theme's `effectStyleLst` via a shape's `effectRef`. Returns an
+/// empty list when the ref is absent, the index is out of range, or the theme
+/// doesn't define the requested style.
+fn resolve_theme_effects(
+    style_effect_ref: Option<&StyleMatrixRef>,
+    theme: Option<&Theme>,
+    ctx: &DrawingColorContext<'_>,
+) -> Vec<ResolvedEffect> {
+    let Some(r) = style_effect_ref else {
+        return Vec::new();
+    };
+    let Some(theme) = theme else {
+        return Vec::new();
+    };
+    // §20.1.4.2.19: idx is 1-based. idx=0 is the no-reference sentinel.
+    if r.idx == 0 {
+        return Vec::new();
+    }
+    let slot = (r.idx as usize).saturating_sub(1);
+    let Some(list) = theme.effect_styles.get(slot) else {
+        return Vec::new();
+    };
+    resolve_effects(&list.effects, ctx)
 }
 
 /// Most preset shapes default the fill mode from `<a:path>`; for Tier 0
@@ -317,7 +354,7 @@ mod tests {
 
     #[test]
     fn empty_props_resolves_to_none_visuals() {
-        let v = resolve_shape_visuals(None, None);
+        let v = resolve_shape_visuals(None, None, None);
         assert!(matches!(v.fill, ResolvedFill::None));
         assert!(v.stroke.is_none());
         assert!(v.effects.is_empty());
@@ -333,7 +370,7 @@ mod tests {
             None,
             None,
         );
-        let v = resolve_shape_visuals(Some(&props), None);
+        let v = resolve_shape_visuals(Some(&props), None, None);
         let ResolvedFill::Solid(c) = v.fill else {
             panic!()
         };
@@ -357,7 +394,7 @@ mod tests {
             tail_end: None,
         };
         let props = shape_props(None, Some(outline), None);
-        let v = resolve_shape_visuals(Some(&props), None);
+        let v = resolve_shape_visuals(Some(&props), None, None);
         let s = v.stroke.unwrap();
         assert_eq!(s.width, Pt::new(0.75));
         assert_eq!(s.color.to_rgb24(), 0x0000FF);
@@ -383,7 +420,7 @@ mod tests {
             tail_end: None,
         };
         let props = shape_props(None, Some(outline), None);
-        let v = resolve_shape_visuals(Some(&props), None);
+        let v = resolve_shape_visuals(Some(&props), None, None);
         let s = v.stroke.unwrap();
         assert_eq!(s.width, Pt::new(0.75));
         assert_eq!(s.color, Rgba::BLACK);
@@ -406,7 +443,7 @@ mod tests {
             tail_end: None,
         };
         let props = shape_props(None, Some(outline), None);
-        let v = resolve_shape_visuals(Some(&props), None);
+        let v = resolve_shape_visuals(Some(&props), None, None);
         assert!(v.stroke.is_none());
     }
 
@@ -415,6 +452,90 @@ mod tests {
         assert_eq!(emu_to_pt(Dimension::new(12_700)), Pt::new(1.0));
         assert_eq!(emu_to_pt(Dimension::new(9525)), Pt::new(0.75));
         assert_eq!(emu_to_pt(Dimension::new(914_400)), Pt::new(72.0));
+    }
+
+    #[test]
+    fn empty_effect_list_falls_back_to_theme_via_effect_ref() {
+        use crate::model::DrawingColor;
+        // Empty direct effect list + effectRef idx=1 → theme effect style [0].
+        let props = shape_props(None, None, Some(EffectList { effects: vec![] }));
+        let theme = Theme {
+            effect_styles: vec![EffectList {
+                effects: vec![Effect::OuterShdw(OuterShadowEffect {
+                    blur_radius: Dimension::new(25_400), // 2pt
+                    distance: Dimension::new(12_700),    // 1pt
+                    direction: Dimension::new(0),        // east
+                    sx: Dimension::new(100_000),
+                    sy: Dimension::new(100_000),
+                    kx: Dimension::new(0),
+                    ky: Dimension::new(0),
+                    alignment: crate::model::RectAlignment::B,
+                    rot_with_shape: None,
+                    color: DrawingColor::Srgb {
+                        rgb: 0x000000,
+                        transforms: vec![],
+                    },
+                })],
+            }],
+            ..Theme::default()
+        };
+        let er = StyleMatrixRef {
+            idx: 1,
+            color: None,
+        };
+        let v = resolve_shape_visuals(Some(&props), Some(&er), Some(&theme));
+        assert_eq!(v.effects.len(), 1);
+    }
+
+    #[test]
+    fn direct_effect_list_overrides_theme() {
+        use crate::model::DrawingColor;
+        let own = Effect::OuterShdw(OuterShadowEffect {
+            blur_radius: Dimension::new(50_800), // 4pt
+            distance: Dimension::new(0),
+            direction: Dimension::new(0),
+            sx: Dimension::new(100_000),
+            sy: Dimension::new(100_000),
+            kx: Dimension::new(0),
+            ky: Dimension::new(0),
+            alignment: crate::model::RectAlignment::B,
+            rot_with_shape: None,
+            color: DrawingColor::Srgb {
+                rgb: 0xFF0000,
+                transforms: vec![],
+            },
+        });
+        let props = shape_props(None, None, Some(EffectList { effects: vec![own] }));
+        let theme = Theme {
+            effect_styles: vec![EffectList {
+                effects: vec![Effect::OuterShdw(OuterShadowEffect {
+                    blur_radius: Dimension::new(12_700),
+                    distance: Dimension::new(12_700),
+                    direction: Dimension::new(0),
+                    sx: Dimension::new(100_000),
+                    sy: Dimension::new(100_000),
+                    kx: Dimension::new(0),
+                    ky: Dimension::new(0),
+                    alignment: crate::model::RectAlignment::B,
+                    rot_with_shape: None,
+                    color: DrawingColor::Srgb {
+                        rgb: 0x000000,
+                        transforms: vec![],
+                    },
+                })],
+            }],
+            ..Theme::default()
+        };
+        let er = StyleMatrixRef {
+            idx: 1,
+            color: None,
+        };
+        let v = resolve_shape_visuals(Some(&props), Some(&er), Some(&theme));
+        let ResolvedEffect::OuterShadow {
+            blur_radius, color, ..
+        } = &v.effects[0];
+        assert_eq!(*blur_radius, Pt::new(4.0));
+        assert_eq!(color.to_rgb24(), 0xFF0000);
     }
 
     #[test]
@@ -441,7 +562,7 @@ mod tests {
                 effects: vec![Effect::OuterShdw(sh)],
             }),
         );
-        let v = resolve_shape_visuals(Some(&props), None);
+        let v = resolve_shape_visuals(Some(&props), None, None);
         assert_eq!(v.effects.len(), 1);
         let ResolvedEffect::OuterShadow {
             blur_radius,
