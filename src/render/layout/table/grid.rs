@@ -9,6 +9,11 @@ pub(super) struct RowGroup {
     pub(super) start: usize,
     pub(super) end: usize, // exclusive
     pub(super) height: Pt,
+    /// §17.4.1: row content may be broken across pages. False if any row in
+    /// the group has `cantSplit`, if the group is a vMerge span (multiple
+    /// rows stacked here), or if any cell contains a nested table or floated
+    /// content that would be ambiguous to split.
+    pub(super) splittable: bool,
 }
 
 /// Compute column widths by scaling grid column values to fit available width.
@@ -56,13 +61,34 @@ pub(super) fn build_row_groups(rows: &[TableRowInput], measured: &MeasuredTable)
             .iter()
             .map(|mr| mr.height + mr.border_gap_below)
             .sum();
+
+        // §17.4.1: a row may be split across pages unless it opts out via
+        // `cantSplit` or lives inside a vMerge span (grouping multiple rows).
+        // Nested tables inside cells aren't splittable either — the cell's
+        // commands would be hard to bisect cleanly.
+        let is_vmerge_span = i - start > 1;
+        let any_cant_split = rows[start..i].iter().any(|r| r.cant_split == Some(true));
+        let has_nested_table = rows[start..i]
+            .iter()
+            .flat_map(|r| r.cells.iter())
+            .any(cell_has_nested_table);
+        let splittable = !is_vmerge_span && !any_cant_split && !has_nested_table;
+
         groups.push(RowGroup {
             start,
             end: i,
             height,
+            splittable,
         });
     }
     groups
+}
+
+fn cell_has_nested_table(cell: &TableCellInput) -> bool {
+    use crate::render::layout::section::LayoutBlock;
+    cell.blocks
+        .iter()
+        .any(|b| matches!(b, LayoutBlock::Table { .. }))
 }
 
 /// §17.4.85: expand the last row of each vertical merge group so the

@@ -7,6 +7,7 @@ use super::types::{
 use crate::render::layout::draw_command::DrawCommand;
 
 /// Resolved borders for one cell edge.
+#[derive(Clone)]
 pub(super) struct CellBorders {
     pub(super) top: Option<TableBorderLine>,
     pub(super) bottom: Option<TableBorderLine>,

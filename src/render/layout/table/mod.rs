@@ -13,14 +13,16 @@ mod borders;
 mod emit;
 mod grid;
 mod measure;
+mod split;
 mod types;
 
 pub use grid::compute_column_widths;
 pub use types::*;
 
-use emit::{emit_table_rows, TableCommandBuffers};
+use emit::{emit_split_row, emit_table_rows, TableCommandBuffers};
 use grid::build_row_groups;
 use measure::measure_table_rows;
+use split::{find_row_cut, split_row_at, RowCutInput};
 
 /// Lay out a table: compute column widths, lay out cells, emit borders.
 ///
@@ -144,45 +146,125 @@ pub fn layout_table_paginated(
 
     let groups = build_row_groups(rows, &measured);
 
-    // Pack groups into page slices.
-    // Each slice is a Vec<Range<usize>> of row ranges to emit.
-    let mut slices: Vec<Vec<std::ops::Range<usize>>> = Vec::new();
-    let mut current_slice: Vec<std::ops::Range<usize>> = Vec::new();
+    // Each slice is a list of items to emit in order: either a range of
+    // measured rows (the common case) or a custom (split) row with its own
+    // MeasuredRow data.
+    let mut slices: Vec<Vec<SliceItem>> = Vec::new();
+    let mut current_slice: Vec<SliceItem> = Vec::new();
     let mut remaining = available_height;
     let is_first_slice = |slices: &Vec<Vec<_>>| slices.is_empty();
 
     for group in &groups {
         // Header rows on the first slice are emitted as normal rows.
         if is_first_slice(&slices) && group.start < header_count {
-            current_slice.push(group.start..group.end);
+            current_slice.push(SliceItem::Range(group.start..group.end));
             remaining -= group.height;
             continue;
         }
 
         if group.height <= remaining {
-            current_slice.push(group.start..group.end);
+            current_slice.push(SliceItem::Range(group.start..group.end));
             remaining -= group.height;
-        } else {
-            // Close current slice.
-            slices.push(std::mem::take(&mut current_slice));
-            // New page: start with header rows (if any).
-            remaining = page_height;
-            if header_count > 0 {
-                current_slice.push(0..header_count);
-                remaining -= header_height;
-            }
-            if group.height > remaining {
-                log::warn!(
-                    "[table] row group {}-{} ({:.1}pt) exceeds page height ({:.1}pt available)",
-                    group.start,
-                    group.end,
-                    group.height.raw(),
-                    remaining.raw(),
-                );
-            }
-            current_slice.push(group.start..group.end);
-            remaining -= group.height;
+            continue;
         }
+
+        // Doesn't fit. Try to split (§17.4.1) before spilling the whole
+        // group to the next page. Only single-row groups are splittable —
+        // vMerge spans and cantSplit rows set `splittable=false`.
+        if group.splittable && group.end - group.start == 1 {
+            let row_idx = group.start;
+            let cut_input = RowCutInput {
+                mr: &measured.rows[row_idx],
+                row: &rows[row_idx],
+                available: remaining,
+            };
+            if let Some(cut) = find_row_cut(&cut_input) {
+                let parts = split_row_at(&measured.rows[row_idx], &cut);
+                current_slice.push(SliceItem::Split {
+                    row_idx,
+                    mr: parts.first,
+                });
+                slices.push(std::mem::take(&mut current_slice));
+                // New page: start with header rows (if any).
+                remaining = page_height;
+                if header_count > 0 {
+                    current_slice.push(SliceItem::Range(0..header_count));
+                    remaining -= header_height;
+                }
+
+                // Iteratively place the continuation, splitting again each
+                // time it exceeds the new page's remaining space.
+                let mut pending = parts.second;
+                loop {
+                    if pending.height <= remaining {
+                        remaining -= pending.height;
+                        current_slice.push(SliceItem::Continuation {
+                            row_idx,
+                            mr: pending,
+                        });
+                        break;
+                    }
+                    let sub_cut_input = RowCutInput {
+                        mr: &pending,
+                        row: &rows[row_idx],
+                        available: remaining,
+                    };
+                    match find_row_cut(&sub_cut_input) {
+                        Some(sub_cut) => {
+                            let sub = split_row_at(&pending, &sub_cut);
+                            current_slice.push(SliceItem::Continuation {
+                                row_idx,
+                                mr: sub.first,
+                            });
+                            slices.push(std::mem::take(&mut current_slice));
+                            remaining = page_height;
+                            if header_count > 0 {
+                                current_slice.push(SliceItem::Range(0..header_count));
+                                remaining -= header_height;
+                            }
+                            pending = sub.second;
+                        }
+                        None => {
+                            // Not even one line of the continuation fits.
+                            // This should be rare — a row taller than a
+                            // full page of content. Emit it anyway and log.
+                            log::warn!(
+                                "[table] row {} continuation ({:.1}pt) exceeds \
+                                 page content height ({:.1}pt available)",
+                                row_idx,
+                                pending.height.raw(),
+                                remaining.raw(),
+                            );
+                            current_slice.push(SliceItem::Continuation {
+                                row_idx,
+                                mr: pending,
+                            });
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        // No split possible — move the whole group to the next page.
+        slices.push(std::mem::take(&mut current_slice));
+        remaining = page_height;
+        if header_count > 0 {
+            current_slice.push(SliceItem::Range(0..header_count));
+            remaining -= header_height;
+        }
+        if group.height > remaining {
+            log::warn!(
+                "[table] row group {}-{} ({:.1}pt) exceeds page height ({:.1}pt available)",
+                group.start,
+                group.end,
+                group.height.raw(),
+                remaining.raw(),
+            );
+        }
+        current_slice.push(SliceItem::Range(group.start..group.end));
+        remaining -= group.height;
     }
     slices.push(current_slice);
 
@@ -195,34 +277,52 @@ pub fn layout_table_paginated(
     slices
         .iter()
         .enumerate()
-        .map(|(slice_idx, row_ranges)| {
+        .map(|(slice_idx, items)| {
             let mut commands = Vec::new();
             let mut content_commands = Vec::new();
             let mut border_commands = Vec::new();
             let mut cursor_y = Pt::ZERO;
-            for (range_idx, range) in row_ranges.iter().enumerate() {
-                // The first range on each continuation slice (slice_idx > 0) needs
-                // a top border override, since internal conflict resolution removed
-                // it. On the first slice, only apply if suppress_first_row_top was
-                // used (adjacent table collapse) — in that case the first range
-                // should NOT get the override (the whole point is to suppress it).
-                let top_override = if slice_idx > 0 && range_idx == 0 {
+            for (item_idx, item) in items.iter().enumerate() {
+                // First item on each continuation slice (slice_idx > 0) needs
+                // its top border restored if it was resolved away. The first
+                // slice does NOT get an override — `suppress_first_row_top`
+                // semantics are preserved there.
+                let top_override = if slice_idx > 0 && item_idx == 0 {
                     outer_top_border
                 } else {
                     None
                 };
-                emit_table_rows(
-                    &measured,
-                    rows,
-                    range.clone(),
-                    &mut cursor_y,
-                    &mut TableCommandBuffers {
-                        commands: &mut commands,
-                        content_commands: &mut content_commands,
-                        border_commands: &mut border_commands,
-                    },
-                    top_override,
-                );
+                match item {
+                    SliceItem::Range(range) => {
+                        emit_table_rows(
+                            &measured,
+                            rows,
+                            range.clone(),
+                            &mut cursor_y,
+                            &mut TableCommandBuffers {
+                                commands: &mut commands,
+                                content_commands: &mut content_commands,
+                                border_commands: &mut border_commands,
+                            },
+                            top_override,
+                        );
+                    }
+                    SliceItem::Split { row_idx, mr } | SliceItem::Continuation { row_idx, mr } => {
+                        let has_next = item_idx + 1 < items.len();
+                        emit_split_row(
+                            mr,
+                            &rows[*row_idx],
+                            &mut cursor_y,
+                            &mut TableCommandBuffers {
+                                commands: &mut commands,
+                                content_commands: &mut content_commands,
+                                border_commands: &mut border_commands,
+                            },
+                            top_override,
+                            has_next,
+                        );
+                    }
+                }
             }
             commands.append(&mut content_commands);
             commands.append(&mut border_commands);
@@ -232,6 +332,25 @@ pub fn layout_table_paginated(
             }
         })
         .collect()
+}
+
+/// One item inside a page slice's emit list.
+enum SliceItem {
+    /// Emit the contiguous range of measured rows (normal case).
+    Range(std::ops::Range<usize>),
+    /// Emit a partial row (first half) at the bottom of a page. Shares the
+    /// row's `TableRowInput` with `row_idx` but carries partitioned
+    /// commands and modified borders.
+    Split {
+        row_idx: usize,
+        mr: types::MeasuredRow,
+    },
+    /// Emit the continuation (second half) of a split row at the top of a
+    /// continuation page.
+    Continuation {
+        row_idx: usize,
+        mr: types::MeasuredRow,
+    },
 }
 
 #[cfg(test)]
@@ -741,5 +860,238 @@ mod tests {
             "Total (bottom-valigned merged) should sit well below header (top-valigned row 0): \
              total_y={total_y}, header_y={header_y}"
         );
+    }
+
+    // ── Row splitting (§17.4.1) ──────────────────────────────────────────
+
+    /// Build a single-row table with one cell whose paragraph contains
+    /// `n_lines` narrow text fragments that wrap to separate lines.
+    fn tall_row(n_lines: usize) -> TableRowInput {
+        // Width=30 for each fragment; cell content width ≈ 40 ⇒ each
+        // fragment wraps to its own line (default line height 14pt).
+        let fragments: Vec<Fragment> = (0..n_lines)
+            .map(|i| text_frag(&format!("L{i} "), 30.0))
+            .collect();
+        TableRowInput {
+            cells: vec![TableCellInput {
+                blocks: vec![LayoutBlock::Paragraph {
+                    fragments,
+                    style: ParagraphStyle::default(),
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![],
+                    floating_shapes: vec![],
+                }],
+                margins: PtEdgeInsets::ZERO,
+                grid_span: 1,
+                shading: None,
+                cell_borders: None,
+                vertical_merge: None,
+                vertical_align: CellVAlign::Top,
+            }],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        }
+    }
+
+    #[test]
+    fn splittable_row_breaks_across_pages() {
+        // Row with 6 lines (84pt). Available = 50pt on page 1 ⇒ only ~3
+        // lines fit. The row should split: first slice has ~3 lines,
+        // second slice has the rest.
+        let rows = vec![tall_row(6)];
+        let col_widths = vec![Pt::new(40.0)];
+        let slices = layout_table_paginated(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            &TablePaginationConfig {
+                available_height: Pt::new(50.0),
+                page_height: Pt::new(200.0),
+                suppress_first_row_top: false,
+            },
+        );
+
+        assert!(
+            slices.len() >= 2,
+            "expected at least 2 slices, got {}",
+            slices.len()
+        );
+
+        let text_y = |slice: &TableSlice| -> Vec<f32> {
+            slice
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    DrawCommand::Text { position, .. } => Some(position.y.raw()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let s0 = text_y(&slices[0]);
+        let s1 = text_y(&slices[1]);
+        assert!(!s0.is_empty(), "slice 0 should contain some lines");
+        assert!(!s1.is_empty(), "slice 1 should contain continuation lines");
+        assert_eq!(
+            s0.len() + s1.len(),
+            6,
+            "every line should be emitted exactly once across slices"
+        );
+        // Slice 1's lines should sit near the top (near y=0) since we
+        // rebased them.
+        let min_s1_y = s1.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            min_s1_y < 20.0,
+            "slice 1 top text should be near y=0, was {min_s1_y}"
+        );
+    }
+
+    #[test]
+    fn cant_split_row_moves_whole_to_next_page() {
+        // cantSplit=true ⇒ entire row moves when it doesn't fit.
+        let mut row = tall_row(6);
+        row.cant_split = Some(true);
+        let rows = vec![row];
+        let col_widths = vec![Pt::new(40.0)];
+        let slices = layout_table_paginated(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            &TablePaginationConfig {
+                available_height: Pt::new(50.0),
+                page_height: Pt::new(200.0),
+                suppress_first_row_top: false,
+            },
+        );
+
+        assert_eq!(slices.len(), 2, "should still produce 2 slices");
+        // Slice 0 is empty (or at most has no text); all 6 lines land on slice 1.
+        let count0 = slices[0]
+            .commands
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::Text { .. }))
+            .count();
+        let count1 = slices[1]
+            .commands
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::Text { .. }))
+            .count();
+        assert_eq!(count0, 0, "first slice has no text with cantSplit");
+        assert_eq!(count1, 6, "all 6 lines on second slice");
+    }
+
+    #[test]
+    fn splittable_row_spans_three_or_more_pages() {
+        // Row with 15 lines (≈210pt at 14pt line height).
+        // Page 1 has 50pt → ~3 lines fit.
+        // Page 2 and on have ~70pt → ~5 lines fit each.
+        // Expected: 3+ slices, every line emitted exactly once.
+        let rows = vec![tall_row(15)];
+        let col_widths = vec![Pt::new(40.0)];
+        let slices = layout_table_paginated(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            &TablePaginationConfig {
+                available_height: Pt::new(50.0),
+                page_height: Pt::new(70.0),
+                suppress_first_row_top: false,
+            },
+        );
+
+        assert!(
+            slices.len() >= 3,
+            "expected ≥3 slices for a 15-line row split across pages, got {}",
+            slices.len()
+        );
+
+        // Every original line should appear exactly once across all slices.
+        let total_lines: usize = slices
+            .iter()
+            .map(|s| {
+                s.commands
+                    .iter()
+                    .filter(|c| matches!(c, DrawCommand::Text { .. }))
+                    .count()
+            })
+            .sum();
+        assert_eq!(
+            total_lines, 15,
+            "all 15 lines should be emitted across the slices exactly once"
+        );
+    }
+
+    #[test]
+    fn vmerge_span_is_not_split_mid_cell() {
+        // A vMerge span must stay atomic even when its content would split.
+        let row0 = TableRowInput {
+            cells: vec![TableCellInput {
+                blocks: vec![LayoutBlock::Paragraph {
+                    fragments: (0..4).map(|i| text_frag(&format!("L{i} "), 30.0)).collect(),
+                    style: ParagraphStyle::default(),
+                    page_break_before: false,
+                    footnotes: vec![],
+                    floating_images: vec![],
+                    floating_shapes: vec![],
+                }],
+                margins: PtEdgeInsets::ZERO,
+                grid_span: 1,
+                shading: None,
+                cell_borders: None,
+                vertical_merge: Some(VerticalMergeState::Restart),
+                vertical_align: CellVAlign::Top,
+            }],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        };
+        let row1 = TableRowInput {
+            cells: vec![TableCellInput {
+                blocks: vec![],
+                margins: PtEdgeInsets::ZERO,
+                grid_span: 1,
+                shading: None,
+                cell_borders: None,
+                vertical_merge: Some(VerticalMergeState::Continue),
+                vertical_align: CellVAlign::Top,
+            }],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+        };
+        let col_widths = vec![Pt::new(40.0)];
+        let slices = layout_table_paginated(
+            &[row0, row1],
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            &TablePaginationConfig {
+                available_height: Pt::new(30.0),
+                page_height: Pt::new(200.0),
+                suppress_first_row_top: false,
+            },
+        );
+
+        // Should still page: the merge group doesn't fit on page 1, so it
+        // moves intact to page 2 — never split mid-cell.
+        let count0 = slices[0]
+            .commands
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::Text { .. }))
+            .count();
+        assert_eq!(count0, 0, "vMerge span must not split across pages");
     }
 }
