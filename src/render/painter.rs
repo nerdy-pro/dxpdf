@@ -21,8 +21,10 @@ use crate::render::resolve::shape_geometry::{PathVerb, SubPath};
 use crate::render::skia_conv::{to_color4f, to_line, to_point, to_rect, to_size};
 
 /// Target resolution for embedded images (pixels per inch).
-/// 150 DPI balances print quality with file size; matches LibreOffice.
-const IMAGE_TARGET_DPI: f32 = 150.0;
+/// 300 DPI gives crisp on-screen zoom and print output. Skia's PDF backend
+/// does not emit `/Interpolate true` on image dicts, so viewers smooth-scale
+/// with nearest-neighbor — we need enough source pixels to absorb that.
+const IMAGE_TARGET_DPI: f32 = 300.0;
 /// Conversion factor from PDF points to target pixels.
 const IMAGE_DPI_SCALE: f32 = IMAGE_TARGET_DPI / 72.0;
 
