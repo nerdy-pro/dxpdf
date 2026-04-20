@@ -163,6 +163,22 @@ fn inject_text_label(
         .and_then(|rp| crate::render::resolve::fonts::effective_font(&rp.fonts))
         .unwrap_or("");
 
+    // §17.9.23 / §17.3.1.29: the list label's character properties cascade
+    // level/rPr → paragraph-mark rPr (pPr/rPr) → paragraph-style run → doc default.
+    // Color follows the same chain; we try level, then mark, then fall back
+    // to the resolved paragraph default.
+    let label_color = level_def
+        .and_then(|l| l.run_properties.as_ref())
+        .and_then(|rp| rp.color)
+        .or_else(|| para.mark_run_properties.as_ref().and_then(|rp| rp.color))
+        .map(|c| {
+            crate::render::resolve::color::resolve_color(
+                c,
+                crate::render::resolve::color::ColorContext::Text,
+            )
+        })
+        .unwrap_or(default_color);
+
     // Remap PUA codepoints from legacy Symbol/Wingdings encoding.
     let (label_text, label_family) =
         remap_legacy_font_chars(&label_text, level_font_family, &default_family);
@@ -207,7 +223,7 @@ fn inject_text_label(
     let label_frag = Fragment::Text {
         text: Rc::from(label_text.as_str()),
         font: label_font.clone(),
-        color: default_color,
+        color: label_color,
         shading: None,
         border: None,
         width: label_width,
