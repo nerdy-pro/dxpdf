@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use crate::docx::error::{ParseError, Result};
+use crate::docx::whitespace_workaround::substitute_whitespace_only_runs;
 
 /// The contents of a DOCX package, extracted from the ZIP archive.
 pub struct PackageContents {
@@ -23,6 +24,12 @@ impl PackageContents {
             let name = normalize_path(file.name());
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf)?;
+            // Apply the whitespace workaround only to XML parts. Binary parts
+            // (images, fonts, embedded OLE) must not be touched.
+            // See `whitespace_workaround` module docs for the rationale.
+            if name.ends_with(".xml") || name.ends_with(".rels") {
+                buf = substitute_whitespace_only_runs(&buf);
+            }
             parts.insert(name, buf);
         }
 

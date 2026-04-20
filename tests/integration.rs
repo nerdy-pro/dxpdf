@@ -149,6 +149,52 @@ fn parse_zip_without_document_xml_returns_error() {
     );
 }
 
+/// Regression: a whitespace-only `<w:t xml:space="preserve">` between two
+/// other runs must round-trip the literal space into the parsed model.
+/// quick-xml's serde Deserializer trims whitespace-only `$text` content,
+/// which used to drop the separator and render `Label:Value` instead of
+/// `Label: Value`. The whitespace-workaround module substitutes a Private
+/// Use Area sentinel before parsing and reverses it during run conversion.
+#[test]
+fn whitespace_only_run_with_xml_space_preserve_roundtrips_to_space() {
+    use dxpdf::model::{Block, Inline, RunElement};
+
+    // Same shape as the failing cell in the Protokoll DIN VDE document:
+    // bold label run, whitespace-only run with xml:space="preserve",
+    // value run with different formatting.
+    let docx = simple_docx(
+        r#"<w:p>
+            <w:r><w:rPr><w:b/></w:rPr><w:t>Label:</w:t></w:r>
+            <w:r><w:t xml:space="preserve"> </w:t></w:r>
+            <w:r><w:t>Value</w:t></w:r>
+        </w:p>"#,
+    );
+
+    let document = dxpdf::docx::parse(&docx).expect("parse");
+    let para = match document.body.first().expect("at least one block") {
+        Block::Paragraph(p) => p,
+        other => panic!("expected paragraph, got {other:?}"),
+    };
+
+    let texts: Vec<&str> = para
+        .content
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::TextRun(tr) => tr.content.iter().find_map(|el| match el {
+                RunElement::Text(t) => Some(t.as_str()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        texts,
+        vec!["Label:", " ", "Value"],
+        "whitespace-only run must survive parsing as a literal space"
+    );
+}
+
 #[test]
 fn convert_multi_paragraph_docx() {
     let mut body = String::new();

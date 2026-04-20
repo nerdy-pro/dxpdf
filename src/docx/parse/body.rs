@@ -12,6 +12,7 @@ use crate::docx::error::Result;
 use crate::docx::model::*;
 use crate::docx::parse::body_schema::*;
 use crate::docx::parse::serde_xml::from_xml;
+use crate::docx::whitespace_workaround::restore_whitespace_sentinels;
 
 /// Parse `w:document > w:body`, returning blocks and final section properties.
 pub fn parse_body(data: &[u8]) -> Result<(Vec<Block>, SectionProperties)> {
@@ -202,8 +203,12 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
 
     for child in r.content {
         match child {
-            RunChildXml::Text(t) => acc.push(RunElement::Text(t.content)),
-            RunChildXml::DelText(t) => acc.push(RunElement::Text(t.content)),
+            RunChildXml::Text(t) => {
+                acc.push(RunElement::Text(restore_whitespace_sentinels(&t.content)))
+            }
+            RunChildXml::DelText(t) => {
+                acc.push(RunElement::Text(restore_whitespace_sentinels(&t.content)))
+            }
             RunChildXml::Tab => acc.push(RunElement::Tab),
             RunChildXml::Br(br) => acc.push(run_break(br)),
             RunChildXml::Cr => acc.push(RunElement::LineBreak(BreakKind::TextWrapping)),
@@ -228,7 +233,7 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
             }
             RunChildXml::InstrText(t) => {
                 flush(&mut acc, out);
-                out.push(Inline::InstrText(t.content));
+                out.push(Inline::InstrText(restore_whitespace_sentinels(&t.content)));
             }
             RunChildXml::FldChar(fc) => {
                 flush(&mut acc, out);
