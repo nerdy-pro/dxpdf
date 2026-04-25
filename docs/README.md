@@ -15,3 +15,4 @@ Technical reference for DOCX-to-PDF rendering decisions in dxpdf, organized by O
 - [DrawingML Tier 0](drawingml-tier-0.md) — foundational infrastructure: color ADT, fills/strokes/effects, geometry generator, FloatingShape — standalone blueprint
 - [DrawingML Tier 0 — Phase 2](drawingml-tier-0-phase-2.md) — detailed plan for fill / stroke / effect ADTs + parsers
 - [Serde Migration Plan](serde-migration-plan.md) — full plan to replace event-driven OOXML parsing with serde schemas; phases, risks, decisions
+- [Font Subsetting](font-subsetting.md) — §17.8 / ISO 32000-1 §9.6–9.9 — plan to subset embedded typefaces before Skia emits PDF; ADT design, FontRegistry refactor, TDD checklist

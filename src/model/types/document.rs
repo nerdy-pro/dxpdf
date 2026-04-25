@@ -49,7 +49,7 @@ pub struct EmbeddedFont {
 }
 
 /// §17.8.3.3: which style variant an embedded font represents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EmbeddedFontVariant {
     /// §17.8.3.3 w:embedRegular
     Regular,
