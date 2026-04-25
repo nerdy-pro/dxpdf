@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use skia_safe::{
-    path_effect::PathEffect, pdf, BlurStyle, Color4f, Data, FontMgr, MaskFilter, Paint, Path,
-    PathBuilder, PathFillType,
+    path_effect::PathEffect, pdf, BlurStyle, Color4f, Data, MaskFilter, Paint, Path, PathBuilder,
+    PathFillType,
 };
 
 use crate::render::dimension::Pt;
 use crate::render::error::RenderError;
-use crate::render::fonts;
+use crate::render::fonts::{self, FontRegistry};
 use crate::render::layout::draw_command::{
     DrawCommand, LayoutedPage, ResolvedDashPattern, ResolvedEffect, ResolvedFill, ResolvedLineCap,
     ResolvedLineJoin, ResolvedStroke,
@@ -29,7 +29,14 @@ const IMAGE_TARGET_DPI: f32 = 300.0;
 const IMAGE_DPI_SCALE: f32 = IMAGE_TARGET_DPI / 72.0;
 
 /// Render laid-out pages to PDF bytes via Skia.
-pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u8>, RenderError> {
+///
+/// `registry` owns the typeface universe for this render — paint resolves
+/// every text run through it so any subsetted typefaces (swapped in by
+/// `subset::apply` between layout and paint) are picked up correctly.
+pub fn render_to_pdf(
+    pages: &[LayoutedPage],
+    registry: &FontRegistry,
+) -> Result<Vec<u8>, RenderError> {
     let mut pdf_bytes: Vec<u8> = Vec::new();
     let pdf_metadata = pdf::Metadata {
         encoding_quality: Some(85),
@@ -46,7 +53,7 @@ pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u
         let mut on_page = doc.begin_page(to_size(page.page_size), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, font_mgr, &mut font_cache, &mut image_cache);
+            render_page(canvas, page, registry, &mut font_cache, &mut image_cache);
         }
         doc = on_page.end_page();
     }
@@ -58,7 +65,7 @@ pub fn render_to_pdf(pages: &[LayoutedPage], font_mgr: &FontMgr) -> Result<Vec<u
 fn render_page(
     canvas: &skia_safe::Canvas,
     page: &LayoutedPage,
-    font_mgr: &FontMgr,
+    registry: &FontRegistry,
     font_cache: &mut fonts::FontCache,
     image_cache: &mut HashMap<*const [u8], skia_safe::Image>,
 ) {
@@ -74,7 +81,7 @@ fn render_page(
                 italic,
                 color,
             } => {
-                let font = font_cache.get(font_mgr, font_family, *font_size, *bold, *italic);
+                let font = font_cache.get(registry, font_family, *font_size, *bold, *italic);
                 log::trace!(
                     "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
                     &text[..text.len().min(30)],
@@ -504,17 +511,22 @@ mod tests {
     use super::*;
     use crate::render::geometry::{PtOffset, PtSize};
     use crate::render::resolve::color::RgbColor;
+    use skia_safe::FontMgr;
     use std::rc::Rc;
 
     fn test_font_mgr() -> FontMgr {
         FontMgr::new()
     }
 
+    fn test_registry() -> FontRegistry {
+        FontRegistry::new(test_font_mgr())
+    }
+
     // ── render_to_pdf integration ───────────────────────────────────
 
     #[test]
     fn render_text_command_produces_pdf() {
-        let font_mgr = test_font_mgr();
+        let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
@@ -529,14 +541,14 @@ mod tests {
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
 
-        let pdf_bytes = render_to_pdf(&[page], &font_mgr).expect("render_to_pdf must succeed");
+        let pdf_bytes = render_to_pdf(&[page], &registry).expect("render_to_pdf must succeed");
         assert!(pdf_bytes.len() > 100, "PDF output must be non-trivial");
         assert_eq!(&pdf_bytes[..5], b"%PDF-", "output must be valid PDF");
     }
 
     #[test]
     fn render_text_with_char_spacing_produces_pdf() {
-        let font_mgr = test_font_mgr();
+        let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
@@ -551,14 +563,14 @@ mod tests {
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
 
-        let pdf_bytes = render_to_pdf(&[page], &font_mgr).expect("render_to_pdf must succeed");
+        let pdf_bytes = render_to_pdf(&[page], &registry).expect("render_to_pdf must succeed");
         assert!(pdf_bytes.len() > 100);
         assert_eq!(&pdf_bytes[..5], b"%PDF-");
     }
 
     #[test]
     fn render_empty_text_produces_pdf() {
-        let font_mgr = test_font_mgr();
+        let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
@@ -573,7 +585,7 @@ mod tests {
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
 
-        let pdf_bytes = render_to_pdf(&[page], &font_mgr).expect("empty text must not panic");
+        let pdf_bytes = render_to_pdf(&[page], &registry).expect("empty text must not panic");
         assert_eq!(&pdf_bytes[..5], b"%PDF-");
     }
 
@@ -625,7 +637,7 @@ mod tests {
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
-        let pdf = render_to_pdf(&[page], &test_font_mgr()).expect("render path");
+        let pdf = render_to_pdf(&[page], &test_registry()).expect("render path");
         assert_eq!(&pdf[..5], b"%PDF-");
     }
 
@@ -671,13 +683,13 @@ mod tests {
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
-        let pdf = render_to_pdf(&[page], &test_font_mgr()).expect("render dashed line");
+        let pdf = render_to_pdf(&[page], &test_registry()).expect("render dashed line");
         assert_eq!(&pdf[..5], b"%PDF-");
     }
 
     #[test]
     fn render_unicode_text_produces_pdf() {
-        let font_mgr = test_font_mgr();
+        let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
@@ -692,7 +704,7 @@ mod tests {
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
 
-        let pdf_bytes = render_to_pdf(&[page], &font_mgr).expect("unicode text must not panic");
+        let pdf_bytes = render_to_pdf(&[page], &registry).expect("unicode text must not panic");
         assert_eq!(&pdf_bytes[..5], b"%PDF-");
     }
 }

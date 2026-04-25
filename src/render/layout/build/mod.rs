@@ -39,7 +39,7 @@ pub(super) const SPEC_DEFAULT_FONT_SIZE: Pt = Pt::new(10.0);
 
 /// Immutable context threaded through the recursive tree walk.
 pub struct BuildContext<'a> {
-    pub measurer: &'a TextMeasurer,
+    pub measurer: &'a TextMeasurer<'a>,
     pub resolved: &'a ResolvedDocument,
 }
 

@@ -1,24 +1,23 @@
-//! Text measurer — wraps Skia FontMgr for real font metrics.
+//! Text measurer — resolves text widths through a `FontRegistry`.
 
 use std::cell::RefCell;
 
-use skia_safe::FontMgr;
-
 use crate::render::dimension::Pt;
-use crate::render::fonts;
+use crate::render::fonts::{self, FontRegistry};
 
 use super::fragment::FontProps;
 
-/// Measures text using Skia fonts. Wraps a FontMgr reference and a Font cache.
-pub struct TextMeasurer {
-    font_mgr: FontMgr,
+/// Measures text using Skia fonts resolved through a [`FontRegistry`].
+/// Holds a per-instance `FontCache` for `Font` reuse across measurements.
+pub struct TextMeasurer<'r> {
+    registry: &'r FontRegistry,
     font_cache: RefCell<fonts::FontCache>,
 }
 
-impl TextMeasurer {
-    pub fn new(font_mgr: FontMgr) -> Self {
+impl<'r> TextMeasurer<'r> {
+    pub fn new(registry: &'r FontRegistry) -> Self {
         Self {
-            font_mgr,
+            registry,
             font_cache: RefCell::new(fonts::FontCache::new()),
         }
     }
@@ -32,7 +31,7 @@ impl TextMeasurer {
     ) -> (Pt, super::fragment::TextMetrics) {
         let mut cache = self.font_cache.borrow_mut();
         let font = cache.get(
-            &self.font_mgr,
+            self.registry,
             &font_props.family,
             font_props.size,
             font_props.bold,
@@ -65,7 +64,7 @@ impl TextMeasurer {
     pub fn underline_metrics(&self, font_props: &FontProps) -> (Pt, Pt) {
         let mut cache = self.font_cache.borrow_mut();
         let font = cache.get(
-            &self.font_mgr,
+            self.registry,
             &font_props.family,
             font_props.size,
             font_props.bold,
@@ -95,7 +94,7 @@ impl TextMeasurer {
     /// font-recommended height.
     pub fn default_line_height(&self, family: &str, size: Pt) -> Pt {
         let mut cache = self.font_cache.borrow_mut();
-        let font = cache.get(&self.font_mgr, family, size, false, false);
+        let font = cache.get(self.registry, family, size, false, false);
         let (_, metrics) = font.metrics();
         Pt::new(-metrics.ascent + metrics.descent + metrics.leading.max(0.0))
     }

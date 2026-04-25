@@ -26,14 +26,21 @@ log = "0.4"
 env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+fontcull = { version = "2", optional = true }
 
 [features]
-default = []
+default = ["subset-fonts"]
 python = ["pyo3"]
+# `fontcull` (Google's klippa packaged for Rust) produces a *complete* subsetted
+# SFNT — cmap, hhea, OS/2 preserved — so Skia can shape against it normally
+# during paint. The earlier `subsetter` (Typst) crate strips cmap by design,
+# which broke Skia's draw_str path: every codepoint mapped to .notdef.
+subset-fonts = ["dep:fontcull"]
 
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
+lopdf = { version = "0.40", default-features = false }
 
 [[bench]]
 name = "convert_bench"

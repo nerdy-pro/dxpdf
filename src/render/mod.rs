@@ -6,7 +6,9 @@
 //!
 //! 1. **Resolve** — flatten style inheritance, split sections, extract images/fonts
 //! 2. **Layout** — fit content into pages using constraint-based layout
-//! 3. **Paint** — emit draw commands to Skia PDF canvas (requires `skia-safe`)
+//! 3. **Subset** *(optional, gated by `subset-fonts`)* — collect glyph usage
+//!    and replace each typeface with a subsetted variant before paint
+//! 4. **Paint** — emit draw commands to Skia PDF canvas (requires `skia-safe`)
 
 pub mod dimension;
 pub(crate) mod emf;
@@ -17,6 +19,8 @@ pub mod layout;
 pub mod painter;
 pub mod resolve;
 pub mod skia_conv;
+#[cfg(feature = "subset-fonts")]
+pub mod subset;
 
 use crate::model::Document;
 
@@ -74,10 +78,22 @@ pub fn render_with_font_mgr(
     font_mgr: &skia_safe::FontMgr,
 ) -> Result<Vec<u8>, error::RenderError> {
     let resolved = resolve::resolve(doc);
-    fonts::register_embedded_fonts(font_mgr, &doc.embedded_fonts);
-    fonts::preload_fonts(font_mgr, &resolved.font_families);
-    let pages = layout_document(&resolved, font_mgr);
-    painter::render_to_pdf(&pages, font_mgr)
+    #[allow(unused_mut)] // mut required only when subset-fonts is enabled
+    let mut registry = fonts::FontRegistry::build(
+        font_mgr.clone(),
+        &doc.embedded_fonts,
+        &resolved.font_families,
+    );
+    let pages = layout_document(&resolved, &registry);
+
+    #[cfg(feature = "subset-fonts")]
+    {
+        let usage = subset::collect(&pages, &registry);
+        let report = subset::apply(usage, &mut registry);
+        log::info!("font subset: {report}");
+    }
+
+    painter::render_to_pdf(&pages, &registry)
 }
 
 /// Resolve and lay out a document without painting to PDF.
@@ -85,17 +101,19 @@ pub fn render_with_font_mgr(
 pub fn resolve_and_layout(doc: &Document) -> (ResolvedDocument, Vec<LayoutedPage>) {
     let font_mgr = skia_safe::FontMgr::new();
     let resolved = resolve::resolve(doc);
-    fonts::preload_fonts(&font_mgr, &resolved.font_families);
-    let pages = layout_document(&resolved, &font_mgr);
+    let registry =
+        fonts::FontRegistry::build(font_mgr, &doc.embedded_fonts, &resolved.font_families);
+    let pages = layout_document(&resolved, &registry);
     (resolved, pages)
 }
 
-/// Lay out a resolved document using Skia font metrics.
+/// Lay out a resolved document using Skia font metrics resolved through
+/// the supplied [`fonts::FontRegistry`].
 pub fn layout_document(
     resolved: &ResolvedDocument,
-    font_mgr: &skia_safe::FontMgr,
+    registry: &fonts::FontRegistry,
 ) -> Vec<LayoutedPage> {
-    let measurer = layout::measurer::TextMeasurer::new(font_mgr.clone());
+    let measurer = layout::measurer::TextMeasurer::new(registry);
     let ctx = BuildContext {
         measurer: &measurer,
         resolved,
