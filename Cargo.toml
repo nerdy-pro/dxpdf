@@ -29,6 +29,7 @@ pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 fontcull = { version = "2", optional = true }
 unicode-segmentation = "1.13.2"
 unicode-properties = "0.1.4"
+unicode-normalization = "0.1.25"
 
 [features]
 default = ["subset-fonts"]

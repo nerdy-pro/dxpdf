@@ -8,4 +8,5 @@
 //! no string-name allowlists, no font bundling.
 
 pub mod cluster;
+pub mod raster;
 pub mod resolve;
