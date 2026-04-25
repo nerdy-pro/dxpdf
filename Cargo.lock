@@ -551,6 +551,8 @@ dependencies = [
  "skia-safe",
  "tempfile",
  "thiserror 2.0.18",
+ "unicode-properties",
+ "unicode-segmentation",
  "zip",
 ]
 
@@ -1697,6 +1699,12 @@ name = "unicode-properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "unicode-xid"
