@@ -206,22 +206,35 @@ pub(super) fn paragraph_style_from_props(props: &model::ParagraphProperties) -> 
 }
 
 /// §17.3.1.24: resolve paragraph borders.
-fn resolve_paragraph_borders(props: &model::ParagraphProperties) -> Option<ParagraphBorderStyle> {
+///
+/// Each side that arrives as `Some(Border { style: BorderStyle::None, .. })`
+/// is the spec's explicit "no border" override (`<w:top w:val="nil"/>` or
+/// `<w:top w:val="none"/>`, §17.18.2 ST_Border). The model preserves the
+/// `Some` so the §17.7.2 cascade can override an inherited side, but at
+/// the render boundary we drop the sentinel — otherwise an empty `<w:pBdr>`
+/// with all sides "nil" (Word's default for any paragraph cascade) would
+/// frame every paragraph in the document with a hairline rectangle.
+pub(super) fn resolve_paragraph_borders(
+    props: &model::ParagraphProperties,
+) -> Option<ParagraphBorderStyle> {
     let pbdr = props.borders.as_ref()?;
 
-    let convert = |b: &model::Border| -> BorderLine {
-        BorderLine {
+    let convert = |b: &model::Border| -> Option<BorderLine> {
+        if b.style == model::BorderStyle::None {
+            return None;
+        }
+        Some(BorderLine {
             width: Pt::from(b.width),
             color: resolve_color(b.color, ColorContext::Text),
             space: Pt::from(b.space),
-        }
+        })
     };
 
     let style = ParagraphBorderStyle {
-        top: pbdr.top.as_ref().map(convert),
-        bottom: pbdr.bottom.as_ref().map(convert),
-        left: pbdr.left.as_ref().map(convert),
-        right: pbdr.right.as_ref().map(convert),
+        top: pbdr.top.as_ref().and_then(convert),
+        bottom: pbdr.bottom.as_ref().and_then(convert),
+        left: pbdr.left.as_ref().and_then(convert),
+        right: pbdr.right.as_ref().and_then(convert),
     };
 
     if style.top.is_some()
@@ -577,4 +590,88 @@ pub(super) fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
         .map(to_pt)
         .unwrap_or(default.height);
     PtSize::new(w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::dimension::Dimension;
+    use crate::model::{Border, BorderStyle, Color, ParagraphBorders, ParagraphProperties};
+
+    fn border_with_style(style: BorderStyle) -> Border {
+        Border {
+            style,
+            width: Dimension::new(0),
+            space: Dimension::new(0),
+            color: Color::Auto,
+        }
+    }
+
+    /// §17.18.2: every side carrying `BorderStyle::None` (the parser's
+    /// landing for `<w:top w:val="nil"/>` and `<w:top w:val="none"/>`)
+    /// is dropped, even though the side's `Option<Border>` is `Some(_)`.
+    #[test]
+    fn paragraph_borders_explicit_none_yields_no_render_borders() {
+        let props = ParagraphProperties {
+            borders: Some(ParagraphBorders {
+                top: Some(border_with_style(BorderStyle::None)),
+                bottom: Some(border_with_style(BorderStyle::None)),
+                left: Some(border_with_style(BorderStyle::None)),
+                right: Some(border_with_style(BorderStyle::None)),
+                between: Some(border_with_style(BorderStyle::None)),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            resolve_paragraph_borders(&props).is_none(),
+            "all-sides-nil pPr must produce no ParagraphBorderStyle"
+        );
+    }
+
+    /// One real side stays — the others (None) are still filtered.
+    #[test]
+    fn paragraph_borders_mixed_keeps_only_actual_sides() {
+        let props = ParagraphProperties {
+            borders: Some(ParagraphBorders {
+                top: Some(border_with_style(BorderStyle::Single)),
+                bottom: Some(border_with_style(BorderStyle::None)),
+                left: Some(border_with_style(BorderStyle::None)),
+                right: Some(border_with_style(BorderStyle::None)),
+                between: None,
+            }),
+            ..Default::default()
+        };
+        let resolved = resolve_paragraph_borders(&props).expect("top side must survive");
+        assert!(resolved.top.is_some());
+        assert!(resolved.bottom.is_none());
+        assert!(resolved.left.is_none());
+        assert!(resolved.right.is_none());
+    }
+
+    /// All-Single → carries through to render-side struct.
+    #[test]
+    fn paragraph_borders_all_single_round_trips() {
+        let props = ParagraphProperties {
+            borders: Some(ParagraphBorders {
+                top: Some(border_with_style(BorderStyle::Single)),
+                bottom: Some(border_with_style(BorderStyle::Single)),
+                left: Some(border_with_style(BorderStyle::Single)),
+                right: Some(border_with_style(BorderStyle::Single)),
+                between: None,
+            }),
+            ..Default::default()
+        };
+        let resolved = resolve_paragraph_borders(&props).expect("must produce Some");
+        assert!(resolved.top.is_some());
+        assert!(resolved.bottom.is_some());
+        assert!(resolved.left.is_some());
+        assert!(resolved.right.is_some());
+    }
+
+    /// No `<w:pBdr>` at all → no render-side borders.
+    #[test]
+    fn paragraph_borders_absent_yields_none() {
+        let props = ParagraphProperties::default();
+        assert!(resolve_paragraph_borders(&props).is_none());
+    }
 }

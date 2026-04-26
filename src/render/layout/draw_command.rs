@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use crate::model::dimension::{Dimension, SixtieThousandthDeg};
 use crate::render::dimension::Pt;
+use crate::render::emoji::cluster::{EmojiPresentation, EmojiStructure};
+use crate::render::fonts::TypefaceEntry;
 use crate::render::geometry::{PtLineSegment, PtOffset, PtRect, PtSize};
 use crate::render::resolve::color::RgbColor;
 use crate::render::resolve::drawing_color::Rgba;
@@ -36,6 +38,24 @@ pub enum DrawCommand {
     Image {
         rect: PtRect,
         image_data: MediaEntry,
+    },
+    /// One emoji grapheme cluster placed at `rect`. The painter rasterizes
+    /// the cluster against `typeface` (Skia raster backend honours the color
+    /// glyph tables that the PDF backend strips) and embeds the result as
+    /// an inline image. See `docs/emoji-rendering.md`.
+    EmojiCluster {
+        /// Page-coordinate rectangle at which to draw the rasterized image.
+        rect: PtRect,
+        /// Cluster text — one grapheme cluster, possibly multi-codepoint.
+        text: String,
+        /// Color emoji typeface to rasterize against.
+        typeface: TypefaceEntry,
+        /// Font size in Pt at which to rasterize.
+        size: Pt,
+        /// UTS #51 cluster classification (carried for future paint-side
+        /// behaviour and diagnostics; not needed by the raster pipeline).
+        presentation: EmojiPresentation,
+        structure: EmojiStructure,
     },
     Rect {
         rect: PtRect,
@@ -203,6 +223,7 @@ impl DrawCommand {
                 line.end.y += dy;
             }
             DrawCommand::Image { rect, .. }
+            | DrawCommand::EmojiCluster { rect, .. }
             | DrawCommand::Rect { rect, .. }
             | DrawCommand::LinkAnnotation { rect, .. }
             | DrawCommand::InternalLink { rect, .. } => {

@@ -3,15 +3,18 @@
 
 use std::rc::Rc;
 
-use crate::model::RunProperties;
+use crate::model::{RunProperties, UnderlineStyle};
 
 use crate::render::dimension::Pt;
+use crate::render::emoji::cluster::{EmojiPresentation, EmojiStructure};
+use crate::render::fonts::TypefaceEntry;
 use crate::render::geometry::PtSize;
 use crate::render::resolve::color::RgbColor;
 use crate::render::resolve::fonts::effective_font;
 use crate::render::resolve::images::MediaEntry;
 
 mod collect;
+mod segment;
 mod text;
 
 pub use collect::{collect_fragments, FieldContext, FragmentCtx};
@@ -108,6 +111,33 @@ pub enum Fragment {
         rel_id: String,
         image_data: Option<MediaEntry>,
     },
+    /// One emoji grapheme cluster (UAX #29) classified as an emoji sequence
+    /// (UTS #51), to be rasterized at paint time via Skia's raster backend
+    /// and embedded as an inline PDF image. See `docs/emoji-rendering.md`.
+    Emoji {
+        /// Cluster text exactly as classified — one grapheme cluster, possibly
+        /// multi-codepoint (ZWJ, modifier, RIS, tag, keycap sequences).
+        text: String,
+        /// Color emoji typeface resolved upstream by the emoji resolver.
+        /// Frozen at fragment build so paint never re-resolves.
+        typeface: TypefaceEntry,
+        /// Font size at which to rasterize, in Pt.
+        size: Pt,
+        /// UTS #51 §2 presentation. `EmojiPresentation::Text` is preserved
+        /// (the rasterizer can still render it via the same color path) but
+        /// allows future paint-side decisions (e.g. monochrome over color).
+        presentation: EmojiPresentation,
+        /// UTS #51 §2 cluster structure. Carried for diagnostics + future
+        /// painter behaviour (skin-tone modifier substitution, etc.).
+        structure: EmojiStructure,
+        /// Measured advance from Skia raster metrics at `size`.
+        advance: Pt,
+        /// Font metrics from the resolved emoji typeface — used for line
+        /// height contribution.
+        metrics: TextMetrics,
+        /// Inherited from the run (super/subscript / `w:position`).
+        baseline_offset: Pt,
+    },
     Tab {
         line_height: Pt,
         /// Override minimum width for line fitting (default: MIN_TAB_WIDTH).
@@ -133,6 +163,7 @@ impl Fragment {
         match self {
             Fragment::Text { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
+            Fragment::Emoji { advance, .. } => *advance,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
             Fragment::LineBreak { .. }
             | Fragment::ColumnBreak
@@ -153,6 +184,7 @@ impl Fragment {
         match self {
             Fragment::Text { metrics, .. } => metrics.height(),
             Fragment::Image { size, .. } => size.height,
+            Fragment::Emoji { metrics, .. } => metrics.height(),
             Fragment::Tab { line_height, .. }
             | Fragment::LineBreak { line_height }
             | Fragment::PageBreak { line_height } => *line_height,
@@ -205,7 +237,12 @@ pub fn font_props_from_run(
         size,
         bold: rp.bold.unwrap_or(false),
         italic: rp.italic.unwrap_or(false),
-        underline: rp.underline.is_some(),
+        // §17.3.2.40: an actual underline style sets the bool. The model's
+        // tri-state — `None` (inherit), `Some(UnderlineStyle::None)`
+        // (explicit "no underline" override), `Some(_actual_style_)` —
+        // collapses here into "draw / don't draw"; only the third case
+        // draws.
+        underline: matches!(rp.underline, Some(s) if s != UnderlineStyle::None),
         char_spacing,
         // Populated by the measurer from Skia font metrics.
         underline_position: Pt::ZERO,
@@ -243,6 +280,7 @@ pub fn to_roman_lower(mut n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::UnderlineStyle;
 
     #[test]
     fn font_props_default_fallback() {
@@ -252,5 +290,64 @@ mod tests {
         assert_eq!(fp.size.raw(), 12.0);
         assert!(!fp.bold);
         assert!(!fp.italic);
+    }
+
+    // ── §17.3.2.40 underline tri-state ─────────────────────────────────────
+    //
+    // `RunProperties::underline: Option<UnderlineStyle>` carries three states:
+    //   * `None`                            — element absent; inherit (§17.7.2)
+    //   * `Some(UnderlineStyle::None)`      — `<w:u w:val="none"/>` explicit override
+    //   * `Some(UnderlineStyle::Single)` …  — actual underline style
+    // `font_props.underline` is the rendering-decision boolean: it must be
+    // `true` only when an actual underline style is in effect.
+
+    fn rp_with_underline(style: Option<UnderlineStyle>) -> RunProperties {
+        RunProperties {
+            underline: style,
+            ..RunProperties::default()
+        }
+    }
+
+    #[test]
+    fn font_props_underline_absent_is_false() {
+        let fp = font_props_from_run(&rp_with_underline(None), "Helvetica", Pt::new(12.0));
+        assert!(!fp.underline, "no <w:u> element → no underline");
+    }
+
+    #[test]
+    fn font_props_underline_explicit_none_is_false() {
+        let fp = font_props_from_run(
+            &rp_with_underline(Some(UnderlineStyle::None)),
+            "Helvetica",
+            Pt::new(12.0),
+        );
+        assert!(
+            !fp.underline,
+            "<w:u w:val=\"none\"/> is the spec's explicit \"no underline\" \
+             override; font_props.underline must remain false"
+        );
+    }
+
+    #[test]
+    fn font_props_underline_single_is_true() {
+        let fp = font_props_from_run(
+            &rp_with_underline(Some(UnderlineStyle::Single)),
+            "Helvetica",
+            Pt::new(12.0),
+        );
+        assert!(fp.underline, "<w:u w:val=\"single\"/> → underline drawn");
+    }
+
+    #[test]
+    fn font_props_underline_double_is_true() {
+        // Sanity: any non-`None` style sets the bool. A future renderer
+        // change to support distinct styles will replace this bool with
+        // an enum; for now, "any style other than None" → draw.
+        let fp = font_props_from_run(
+            &rp_with_underline(Some(UnderlineStyle::Double)),
+            "Helvetica",
+            Pt::new(12.0),
+        );
+        assert!(fp.underline);
     }
 }

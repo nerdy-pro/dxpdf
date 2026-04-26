@@ -346,6 +346,36 @@ pub(super) fn emit_line_commands(
                     }
                     x += size.width;
                 }
+                Fragment::Emoji {
+                    text,
+                    typeface,
+                    size,
+                    presentation,
+                    structure,
+                    advance,
+                    metrics,
+                    baseline_offset,
+                } => {
+                    // Place the cluster's box so its top sits at the line
+                    // baseline minus the typeface ascent, matching where text
+                    // glyphs at the same baseline would sit.
+                    let baseline_y = *cursor_y + line.ascent + *baseline_offset;
+                    let top_y = baseline_y - metrics.ascent;
+                    commands.push(DrawCommand::EmojiCluster {
+                        rect: crate::render::geometry::PtRect::from_xywh(
+                            x,
+                            top_y,
+                            *advance,
+                            metrics.height(),
+                        ),
+                        text: text.clone(),
+                        typeface: typeface.clone(),
+                        size: *size,
+                        presentation: *presentation,
+                        structure: *structure,
+                    });
+                    x += *advance;
+                }
                 Fragment::Tab { .. } => {
                     // §17.3.1.37: resolve to the next tab stop.
                     // Tab stop positions are absolute from the paragraph's

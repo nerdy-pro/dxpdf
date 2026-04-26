@@ -298,6 +298,7 @@ fn command_primary_y(cmd: &DrawCommand) -> Pt {
         }
         DrawCommand::Underline { line, .. } | DrawCommand::Line { line, .. } => line.start.y,
         DrawCommand::Image { rect, .. }
+        | DrawCommand::EmojiCluster { rect, .. }
         | DrawCommand::Rect { rect, .. }
         | DrawCommand::LinkAnnotation { rect, .. }
         | DrawCommand::InternalLink { rect, .. } => rect.origin.y,

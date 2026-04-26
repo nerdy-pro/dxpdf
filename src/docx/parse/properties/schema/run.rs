@@ -239,6 +239,15 @@ mod tests {
     }
 
     #[test]
+    fn underline_val_none_is_explicit_override() {
+        // §17.3.2.40: w:val="none" is the explicit "no underline" override —
+        // it must round-trip as `Some(UnderlineStyle::None)`, distinct from
+        // both an absent <w:u/> element (None) and an inherited underline.
+        let (rp, _) = parse(r#"<rPr><u val="none"/></rPr>"#);
+        assert_eq!(rp.underline, Some(UnderlineStyle::None));
+    }
+
+    #[test]
     fn strike_single() {
         let (rp, _) = parse(r#"<rPr><strike/></rPr>"#);
         assert_eq!(rp.strike, Some(StrikeStyle::Single));

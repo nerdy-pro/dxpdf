@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
 use crate::render::dimension::Pt;
+use crate::render::emoji::cluster::{self, EmojiCluster, InlineCluster};
+use crate::render::emoji::resolve::{EmojiFamily, EmojiTypeface};
+use crate::render::layout::measurer::TextMeasurer;
 use crate::render::resolve::color::RgbColor;
 
 use super::{FontProps, Fragment, FragmentBorder, TextMetrics};
@@ -112,12 +115,21 @@ fn split_into_words(text: &str) -> Vec<&str> {
 }
 
 /// Split text into word-level fragments and push to the output vec.
+///
+/// When `measurer` is `Some`, the text is first split into grapheme clusters
+/// (UAX #29) and each cluster is classified per UTS #51. Emoji clusters that
+/// resolve to a host color emoji typeface become [`Fragment::Emoji`]; clusters
+/// without a resolved typeface fall through to the text path with a one-time
+/// warning per cluster. When `measurer` is `None` (used by unit tests that
+/// don't construct a font registry), the input is passed straight to the
+/// existing word-split + measure path — preserving prior behaviour.
 pub(super) fn emit_text_fragments<F>(
     text: &str,
     font: &FontProps,
     style: &TextRunStyle,
     hyperlink_url: Option<&str>,
     measure_text: &F,
+    measurer: Option<&TextMeasurer<'_>>,
     fragments: &mut Vec<Fragment>,
 ) where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
@@ -133,7 +145,57 @@ pub(super) fn emit_text_fragments<F>(
     if cleaned.is_empty() {
         return;
     }
-    for word in split_into_words(&cleaned) {
+
+    let Some(measurer) = measurer else {
+        emit_text_words(
+            &cleaned,
+            font,
+            style,
+            hyperlink_url,
+            measure_text,
+            fragments,
+        );
+        return;
+    };
+
+    // Classify into clusters and route emoji clusters through the raster
+    // pipeline; text spans go through the existing word-split path.
+    for cluster in cluster::classify(&cleaned) {
+        match cluster {
+            InlineCluster::Text(span) => {
+                emit_text_words(span, font, style, hyperlink_url, measure_text, fragments);
+            }
+            InlineCluster::Emoji(emoji) => {
+                emit_emoji_or_fallback(
+                    &emoji,
+                    font,
+                    style,
+                    hyperlink_url,
+                    measure_text,
+                    measurer,
+                    fragments,
+                );
+            }
+        }
+    }
+}
+
+/// Word-split + measure path. Identical to the prior body of
+/// [`emit_text_fragments`]; factored out so emoji-cluster fallback can reuse it.
+pub(super) fn emit_text_words<F>(
+    text: &str,
+    font: &FontProps,
+    style: &TextRunStyle,
+    hyperlink_url: Option<&str>,
+    measure_text: &F,
+    fragments: &mut Vec<Fragment>,
+) where
+    F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
+{
+    if text.is_empty() {
+        return;
+    }
+    for word in split_into_words(text) {
         let (w, m) = measure_text(word, font);
         let trimmed = word.trim_end();
         let tw = if trimmed.len() < word.len() {
@@ -157,6 +219,58 @@ pub(super) fn emit_text_fragments<F>(
     }
 }
 
+/// Resolve a host color emoji typeface for an emoji cluster and emit a
+/// [`Fragment::Emoji`]. On `Unavailable`, log a one-time warning and route
+/// the cluster through the text path so its codepoints still appear in the
+/// PDF text stream (per the no-bundle / no-silent-degradation policy in
+/// `docs/emoji-rendering.md`).
+pub(super) fn emit_emoji_or_fallback<F>(
+    cluster: &EmojiCluster<'_>,
+    font: &FontProps,
+    style: &TextRunStyle,
+    hyperlink_url: Option<&str>,
+    measure_text: &F,
+    measurer: &TextMeasurer<'_>,
+    fragments: &mut Vec<Fragment>,
+) where
+    F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
+{
+    // §17.3.2.26: the run's font name acts as a hint. If it names a known
+    // color emoji family, prefer it; otherwise we fall through to the
+    // host-default chain (e.g. Calibri-tagged runs containing 📞 still
+    // resolve to Apple Color Emoji on macOS).
+    let requested = EmojiFamily::from_name_ci(&font.family);
+    match measurer.resolve_emoji(requested) {
+        EmojiTypeface::Resolved {
+            entry: typeface, ..
+        } => {
+            let (advance, metrics) =
+                measurer.measure_with_typeface(cluster.text, &typeface, font.size);
+            fragments.push(Fragment::Emoji {
+                text: cluster.text.to_string(),
+                typeface,
+                size: font.size,
+                presentation: cluster.presentation,
+                structure: cluster.structure,
+                advance,
+                metrics,
+                baseline_offset: style.baseline_offset,
+            });
+        }
+        EmojiTypeface::Unavailable { attempted } => {
+            measurer.warn_emoji_unavailable_once(cluster.text, &attempted);
+            emit_text_words(
+                cluster.text,
+                font,
+                style,
+                hyperlink_url,
+                measure_text,
+                fragments,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +291,140 @@ mod tests {
     fn split_trailing_space() {
         assert_eq!(split_into_words("hello "), vec!["hello "]);
     }
+
+    // ── L1, L2, L4: emoji cluster integration ────────────────────────────
+
+    use crate::render::emoji::cluster::EmojiPresentation;
+    use crate::render::fonts::FontRegistry;
+    use crate::render::layout::measurer::TextMeasurer;
+    use skia_safe::FontMgr;
+    use std::rc::Rc;
+
+    fn font(family: &str, size: f32) -> FontProps {
+        FontProps {
+            family: Rc::from(family),
+            size: Pt::new(size),
+            bold: false,
+            italic: false,
+            underline: false,
+            char_spacing: Pt::ZERO,
+            underline_position: Pt::ZERO,
+            underline_thickness: Pt::ZERO,
+        }
+    }
+
+    fn style() -> TextRunStyle {
+        TextRunStyle {
+            color: RgbColor::BLACK,
+            shading: None,
+            border: None,
+            baseline_offset: Pt::ZERO,
+        }
+    }
+
+    /// L1 — Run "hi 📞" produces `[Text("hi "), Emoji(...)]` when an emoji
+    /// typeface is resolvable on the host. Skipped on hosts without one.
+    #[test]
+    fn l1_emoji_run_splits_into_text_and_emoji_fragments() {
+        let registry = FontRegistry::new(FontMgr::new());
+        let measurer = TextMeasurer::new(&registry);
+        // Bail if the host has no color emoji — Phase 3 is platform-aware.
+        use crate::render::emoji::resolve::EmojiTypeface;
+        if matches!(
+            measurer.resolve_emoji(None),
+            EmojiTypeface::Unavailable { .. }
+        ) {
+            eprintln!("skipping L1: no color emoji typeface on this host");
+            return;
+        }
+        let mut fragments = Vec::new();
+        let measure = |text: &str, fp: &FontProps| measurer.measure(text, fp);
+        emit_text_fragments(
+            "hi \u{1F4DE}",
+            &font("Calibri", 12.0),
+            &style(),
+            None,
+            &measure,
+            Some(&measurer),
+            &mut fragments,
+        );
+        assert_eq!(
+            fragments.len(),
+            2,
+            "expected 2 fragments (Text + Emoji), got {fragments:#?}"
+        );
+        match &fragments[0] {
+            Fragment::Text { text, .. } => assert_eq!(&**text, "hi "),
+            other => panic!("first fragment must be Text, got {other:?}"),
+        }
+        match &fragments[1] {
+            Fragment::Emoji {
+                text,
+                presentation,
+                advance,
+                ..
+            } => {
+                assert_eq!(text, "\u{1F4DE}");
+                assert_eq!(*presentation, EmojiPresentation::Emoji);
+                // L2 — advance must be > 0 when the typeface is resolved.
+                assert!(
+                    advance.raw() > 0.0,
+                    "advance must be positive, got {advance}"
+                );
+            }
+            other => panic!("second fragment must be Emoji, got {other:?}"),
+        }
+    }
+
+    /// L4 — When `measurer` is `None` (no emoji pipeline available), emoji
+    /// codepoints flow through the existing text path unchanged. This matches
+    /// the no-bundle / no-silent-degradation policy: the codepoint is still
+    /// preserved in the PDF's text stream.
+    #[test]
+    fn l4_no_measurer_routes_emoji_through_text_path() {
+        let mut fragments = Vec::new();
+        let measure = |text: &str, _fp: &FontProps| {
+            (
+                Pt::new(text.len() as f32 * 6.0),
+                TextMetrics {
+                    ascent: Pt::new(10.0),
+                    descent: Pt::new(2.0),
+                    leading: Pt::ZERO,
+                },
+            )
+        };
+        emit_text_fragments(
+            "hi \u{1F4DE}",
+            &font("Calibri", 12.0),
+            &style(),
+            None,
+            &measure,
+            None,
+            &mut fragments,
+        );
+        // No measurer → the whole input is fed to the text path. There must
+        // be zero Emoji fragments and the original codepoint must appear in
+        // exactly one Text fragment.
+        for f in &fragments {
+            assert!(
+                !matches!(f, Fragment::Emoji { .. }),
+                "no emoji fragments must be produced when measurer is None"
+            );
+        }
+        let joined: String = fragments
+            .iter()
+            .filter_map(|f| match f {
+                Fragment::Text { text, .. } => Some(&**text),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            joined.contains('\u{1F4DE}'),
+            "emoji codepoint must survive through the text path"
+        );
+    }
+
+    // ── split_into_words (existing tests) ────────────────────────────────
 
     #[test]
     fn split_multiple_words() {

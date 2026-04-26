@@ -12,6 +12,7 @@
 
 pub mod dimension;
 pub(crate) mod emf;
+pub mod emoji;
 pub mod error;
 pub mod fonts;
 pub mod geometry;

@@ -48,6 +48,17 @@ pub enum SubsetOutcome {
     /// `FontMgr::new_from_data` failed to build a Skia typeface from the
     /// subsetted bytes — would indicate fontcull produced malformed SFNT.
     SkiaRebuildFailed { id: TypefaceId },
+    /// The subsetted typeface is structurally valid (Skia accepted the
+    /// bytes) but shaping a kept codepoint produces `.notdef`. Observed
+    /// with macOS Apple-vendored fonts (Helvetica Neue, Arial Unicode MS)
+    /// where klippa's cmap reconstruction silently drops mappings.
+    /// Original typeface left in place; PDF embeds the full font.
+    UnshapeableSubset {
+        id: TypefaceId,
+        codepoints_kept: usize,
+        notdef_count: usize,
+        notdef_total: usize,
+    },
 }
 
 impl SubsetOutcome {
@@ -58,7 +69,8 @@ impl SubsetOutcome {
             | Self::UnsupportedFormat { id, .. }
             | Self::NoBytesAvailable { id }
             | Self::SubsetterError { id, .. }
-            | Self::SkiaRebuildFailed { id } => id,
+            | Self::SkiaRebuildFailed { id }
+            | Self::UnshapeableSubset { id, .. } => id,
         }
     }
 
@@ -95,17 +107,35 @@ impl SubsetReport {
     }
 }
 
+impl SubsetReport {
+    pub fn unshapeable_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|o| matches!(o, SubsetOutcome::UnshapeableSubset { .. }))
+            .count()
+    }
+}
+
 impl fmt::Display for SubsetReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let subsetted = self.subsetted_count();
         let savings = self.total_savings();
         let total = self.outcomes.len();
         let other = total - subsetted;
-        write!(
-            f,
-            "{subsetted}/{total} typefaces subsetted ({} bytes saved, {other} unchanged)",
-            savings
-        )
+        let unshapeable = self.unshapeable_count();
+        if unshapeable == 0 {
+            write!(
+                f,
+                "{subsetted}/{total} typefaces subsetted ({} bytes saved, {other} unchanged)",
+                savings
+            )
+        } else {
+            write!(
+                f,
+                "{subsetted}/{total} typefaces subsetted ({} bytes saved, {other} unchanged, {unshapeable} rejected as unshapeable)",
+                savings
+            )
+        }
     }
 }
 
@@ -188,6 +218,20 @@ fn process_one(
         Some(t) => t,
         None => return SubsetOutcome::SkiaRebuildFailed { id },
     };
+
+    // Post-validation: a structurally valid SFNT can still ship a broken
+    // cmap. Verified by shaping the kept codepoints against the rebuilt
+    // typeface and checking for `.notdef`. If the subsetter's output is
+    // unshapeable we keep the original — PDF gets bigger but text renders.
+    if let Some(failure) = check_shapeability(&new_tf, codepoints) {
+        return SubsetOutcome::UnshapeableSubset {
+            id,
+            codepoints_kept: codepoints.len(),
+            notdef_count: failure.notdef_count,
+            notdef_total: failure.notdef_total,
+        };
+    }
+
     let new_origin = TypefaceOrigin::System {
         typeface_id: TypefaceId::from(&new_tf),
     };
@@ -199,6 +243,49 @@ fn process_one(
         bytes_after,
         codepoints_kept: codepoints.len(),
     }
+}
+
+struct ShapeabilityFailure {
+    /// Number of kept codepoints that shaped to `.notdef`.
+    notdef_count: usize,
+    /// Total kept codepoints probed.
+    notdef_total: usize,
+}
+
+/// Shape every kept codepoint against the rebuilt typeface and return
+/// `Some` if any codepoint maps to `.notdef`. Catches the
+/// macOS-Apple-font subsetter pathology where Skia accepts the bytes but
+/// the cmap doesn't bind glyph IDs.
+///
+/// Whitespace and control codepoints are exempt — their .notdef-ness is
+/// font-dependent and not a sign of a broken subset.
+fn check_shapeability(
+    typeface: &skia_safe::Typeface,
+    codepoints: &std::collections::BTreeSet<crate::render::subset::collect::Codepoint>,
+) -> Option<ShapeabilityFailure> {
+    use skia_safe::Font;
+    let font = Font::from_typeface(typeface.clone(), 12.0);
+
+    // Build a probe string from the kept codepoints, skipping whitespace
+    // and other glyph-optional categories so the result reflects actual
+    // shapeability of the kept set.
+    let probe: String = codepoints
+        .iter()
+        .filter_map(|c| char::from_u32(c.0))
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    if probe.is_empty() {
+        return None;
+    }
+    let glyphs = font.text_to_glyphs_vec(&probe);
+    let notdef_count = glyphs.iter().filter(|&&g| g == 0).count();
+    if notdef_count == 0 {
+        return None;
+    }
+    Some(ShapeabilityFailure {
+        notdef_count,
+        notdef_total: glyphs.len(),
+    })
 }
 
 #[cfg(feature = "subset-fonts")]
@@ -410,5 +497,120 @@ mod tests {
         let s = report.to_string();
         assert!(s.contains("1/2"));
         assert!(s.contains("90000")); // savings
+    }
+
+    /// Helper: resolve a font from the host or skip the test cleanly.
+    fn host_font(family: &str) -> Option<skia_safe::Typeface> {
+        let mgr = fmgr();
+        let tf = mgr.match_family_style(family, FontStyle::normal())?;
+        if tf.family_name().eq_ignore_ascii_case(family) {
+            Some(tf)
+        } else {
+            None
+        }
+    }
+
+    /// Direct end-to-end of the apply path against a host system font.
+    /// `apply` swaps the typeface in the registry only when the subsetted
+    /// typeface can shape its kept codepoints; if the post-validation
+    /// catches an unshapeable subset, the registry retains the original.
+    /// Either way, the registry's resolved typeface must shape correctly
+    /// after `apply` returns.
+    #[test]
+    fn apply_never_installs_unshapeable_subset() {
+        // macOS's Helvetica Neue is the canonical case: fontcull produces
+        // structurally valid bytes whose cmap doesn't bind glyph IDs.
+        // On hosts without it, fall back to whatever standard font is
+        // available; the invariant ("registry shapes correctly after
+        // apply") must hold for every host font.
+        let candidates = ["Helvetica Neue", "Arial Unicode MS", "Helvetica", "Arial"];
+        let target = match candidates.iter().find(|f| host_font(f).is_some()) {
+            Some(t) => *t,
+            None => {
+                eprintln!("skipping: no candidate system font available");
+                return;
+            }
+        };
+
+        let mut r = FontRegistry::new(fmgr());
+        // Force the registry to cache this exact typeface so apply() picks
+        // it up. The simplest path is just a normal resolve(...) — that
+        // populates the typefaces cache via FontMgr.
+        let _ = r.resolve(target, FontStyle::normal());
+
+        // Build pages whose text uses real codepoints from the font.
+        let pages = vec![page_with_text("Numbers: 1, 2, 3, 4, 5", target)];
+        let usage = collect(&pages, &r);
+        assert_eq!(
+            usage.typeface_count(),
+            1,
+            "test precondition — exactly one typeface in use"
+        );
+
+        let _report = apply(usage, &mut r);
+
+        // The contract: regardless of which SubsetOutcome variant fires,
+        // the registry's resolved typeface must shape the original probe
+        // string to non-.notdef glyphs. For a font fontcull mishandles,
+        // this is the post-validation rejecting the broken subset and
+        // leaving the original; for fonts fontcull handles, it's the
+        // subsetted version still shaping correctly.
+        let after = r.resolve(target, FontStyle::normal());
+        let font = skia_safe::Font::from_typeface(after.typeface, 12.0);
+        let probe = "Numbers: 1, 2, 3, 4, 5";
+        let glyphs = font.text_to_glyphs_vec(probe);
+        let nondef: Vec<u16> = glyphs.iter().filter(|&&g| g != 0).copied().collect();
+        let zeros = glyphs.iter().filter(|&&g| g == 0).count();
+        assert_eq!(
+            zeros,
+            0,
+            "post-`apply` typeface for '{target}' must shape every probe codepoint \
+             to a non-.notdef glyph (got {zeros}/{} .notdef out of {nondef:?})",
+            glyphs.len()
+        );
+    }
+
+    /// Unit-level test for the post-validation predicate itself: given a
+    /// known-good typeface and codepoints in its repertoire, the predicate
+    /// reports no failure.
+    #[test]
+    fn check_shapeability_passes_on_valid_typeface() {
+        use std::collections::BTreeSet;
+        let mgr = fmgr();
+        let tf = mgr
+            .legacy_make_typeface(None::<&str>, FontStyle::normal())
+            .expect("system has a default typeface");
+        let mut cps = BTreeSet::new();
+        for c in "abc".chars() {
+            cps.insert(crate::render::subset::collect::Codepoint::from(c));
+        }
+        assert!(
+            check_shapeability(&tf, &cps).is_none(),
+            "default typeface must shape 'abc' without .notdef"
+        );
+    }
+
+    /// Helper for the synthetic broken-cmap case: build a typeface from
+    /// arbitrary system bytes, then probe with a codepoint outside its
+    /// repertoire. Confirms the predicate fires — independent of any
+    /// klippa-specific behaviour.
+    #[test]
+    fn check_shapeability_fires_on_missing_codepoint() {
+        use std::collections::BTreeSet;
+        // Pick a Latin-only font; CJK ideographs will be .notdef.
+        let tf = match host_font("Helvetica").or_else(|| host_font("Arial")) {
+            Some(t) => t,
+            None => {
+                eprintln!("skipping: no Latin-only system font");
+                return;
+            }
+        };
+        let mut cps = BTreeSet::new();
+        // 烏 is not in standard Helvetica/Arial.
+        cps.insert(crate::render::subset::collect::Codepoint::from('\u{70CF}'));
+        let failure = check_shapeability(&tf, &cps)
+            .expect("a Latin font must report .notdef for a CJK codepoint");
+        assert!(failure.notdef_count >= 1);
+        assert!(failure.notdef_total >= 1);
     }
 }

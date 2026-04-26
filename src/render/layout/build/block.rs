@@ -400,6 +400,7 @@ pub(super) fn build_fragments(
         resolved_styles: Some(&ctx.resolved.styles),
         paragraph_run_defaults: Some(&run_defaults),
         theme: ctx.resolved.theme.as_ref(),
+        measurer: Some(ctx.measurer),
     };
     let mut fragments = collect_fragments(
         &para.content,

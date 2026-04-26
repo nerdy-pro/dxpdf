@@ -58,7 +58,7 @@ pub enum TypefaceOrigin {
     System { typeface_id: TypefaceId },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TypefaceEntry {
     pub typeface: Typeface,
     pub origin: TypefaceOrigin,
@@ -275,6 +275,32 @@ impl FontRegistry {
             tf.family_name()
         );
         system_entry(tf)
+    }
+
+    /// Resolve a typeface by exact family + style match, or `None` if the
+    /// family is neither registered as an embedded font nor present in the
+    /// host's font system.
+    ///
+    /// Unlike [`resolve`], this does not fall back to substitutes or to the
+    /// system default — necessary for the emoji pipeline, where substituting
+    /// a non-emoji typeface for a missing color emoji font is never correct.
+    pub fn resolve_exact(&self, family: &str, style: FontStyle) -> Option<TypefaceEntry> {
+        let variant = variant_for_style(style);
+        if let Some(id) = self
+            .embedded_index
+            .get(&(family.to_lowercase(), variant))
+            .copied()
+        {
+            let bytes = &self.embedded[id.0 as usize].bytes;
+            let data = Data::new_copy(bytes);
+            if let Some(tf) = self.font_mgr.new_from_data(&data, 0) {
+                return Some(TypefaceEntry {
+                    typeface: tf,
+                    origin: TypefaceOrigin::Embedded { id },
+                });
+            }
+        }
+        match_exact(&self.font_mgr, family, style).map(system_entry)
     }
 
     /// Pre-resolve all four style variants for each family.
@@ -631,5 +657,27 @@ mod tests {
             new_id,
             "FontCache must observe the post-replacement typeface"
         );
+    }
+
+    #[test]
+    fn resolve_exact_returns_none_for_unknown_family() {
+        let r = FontRegistry::new(fmgr());
+        assert!(
+            r.resolve_exact("DefinitelyNotInstalledXYZ", FontStyle::normal())
+                .is_none(),
+            "unlike resolve(), resolve_exact must not invent a fallback"
+        );
+    }
+
+    #[test]
+    fn resolve_exact_returns_some_for_embedded_family() {
+        let bytes = arbitrary_system_font_bytes();
+        let mut r = FontRegistry::new(fmgr());
+        r.register_embedded("ExactProbe", EmbeddedFontVariant::Regular, bytes)
+            .expect("register_embedded should accept valid font bytes");
+        let entry = r
+            .resolve_exact("ExactProbe", FontStyle::normal())
+            .expect("embedded font must be resolvable via exact match");
+        assert!(matches!(entry.origin, TypefaceOrigin::Embedded { .. }));
     }
 }

@@ -104,6 +104,8 @@ pub struct Shading {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShadingPattern {
+    /// §17.18.78 ST_Shd: `nil` — no shading whatsoever.
+    Nil,
     Clear,
     Solid,
     HorzStripe,

@@ -219,6 +219,40 @@ mod tests {
     }
 
     #[test]
+    fn merge_run_explicit_underline_none_overrides_parent_single() {
+        // §17.7.2 + §17.3.2.40: <w:u w:val="none"/> on the child explicitly
+        // turns off an underline that the parent style would otherwise
+        // inherit. The merge must preserve `Some(UnderlineStyle::None)`
+        // rather than overwriting it with the parent's `Single`.
+        let mut target = RunProperties {
+            underline: Some(UnderlineStyle::None),
+            ..Default::default()
+        };
+        let base = RunProperties {
+            underline: Some(UnderlineStyle::Single),
+            ..Default::default()
+        };
+        merge_run_properties(&mut target, &base);
+        assert_eq!(
+            target.underline,
+            Some(UnderlineStyle::None),
+            "explicit <w:u w:val=\"none\"/> must override the parent's Single"
+        );
+    }
+
+    #[test]
+    fn merge_run_absent_underline_inherits_from_parent() {
+        // Mirror invariant: when the child is silent, parent's underline wins.
+        let mut target = RunProperties::default();
+        let base = RunProperties {
+            underline: Some(UnderlineStyle::Single),
+            ..Default::default()
+        };
+        merge_run_properties(&mut target, &base);
+        assert_eq!(target.underline, Some(UnderlineStyle::Single));
+    }
+
+    #[test]
     fn merge_run_fonts_merged_field_by_field() {
         let mut target = RunProperties {
             fonts: FontSet {
