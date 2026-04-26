@@ -357,6 +357,9 @@ impl From<StSectionMark> for SectionType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StShd {
+    /// §17.18.78 ST_Shd: `nil` — no shading whatsoever (distinct from
+    /// `clear`, which means "transparent shading with a defined color").
+    Nil,
     Clear,
     Solid,
     HorzStripe,
@@ -399,6 +402,7 @@ pub enum StShd {
 impl From<StShd> for ShadingPattern {
     fn from(s: StShd) -> Self {
         match s {
+            StShd::Nil => Self::Nil,
             StShd::Clear => Self::Clear,
             StShd::Solid => Self::Solid,
             StShd::HorzStripe => Self::HorzStripe,
