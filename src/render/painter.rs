@@ -181,6 +181,7 @@ fn render_page(
                 structure,
             } => {
                 use crate::render::emoji::cluster::EmojiCluster;
+                use skia_safe::{CubicResampler, SamplingOptions};
                 let cluster = EmojiCluster {
                     text: text.as_str(),
                     presentation: *presentation,
@@ -190,7 +191,18 @@ fn render_page(
                 // whose aspect matches the rect → uniform scaling at
                 // `draw_image_rect`, no anisotropic distortion.
                 let img = emoji_rasterizer.rasterize(&cluster, typeface, *size, rect.size);
-                canvas.draw_image_rect(&img.image, None, to_rect(*rect), &Paint::default());
+                // Mitchell cubic resampling — same filter we use for
+                // photographic image downsampling. Without explicit
+                // sampling, Skia defaults to nearest/bilinear which makes
+                // the emoji look blurry/pixelated at typical PDF zoom.
+                let sampling = SamplingOptions::from(CubicResampler::mitchell());
+                canvas.draw_image_rect_with_sampling_options(
+                    &img.image,
+                    None,
+                    to_rect(*rect),
+                    sampling,
+                    &Paint::default(),
+                );
             }
             DrawCommand::Rect { rect, color } => {
                 let mut paint = Paint::default();

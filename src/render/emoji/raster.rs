@@ -27,15 +27,25 @@ use crate::render::geometry::PtSize;
 /// Pixel density at which clusters are rasterized.
 ///
 /// PDF viewers re-rasterize images at the user's chosen zoom; super-sampling
-/// here trades larger PDF size for crispness when zoomed in.
+/// here trades larger PDF size for crispness when zoomed in. For sbix /
+/// CBDT bitmap-emoji fonts (Apple Color Emoji, Noto Color Emoji), higher
+/// super-sampling also lets Skia pick a higher-resolution source bitmap
+/// from the font's strike table, sharpening the result before any paint-
+/// time downsampling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SuperSample {
     /// 1 pixel per Pt — minimum size, soft when zoomed.
     OnePerPt,
-    /// 2 pixels per Pt — default, crisp at typical viewer zoom.
+    /// 2 pixels per Pt — soft at print quality.
     TwoPerPt,
-    /// 3 pixels per Pt — print-quality.
+    /// 3 pixels per Pt — moderate.
     ThreePerPt,
+    /// 4 pixels per Pt — default. Drives Skia to pick a 64–96px sbix
+    /// strike at typical body-text sizes, which downsamples cleanly via
+    /// Mitchell cubic at paint time.
+    FourPerPt,
+    /// 6 pixels per Pt — print-quality / display-zoom-friendly.
+    SixPerPt,
 }
 
 impl SuperSample {
@@ -44,6 +54,8 @@ impl SuperSample {
             SuperSample::OnePerPt => 1.0,
             SuperSample::TwoPerPt => 2.0,
             SuperSample::ThreePerPt => 3.0,
+            SuperSample::FourPerPt => 4.0,
+            SuperSample::SixPerPt => 6.0,
         }
     }
 }
@@ -56,7 +68,7 @@ pub struct RasterConfig {
 impl Default for RasterConfig {
     fn default() -> Self {
         Self {
-            super_sample: SuperSample::TwoPerPt,
+            super_sample: SuperSample::FourPerPt,
         }
     }
 }
