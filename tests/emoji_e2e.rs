@@ -6,10 +6,11 @@
 //! - Paragraph 1: `Numbers: 1, 2, 3, 4, 5` — pure text. Asserts the
 //!   default-text emoji codepoint trap (digits 0-9 have `Emoji=YES` per
 //!   UTS #51) is *not* re-introduced.
-//! - Paragraph 2: `Emojis: 👋 1️⃣ 👍🏿` — at least two color emoji
-//!   clusters that must reach the rasterizer (single + modifier sequence).
-//!   The keycap `1️⃣` is split across three runs in the source docx, so
-//!   it renders as text glyphs today; this is documented in the test.
+//! - Paragraph 2: `Emojis: 👋 1️⃣ 👍🏿` — three color emoji clusters
+//!   that must reach the rasterizer. The keycap `1️⃣` is split across
+//!   three runs in the source docx (Word's §17.3.2.26 `<w:rFonts>` slot
+//!   routing) and reassembles via `docs/cross-run-cluster-reassembly.md`;
+//!   the modifier sequence `👍🏿` is similarly cross-run.
 
 use std::path::Path;
 
@@ -96,9 +97,11 @@ fn e1_digits_are_not_rasterized() {
 
 // ─── E2: emoji clusters reach the rasterizer ─────────────────────────────────
 
-/// E2 — `Emojis: 👋 ... 👍🏿` produces at least two EmojiCluster commands
-/// (the standalone hand wave and the thumbs-up + skin-tone modifier
-/// sequence). Skipped on hosts without a color emoji typeface.
+/// E2 — `Emojis: 👋 1️⃣ 👍🏿` produces three EmojiCluster commands
+/// (the wave, the keycap, and the thumbs-up + skin-tone modifier
+/// sequence). The keycap reassembly across runs is implemented per
+/// `docs/cross-run-cluster-reassembly.md`; previously this asserted
+/// `>= 2` and the keycap was missing.
 #[test]
 fn e2_real_emojis_reach_rasterizer() {
     if !host_has_color_emoji() {
@@ -113,8 +116,8 @@ fn e2_real_emojis_reach_rasterizer() {
         .map(|p| count_emoji_commands(&p.commands))
         .sum();
     assert!(
-        n_emoji >= 2,
-        "expected at least 2 EmojiCluster commands (👋 and 👍🏿), got {n_emoji}"
+        n_emoji >= 3,
+        "expected at least 3 EmojiCluster commands (👋, 1️⃣, 👍🏿), got {n_emoji}"
     );
 
     // Specifically confirm 👋 and 👍🏿 (or 👍 + skin tone) are present.
@@ -267,6 +270,103 @@ fn underline_explicit_none_emits_no_underline_commands() {
         underline_count, 0,
         "fixture's <w:u w:val=\"none\"/> override must produce zero \
          Underline draw commands"
+    );
+}
+
+// ─── Cross-run grapheme reassembly (UAX #29 + UTS #51) ────────────────────────
+
+/// E_keycap_1 — the keycap `1️⃣` in `sample-emoji.docx` is split across
+/// three runs by Word's §17.3.2.26 `<w:rFonts>` slot routing (digit `1`
+/// in ASCII slot, VS-16 + U+20E3 in hAnsi slot). After the cross-run
+/// reassembly per `docs/cross-run-cluster-reassembly.md`, the cluster
+/// reaches the painter as one `DrawCommand::EmojiCluster`.
+#[test]
+fn e_keycap_1_reassembles_into_one_emoji_command() {
+    if !host_has_color_emoji() {
+        eprintln!("skipping E_keycap_1: no color emoji typeface on this host");
+        return;
+    }
+    let doc = parse_fixture();
+    let (_, pages) = dxpdf::render::resolve_and_layout(&doc);
+
+    let mut saw_keycap = false;
+    for cmd in pages.iter().flat_map(|p| p.commands.iter()) {
+        if let DrawCommand::EmojiCluster { text, .. } = cmd {
+            if text == "1\u{FE0F}\u{20E3}" {
+                saw_keycap = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        saw_keycap,
+        "expected one EmojiCluster carrying the full keycap text \"1\\u{{FE0F}}\\u{{20E3}}\""
+    );
+}
+
+/// E_keycap_2 — the constituent codepoints of the keycap (digit `1`,
+/// VS-16, U+20E3) must NOT appear as separate `Text` commands. They
+/// were consumed by the emoji reassembly. Regression test for the
+/// known limitation that previously rendered them as text glyphs.
+#[test]
+fn e_keycap_2_no_constituent_text_remains() {
+    if !host_has_color_emoji() {
+        eprintln!("skipping E_keycap_2: no color emoji typeface on this host");
+        return;
+    }
+    let doc = parse_fixture();
+    let (_, pages) = dxpdf::render::resolve_and_layout(&doc);
+
+    for cmd in pages.iter().flat_map(|p| p.commands.iter()) {
+        if let DrawCommand::Text { text, .. } = cmd {
+            assert_ne!(
+                &**text, "\u{FE0F}",
+                "VS-16 must not survive as a text fragment"
+            );
+            assert_ne!(
+                &**text, "\u{20E3}",
+                "U+20E3 must not survive as a text fragment"
+            );
+            // The standalone "1" *would* have been emitted before the
+            // reassembly fix; with reassembly, the entire keycap is one
+            // emoji unit, so no text fragment carries just "1" from this
+            // paragraph. (We can't be quite that strict — the "Numbers"
+            // line legitimately contains "1, " etc. — but we can assert
+            // the keycap-construction codepoints are gone.)
+        }
+    }
+}
+
+/// E_keycap_3 — the rendered PDF embeds at least 3 image XObjects in
+/// the body area: 👋, 1️⃣ raster, 👍🏿. Was 2 before the reassembly fix.
+#[test]
+fn e_keycap_3_pdf_image_count() {
+    if !host_has_color_emoji() {
+        eprintln!("skipping E_keycap_3: no color emoji typeface on this host");
+        return;
+    }
+    let font_mgr = skia_safe::FontMgr::new();
+    let doc = parse_fixture();
+    let pdf_bytes = dxpdf::render::render_with_font_mgr(&doc, &font_mgr).expect("render");
+
+    let parsed = lopdf::Document::load_mem(&pdf_bytes).expect("load_mem");
+    let mut image_count = 0;
+    for obj in parsed.objects.values() {
+        if let Ok(stream) = obj.as_stream() {
+            if stream
+                .dict
+                .get(b"Subtype")
+                .ok()
+                .and_then(|s| s.as_name().ok())
+                .is_some_and(|n| n == b"Image")
+            {
+                image_count += 1;
+            }
+        }
+    }
+    assert!(
+        image_count >= 3,
+        "PDF must embed at least 3 image XObjects (👋, 1️⃣, 👍🏿), got {image_count}"
     );
 }
 

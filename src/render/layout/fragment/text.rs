@@ -182,7 +182,7 @@ pub(super) fn emit_text_fragments<F>(
 
 /// Word-split + measure path. Identical to the prior body of
 /// [`emit_text_fragments`]; factored out so emoji-cluster fallback can reuse it.
-fn emit_text_words<F>(
+pub(super) fn emit_text_words<F>(
     text: &str,
     font: &FontProps,
     style: &TextRunStyle,
@@ -224,7 +224,7 @@ fn emit_text_words<F>(
 /// the cluster through the text path so its codepoints still appear in the
 /// PDF text stream (per the no-bundle / no-silent-degradation policy in
 /// `docs/emoji-rendering.md`).
-fn emit_emoji_or_fallback<F>(
+pub(super) fn emit_emoji_or_fallback<F>(
     cluster: &EmojiCluster<'_>,
     font: &FontProps,
     style: &TextRunStyle,

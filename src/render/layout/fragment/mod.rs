@@ -14,6 +14,7 @@ use crate::render::resolve::fonts::effective_font;
 use crate::render::resolve::images::MediaEntry;
 
 mod collect;
+mod segment;
 mod text;
 
 pub use collect::{collect_fragments, FieldContext, FragmentCtx};
