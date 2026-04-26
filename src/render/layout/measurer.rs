@@ -7,6 +7,7 @@ use skia_safe::Font;
 
 use crate::render::dimension::Pt;
 use crate::render::emoji::resolve::{EmojiFamily, EmojiResolver, EmojiTypeface, RegistryLookup};
+use crate::render::emoji::shape::shape_text;
 use crate::render::fonts::{self, FontRegistry, TypefaceEntry};
 
 use super::fragment::FontProps;
@@ -130,9 +131,16 @@ impl<'r> TextMeasurer<'r> {
     /// which has already resolved the typeface and needs Skia raster metrics
     /// at the cluster's font size.
     ///
-    /// Returns advance and ascent/descent/leading sourced from Skia's
-    /// raster backend — same metrics the rasterizer uses at paint time, so
-    /// layout and paint stay in lockstep.
+    /// **Shapes via rustybuzz** (GSUB-aware) so multi-codepoint emoji
+    /// sequences measure to their *ligated* width, matching what the
+    /// rasterizer produces at paint time. Without this, the layout would
+    /// reserve `n × glyph_advance` for an `n`-codepoint sequence (cmap-
+    /// only) but the rasterizer would draw a ligated single glyph that's
+    /// narrower — the painter then stretches the image to fill the over-
+    /// sized rect, distorting the emoji.
+    ///
+    /// Falls back to `font.measure_str` (cmap-only) if shaping fails — a
+    /// best-effort policy mirroring the rasterizer's fallback path.
     pub fn measure_with_typeface(
         &self,
         text: &str,
@@ -140,14 +148,23 @@ impl<'r> TextMeasurer<'r> {
         size: Pt,
     ) -> (Pt, super::fragment::TextMetrics) {
         let font = Font::from_typeface(typeface.typeface.clone(), f32::from(size));
-        let (advance, _bounds) = font.measure_str(text, None);
         let (_, metrics) = font.metrics();
         let text_metrics = super::fragment::TextMetrics {
             ascent: Pt::new(-metrics.ascent),
             descent: Pt::new(metrics.descent),
             leading: Pt::new(metrics.leading.max(0.0)),
         };
-        (Pt::new(advance), text_metrics)
+
+        // Try the GSUB-aware advance first; fall back to the cmap-only
+        // path if the typeface bytes can't be extracted or shaped.
+        let advance = typeface
+            .typeface
+            .to_font_data()
+            .and_then(|(bytes, _)| shape_text(&bytes, text, f32::from(size)).ok())
+            .map(|run| run.total_advance)
+            .unwrap_or_else(|| Pt::new(font.measure_str(text, None).0));
+
+        (advance, text_metrics)
     }
 
     /// Log a warning once per cluster when no color emoji typeface is

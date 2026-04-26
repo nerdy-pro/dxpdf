@@ -186,7 +186,10 @@ fn render_page(
                     presentation: *presentation,
                     structure: *structure,
                 };
-                let img = emoji_rasterizer.rasterize(&cluster, typeface, *size);
+                // Pass `rect.size` so the rasterizer allocates an image
+                // whose aspect matches the rect → uniform scaling at
+                // `draw_image_rect`, no anisotropic distortion.
+                let img = emoji_rasterizer.rasterize(&cluster, typeface, *size, rect.size);
                 canvas.draw_image_rect(&img.image, None, to_rect(*rect), &Paint::default());
             }
             DrawCommand::Rect { rect, color } => {

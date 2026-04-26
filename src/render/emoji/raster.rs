@@ -64,23 +64,37 @@ impl Default for RasterConfig {
 /// Cache key for a rasterized cluster.
 ///
 /// Cluster text is NFC-normalized (UAX #15) so canonically-equivalent inputs
-/// share a slot. Size and scale are stored as the bit pattern of the f32 so
-/// the key is hashable and comparison is exact (no rounding-induced misses).
+/// share a slot. Size, scale, and target dimensions are stored as the bit
+/// pattern of the f32 so the key is hashable and comparison is exact (no
+/// rounding-induced misses).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EmojiKey {
     pub cluster: String,
     pub typeface_id: TypefaceId,
     pub size_bits: u32,
     pub scale_bits: u32,
+    /// Target image width in Pt as f32 bits. The rasterizer guarantees
+    /// image_aspect == rect_aspect to prevent anisotropic stretching at
+    /// paint time, so the cache key includes the target dimensions.
+    pub target_w_bits: u32,
+    pub target_h_bits: u32,
 }
 
 impl EmojiKey {
-    pub fn new(text: &str, typeface: &TypefaceEntry, size: Pt, scale: SuperSample) -> Self {
+    pub fn new(
+        text: &str,
+        typeface: &TypefaceEntry,
+        size: Pt,
+        scale: SuperSample,
+        target: PtSize,
+    ) -> Self {
         Self {
             cluster: text.nfc().collect(),
             typeface_id: TypefaceId::from(&typeface.typeface),
             size_bits: f32::from(size).to_bits(),
             scale_bits: scale.factor().to_bits(),
+            target_w_bits: target.width.raw().to_bits(),
+            target_h_bits: target.height.raw().to_bits(),
         }
     }
 }
@@ -142,6 +156,14 @@ impl EmojiRasterizer {
     /// Rasterize `cluster` at `size` using `typeface`, or return the cached
     /// image if previously seen.
     ///
+    /// `target` is the layout's reserved rect (in Pt). The rasterizer
+    /// allocates an image with **the same aspect ratio** as `target`,
+    /// scaled by the super-sample factor — this is critical because
+    /// `Canvas::draw_image_rect` does anisotropic scaling when image
+    /// aspect ≠ rect aspect, distorting the emoji. By matching aspects
+    /// here, the painter's image-to-rect scaling becomes uniform and
+    /// the emoji's visual content is preserved.
+    ///
     /// Internally shapes via `rustybuzz` (GSUB-aware) so multi-codepoint
     /// emoji sequences (keycap, modifier, ZWJ, RIS) render as their
     /// ligated single glyph — `canvas.draw_str` would have rendered each
@@ -157,9 +179,10 @@ impl EmojiRasterizer {
         cluster: &EmojiCluster,
         typeface: &TypefaceEntry,
         size: Pt,
+        target: PtSize,
     ) -> &EmojiImage {
         let scale = self.config.super_sample;
-        let key = EmojiKey::new(cluster.text, typeface, size, scale);
+        let key = EmojiKey::new(cluster.text, typeface, size, scale, target);
         if !self.cache.contains_key(&key) {
             let bytes = self.font_bytes_for(typeface);
             let image = rasterize_uncached(
@@ -167,6 +190,7 @@ impl EmojiRasterizer {
                 typeface,
                 size,
                 scale,
+                target,
                 bytes.as_deref().map(|v| v.as_slice()),
             );
             self.cache.insert(key.clone(), image);
@@ -195,36 +219,36 @@ fn rasterize_uncached(
     typeface: &TypefaceEntry,
     size: Pt,
     scale: SuperSample,
+    target: PtSize,
     font_bytes: Option<&[u8]>,
 ) -> EmojiImage {
     let factor = scale.factor();
     let scaled_size = f32::from(size) * factor;
     let font = Font::from_typeface(typeface.typeface.clone(), scaled_size);
 
+    // Image dimensions are derived from the target rect (× scale). This
+    // guarantees image_aspect == target_aspect → uniform scaling at paint
+    // time. Anisotropic scaling would distort the emoji (a square keycap
+    // squished to a rectangle). Apple Color Emoji's font.metrics() are
+    // non-linear across point sizes (ascent+descent ratio = 1.64 at 11pt
+    // but 1.37 at 22pt), so deriving image height from the rasterizer's
+    // own metrics() would mismatch the layout's rect.
+    let width_px = (target.width.raw() * factor).ceil().max(1.0) as i32;
+    let height_px = (target.height.raw() * factor).ceil().max(1.0) as i32;
+
+    // Baseline within the surface: the rasterizer's font.metrics() gives
+    // ascent at the scaled size. We position the baseline such that the
+    // glyph's top sits within the image; precise alignment with the line's
+    // baseline happens at paint time (the rect's vertical placement, not
+    // here).
+    let (_, font_metrics) = font.metrics();
+    let ascent_px_scaled = -font_metrics.ascent;
+
     // Try the GSUB-aware shaping path. On any shaping failure (font bytes
     // unavailable, parse error, glyph id out of range), fall through to
-    // the legacy `draw_str` path so the rasterizer still produces output.
+    // the cmap-only `draw_str` path so the rasterizer still produces
+    // output.
     let shaped = font_bytes.and_then(|b| shape_text(b, text, scaled_size).ok());
-
-    let (_, font_metrics) = font.metrics();
-    let ascent_px = -font_metrics.ascent;
-    let descent_px = font_metrics.descent;
-
-    // Compute width: from shaped advance if shaping succeeded, otherwise
-    // fall back to `font.measure_str` (cmap-level approximation).
-    let (width_px, height_px, x_origin, y_baseline) = match &shaped {
-        Some(run) => {
-            let w = run.total_advance.raw().ceil().max(1.0) as i32;
-            let h = (ascent_px + descent_px).ceil().max(1.0) as i32;
-            (w, h, 0.0, ascent_px)
-        }
-        None => {
-            let (_, bounds) = font.measure_str(text, None);
-            let w = bounds.width().ceil().max(1.0) as i32;
-            let h = bounds.height().ceil().max(1.0) as i32;
-            (w, h, -bounds.left(), -bounds.top())
-        }
-    };
 
     let mut surface = surfaces::raster_n32_premul((width_px, height_px))
         .expect("raster_n32_premul returned None for non-degenerate dimensions");
@@ -240,10 +264,9 @@ fn rasterize_uncached(
 
     match shaped {
         Some(run) => {
-            // Walk shaped glyphs, accumulating positions. The baseline sits
-            // at y=ascent_px; each glyph carries its own (x_offset,
-            // y_offset) in HarfBuzz convention (y positive = up); Skia's
-            // y-axis is flipped, so we negate the y offset.
+            // Walk shaped glyphs, accumulating positions. Baseline at
+            // ascent_px_scaled from the top; each glyph's HarfBuzz
+            // y-offset is positive-up, so we negate for Skia's y-down.
             let mut ids = Vec::with_capacity(run.glyphs.len());
             let mut positions = Vec::with_capacity(run.glyphs.len());
             let mut pen_x = 0.0f32;
@@ -251,30 +274,31 @@ fn rasterize_uncached(
                 ids.push(g.id);
                 positions.push(Point::new(
                     pen_x + g.x_offset.raw(),
-                    y_baseline - g.y_offset.raw(),
+                    ascent_px_scaled - g.y_offset.raw(),
                 ));
                 pen_x += g.advance.raw();
             }
             canvas.draw_glyphs_at(&ids, &*positions, (0.0, 0.0), &font, &paint);
         }
         None => {
-            // Legacy path: cmap-level draw_str. Used for fonts whose bytes
-            // we can't extract or rustybuzz can't parse.
-            canvas.translate((x_origin, y_baseline));
+            // Fallback: cmap-level draw_str. The bounds-based translation
+            // here is a best effort to land the glyph inside the surface.
+            let (_, bounds) = font.measure_str(text, None);
+            canvas.translate((-bounds.left(), -bounds.top()));
             canvas.draw_str(text, (0.0, 0.0), &font, &paint);
         }
     }
 
     let image = surface.image_snapshot();
 
+    // The image dimensions exactly match `target × factor` (modulo ceil),
+    // so draw_size returns to `target`. The painter draws `image` into a
+    // rect of exactly these dimensions for uniform scaling.
     EmojiImage {
         image,
         pixels: (width_px, height_px),
-        draw_size: PtSize::new(
-            Pt::new(width_px as f32 / factor),
-            Pt::new(height_px as f32 / factor),
-        ),
-        baseline_offset: Pt::new(y_baseline / factor),
+        draw_size: target,
+        baseline_offset: Pt::new(ascent_px_scaled / factor),
     }
 }
 
@@ -310,14 +334,21 @@ mod tests {
         }
     }
 
+    /// Default target rect for tests — non-degenerate, sized at the
+    /// 12pt font size used throughout the test suite. Aspect 1:1.6 so
+    /// distortion-style assertions can be checked.
+    fn default_target() -> PtSize {
+        PtSize::new(Pt::new(12.0), Pt::new(18.0))
+    }
+
     /// X1 — same key twice → one cache entry.
     #[test]
     fn x1_same_input_dedupes_in_cache() {
         let mut r = EmojiRasterizer::default();
         let tf = any_typeface();
         let c = single_emoji("\u{1F4DE}");
-        let _ = r.rasterize(&c, &tf, Pt::new(12.0));
-        let _ = r.rasterize(&c, &tf, Pt::new(12.0));
+        let _ = r.rasterize(&c, &tf, Pt::new(12.0), default_target());
+        let _ = r.rasterize(&c, &tf, Pt::new(12.0), default_target());
         assert_eq!(r.cached_count(), 1, "identical key must reuse cache slot");
     }
 
@@ -326,8 +357,18 @@ mod tests {
     fn x2_distinct_clusters_cache_independently() {
         let mut r = EmojiRasterizer::default();
         let tf = any_typeface();
-        let _ = r.rasterize(&single_emoji("\u{1F4DE}"), &tf, Pt::new(12.0));
-        let _ = r.rasterize(&single_emoji("\u{1F4E7}"), &tf, Pt::new(12.0));
+        let _ = r.rasterize(
+            &single_emoji("\u{1F4DE}"),
+            &tf,
+            Pt::new(12.0),
+            default_target(),
+        );
+        let _ = r.rasterize(
+            &single_emoji("\u{1F4E7}"),
+            &tf,
+            Pt::new(12.0),
+            default_target(),
+        );
         assert_eq!(r.cached_count(), 2);
     }
 
@@ -337,8 +378,8 @@ mod tests {
         let mut r = EmojiRasterizer::default();
         let tf = any_typeface();
         let c = single_emoji("\u{1F4DE}");
-        let _ = r.rasterize(&c, &tf, Pt::new(12.0));
-        let _ = r.rasterize(&c, &tf, Pt::new(24.0));
+        let _ = r.rasterize(&c, &tf, Pt::new(12.0), default_target());
+        let _ = r.rasterize(&c, &tf, Pt::new(24.0), default_target());
         assert_eq!(r.cached_count(), 2);
     }
 
@@ -348,7 +389,12 @@ mod tests {
         let mut r = EmojiRasterizer::default();
         let tf = any_typeface();
         let img = r
-            .rasterize(&single_emoji("\u{1F4DE}"), &tf, Pt::new(12.0))
+            .rasterize(
+                &single_emoji("\u{1F4DE}"),
+                &tf,
+                Pt::new(12.0),
+                default_target(),
+            )
             .clone();
         assert!(
             img.pixels.0 >= 1,
@@ -364,20 +410,47 @@ mod tests {
         assert!(img.draw_size.height.raw() > 0.0);
     }
 
-    /// X4b — degenerate empty input must not crash and must yield a
-    /// non-zero raster surface. Width is clamped to 1 (no advance),
-    /// height comes from the typeface's ascent+descent so the baseline
-    /// is preserved if the painter ever places this image.
+    /// X4b — degenerate empty input must not crash. Image dimensions are
+    /// governed by the target rect now (so the image aspect matches the
+    /// painter's destination rect — see Y_aspect below), so we only
+    /// assert non-degeneracy.
     #[test]
     fn x4b_zero_width_input_yields_non_degenerate_surface() {
         let mut r = EmojiRasterizer::default();
         let tf = any_typeface();
-        let img = r.rasterize(&single_emoji(""), &tf, Pt::new(12.0)).clone();
-        assert_eq!(img.pixels.0, 1, "zero-advance input clamps to 1px width");
+        let img = r
+            .rasterize(&single_emoji(""), &tf, Pt::new(12.0), default_target())
+            .clone();
+        assert!(img.pixels.0 >= 1);
+        assert!(img.pixels.1 >= 1);
+    }
+
+    /// Y_aspect — image surface aspect == target rect aspect. This is
+    /// the property that prevents `Canvas::draw_image_rect` from
+    /// stretching the emoji at paint time. Without it, fonts whose
+    /// `ascent + descent` doesn't scale linearly (Apple Color Emoji's
+    /// ratio is 1.64 at 11pt vs 1.37 at 22pt) produce images of one
+    /// aspect that get drawn into rects of a different aspect →
+    /// distortion.
+    #[test]
+    fn y_aspect_image_matches_target() {
+        let mut r = EmojiRasterizer::default();
+        let tf = any_typeface();
+        // Pick an asymmetric target so a regression — using ascent+descent
+        // for height — would obviously change the aspect.
+        let target = PtSize::new(Pt::new(11.0), Pt::new(18.0));
+        let img = r
+            .rasterize(&single_emoji("A"), &tf, Pt::new(11.0), target)
+            .clone();
+        let img_aspect = img.pixels.0 as f32 / img.pixels.1 as f32;
+        let target_aspect = target.width.raw() / target.height.raw();
+        // Within rounding (ceil + integer pixels) — within 5% of the
+        // target aspect.
+        let rel_err = (img_aspect - target_aspect).abs() / target_aspect;
         assert!(
-            img.pixels.1 >= 1,
-            "height must remain non-degenerate, got {}",
-            img.pixels.1
+            rel_err < 0.05,
+            "image aspect {img_aspect:.4} must match target aspect {target_aspect:.4} \
+             within rounding (rel err {rel_err:.4})"
         );
     }
 
@@ -400,7 +473,12 @@ mod tests {
         };
         let mut r = EmojiRasterizer::default();
         let img = r
-            .rasterize(&single_emoji("\u{1F4DE}"), &entry, Pt::new(24.0))
+            .rasterize(
+                &single_emoji("\u{1F4DE}"),
+                &entry,
+                Pt::new(24.0),
+                PtSize::new(Pt::new(24.0), Pt::new(36.0)),
+            )
             .clone();
         let peek = img.image.peek_pixels();
         // peek_pixels can return None if the image is GPU-backed; raster
@@ -434,8 +512,8 @@ mod tests {
             presentation: EmojiPresentation::Emoji,
             structure: EmojiStructure::Single,
         };
-        let _ = r.rasterize(&precomposed, &tf, Pt::new(12.0));
-        let _ = r.rasterize(&decomposed, &tf, Pt::new(12.0));
+        let _ = r.rasterize(&precomposed, &tf, Pt::new(12.0), default_target());
+        let _ = r.rasterize(&decomposed, &tf, Pt::new(12.0), default_target());
         assert_eq!(
             r.cached_count(),
             1,
@@ -466,12 +544,12 @@ mod tests {
         let mut r1 = EmojiRasterizer::new(RasterConfig {
             super_sample: SuperSample::OnePerPt,
         });
-        let img1 = r1.rasterize(&c, &tf, size).clone();
+        let img1 = r1.rasterize(&c, &tf, size, default_target()).clone();
 
         let mut r3 = EmojiRasterizer::new(RasterConfig {
             super_sample: SuperSample::ThreePerPt,
         });
-        let img3 = r3.rasterize(&c, &tf, size).clone();
+        let img3 = r3.rasterize(&c, &tf, size, default_target()).clone();
 
         // Outline glyphs scale linearly: at 3× super-sample the pixel
         // surface should be ~3× larger on each axis.
