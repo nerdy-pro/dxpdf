@@ -132,9 +132,21 @@ pub enum Fragment {
         structure: EmojiStructure,
         /// Measured advance from Skia raster metrics at `size`.
         advance: Pt,
-        /// Font metrics from the resolved emoji typeface — used for line
-        /// height contribution.
+        /// Font metrics from the resolved emoji typeface. Drives the
+        /// rasterized image's natural aspect ratio and the rect's vertical
+        /// extent in `line_emit::emit_line_commands` — NOT the line-height
+        /// contribution. Color emoji typefaces (Apple Color Emoji, Segoe UI
+        /// Emoji) carry tall ascents (≈1.25× font size) so their glyph art
+        /// fits, but bumping running-text line height by that amount makes
+        /// emoji-mixed lines visibly taller than text-only lines.
         metrics: TextMetrics,
+        /// Metrics for line-height contribution, derived from the run's
+        /// font.size against the run-level typeface (not the emoji
+        /// typeface). Keeps the inline emoji "1em-tall" semantics so a
+        /// paragraph that mixes emoji and plain text lays out evenly.
+        /// The rasterized image still draws at its natural extent and may
+        /// overhang the line slightly.
+        line_metrics: TextMetrics,
         /// Inherited from the run (super/subscript / `w:position`).
         baseline_offset: Pt,
     },
@@ -184,7 +196,7 @@ impl Fragment {
         match self {
             Fragment::Text { metrics, .. } => metrics.height(),
             Fragment::Image { size, .. } => size.height,
-            Fragment::Emoji { metrics, .. } => metrics.height(),
+            Fragment::Emoji { line_metrics, .. } => line_metrics.height(),
             Fragment::Tab { line_height, .. }
             | Fragment::LineBreak { line_height }
             | Fragment::PageBreak { line_height } => *line_height,

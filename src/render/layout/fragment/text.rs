@@ -246,6 +246,11 @@ pub(super) fn emit_emoji_or_fallback<F>(
         } => {
             let (advance, metrics) =
                 measurer.measure_with_typeface(cluster.text, &typeface, font.size);
+            // Line-height contribution uses the run's text-font metrics so
+            // an inline emoji doesn't bloat the line. Color emoji typefaces
+            // have ≈1.25× ascent which would otherwise stretch every line
+            // that contains an emoji vs surrounding text-only lines.
+            let (_, line_metrics) = measure_text("X", font);
             fragments.push(Fragment::Emoji {
                 text: cluster.text.to_string(),
                 typeface,
@@ -254,6 +259,7 @@ pub(super) fn emit_emoji_or_fallback<F>(
                 structure: cluster.structure,
                 advance,
                 metrics,
+                line_metrics,
                 baseline_offset: style.baseline_offset,
             });
         }

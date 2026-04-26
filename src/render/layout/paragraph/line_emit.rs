@@ -354,6 +354,7 @@ pub(super) fn emit_line_commands(
                     structure,
                     advance,
                     metrics,
+                    line_metrics: _,
                     baseline_offset,
                 } => {
                     // Place the cluster's box so its top sits at the line
