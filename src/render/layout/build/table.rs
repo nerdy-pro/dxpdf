@@ -100,13 +100,22 @@ pub(super) fn build_table(
     let cell_margins_h = default_cell_margins
         .map(|m| Pt::from(m.left) + Pt::from(m.right))
         .unwrap_or(Pt::ZERO);
+    // §17.4.63 / Word heuristic: a full-width left-aligned table extends
+    // beyond the body content area by its cell margins so cell content
+    // aligns with surrounding paragraph text. Centered/right-aligned tables
+    // are positioned as a unit — extending them would just shift them out
+    // by half the margins, producing a width discrepancy when consecutive
+    // centered tables have different cell margins (cf. the stacked
+    // "Anhang: Sauberkeit" tables in the Volvo Annahme-Protokoll).
+    let extends_for_alignment = !matches!(
+        t.properties.alignment,
+        Some(model::Alignment::Center) | Some(model::Alignment::End)
+    );
     let target_width = match t.properties.width {
         Some(model::TableMeasure::Pct(pct)) => {
-            // §17.4.63: percentage in fiftieths of a percent.
-            // 5000 = 100%. Full-width tables extend by cell margins so
-            // cell content aligns with paragraph text at the margins.
+            // §17.4.63: percentage in fiftieths of a percent. 5000 = 100%.
             let ratio = pct.raw() as f32 / 5000.0;
-            let base = if pct.raw() >= 5000 {
+            let base = if pct.raw() >= 5000 && extends_for_alignment {
                 available_width + cell_margins_h
             } else {
                 available_width
