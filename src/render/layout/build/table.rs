@@ -116,10 +116,12 @@ pub(super) fn build_table(
         Some(model::TableMeasure::Twips(tw)) => Pt::from(tw),
         _ => available_width, // auto/nil: use grid cols or available width
     };
-    // §17.4.53: fixed layout uses exact grid column widths — no scaling.
-    // Auto layout scales columns to fit the target width.
-    let is_fixed = t.properties.layout == Some(model::TableLayout::Fixed);
-    let col_widths = if (is_auto_width || is_fixed) && !grid_cols.is_empty() {
+    // §17.4.53: tblLayout controls whether columns may auto-resize to fit
+    // content; it does not override the preferred table width from tblW.
+    // Word scales grid column widths proportionally to match tblW in both
+    // fixed and auto layouts. Only when tblW is auto/nil do we keep the raw
+    // grid widths (no preferred width was specified).
+    let col_widths = if is_auto_width && !grid_cols.is_empty() {
         grid_cols.clone()
     } else {
         compute_column_widths(&grid_cols, num_cols, target_width)
