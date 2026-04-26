@@ -202,17 +202,29 @@ fn classify_cluster(cluster: &str) -> ClusterClass {
     }
 
     // 6. Single emoji codepoint, with optional presentation selector.
-    let presentation = if has_vs15 {
-        EmojiPresentation::Text
-    } else if has_vs16 || has_default_emoji_presentation(emoji_base) {
-        EmojiPresentation::Emoji
-    } else {
-        EmojiPresentation::Text
-    };
-    ClusterClass::Emoji {
-        presentation,
-        structure: EmojiStructure::Single,
+    //
+    // UTS #51 distinguishes "default-text" emoji codepoints (digits 0-9,
+    // '#', '*', ☎, ☃, ✉, ⌚, etc.) from "default-emoji" ones. A default-text
+    // codepoint without VS-16 must NOT be rasterized via the color emoji
+    // typeface — it's intended to render as the run's normal text glyph,
+    // and routing it to the rasterizer corrupts page numbers, IBANs, dates,
+    // and any other run that happens to contain digits.
+    //
+    // Decision rule:
+    //   VS-15            → Text (forced text presentation)
+    //   VS-16            → Emoji (forced emoji presentation)
+    //   default-emoji    → Emoji (color glyph rendering intended)
+    //   default-text     → Text (monochrome text-font rendering intended)
+    if has_vs15 {
+        return ClusterClass::Text;
     }
+    if has_vs16 || has_default_emoji_presentation(emoji_base) {
+        return ClusterClass::Emoji {
+            presentation: EmojiPresentation::Emoji,
+            structure: EmojiStructure::Single,
+        };
+    }
+    ClusterClass::Text
 }
 
 // ─── Codepoint property helpers ──────────────────────────────────────────────
@@ -311,16 +323,11 @@ mod tests {
     }
 
     /// C3 — U+260E BLACK TELEPHONE has Emoji=YES with default-text presentation.
+    /// Per UTS #51 it must render via the run's text font, not as a color
+    /// emoji raster — so it stays in an `InlineCluster::Text` span.
     #[test]
-    fn c3_default_text_presentation() {
-        assert_eq!(
-            classify("\u{260E}"),
-            vec![emoji(
-                "\u{260E}",
-                EmojiPresentation::Text,
-                EmojiStructure::Single
-            )]
-        );
+    fn c3_default_text_presentation_stays_text() {
+        assert_eq!(classify("\u{260E}"), vec![InlineCluster::Text("\u{260E}")]);
     }
 
     /// C4 — VS-16 promotes a default-text emoji to emoji presentation.
@@ -336,14 +343,89 @@ mod tests {
         );
     }
 
-    /// C5 — VS-15 demotes any emoji to text presentation.
+    /// C5 — VS-15 explicitly forces text presentation. The cluster must
+    /// stay as text so it renders via the run's text font.
     #[test]
-    fn c5_vs15_demotes_to_text() {
+    fn c5_vs15_forces_text() {
         assert_eq!(
             classify("\u{260E}\u{FE0E}"),
+            vec![InlineCluster::Text("\u{260E}\u{FE0E}")]
+        );
+    }
+
+    // ─── Default-text emoji codepoint regression tests ───────────────────────
+    //
+    // Per UTS #51 emoji-data.txt: digits 0-9, '#', '*' have Emoji=YES with
+    // default-text presentation. A prior version of the classifier returned
+    // them as `InlineCluster::Emoji` with `presentation: Text`, which still
+    // routed them through the color emoji rasterizer downstream — corrupting
+    // page numbers, IBANs, dates, and any other digit-bearing text.
+
+    /// Standalone digit must be plain text — no rasterization.
+    #[test]
+    fn standalone_digit_is_text() {
+        assert_eq!(classify("1"), vec![InlineCluster::Text("1")]);
+    }
+
+    /// Multi-digit string is one text span (digits are separate graphemes
+    /// per UAX #29 but adjacent text clusters merge in `classify`).
+    #[test]
+    fn multi_digit_is_single_text_span() {
+        assert_eq!(classify("12345"), vec![InlineCluster::Text("12345")]);
+    }
+
+    /// `#` and `*` alone are text — they're keycap *bases*, not emojis.
+    #[test]
+    fn hash_and_star_alone_are_text() {
+        assert_eq!(classify("#"), vec![InlineCluster::Text("#")]);
+        assert_eq!(classify("*"), vec![InlineCluster::Text("*")]);
+    }
+
+    /// Real-world regression: footer text "Seite 1 von 2" must produce a
+    /// single text span. Previously the digits were rasterized, so
+    /// `pdftotext` showed only "Seite  von" with the numbers replaced by
+    /// images.
+    #[test]
+    fn footer_page_number_text_is_not_rasterized() {
+        let clusters = classify("Seite 1 von 2");
+        assert_eq!(clusters, vec![InlineCluster::Text("Seite 1 von 2")]);
+        for c in &clusters {
+            assert!(
+                matches!(c, InlineCluster::Text(_)),
+                "no emoji clusters expected, got {c:?}"
+            );
+        }
+    }
+
+    /// IBAN strings (digits and letters) must stay as one text span.
+    #[test]
+    fn iban_is_text_only() {
+        assert_eq!(
+            classify("IBAN: DE50 3705 0299 0000 3812 08"),
+            vec![InlineCluster::Text("IBAN: DE50 3705 0299 0000 3812 08")]
+        );
+    }
+
+    /// Phone-number-style content with separators stays as text.
+    #[test]
+    fn phone_number_is_text_only() {
+        assert_eq!(
+            classify("0221 – 89 06 37 69"),
+            vec![InlineCluster::Text("0221 – 89 06 37 69")]
+        );
+    }
+
+    /// VS-16 on a digit DOES route through the emoji rasterizer (uncommon
+    /// but spec-allowed: VS-16 forces emoji presentation regardless of the
+    /// codepoint's default). This keeps C4's contract symmetric across
+    /// codepoints.
+    #[test]
+    fn digit_with_vs16_is_emoji() {
+        assert_eq!(
+            classify("1\u{FE0F}"),
             vec![emoji(
-                "\u{260E}\u{FE0E}",
-                EmojiPresentation::Text,
+                "1\u{FE0F}",
+                EmojiPresentation::Emoji,
                 EmojiStructure::Single
             )]
         );
