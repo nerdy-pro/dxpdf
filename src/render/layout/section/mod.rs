@@ -233,6 +233,8 @@ mod tests {
                 height_rule: None,
                 is_header: None,
                 cant_split: None,
+                grid_before: 0,
+                grid_after: 0,
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,

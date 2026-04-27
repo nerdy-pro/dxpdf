@@ -40,15 +40,19 @@ pub(super) fn measure_table_rows(
         for (row_idx, row) in rows.iter().enumerate() {
             let mut row_borders = Vec::new();
             let mut row_grid = Vec::new();
-            let mut grid_idx = 0;
-            for (cell_ci, cell_input) in row.cells.iter().enumerate() {
+            // §17.4.17: gridBefore — the row's first cell starts at grid_col
+            // `grid_before`, leaving the leftmost columns empty.
+            let mut grid_idx = row.grid_before as usize;
+            for cell_input in row.cells.iter() {
+                let span = cell_input.grid_span.max(1) as usize;
                 let (mut b_top, mut b_bottom, b_left, b_right) = resolve_cell_effective_borders(
                     cell_input,
                     borders,
                     row_idx,
-                    cell_ci,
+                    grid_idx,
+                    span,
                     num_rows,
-                    row.cells.len(),
+                    col_widths.len(),
                 );
                 if cell_input.vertical_merge == Some(VerticalMergeState::Continue) {
                     b_top = None;
@@ -114,12 +118,19 @@ pub(super) fn measure_table_rows(
     for (row_idx, row) in rows.iter().enumerate() {
         let mut entries = Vec::new();
         let mut max_height = Pt::ZERO;
-        let mut grid_idx = 0;
+        // §17.4.17: gridBefore — first cell offset.
+        let mut grid_idx = row.grid_before as usize;
 
         for (cell_ci, cell) in row.cells.iter().enumerate() {
             let span = cell.grid_span.max(1) as usize;
-            let cell_w: Pt = col_widths[grid_idx..grid_idx + span].iter().copied().sum();
-            let cell_x: Pt = col_widths[..grid_idx].iter().copied().sum();
+            // Defensive clamp: malformed DOCX where gridBefore + spans + gridAfter
+            // exceed the grid would otherwise panic in the slice index below.
+            let grid_end = (grid_idx + span).min(col_widths.len());
+            let cell_w: Pt = col_widths[grid_idx..grid_end].iter().copied().sum();
+            let cell_x: Pt = col_widths[..grid_idx.min(col_widths.len())]
+                .iter()
+                .copied()
+                .sum();
 
             let b = &resolved_borders[row_idx][cell_ci];
             let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);

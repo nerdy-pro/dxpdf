@@ -18,13 +18,21 @@ pub(super) struct CellBorders {
 /// §17.4.38 / §17.7.6: resolve effective borders for a cell.
 /// Per-cell borders (from conditional formatting) override table-level borders.
 /// Table-level insideH/insideV are mapped to cell edges based on position.
+///
+/// `cell_grid_col` is the cell's absolute starting grid column (accounting
+/// for the row's `gridBefore`); `cell_grid_span` is its `gridSpan` (≥1);
+/// `num_grid_cols` is the table-wide grid column count. Together these
+/// determine whether the cell is at the table's left or right edge — which
+/// matters because §17.4.17/§17.4.16 (`gridBefore`/`gridAfter`) can leave
+/// the row's first/last cell *not* at the table edge.
 pub(super) fn resolve_cell_effective_borders(
     cell: &TableCellInput,
     table_borders: Option<&TableBorderConfig>,
     row_idx: usize,
-    col_idx: usize,
+    cell_grid_col: usize,
+    cell_grid_span: usize,
     num_rows: usize,
-    num_cols: usize,
+    num_grid_cols: usize,
 ) -> (
     Option<TableBorderLine>,
     Option<TableBorderLine>,
@@ -35,8 +43,8 @@ pub(super) fn resolve_cell_effective_borders(
     let tb = table_borders;
     let is_first_row = row_idx == 0;
     let is_last_row = row_idx == num_rows - 1;
-    let is_first_col = col_idx == 0;
-    let is_last_col = col_idx == num_cols - 1;
+    let is_first_col = cell_grid_col == 0;
+    let is_last_col = cell_grid_col + cell_grid_span >= num_grid_cols;
 
     let mut top = if is_first_row {
         tb.and_then(|b| b.top)
@@ -319,6 +327,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(

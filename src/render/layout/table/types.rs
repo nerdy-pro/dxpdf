@@ -25,6 +25,12 @@ pub struct TableRowInput {
     pub is_header: Option<bool>,
     /// §17.4.1: if true, row cannot be split across pages.
     pub cant_split: Option<bool>,
+    /// §17.4.17: number of grid columns to skip at the row's start. The first
+    /// cell's leftmost grid column is `grid_before`, not 0.
+    pub grid_before: u32,
+    /// §17.4.16: number of grid columns to skip after the row's last cell.
+    /// The last cell's rightmost grid column is `num_grid_cols - grid_after - 1`.
+    pub grid_after: u32,
 }
 
 /// §17.4.84: cell vertical alignment.

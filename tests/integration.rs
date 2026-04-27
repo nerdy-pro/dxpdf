@@ -212,3 +212,112 @@ fn convert_multi_paragraph_docx() {
     // Should produce a non-trivial PDF
     assert!(pdf.len() > 100);
 }
+
+/// §17.4.17 / §17.4.16: a row whose cells start with `<w:gridBefore>` (and/or
+/// end with `<w:gridAfter>`) must offset its first cell to the right by that
+/// many grid columns. Word emits this pattern for tables whose visible columns
+/// are a subset of the `<w:tblGrid>` columns — typically a thin "phantom"
+/// column at each edge to provide consistent table indentation.
+///
+/// Real-world repro: the "Sanitärräume" table in
+/// `test-cases/ÜP - 27.02.2026-Rübenhofstr. 57, 22335 Hamburg, Nr. 7 OG2 Mitte.docx`
+/// uses `<w:tblGrid>` `[38, 2905, 6872, 250]` with every row carrying
+/// `<w:trPr><w:gridBefore val="1"/><w:gridAfter val="1"/>...</w:trPr>` and 2
+/// cells. Without gridBefore handling, cells were placed in grid columns 0-1
+/// instead of 1-2, leaving the wide "label" column rendered into the 38-twip
+/// column and visually overlapping the value column.
+#[test]
+fn grid_before_offsets_each_row_first_cell() {
+    use dxpdf::render::layout::draw_command::DrawCommand;
+
+    let docx = simple_docx(
+        r#"<w:tbl>
+            <w:tblPr>
+                <w:tblW w:w="10065" w:type="dxa"/>
+                <w:tblLayout w:type="fixed"/>
+            </w:tblPr>
+            <w:tblGrid>
+                <w:gridCol w:w="38"/>
+                <w:gridCol w:w="2905"/>
+                <w:gridCol w:w="6872"/>
+                <w:gridCol w:w="250"/>
+            </w:tblGrid>
+            <w:tr>
+                <w:trPr>
+                    <w:gridBefore w:val="1"/><w:gridAfter w:val="1"/>
+                    <w:wBefore w:w="38" w:type="dxa"/>
+                    <w:wAfter w:w="250" w:type="dxa"/>
+                </w:trPr>
+                <w:tc>
+                    <w:tcPr><w:tcW w:w="2905" w:type="dxa"/></w:tcPr>
+                    <w:p><w:r><w:t>LeftA</w:t></w:r></w:p>
+                </w:tc>
+                <w:tc>
+                    <w:tcPr><w:tcW w:w="6872" w:type="dxa"/></w:tcPr>
+                    <w:p><w:r><w:t>RightA</w:t></w:r></w:p>
+                </w:tc>
+            </w:tr>
+            <w:tr>
+                <w:trPr>
+                    <w:gridBefore w:val="1"/><w:gridAfter w:val="1"/>
+                    <w:wBefore w:w="38" w:type="dxa"/>
+                    <w:wAfter w:w="250" w:type="dxa"/>
+                </w:trPr>
+                <w:tc>
+                    <w:tcPr><w:tcW w:w="2905" w:type="dxa"/></w:tcPr>
+                    <w:p><w:r><w:t>LeftB</w:t></w:r></w:p>
+                </w:tc>
+                <w:tc>
+                    <w:tcPr><w:tcW w:w="6872" w:type="dxa"/></w:tcPr>
+                    <w:p><w:r><w:t>RightB</w:t></w:r></w:p>
+                </w:tc>
+            </w:tr>
+        </w:tbl>"#,
+    );
+
+    let document = dxpdf::docx::parse(&docx).expect("parse");
+    let (_, pages) = dxpdf::render::resolve_and_layout(&document);
+    let cmds: Vec<&DrawCommand> = pages.iter().flat_map(|p| p.commands.iter()).collect();
+
+    let position_of = |needle: &str| -> Option<(f32, f32)> {
+        cmds.iter().find_map(|c| match c {
+            DrawCommand::Text { position, text, .. } if text.as_ref() == needle => {
+                Some((position.x.raw(), position.y.raw()))
+            }
+            _ => None,
+        })
+    };
+
+    let (x_la, y_la) = position_of("LeftA").expect("LeftA present");
+    let (x_ra, y_ra) = position_of("RightA").expect("RightA present");
+    let (x_lb, y_lb) = position_of("LeftB").expect("LeftB present");
+    let (x_rb, y_rb) = position_of("RightB").expect("RightB present");
+
+    // Both rows align to the same columns — no per-row drift from gridBefore.
+    assert!(
+        (x_la - x_lb).abs() < 0.01,
+        "LeftA ({x_la}) and LeftB ({x_lb}) must share the same x — both \
+         rows declare gridBefore=1 so the first cell starts at the same \
+         absolute grid column"
+    );
+    assert!(
+        (x_ra - x_rb).abs() < 0.01,
+        "RightA ({x_ra}) and RightB ({x_rb}) must share the same x"
+    );
+    assert!(y_la == y_ra, "row 0 cells share the same y baseline");
+    assert!(y_lb == y_rb, "row 1 cells share the same y baseline");
+    assert!(y_lb > y_la, "row 1 sits below row 0");
+
+    // Right column must sit clearly to the right of the left column. The
+    // 2905-twip left column is ~145pt wide once scaled down to fit page
+    // width, so the right column's x should exceed the left column's x by
+    // at least ~50pt — well beyond any rounding noise. Without gridBefore
+    // handling, the right column would land just ~1.9pt past the left
+    // column (the phantom 38-twip first grid column) and overlap.
+    assert!(
+        x_ra - x_la > 50.0,
+        "RightA ({x_ra}) must be well to the right of LeftA ({x_la}) — \
+         small separation indicates gridBefore was ignored and the right \
+         column overlapped the left"
+    );
+}

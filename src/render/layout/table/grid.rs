@@ -134,12 +134,18 @@ pub(super) fn expand_rows_for_vmerge(
     }
 }
 
-/// Find the cell in a row that covers the given grid column index.
+/// Find the cell in a row that covers the given absolute grid column index.
+///
+/// Returns `None` for grid columns inside the row's `gridBefore` / `gridAfter`
+/// regions (§17.4.17 / §17.4.16) — those columns have no cell in this row.
 pub(super) fn find_cell_at_grid_col(
     row: &TableRowInput,
     target_grid_col: usize,
 ) -> Option<&TableCellInput> {
-    let mut col = 0;
+    let mut col = row.grid_before as usize;
+    if target_grid_col < col {
+        return None;
+    }
     for cell in &row.cells {
         let span = cell.grid_span.max(1) as usize;
         if target_grid_col < col + span {
@@ -157,8 +163,12 @@ pub(super) fn is_vmerge_continue(row: &TableRowInput, grid_col: usize) -> bool {
 }
 
 /// Return the cell index (not grid column) for the cell covering `grid_col`.
+/// Returns `None` for grid columns inside the row's gridBefore/gridAfter regions.
 pub(super) fn cell_index_at_grid_col(row: &TableRowInput, target_grid_col: usize) -> Option<usize> {
-    let mut col = 0;
+    let mut col = row.grid_before as usize;
+    if target_grid_col < col {
+        return None;
+    }
     for (i, cell) in row.cells.iter().enumerate() {
         let span = cell.grid_span.max(1) as usize;
         if target_grid_col < col + span {
@@ -205,5 +215,68 @@ mod tests {
     fn zero_cols_empty_result() {
         let widths = compute_column_widths(&[], 0, Pt::new(300.0));
         assert!(widths.is_empty());
+    }
+
+    // ── grid_before / grid_after lookups ─────────────────────────────────
+
+    use super::super::types::CellVAlign;
+    use crate::render::geometry::PtEdgeInsets;
+
+    fn empty_cell(grid_span: u32) -> TableCellInput {
+        TableCellInput {
+            blocks: Vec::new(),
+            margins: PtEdgeInsets::ZERO,
+            grid_span,
+            shading: None,
+            cell_borders: None,
+            vertical_merge: None,
+            vertical_align: CellVAlign::Top,
+        }
+    }
+
+    fn row_with_offsets(
+        cells: Vec<TableCellInput>,
+        grid_before: u32,
+        grid_after: u32,
+    ) -> TableRowInput {
+        TableRowInput {
+            cells,
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before,
+            grid_after,
+        }
+    }
+
+    #[test]
+    fn find_cell_skips_grid_before() {
+        // §17.4.17: gridBefore=1 means cell 0 starts at grid_col 1.
+        // §17.4.16: gridAfter=1 means the row leaves grid_col 3 empty.
+        let row = row_with_offsets(vec![empty_cell(1), empty_cell(1)], 1, 1);
+        assert!(find_cell_at_grid_col(&row, 0).is_none());
+        assert!(find_cell_at_grid_col(&row, 1).is_some());
+        assert!(find_cell_at_grid_col(&row, 2).is_some());
+        assert!(find_cell_at_grid_col(&row, 3).is_none());
+    }
+
+    #[test]
+    fn cell_index_at_grid_col_skips_grid_before() {
+        let row = row_with_offsets(vec![empty_cell(1), empty_cell(1)], 1, 1);
+        assert_eq!(cell_index_at_grid_col(&row, 0), None);
+        assert_eq!(cell_index_at_grid_col(&row, 1), Some(0));
+        assert_eq!(cell_index_at_grid_col(&row, 2), Some(1));
+        assert_eq!(cell_index_at_grid_col(&row, 3), None);
+    }
+
+    #[test]
+    fn find_cell_with_grid_span_after_grid_before() {
+        // gridBefore=2; one cell with span=2 should occupy grid cols 2 and 3.
+        let row = row_with_offsets(vec![empty_cell(2)], 2, 0);
+        assert!(find_cell_at_grid_col(&row, 0).is_none());
+        assert!(find_cell_at_grid_col(&row, 1).is_none());
+        assert!(find_cell_at_grid_col(&row, 2).is_some());
+        assert!(find_cell_at_grid_col(&row, 3).is_some());
+        assert!(find_cell_at_grid_col(&row, 4).is_none());
     }
 }
