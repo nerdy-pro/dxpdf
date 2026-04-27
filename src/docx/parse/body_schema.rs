@@ -164,6 +164,10 @@ pub(crate) enum RunChildXml {
     Br(BrXml),
     #[serde(rename = "cr")]
     Cr,
+    #[serde(rename = "softHyphen")]
+    SoftHyphen,
+    #[serde(rename = "noBreakHyphen")]
+    NoBreakHyphen,
     #[serde(rename = "lastRenderedPageBreak")]
     LastRenderedPageBreak,
     #[serde(rename = "drawing")]

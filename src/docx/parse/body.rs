@@ -212,6 +212,8 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
             RunChildXml::Tab => acc.push(RunElement::Tab),
             RunChildXml::Br(br) => acc.push(run_break(br)),
             RunChildXml::Cr => acc.push(RunElement::LineBreak(BreakKind::TextWrapping)),
+            RunChildXml::SoftHyphen => {} // optional hyphen — only visible if line breaks here; we don't hyphenate
+            RunChildXml::NoBreakHyphen => acc.push(RunElement::Text("\u{2011}".to_string())),
             RunChildXml::LastRenderedPageBreak => acc.push(RunElement::LastRenderedPageBreak),
             RunChildXml::Drawing(d) => {
                 flush(&mut acc, out);
