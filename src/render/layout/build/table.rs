@@ -169,15 +169,15 @@ pub(super) fn build_table(
                     );
 
                     // Compute available width for nested content.
+                    // §17.4.17: gridBefore offsets the row's first cell to the
+                    // right by that many grid columns; subsequent spans accumulate.
                     let span = cell.properties.grid_span.unwrap_or(1) as usize;
-                    let mut grid_start = 0;
+                    let mut grid_start = row.properties.grid_before as usize;
                     for ci in 0..col_idx {
                         grid_start += row.cells[ci].properties.grid_span.unwrap_or(1) as usize;
                     }
-                    let cell_width: Pt = col_widths[grid_start..grid_start + span]
-                        .iter()
-                        .copied()
-                        .sum();
+                    let grid_end = (grid_start + span).min(col_widths.len());
+                    let cell_width: Pt = col_widths[grid_start..grid_end].iter().copied().sum();
                     let cell_margins_h = cell
                         .properties
                         .margins
@@ -210,6 +210,8 @@ pub(super) fn build_table(
                 }),
                 is_header: row.properties.is_header,
                 cant_split: row.properties.cant_split,
+                grid_before: row.properties.grid_before,
+                grid_after: row.properties.grid_after,
             }
         })
         .collect();

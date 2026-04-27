@@ -255,6 +255,10 @@ pub(crate) struct TrPrXml {
     jc: Option<ValAttr<StJc>>,
     #[serde(rename = "cnfStyle", default)]
     cnf_style: Option<CnfStyleXml>,
+    #[serde(rename = "gridBefore", default)]
+    grid_before: Option<ValAttr<u32>>,
+    #[serde(rename = "wBefore", default)]
+    w_before: Option<TableMeasureXml>,
     #[serde(rename = "gridAfter", default)]
     grid_after: Option<ValAttr<u32>>,
     #[serde(rename = "wAfter", default)]
@@ -289,7 +293,9 @@ impl From<TrPrXml> for TableRowProperties {
             cant_split: x.cant_split.map(|OnOff(b)| b),
             justification: x.jc.map(|v| Alignment::from(v.val)),
             cnf_style: x.cnf_style.map(CnfStyle::from),
-            grid_after: x.grid_after.map(|v| v.val),
+            grid_before: x.grid_before.map(|v| v.val).unwrap_or(0),
+            w_before: x.w_before.map(Into::into),
+            grid_after: x.grid_after.map(|v| v.val).unwrap_or(0),
             w_after: x.w_after.map(Into::into),
         }
     }
@@ -549,11 +555,30 @@ mod tests {
     #[test]
     fn tr_pr_grid_after_and_w_after() {
         let tr = parse_tr_pr(r#"<trPr><gridAfter val="2"/><wAfter w="500" type="dxa"/></trPr>"#);
-        assert_eq!(tr.grid_after, Some(2));
+        assert_eq!(tr.grid_after, 2);
         match tr.w_after.unwrap() {
             TableMeasure::Twips(d) => assert_eq!(d.raw(), 500),
             other => panic!("expected Twips, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tr_pr_grid_before_and_w_before() {
+        let tr = parse_tr_pr(r#"<trPr><gridBefore val="1"/><wBefore w="38" type="dxa"/></trPr>"#);
+        assert_eq!(tr.grid_before, 1);
+        match tr.w_before.unwrap() {
+            TableMeasure::Twips(d) => assert_eq!(d.raw(), 38),
+            other => panic!("expected Twips, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tr_pr_grid_before_and_grid_after_default_zero() {
+        let tr = parse_tr_pr(r#"<trPr/>"#);
+        assert_eq!(tr.grid_before, 0);
+        assert_eq!(tr.grid_after, 0);
+        assert!(tr.w_before.is_none());
+        assert!(tr.w_after.is_none());
     }
 
     // ── tcPr ──

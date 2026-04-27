@@ -104,9 +104,19 @@ pub struct TableRowProperties {
     pub justification: Option<Alignment>,
     /// §17.3.1.8: table conditional formatting applied to this row.
     pub cnf_style: Option<CnfStyle>,
-    /// §17.4.14: number of grid columns in the trailing grid units after the last cell.
-    pub grid_after: Option<u32>,
-    /// §17.4.87: preferred width of the trailing space after the last cell.
+    /// §17.4.17: number of grid columns to skip before the first cell of the row.
+    /// Default 0 when omitted from `<w:trPr>`.
+    pub grid_before: u32,
+    /// §17.4.86: preferred width of the leading space before the first cell.
+    /// Note: when present and divergent from the corresponding `tblGrid` columns'
+    /// summed widths, treated as informational only — column widths are not
+    /// overridden per row in this implementation; a `warn!` is logged on mismatch.
+    pub w_before: Option<TableMeasure>,
+    /// §17.4.16: number of grid columns to skip after the last cell of the row.
+    /// Default 0 when omitted from `<w:trPr>`.
+    pub grid_after: u32,
+    /// §17.4.85: preferred width of the trailing space after the last cell.
+    /// Same width-override caveat as `w_before`.
     pub w_after: Option<TableMeasure>,
 }
 

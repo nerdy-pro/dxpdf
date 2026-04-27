@@ -442,6 +442,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -473,12 +475,16 @@ mod tests {
                 height_rule: None,
                 is_header: None,
                 cant_split: None,
+                grid_before: 0,
+                grid_after: 0,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
                 height_rule: None,
                 is_header: None,
                 cant_split: None,
+                grid_before: 0,
+                grid_after: 0,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
@@ -529,6 +535,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
@@ -552,6 +560,8 @@ mod tests {
             height_rule: Some(RowHeightRule::AtLeast(Pt::new(40.0))),
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -597,6 +607,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(100.0)];
         let result = layout_table(
@@ -639,6 +651,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -659,6 +673,262 @@ mod tests {
             .filter(|c| matches!(c, DrawCommand::Text { .. }))
             .count();
         assert_eq!(text_count, 1);
+    }
+
+    /// Helper: collect all Text command x-positions in command order.
+    fn text_x_positions(commands: &[DrawCommand]) -> Vec<f32> {
+        commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Text { position, .. } => Some(position.x.raw()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn grid_before_offsets_first_cell_x() {
+        // §17.4.17: gridBefore=1 + wBefore skips the first grid column. With
+        // a 4-column grid [10, 100, 200, 10] and a row with gridBefore=1 and
+        // gridAfter=1, the two cells must occupy columns 1 and 2 — not 0 and 1.
+        let rows = vec![TableRowInput {
+            cells: vec![simple_cell("A"), simple_cell("B")],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before: 1,
+            grid_after: 1,
+        }];
+        let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
+
+        let xs = text_x_positions(&result.commands);
+        assert_eq!(xs.len(), 2, "two text fragments expected");
+        assert_eq!(xs[0], 10.0, "first cell starts at col 1's left edge (10pt)");
+        assert_eq!(
+            xs[1], 110.0,
+            "second cell starts after col 1 (10 + 100 = 110pt)"
+        );
+
+        // The table's overall width is unchanged by gridBefore/gridAfter —
+        // they only leave whitespace within rows.
+        assert_eq!(result.size.width.raw(), 320.0);
+    }
+
+    #[test]
+    fn grid_after_does_not_overflow() {
+        // §17.4.16: gridAfter=2 leaves the rightmost two columns of a 4-column
+        // grid empty for this row. Cells must fit within the leftmost two
+        // columns and not overflow into the gridAfter region.
+        let rows = vec![TableRowInput {
+            cells: vec![simple_cell("X"), simple_cell("Y")],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before: 0,
+            grid_after: 2,
+        }];
+        let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
+
+        let xs = text_x_positions(&result.commands);
+        assert_eq!(xs.len(), 2);
+        assert_eq!(xs[0], 0.0, "first cell at col 0");
+        assert_eq!(xs[1], 10.0, "second cell at col 1");
+        // The cells together occupy 10 + 100 = 110pt; the right 210pt are
+        // empty (gridAfter region). Total table width stays at 320pt.
+        assert_eq!(result.size.width.raw(), 320.0);
+    }
+
+    #[test]
+    fn grid_before_first_cell_uses_inside_v_left_border() {
+        // §17.4.17 + §17.4.38: with gridBefore>0, the row's first cell is not
+        // at the table's left edge, so its left border must come from
+        // `inside_v`, not `left`. Mirror for gridAfter>0 and the right edge.
+        //
+        // We use distinct border widths to identify which table border was
+        // applied: `left`/`right` = 4pt, `inside_v` = 1pt. With grid_before=1
+        // and grid_after=1 in a 4-column grid, both cells must use only the
+        // 1pt borders for left/right edges; no 4pt border rect should appear.
+        let rows = vec![TableRowInput {
+            cells: vec![simple_cell("A"), simple_cell("B")],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before: 1,
+            grid_after: 1,
+        }];
+        let col_widths = vec![Pt::new(10.0), Pt::new(50.0), Pt::new(50.0), Pt::new(10.0)];
+        let borders = TableBorderConfig {
+            top: None,
+            bottom: None,
+            left: Some(TableBorderLine {
+                width: Pt::new(4.0),
+                color: RgbColor::BLACK,
+                style: TableBorderStyle::Single,
+            }),
+            right: Some(TableBorderLine {
+                width: Pt::new(4.0),
+                color: RgbColor::BLACK,
+                style: TableBorderStyle::Single,
+            }),
+            inside_h: None,
+            inside_v: Some(TableBorderLine {
+                width: Pt::new(1.0),
+                color: RgbColor::BLACK,
+                style: TableBorderStyle::Single,
+            }),
+        };
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            Some(&borders),
+            None,
+            false,
+        );
+
+        // Vertical border rects have width equal to the border thickness
+        // (depth) and height >= 1. Find any 4pt-thick border rect.
+        let has_thick_vertical = result.commands.iter().any(|c| match c {
+            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                rect.size.width.raw() == 4.0 && rect.size.height.raw() > 1.0
+            }
+            _ => false,
+        });
+        assert!(
+            !has_thick_vertical,
+            "no 4pt-thick vertical border should appear: gridBefore/gridAfter \
+             mean cells aren't at the table's left/right edges, so left/right \
+             borders are not applied"
+        );
+
+        // Inside_v (1pt) should appear at the boundary between cell A and cell B.
+        let has_inside_v = result.commands.iter().any(|c| match c {
+            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                rect.size.width.raw() == 1.0
+            }
+            _ => false,
+        });
+        assert!(
+            has_inside_v,
+            "1pt inside_v border between cells must appear"
+        );
+    }
+
+    #[test]
+    fn vmerge_across_rows_with_different_grid_before() {
+        // §17.4.85 + §17.4.17: a cell at grid_col 1 in row A (gridBefore=1)
+        // can merge vertically with a Continue cell at grid_col 1 in row B
+        // (gridBefore=0) — the merge is per absolute grid column. Row B's
+        // cell at grid_col 0 has no above-cell (it's in row A's gridBefore
+        // region) and must layout independently.
+        let row_a = TableRowInput {
+            cells: vec![
+                TableCellInput {
+                    blocks: vec![LayoutBlock::Paragraph {
+                        fragments: vec![text_frag("Restart", 30.0)],
+                        style: ParagraphStyle::default(),
+                        page_break_before: false,
+                        footnotes: vec![],
+                        floating_images: vec![],
+                        floating_shapes: vec![],
+                    }],
+                    margins: PtEdgeInsets::ZERO,
+                    grid_span: 1,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: Some(VerticalMergeState::Restart),
+                    vertical_align: CellVAlign::Top,
+                },
+                simple_cell("header"),
+            ],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before: 1,
+            grid_after: 0,
+        };
+        let row_b = TableRowInput {
+            cells: vec![
+                simple_cell("row1col0"),
+                TableCellInput {
+                    blocks: vec![],
+                    margins: PtEdgeInsets::ZERO,
+                    grid_span: 1,
+                    shading: None,
+                    cell_borders: None,
+                    vertical_merge: Some(VerticalMergeState::Continue),
+                    vertical_align: CellVAlign::Top,
+                },
+                simple_cell("row1col2"),
+            ],
+            height_rule: None,
+            is_header: None,
+            cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
+        };
+        let col_widths = vec![Pt::new(50.0), Pt::new(100.0), Pt::new(150.0)];
+        let result = layout_table(
+            &[row_a, row_b],
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            None,
+            None,
+            false,
+        );
+
+        let position_of = |needle: &str| -> Option<(f32, f32)> {
+            result.commands.iter().find_map(|c| match c {
+                DrawCommand::Text { position, text, .. } if text.as_ref() == needle => {
+                    Some((position.x.raw(), position.y.raw()))
+                }
+                _ => None,
+            })
+        };
+
+        let (restart_x, _) = position_of("Restart").expect("Restart text present");
+        let (header_x, header_y) = position_of("header").expect("header text present");
+        let (col0_x, col0_y) = position_of("row1col0").expect("row1col0 text present");
+        let (col2_x, _) = position_of("row1col2").expect("row1col2 text present");
+
+        // Row A respects gridBefore=1: first cell at col 1's left edge (50pt).
+        assert_eq!(restart_x, 50.0, "Restart cell starts at grid col 1");
+        assert_eq!(header_x, 150.0, "header cell starts at grid col 2 (50+100)");
+
+        // Row B has its own grid_before=0 — the col-0 cell exists and lays
+        // out independently. The col-1 cell is a Continue (no content).
+        // Row B's col-2 cell is unaffected by the merge.
+        assert_eq!(col0_x, 0.0, "row1col0 starts at grid col 0");
+        assert_eq!(col2_x, 150.0, "row1col2 starts at grid col 2 (50+100)");
+
+        // Row B's col-0 cell sits in row 2 (y > 0); it's not stretched by
+        // the vMerge happening at col 1.
+        assert!(col0_y > 0.0, "row1col0 is on the second row");
+        assert_eq!(
+            col0_y,
+            header_y + 14.0,
+            "row1col0 sits exactly one row-height below the row 0 header"
+        );
     }
 
     #[test]
@@ -688,6 +958,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -729,6 +1001,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }];
         let col_widths = vec![Pt::new(100.0)];
 
@@ -804,6 +1078,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         };
         let row1 = TableRowInput {
             cells: vec![
@@ -821,6 +1097,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         };
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -894,6 +1172,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         }
     }
 
@@ -1057,6 +1337,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         };
         let row1 = TableRowInput {
             cells: vec![TableCellInput {
@@ -1071,6 +1353,8 @@ mod tests {
             height_rule: None,
             is_header: None,
             cant_split: None,
+            grid_before: 0,
+            grid_after: 0,
         };
         let col_widths = vec![Pt::new(40.0)];
         let slices = layout_table_paginated(
