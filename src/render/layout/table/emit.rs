@@ -8,7 +8,8 @@ use crate::render::layout::draw_command::DrawCommand;
 use super::borders::{border_width, emit_cell_borders, CellBorders};
 use super::grid::is_vmerge_continue;
 use super::types::{
-    CellVAlign, MeasuredRow, MeasuredTable, TableBorderLine, TableRowInput, VerticalMergeState,
+    CellBorderOverride, CellVAlign, MeasuredRow, MeasuredTable, TableBorderLine, TableRowInput,
+    VerticalMergeState,
 };
 
 /// Layered command buffers for table rendering: shading, content, borders.
@@ -101,8 +102,16 @@ fn emit_one_row(
 
         // §17.4.38: restore top border when this row is the first in its
         // slice and the resolved top was removed (conflict resolution or
-        // adjacent-table collapse).
-        let cell_top = if mr.borders[cell_ci].top.is_none() {
+        // adjacent-table collapse). An explicit `<w:top w:val="nil"/>` on the
+        // cell must NOT be restored — the user asked for no border.
+        let user_suppressed_top = matches!(
+            cell_input
+                .cell_borders
+                .as_ref()
+                .and_then(|cb| cb.top.as_ref()),
+            Some(CellBorderOverride::Nil)
+        );
+        let cell_top = if mr.borders[cell_ci].top.is_none() && !user_suppressed_top {
             top_border_override
         } else {
             mr.borders[cell_ci].top
