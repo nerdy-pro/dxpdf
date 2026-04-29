@@ -72,8 +72,9 @@ pub enum LnChildXml {
 
 #[derive(Debug, Deserialize)]
 pub struct PrstDashXml {
-    #[serde(rename = "@val")]
-    pub val: StPresetLineDashVal,
+    // Word emits empty `<a:prstDash/>` in some files; tolerate the missing val.
+    #[serde(rename = "@val", default)]
+    pub val: Option<StPresetLineDashVal>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -281,7 +282,9 @@ impl From<OutlineXml> for Outline {
                     fill = Some(f.into());
                 }
                 LnChildXml::PrstDash(p) => {
-                    dash = Some(LineDash::Preset(p.val.into()));
+                    if let Some(v) = p.val {
+                        dash = Some(LineDash::Preset(v.into()));
+                    }
                 }
                 LnChildXml::CustDash(c) => {
                     dash = Some(LineDash::Custom(
