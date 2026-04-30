@@ -85,7 +85,7 @@ fn replace_table(sfnt: &[u8], tag: &[u8; 4], new_data: &[u8]) -> Result<Vec<u8>,
         tables.push((*tag, new_data.to_vec()));
     }
     // SFNT directory is sorted by tag.
-    tables.sort_by(|a, b| a.0.cmp(&b.0));
+    tables.sort_by_key(|t| t.0);
 
     rebuild_sfnt(&sfnt[0..4], &tables)
 }
