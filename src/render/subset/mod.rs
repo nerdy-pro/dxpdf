@@ -20,6 +20,8 @@ pub mod apply;
 pub mod collect;
 pub mod extract;
 pub mod format;
+#[cfg(feature = "subset-fonts")]
+pub mod name_splice;
 
 pub use apply::{apply, SubsetOutcome, SubsetReport};
 pub use collect::{collect, Codepoint, CodepointUsage};

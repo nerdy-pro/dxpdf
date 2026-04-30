@@ -201,6 +201,17 @@ fn process_one(
         }
     };
 
+    // fontcull's API drops every record from the `name` table; restore it from
+    // the original so the embedded PDF font keeps its real PostScript name
+    // (otherwise Skia falls back to a synthetic `font<hex>` identifier).
+    let subsetted = match crate::render::subset::name_splice::splice_original_name(
+        &subsetted,
+        &extracted.bytes,
+    ) {
+        Ok(b) => b,
+        Err(_) => subsetted, // Splice is best-effort; fall back to unnamed subset.
+    };
+
     let bytes_after = subsetted.len();
     if bytes_after >= bytes_before {
         return SubsetOutcome::UnchangedNoSavings {
