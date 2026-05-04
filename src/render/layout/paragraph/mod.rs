@@ -184,6 +184,7 @@ pub fn layout_paragraph(
                     bold: font.bold,
                     italic: font.italic,
                     color: *color,
+                    text_scale: font.text_scale,
                 });
             }
         }
@@ -240,6 +241,7 @@ mod tests {
                 italic: false,
                 underline: false,
                 char_spacing: Pt::ZERO,
+                text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
             },

@@ -41,6 +41,12 @@ pub struct FontProps {
     pub italic: bool,
     pub underline: bool,
     pub char_spacing: Pt,
+    /// §17.3.2.45: horizontal character scale as a multiplier (1.0 = normal,
+    /// 0.8 = 80%, 1.5 = 150%). Applied to glyph advances during measure and
+    /// to the Skia font's `scale_x` during paint. Inter-character spacing
+    /// (`char_spacing`) is **not** scaled by this — the spec keeps the two
+    /// independent.
+    pub text_scale: f32,
     /// Underline position from font metrics (positive = below baseline).
     pub underline_position: Pt,
     /// Underline thickness from font metrics.
@@ -244,6 +250,8 @@ pub fn font_props_from_run(
 
     let char_spacing = rp.spacing.map(Pt::from).unwrap_or(Pt::ZERO);
 
+    let text_scale = rp.text_scale.map_or(1.0, |s| s.as_factor());
+
     FontProps {
         family: Rc::from(family),
         size,
@@ -256,6 +264,7 @@ pub fn font_props_from_run(
         // draws.
         underline: matches!(rp.underline, Some(s) if s != UnderlineStyle::None),
         char_spacing,
+        text_scale,
         // Populated by the measurer from Skia font metrics.
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
@@ -348,6 +357,35 @@ mod tests {
             Pt::new(12.0),
         );
         assert!(fp.underline, "<w:u w:val=\"single\"/> → underline drawn");
+    }
+
+    #[test]
+    fn font_props_text_scale_default_is_one() {
+        // §17.3.2.45: when <w:w> is absent the run renders at 100% width.
+        let fp = font_props_from_run(&RunProperties::default(), "Helvetica", Pt::new(12.0));
+        assert_eq!(fp.text_scale, 1.0);
+    }
+
+    #[test]
+    fn font_props_text_scale_compressed() {
+        // <w:w w:val="80"/> → 0.8× horizontal scale.
+        let rp = RunProperties {
+            text_scale: Some(crate::model::TextScale::new(80)),
+            ..RunProperties::default()
+        };
+        let fp = font_props_from_run(&rp, "Helvetica", Pt::new(12.0));
+        assert!((fp.text_scale - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn font_props_text_scale_expanded() {
+        // <w:w w:val="150"/> → 1.5× horizontal scale.
+        let rp = RunProperties {
+            text_scale: Some(crate::model::TextScale::new(150)),
+            ..RunProperties::default()
+        };
+        let fp = font_props_from_run(&rp, "Helvetica", Pt::new(12.0));
+        assert!((fp.text_scale - 1.5).abs() < f32::EPSILON);
     }
 
     #[test]

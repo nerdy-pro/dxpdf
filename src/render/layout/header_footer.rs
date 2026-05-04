@@ -236,6 +236,7 @@ mod tests {
             italic: false,
             underline: false,
             char_spacing: Pt::ZERO,
+            text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
         };
@@ -287,6 +288,7 @@ mod tests {
             bold: false,
             italic: false,
             color: RgbColor::BLACK,
+            text_scale: 1.0,
         });
 
         let config = test_config();
@@ -329,6 +331,7 @@ mod tests {
             bold: false,
             italic: false,
             color: RgbColor::BLACK,
+            text_scale: 1.0,
         });
 
         let config = test_config();

@@ -205,6 +205,7 @@ fn inject_text_label(
         italic: label_italic,
         underline: false,
         char_spacing: Pt::ZERO,
+        text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
     };

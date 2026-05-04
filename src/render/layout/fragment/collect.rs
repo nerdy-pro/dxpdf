@@ -185,6 +185,7 @@ where
         italic: false,
         underline: false,
         char_spacing: Pt::ZERO,
+        text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
     };
@@ -562,6 +563,7 @@ where
                         italic: false,
                         underline: false,
                         char_spacing: Pt::ZERO,
+                        text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
                     };
@@ -605,6 +607,7 @@ where
                         italic: false,
                         underline: false,
                         char_spacing: Pt::ZERO,
+                        text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
                     };
@@ -637,6 +640,7 @@ where
                         italic: false,
                         underline: false,
                         char_spacing: Pt::ZERO,
+                        text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
                     };

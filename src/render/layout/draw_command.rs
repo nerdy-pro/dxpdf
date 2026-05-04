@@ -24,6 +24,9 @@ pub enum DrawCommand {
         bold: bool,
         italic: bool,
         color: RgbColor,
+        /// §17.3.2.45: horizontal scale factor (1.0 = normal, 0.8 = 80%,
+        /// 1.5 = 150%). Painter applies via `Font::set_scale_x`.
+        text_scale: f32,
     },
     Underline {
         line: PtLineSegment,
@@ -283,6 +286,7 @@ mod tests {
             bold: false,
             italic: false,
             color: RgbColor::BLACK,
+            text_scale: 1.0,
         };
         cmd.shift_y(Pt::new(5.0));
         if let DrawCommand::Text { position, .. } = cmd {

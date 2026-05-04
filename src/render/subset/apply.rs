@@ -359,6 +359,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 color: RgbColor::BLACK,
+                text_scale: 1.0,
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         }

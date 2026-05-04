@@ -285,6 +285,7 @@ pub(super) fn emit_line_commands(
                         bold: font.bold,
                         italic: font.italic,
                         color: *color,
+                        text_scale: font.text_scale,
                     });
 
                     if let Some(url) = hyperlink_url {
@@ -564,6 +565,7 @@ pub(super) fn emit_tab_leader(
         italic: false,
         underline: false,
         char_spacing: Pt::ZERO,
+        text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
     };
@@ -598,6 +600,7 @@ pub(super) fn emit_tab_leader(
         bold: false,
         italic: false,
         color: crate::render::resolve::color::RgbColor::BLACK,
+        text_scale: 1.0,
     });
 }
 

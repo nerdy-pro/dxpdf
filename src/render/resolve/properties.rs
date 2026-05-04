@@ -52,6 +52,7 @@ pub fn merge_run_properties(target: &mut RunProperties, base: &RunProperties) {
         position,
         lang,
         border,
+        text_scale,
     );
 }
 
@@ -330,6 +331,7 @@ mod tests {
                 space: Dimension::new(0),
                 color: Color::BLACK,
             }),
+            text_scale: Some(TextScale::new(80)),
         };
         let mut target = RunProperties::default();
         merge_run_properties(&mut target, &base);
@@ -362,6 +364,35 @@ mod tests {
         assert!(target.fonts.east_asian.explicit.is_some());
         assert!(target.fonts.complex_script.explicit.is_some());
         assert!(target.font_size.is_some());
+        assert_eq!(target.text_scale, Some(TextScale::new(80)));
+    }
+
+    #[test]
+    fn merge_run_text_scale_child_wins() {
+        // §17.7.2: when both parent and child specify text_scale, the child's
+        // value wins. Mirrors the standard merge semantics for run properties.
+        let mut target = RunProperties {
+            text_scale: Some(TextScale::new(120)),
+            ..Default::default()
+        };
+        let base = RunProperties {
+            text_scale: Some(TextScale::new(80)),
+            ..Default::default()
+        };
+        merge_run_properties(&mut target, &base);
+        assert_eq!(target.text_scale, Some(TextScale::new(120)));
+    }
+
+    #[test]
+    fn merge_run_text_scale_inherited_from_parent() {
+        // No child override → parent's text_scale propagates.
+        let mut target = RunProperties::default();
+        let base = RunProperties {
+            text_scale: Some(TextScale::new(80)),
+            ..Default::default()
+        };
+        merge_run_properties(&mut target, &base);
+        assert_eq!(target.text_scale, Some(TextScale::new(80)));
     }
 
     // ── ParagraphProperties merging ──────────────────────────────────────

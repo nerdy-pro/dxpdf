@@ -92,15 +92,30 @@ fn render_page(
                 bold,
                 italic,
                 color,
+                text_scale,
             } => {
-                let font = font_cache.get(registry, font_family, *font_size, *bold, *italic);
+                let base_font = font_cache.get(registry, font_family, *font_size, *bold, *italic);
+                // §17.3.2.45: a non-1.0 scale is applied via Skia's scale_x —
+                // that scales glyph advances and horizontal glyph extent
+                // without touching the cached, shared Font. Cloning and
+                // mutating a fresh Font keeps the cache invariant intact.
+                let scaled_font;
+                let font: &skia_safe::Font = if (*text_scale - 1.0).abs() > f32::EPSILON {
+                    let mut f = base_font.clone();
+                    f.set_scale_x(*text_scale);
+                    scaled_font = f;
+                    &scaled_font
+                } else {
+                    base_font
+                };
                 log::trace!(
-                    "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={}",
+                    "[paint] '{}' → font='{}' size={:.1}pt bold={} italic={} scale={:.2}",
                     &text[..text.len().min(30)],
                     font.typeface().family_name(),
                     font_size.raw(),
                     bold,
                     italic,
+                    text_scale,
                 );
                 let mut paint = Paint::default();
                 paint.set_anti_alias(true);
@@ -127,6 +142,11 @@ fn render_page(
                     let mut buf = [0u8; 4];
                     for (i, ch) in text.chars().enumerate() {
                         let s = ch.encode_utf8(&mut buf);
+                        // Per-glyph widths from `get_widths` already include
+                        // scale_x — they're advances of the scaled font.
+                        // measure_str on the scaled font likewise returns the
+                        // scaled advance, so no further multiplication is
+                        // needed. char_spacing stays unscaled (§17.3.2.45).
                         let w = if let Some(ref widths) = batch_widths {
                             widths[i]
                         } else {
@@ -581,6 +601,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 color: RgbColor::BLACK,
+                text_scale: 1.0,
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
@@ -603,6 +624,7 @@ mod tests {
                 bold: true,
                 italic: false,
                 color: RgbColor::BLACK,
+                text_scale: 1.0,
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
@@ -625,6 +647,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 color: RgbColor::BLACK,
+                text_scale: 1.0,
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };
@@ -744,6 +767,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 color: RgbColor::BLACK,
+                text_scale: 1.0,
             }],
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
         };

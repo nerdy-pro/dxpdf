@@ -8,7 +8,7 @@
 use serde::Deserialize;
 
 use crate::docx::model::dimension::{Dimension, HalfPoints, Twips};
-use crate::docx::model::{RunProperties, StrikeStyle, StyleId, UnderlineStyle};
+use crate::docx::model::{RunProperties, StrikeStyle, StyleId, TextScale, UnderlineStyle};
 use crate::docx::parse::primitives::st_enums::{StHighlightColor, StUnderline, StVerticalAlignRun};
 use crate::docx::parse::primitives::{HexColor, OnOff};
 
@@ -53,6 +53,9 @@ pub(crate) struct RPrXml {
     spacing: Option<ValAttr<Dimension<Twips>>>,
     #[serde(rename = "kern", default)]
     kern: Option<ValAttr<Dimension<HalfPoints>>>,
+    /// §17.3.2.45 — `<w:w w:val="80"/>`: horizontal character scale in percent.
+    #[serde(rename = "w", default)]
+    char_scale: Option<ValAttr<u16>>,
 
     #[serde(rename = "caps", default)]
     caps: Option<OnOff>,
@@ -148,6 +151,7 @@ impl RPrXml {
             position: self.position.map(|p| p.val),
             lang: self.lang.map(Into::into),
             border: self.bdr.map(Into::into),
+            text_scale: self.char_scale.map(|v| TextScale::new(v.val)),
         };
         (props, style_id)
     }
@@ -184,7 +188,9 @@ fn resolve_strike(strike: Option<OnOff>, dstrike: Option<OnOff>) -> Option<Strik
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::docx::model::{BorderStyle, Color, HighlightColor, UnderlineStyle, VerticalAlign};
+    use crate::docx::model::{
+        BorderStyle, Color, HighlightColor, TextScale, UnderlineStyle, VerticalAlign,
+    };
 
     fn parse(xml: &str) -> (RunProperties, Option<StyleId>) {
         let r: RPrXml = quick_xml::de::from_str(xml).expect("deserialize rPr");
@@ -284,6 +290,35 @@ mod tests {
     fn vertical_align_superscript() {
         let (rp, _) = parse(r#"<rPr><vertAlign val="superscript"/></rPr>"#);
         assert_eq!(rp.vertical_align, Some(VerticalAlign::Superscript));
+    }
+
+    #[test]
+    fn text_scale_parsed() {
+        // §17.3.2.45: <w:w w:val="80"/> compresses character width to 80%.
+        let (rp, _) = parse(r#"<rPr><w val="80"/></rPr>"#);
+        assert_eq!(rp.text_scale, Some(TextScale::new(80)));
+        assert_eq!(rp.text_scale.unwrap().percent(), 80);
+    }
+
+    #[test]
+    fn text_scale_absent_is_none() {
+        // No <w:w> element → inherit from style cascade.
+        let (rp, _) = parse(r#"<rPr><b/></rPr>"#);
+        assert_eq!(rp.text_scale, None);
+    }
+
+    #[test]
+    fn text_scale_clamps_above_600() {
+        // §17.18.81: ST_TextScale max is 600.
+        let (rp, _) = parse(r#"<rPr><w val="999"/></rPr>"#);
+        assert_eq!(rp.text_scale, Some(TextScale::new(600)));
+    }
+
+    #[test]
+    fn text_scale_zero_normalizes_to_100() {
+        // Word treats <w:w w:val="0"/> as the default 100%.
+        let (rp, _) = parse(r#"<rPr><w val="0"/></rPr>"#);
+        assert_eq!(rp.text_scale, Some(TextScale::NORMAL));
     }
 
     #[test]
