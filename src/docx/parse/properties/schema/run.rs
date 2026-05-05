@@ -130,7 +130,7 @@ impl RPrXml {
             font_size: self.sz.map(|s| s.val),
             bold: self.b.map(|OnOff(b)| b),
             italic: self.i.map(|OnOff(b)| b),
-            underline: self.u.map(resolve_underline),
+            underline: self.u.and_then(resolve_underline),
             strike: resolve_strike(self.strike, self.dstrike),
             color: self.color.map(|c| c.val.into()),
             highlight: self.highlight.map(|h| h.val.into()),
@@ -157,13 +157,20 @@ impl RPrXml {
     }
 }
 
-/// `<w:u/>` with no `@val` means Single per §17.3.2.40; otherwise use the
-/// named style.
-fn resolve_underline(u: UnderlineXml) -> UnderlineStyle {
-    match u.val {
-        Some(v) => v.into(),
-        None => UnderlineStyle::Single,
-    }
+/// Resolve `<w:u .../>` to an `UnderlineStyle` if — and only if — `@val` is
+/// present. A `<w:u>` element without `@val` is silent in the cascade
+/// (returns `None`) so it doesn't override an inherited style and doesn't
+/// force an underline of its own.
+///
+/// §17.3.2.40 documents `@val` defaulting to `single` when omitted, but real
+/// Word output emits `<w:u w:color="…"/>` (no `@val`) merely to remember a
+/// chosen underline color even when the user has *not* turned underline on.
+/// Treating that as "single" makes every such run render underlined — which
+/// neither Word nor LibreOffice does. Matching Word's observable behaviour
+/// is the right call here; the literal spec interpretation is wrong about
+/// real-world documents.
+fn resolve_underline(u: UnderlineXml) -> Option<UnderlineStyle> {
+    u.val.map(Into::into)
 }
 
 /// `<w:strike/>` and `<w:dstrike/>` are separate OnOff toggles; dstrike
@@ -239,9 +246,22 @@ mod tests {
     }
 
     #[test]
-    fn underline_without_val_defaults_single() {
+    fn underline_without_val_is_silent_in_cascade() {
+        // Real Word emits `<w:u w:color="…"/>` — no `@val` — to remember a
+        // chosen underline color even when underline is *not* on. Treating
+        // that as "single" caused every such run to render underlined, which
+        // doesn't match Word's actual rendering. So `<w:u>` without `@val`
+        // contributes nothing to the cascade (parser returns None), letting
+        // any inherited underline win.
         let (rp, _) = parse(r#"<rPr><u/></rPr>"#);
-        assert_eq!(rp.underline, Some(UnderlineStyle::Single));
+        assert_eq!(rp.underline, None);
+    }
+
+    #[test]
+    fn underline_with_color_but_no_val_is_silent() {
+        // Same shape Word actually emits — color attribute alone, no `@val`.
+        let (rp, _) = parse(r#"<rPr><u color="000000"/></rPr>"#);
+        assert_eq!(rp.underline, None);
     }
 
     #[test]
