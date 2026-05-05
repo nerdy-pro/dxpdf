@@ -9,29 +9,56 @@ permissions:
 
 jobs:
   build-wheels:
-    name: Build wheels (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build wheels (${{ matrix.target.os }} / ${{ matrix.target.arch }})
+    runs-on: ${{ matrix.target.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        target:
+          # Linux x86_64 — manylinux_2_28 (RHEL/Fedora-based, broad compat).
+          - { os: linux, arch: x86_64, runner: ubuntu-latest }
+          # macOS Apple Silicon — runs natively on the arm64 hosted runner.
+          - { os: macos, arch: arm64, runner: macos-latest }
+          # macOS Intel — macos-13 is the last Intel-hosted runner image.
+          - { os: macos, arch: x86_64, runner: macos-13 }
+          # Windows x86_64.
+          - { os: windows, arch: x86_64, runner: windows-latest }
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
+          # abi3-py38 means the resulting wheel runs on every Python ≥ 3.8;
+          # the host Python here only drives maturin and is not encoded in
+          # the wheel filename.
           python-version: "3.12"
 
-      - name: Build wheels
+      - name: Build wheels (linux)
+        if: matrix.target.os == 'linux'
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --features python
           manylinux: 2_28
-          before-script-linux: dnf install -y fontconfig-devel freetype-devel
+          before-script-linux: dnf install -y fontconfig-devel freetype-devel clang
+          target: ${{ matrix.target.arch }}-unknown-linux-gnu
+
+      - name: Build wheels (macos)
+        if: matrix.target.os == 'macos'
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist --features python
+          target: ${{ matrix.target.arch }}-apple-darwin
+
+      - name: Build wheels (windows)
+        if: matrix.target.os == 'windows'
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist --features python
+          target: ${{ matrix.target.arch }}-pc-windows-msvc
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.target.os }}-${{ matrix.target.arch }}
           path: dist
 
   build-sdist:
