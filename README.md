@@ -36,7 +36,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dxpdf = "0.2.19"
+dxpdf = "0.2.20"
 ```
 
 ### Python Package
