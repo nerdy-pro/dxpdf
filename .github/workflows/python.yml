@@ -75,6 +75,11 @@ jobs:
           args: --release --out dist --features python
           target: ${{ matrix.target.triple }}
 
+      - name: Verify FreeType is embedded (linux/macos)
+        if: matrix.target.os != 'windows'
+        shell: bash
+        run: python3 scripts/verify_wheel.py dist/*.whl
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.target.label }}
