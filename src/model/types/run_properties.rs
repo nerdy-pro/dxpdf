@@ -226,9 +226,14 @@ mod text_scale_tests {
     }
 }
 
-/// Highlight colors — fixed palette per OOXML spec (ST_HighlightColor).
+/// Highlight colors — fixed palette per OOXML spec (ST_HighlightColor §17.18.40).
+///
+/// `None` is the spec's explicit "no highlight" override (`<w:highlight w:val="none"/>`),
+/// distinct from absence of the element. Mirrors the `UnderlineStyle::None`
+/// tri-state convention used elsewhere in `RunProperties`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HighlightColor {
+    None,
     Black,
     Blue,
     Cyan,

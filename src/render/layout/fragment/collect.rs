@@ -110,7 +110,10 @@ where
                 crate::render::resolve::color::ColorContext::Background,
             )
         })
-        .or_else(|| effective_props.highlight.map(resolve_highlight_color));
+        // §17.18.40: HighlightColor::None is the explicit "no highlight"
+        // override and yields no fill, so use `and_then` to thread the
+        // Option through.
+        .or_else(|| effective_props.highlight.and_then(resolve_highlight_color));
 
     // §17.3.2.42: vertical alignment (super/sub).
     let mut baseline_offset = match effective_props.vertical_align {

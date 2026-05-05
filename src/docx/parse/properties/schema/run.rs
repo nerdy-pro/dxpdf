@@ -287,6 +287,15 @@ mod tests {
     }
 
     #[test]
+    fn highlight_val_none_is_explicit_override() {
+        // §17.3.2.15 / §17.18.40: <w:highlight w:val="none"/> is the spec's
+        // explicit "no highlight" override — must round-trip to
+        // `Some(HighlightColor::None)`, not a parse error.
+        let (rp, _) = parse(r#"<rPr><highlight val="none"/></rPr>"#);
+        assert_eq!(rp.highlight, Some(HighlightColor::None));
+    }
+
+    #[test]
     fn vertical_align_superscript() {
         let (rp, _) = parse(r#"<rPr><vertAlign val="superscript"/></rPr>"#);
         assert_eq!(rp.vertical_align, Some(VerticalAlign::Superscript));
