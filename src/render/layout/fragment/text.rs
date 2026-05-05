@@ -10,9 +10,15 @@ use super::{FontProps, Fragment, FragmentBorder, TextMetrics};
 
 /// §17.18.40 ST_HighlightColor: map highlight enum to RGB.
 /// These are the fixed palette colors defined in the OOXML spec.
-pub(super) fn resolve_highlight_color(hl: crate::model::HighlightColor) -> RgbColor {
+///
+/// Returns `None` for [`HighlightColor::None`] — the spec's explicit
+/// "no highlight" override (`<w:highlight w:val="none"/>`) — so the caller
+/// suppresses the background fill entirely rather than painting nothing
+/// special at the wrong layer.
+pub(super) fn resolve_highlight_color(hl: crate::model::HighlightColor) -> Option<RgbColor> {
     use crate::model::HighlightColor;
-    match hl {
+    Some(match hl {
+        HighlightColor::None => return None,
         HighlightColor::Black => RgbColor { r: 0, g: 0, b: 0 },
         HighlightColor::Blue => RgbColor { r: 0, g: 0, b: 255 },
         HighlightColor::Cyan => RgbColor {
@@ -65,7 +71,7 @@ pub(super) fn resolve_highlight_color(hl: crate::model::HighlightColor) -> RgbCo
             g: 255,
             b: 0,
         },
-    }
+    })
 }
 
 /// Resolved styling for a single text fragment.

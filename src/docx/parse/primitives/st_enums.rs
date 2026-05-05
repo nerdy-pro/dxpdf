@@ -185,6 +185,9 @@ impl From<StHeightRule> for HeightRule {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StHighlightColor {
+    /// §17.18.40: explicit "no highlight" — overrides any inherited
+    /// highlight. Distinct from absence of the element, which inherits.
+    None,
     Black,
     Blue,
     Cyan,
@@ -206,6 +209,7 @@ pub enum StHighlightColor {
 impl From<StHighlightColor> for HighlightColor {
     fn from(s: StHighlightColor) -> Self {
         match s {
+            StHighlightColor::None => Self::None,
             StHighlightColor::Black => Self::Black,
             StHighlightColor::Blue => Self::Blue,
             StHighlightColor::Cyan => Self::Cyan,
