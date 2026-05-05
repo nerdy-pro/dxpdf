@@ -78,3 +78,33 @@ jobs:
 
       - name: Print binary size
         run: ls -lh target/release/dxpdf
+
+  verify-wheel:
+    name: Verify wheel embeds FreeType
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: verify-wheel
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev clang ninja-build
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build wheel
+        run: maturin build --release --features python --out dist
+
+      - name: Verify FreeType is embedded
+        run: python3 scripts/verify_wheel.py dist/*.whl
