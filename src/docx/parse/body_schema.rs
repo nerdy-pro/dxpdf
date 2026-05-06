@@ -338,8 +338,118 @@ pub(crate) struct TableXml {
     pub tbl_pr: Option<TblPrXml>,
     #[serde(rename = "tblGrid", default)]
     pub tbl_grid: Option<TblGridXml>,
+    /// All direct children of `<w:tbl>` in document order. `<w:tblPr>` and
+    /// `<w:tblGrid>` are also captured here (serde's `$value` collects every
+    /// child) and must be ignored when extracting rows; the dedicated
+    /// `tbl_pr` / `tbl_grid` fields above are canonical.
+    #[serde(rename = "$value", default)]
+    pub children: Vec<TableChildXml>,
+}
+
+/// Direct children of `<w:tbl>` modelled per ECMA-376 §17.4.38 (CT_Tbl).
+///
+/// After `<w:tblPr>` and `<w:tblGrid>`, OOXML's content model is a
+/// `<xsd:choice>` repeated 0..*: `<w:tr>`, `<w:customXmlIns|Del|MoveFrom|
+/// MoveTo>` (CT_CustomXmlRow), `<w:sdt>` (CT_SdtRow), or EG_RunLevelElts
+/// (proofErr/permStart/permEnd; ins/del/moveFrom/moveTo as
+/// CT_RowTrackChange; EG_RangeMarkupElements: bookmarkStart/End,
+/// commentRange*; EG_MathContent). Modelling every spec-defined variant
+/// lets row extraction recurse into wrappers; non-row variants are dropped
+/// during conversion since they have no rendered effect at table level.
+#[derive(Deserialize)]
+pub(crate) enum TableChildXml {
+    /// `<w:tr>` — a table row.
+    #[serde(rename = "tr")]
+    Row(Box<TableRowXml>),
+    /// `<w:sdt>` — table-level structured document tag (CT_SdtRow).
+    #[serde(rename = "sdt")]
+    Sdt(Box<SdtRowXml>),
+    /// `<w:ins>` revision-tracked inserted rows (CT_RowTrackChange).
+    #[serde(rename = "ins")]
+    Ins(Box<RowTrackChangeXml>),
+    /// `<w:del>` revision-tracked deleted rows.
+    #[serde(rename = "del")]
+    Del(Box<RowTrackChangeXml>),
+    /// `<w:moveFrom>` / `<w:moveTo>` revision-tracked moved rows.
+    #[serde(rename = "moveFrom")]
+    MoveFrom(Box<RowTrackChangeXml>),
+    #[serde(rename = "moveTo")]
+    MoveTo(Box<RowTrackChangeXml>),
+    /// `<w:customXmlIns|Del|MoveFrom|MoveTo>` — CT_CustomXmlRow wrappers.
+    #[serde(rename = "customXmlIns")]
+    CustomXmlIns(Box<CustomXmlRowXml>),
+    #[serde(rename = "customXmlDel")]
+    CustomXmlDel(Box<CustomXmlRowXml>),
+    #[serde(rename = "customXmlMoveFrom")]
+    CustomXmlMoveFrom(Box<CustomXmlRowXml>),
+    #[serde(rename = "customXmlMoveTo")]
+    CustomXmlMoveTo(Box<CustomXmlRowXml>),
+    /// Range markup — bookmarks and comment ranges may span multiple rows.
+    #[serde(rename = "bookmarkStart")]
+    BookmarkStart(BookmarkStartXml),
+    #[serde(rename = "bookmarkEnd")]
+    BookmarkEnd(BookmarkEndXml),
+    #[serde(rename = "commentRangeStart")]
+    CommentRangeStart(BookmarkEndXml),
+    #[serde(rename = "commentRangeEnd")]
+    CommentRangeEnd(BookmarkEndXml),
+    /// Proofreading and permission markers — ignored.
+    #[serde(rename = "proofErr")]
+    ProofErr(IgnoredXml),
+    #[serde(rename = "permStart")]
+    PermStart(IgnoredXml),
+    #[serde(rename = "permEnd")]
+    PermEnd(IgnoredXml),
+    /// `<w:tblPr>` / `<w:tblGrid>` are captured on the parent directly;
+    /// these variants exist only so `$value` can absorb the duplicate
+    /// match. Compare with `ParaChildXml::PPr`.
+    #[serde(rename = "tblPr")]
+    TblPr(Box<TblPrXml>),
+    #[serde(rename = "tblGrid")]
+    TblGrid(Box<TblGridXml>),
+    /// Catch-all for unmodelled OOXML elements (e.g., math content,
+    /// `customXml*RangeStart/End`).
+    #[serde(other)]
+    Other,
+}
+
+/// CT_SdtRow §17.5.2.30 — `<w:sdt>` at table level. Wrapped rows live in
+/// `<w:sdtContent>` (CT_SdtContentRow).
+#[derive(Deserialize, Default)]
+pub(crate) struct SdtRowXml {
+    #[serde(rename = "sdtContent", default)]
+    pub content: Option<SdtRowContentXml>,
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct SdtRowContentXml {
+    #[serde(rename = "$value", default)]
+    pub children: Vec<TableChildXml>,
+}
+
+/// CT_RowTrackChange §17.13.5.16/.7/.22 — used for `<w:ins>` / `<w:del>` /
+/// `<w:moveFrom>` / `<w:moveTo>` at table level. Per the spec, contains
+/// only `<w:tr>` children plus the inherited revision attributes.
+#[derive(Deserialize, Default)]
+pub(crate) struct RowTrackChangeXml {
+    #[serde(rename = "@id", default)]
+    pub id: Option<i64>,
+    #[serde(rename = "@author", default)]
+    pub author: Option<String>,
+    #[serde(rename = "@date", default)]
+    pub date: Option<String>,
     #[serde(rename = "tr", default)]
     pub rows: Vec<TableRowXml>,
+}
+
+/// CT_CustomXmlRow §17.5.1.5–.9 — recursive wrapper whose content model
+/// mirrors CT_Tbl's row-level choice group, hence `Vec<TableChildXml>`.
+#[derive(Deserialize, Default)]
+pub(crate) struct CustomXmlRowXml {
+    #[serde(rename = "customXmlPr", default)]
+    pub custom_xml_pr: Option<IgnoredXml>,
+    #[serde(rename = "$value", default)]
+    pub children: Vec<TableChildXml>,
 }
 
 #[derive(Deserialize, Default)]

@@ -110,6 +110,115 @@ fn convert_empty_document() {
     assert_eq!(&pdf[..5], b"%PDF-");
 }
 
+/// Per ECMA-376 §17.4.38 (CT_Tbl), `<w:bookmarkStart>` and `<w:bookmarkEnd>`
+/// may appear interleaved with `<w:tr>` elements (they're part of
+/// EG_RangeMarkupElements in the choice group). The parser must not split
+/// the row sequence across non-row siblings.
+#[test]
+fn convert_table_with_bookmarks_between_rows() {
+    let docx = simple_docx(
+        r#"<w:tbl>
+            <w:tblPr/>
+            <w:tblGrid><w:gridCol w:w="2880"/></w:tblGrid>
+            <w:tr><w:tc><w:p><w:r><w:t>R1</w:t></w:r></w:p></w:tc></w:tr>
+            <w:bookmarkStart w:id="0" w:name="anchor"/>
+            <w:tr><w:tc><w:p><w:r><w:t>R2</w:t></w:r></w:p></w:tc></w:tr>
+            <w:tr><w:tc><w:p><w:r><w:t>R3</w:t></w:r></w:p></w:tc></w:tr>
+            <w:bookmarkEnd w:id="0"/>
+            <w:tr><w:tc><w:p><w:r><w:t>R4</w:t></w:r></w:p></w:tc></w:tr>
+        </w:tbl>"#,
+    );
+    let document = dxpdf::docx::parse(&docx).unwrap();
+    let table = match &document.body[0] {
+        dxpdf::model::Block::Table(t) => t,
+        b => panic!("expected table, got {b:?}"),
+    };
+    assert_eq!(
+        table.rows.len(),
+        4,
+        "all four rows must survive a bookmarked split",
+    );
+    let pdf = dxpdf::convert(&docx).unwrap();
+    assert_eq!(&pdf[..5], b"%PDF-");
+}
+
+/// `<w:proofErr>`, `<w:permStart>`, `<w:permEnd>` are EG_RunLevelElts that
+/// CT_Tbl admits between rows. Word emits these around proofreading marks
+/// and document protection ranges; they have no rendered effect but must
+/// not break row parsing.
+#[test]
+fn convert_table_with_proof_err_between_rows() {
+    let docx = simple_docx(
+        r#"<w:tbl>
+            <w:tblPr/>
+            <w:tblGrid><w:gridCol w:w="2880"/></w:tblGrid>
+            <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+            <w:proofErr w:type="spellStart"/>
+            <w:tr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+            <w:proofErr w:type="spellEnd"/>
+        </w:tbl>"#,
+    );
+    let document = dxpdf::docx::parse(&docx).unwrap();
+    let table = match &document.body[0] {
+        dxpdf::model::Block::Table(t) => t,
+        b => panic!("expected table, got {b:?}"),
+    };
+    assert_eq!(table.rows.len(), 2);
+}
+
+/// `<w:ins>` at table level wraps inserted rows (CT_RowTrackChange,
+/// §17.13.5.16). The wrapped `<w:tr>` children must surface as ordinary
+/// rows in the model — the renderer ignores the revision metadata, but
+/// the rows themselves must render.
+#[test]
+fn convert_table_with_revision_tracked_inserted_rows() {
+    let docx = simple_docx(
+        r#"<w:tbl>
+            <w:tblPr/>
+            <w:tblGrid><w:gridCol w:w="2880"/></w:tblGrid>
+            <w:tr><w:tc><w:p><w:r><w:t>existing</w:t></w:r></w:p></w:tc></w:tr>
+            <w:ins w:id="1" w:author="a" w:date="2026-01-01T00:00:00Z">
+                <w:tr><w:tc><w:p><w:r><w:t>inserted</w:t></w:r></w:p></w:tc></w:tr>
+            </w:ins>
+        </w:tbl>"#,
+    );
+    let document = dxpdf::docx::parse(&docx).unwrap();
+    let table = match &document.body[0] {
+        dxpdf::model::Block::Table(t) => t,
+        b => panic!("expected table, got {b:?}"),
+    };
+    assert_eq!(
+        table.rows.len(),
+        2,
+        "rows wrapped in <w:ins> must surface alongside ordinary rows",
+    );
+}
+
+/// `<w:sdt>` at table level (CT_SdtRow, §17.5.2.30) wraps rows in a
+/// content control. Rows live under `<w:sdtContent>`; they must still
+/// render.
+#[test]
+fn convert_table_with_sdt_wrapping_rows() {
+    let docx = simple_docx(
+        r#"<w:tbl>
+            <w:tblPr/>
+            <w:tblGrid><w:gridCol w:w="2880"/></w:tblGrid>
+            <w:tr><w:tc><w:p><w:r><w:t>plain</w:t></w:r></w:p></w:tc></w:tr>
+            <w:sdt>
+                <w:sdtContent>
+                    <w:tr><w:tc><w:p><w:r><w:t>controlled</w:t></w:r></w:p></w:tc></w:tr>
+                </w:sdtContent>
+            </w:sdt>
+        </w:tbl>"#,
+    );
+    let document = dxpdf::docx::parse(&docx).unwrap();
+    let table = match &document.body[0] {
+        dxpdf::model::Block::Table(t) => t,
+        b => panic!("expected table, got {b:?}"),
+    };
+    assert_eq!(table.rows.len(), 2);
+}
+
 #[test]
 fn convert_writes_to_file() {
     let docx = simple_docx(r#"<w:p><w:r><w:t>File test</w:t></w:r></w:p>"#);

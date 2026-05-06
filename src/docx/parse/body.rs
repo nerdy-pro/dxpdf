@@ -439,8 +439,7 @@ fn convert_table(t: TableXml, ctx: &mut ConvertCtx) -> Table {
                 .collect()
         })
         .unwrap_or_default();
-    let rows = t
-        .rows
+    let rows = collect_table_rows(t.children)
         .into_iter()
         .map(|r| convert_table_row(r, ctx))
         .collect();
@@ -449,6 +448,46 @@ fn convert_table(t: TableXml, ctx: &mut ConvertCtx) -> Table {
         grid,
         rows,
     }
+}
+
+/// Walk `<w:tbl>`'s direct children and flatten out every `<w:tr>`,
+/// recursing through revision-tracking, custom-XML, and SDT row wrappers.
+/// Range markers, proofreading errors, permission ranges, and the
+/// `tblPr`/`tblGrid` duplicates produced by `$value` are dropped — they
+/// have no rendered effect at table level. Document order is preserved.
+fn collect_table_rows(children: Vec<TableChildXml>) -> Vec<TableRowXml> {
+    let mut rows = Vec::with_capacity(children.len());
+    for child in children {
+        match child {
+            TableChildXml::Row(r) => rows.push(*r),
+            TableChildXml::Sdt(s) => {
+                if let Some(content) = s.content {
+                    rows.extend(collect_table_rows(content.children));
+                }
+            }
+            TableChildXml::Ins(rt)
+            | TableChildXml::Del(rt)
+            | TableChildXml::MoveFrom(rt)
+            | TableChildXml::MoveTo(rt) => rows.extend(rt.rows),
+            TableChildXml::CustomXmlIns(cx)
+            | TableChildXml::CustomXmlDel(cx)
+            | TableChildXml::CustomXmlMoveFrom(cx)
+            | TableChildXml::CustomXmlMoveTo(cx) => {
+                rows.extend(collect_table_rows(cx.children));
+            }
+            TableChildXml::BookmarkStart(_)
+            | TableChildXml::BookmarkEnd(_)
+            | TableChildXml::CommentRangeStart(_)
+            | TableChildXml::CommentRangeEnd(_)
+            | TableChildXml::ProofErr(_)
+            | TableChildXml::PermStart(_)
+            | TableChildXml::PermEnd(_)
+            | TableChildXml::TblPr(_)
+            | TableChildXml::TblGrid(_)
+            | TableChildXml::Other => {}
+        }
+    }
+    rows
 }
 
 fn convert_table_row(r: TableRowXml, ctx: &mut ConvertCtx) -> TableRow {
