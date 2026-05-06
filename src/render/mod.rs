@@ -125,11 +125,14 @@ pub fn layout_document(
     let mut all_endnotes = Vec::new();
     let mut last_config = PageConfig::default();
     // Per-section metadata for deferred header/footer rendering.
+    // Carries the section's resolved slot sets and `<w:titlePg/>` flag;
+    // the global `<w:evenAndOddHeaders/>` setting is read once below.
     struct SectionHfInfo<'a> {
         page_range: std::ops::Range<usize>,
         config: PageConfig,
-        header_blocks: Option<&'a [Block]>,
-        footer_blocks: Option<&'a [Block]>,
+        headers: &'a crate::render::resolve::header_footer::HeaderFooterSet<Vec<Block>>,
+        footers: &'a crate::render::resolve::header_footer::HeaderFooterSet<Vec<Block>>,
+        title_pg: bool,
     }
     let mut section_hf: Vec<SectionHfInfo> = Vec::new();
 
@@ -213,21 +216,25 @@ pub fn layout_document(
         section_hf.push(SectionHfInfo {
             page_range: page_start..all_pages.len(),
             config,
-            header_blocks: section.header.as_deref(),
-            footer_blocks: section.footer.as_deref(),
+            headers: &section.headers,
+            footers: &section.footers,
+            title_pg: section.properties.title_page.unwrap_or(false),
         });
     }
 
     // Phase 2: render headers/footers with correct NUMPAGES (total page count).
     let total_pages = all_pages.len();
+    let even_and_odd = resolved.even_and_odd_headers;
     for info in &section_hf {
         state.page_config = info.config.clone();
         render_headers_footers(
             &mut all_pages[info.page_range.clone()],
             &info.config,
             &HeaderFooterBlocks {
-                header: info.header_blocks,
-                footer: info.footer_blocks,
+                headers: info.headers,
+                footers: info.footers,
+                title_pg: info.title_pg,
+                even_and_odd,
             },
             &ctx,
             &mut state,
@@ -293,7 +300,19 @@ pub fn layout_document(
 }
 
 /// §17.6.2: if header or footer content extends past the body margin,
-/// adjust margins so body text starts after the header / ends before the footer.
+/// adjust margins so body text starts after the header / ends before
+/// the footer.
+///
+/// Each section can supply up to three header parts (default / first /
+/// even) and three footer parts. To keep the body region consistent
+/// across pages within a section, we compute the extent as the
+/// **maximum** across every populated slot — the body starts low
+/// enough to clear the tallest header, and ends high enough to clear
+/// the tallest footer. Per-page slot variation in height is
+/// uncommon in real documents (Word styles all three slots
+/// identically by default), so this conservative allocation is
+/// indistinguishable from per-page adjustment in the typical case
+/// while keeping body geometry stable.
 fn adjust_margins_for_header_footer(
     mut config: PageConfig,
     section: &crate::render::resolve::sections::ResolvedSection,
@@ -302,8 +321,19 @@ fn adjust_margins_for_header_footer(
     default_line_height: dimension::Pt,
 ) -> PageConfig {
     let content_width = config.content_width();
+    let header_slots = [
+        section.headers.default.as_deref(),
+        section.headers.first.as_deref(),
+        section.headers.even.as_deref(),
+    ];
+    let footer_slots = [
+        section.footers.default.as_deref(),
+        section.footers.first.as_deref(),
+        section.footers.even.as_deref(),
+    ];
 
-    if let Some(ref blocks) = section.header {
+    let mut max_header_bottom = dimension::Pt::ZERO;
+    for blocks in header_slots.iter().flatten() {
         let hf = layout::build::build_header_footer_content(blocks, ctx, state);
         let result =
             layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
@@ -327,13 +357,14 @@ fn adjust_margins_for_header_footer(
                 y + fi.size.height
             })
             .fold(dimension::Pt::ZERO, |a, b| a.max(b));
-        let header_bottom = blocks_bottom.max(floats_bottom);
-        if header_bottom > config.margins.top {
-            config.margins.top = header_bottom;
-        }
+        max_header_bottom = max_header_bottom.max(blocks_bottom.max(floats_bottom));
+    }
+    if max_header_bottom > config.margins.top {
+        config.margins.top = max_header_bottom;
     }
 
-    if let Some(ref blocks) = section.footer {
+    let mut max_footer_extent = dimension::Pt::ZERO;
+    for blocks in footer_slots.iter().flatten() {
         let hf = layout::build::build_header_footer_content(blocks, ctx, state);
         let result =
             layout::section::stack_blocks(&hf.blocks, content_width, default_line_height, None);
@@ -350,10 +381,10 @@ fn adjust_margins_for_header_footer(
                 }
             })
             .fold(dimension::Pt::ZERO, |a, b| a.max(b));
-        let footer_extent = blocks_extent.max(floats_extent);
-        if footer_extent > config.margins.bottom {
-            config.margins.bottom = footer_extent;
-        }
+        max_footer_extent = max_footer_extent.max(blocks_extent.max(floats_extent));
+    }
+    if max_footer_extent > config.margins.bottom {
+        config.margins.bottom = max_footer_extent;
     }
 
     config

@@ -4,6 +4,7 @@ pub mod color;
 pub mod conditional;
 pub mod drawing_color;
 pub mod fonts;
+pub mod header_footer;
 pub mod images;
 pub mod numbering;
 pub mod properties;
@@ -55,6 +56,11 @@ pub struct ResolvedDocument {
     pub footnotes: HashMap<NoteId, Vec<Block>>,
     /// Endnote content keyed by note ID.
     pub endnotes: HashMap<NoteId, Vec<Block>>,
+    /// §17.10.1 — when true, even-numbered pages use the section's
+    /// `even` header/footer slot (and the `default` slot is restricted
+    /// to odd pages). Without this flag, the `even` slots are dead
+    /// data even if the document supplies them.
+    pub even_and_odd_headers: bool,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -99,6 +105,7 @@ pub fn resolve(doc: &Document) -> ResolvedDocument {
         theme: doc.theme.clone(),
         footnotes: doc.footnotes.clone(),
         endnotes: doc.endnotes.clone(),
+        even_and_odd_headers: doc.settings.even_and_odd_headers,
     }
 }
 
@@ -307,6 +314,6 @@ mod tests {
         doc.body = vec![para("body")];
 
         let resolved = resolve(&doc);
-        assert!(resolved.sections[0].header.is_some());
+        assert!(resolved.sections[0].headers.default.is_some());
     }
 }
