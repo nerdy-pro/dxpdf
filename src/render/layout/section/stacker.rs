@@ -210,6 +210,14 @@ pub fn stack_blocks(
                         stroke: fs.stroke.clone(),
                         effects: fs.effects.clone(),
                     });
+                    // §17.17.1 / §20.1.2.1.1: shape's text-box content paints
+                    // *over* the shape's fill — emit after the path. Each
+                    // command is in shape-local coords; shift by the shape's
+                    // resolved page origin.
+                    for mut cmd in fs.text_commands.iter().cloned() {
+                        cmd.shift(fs.x, shape_y);
+                        commands.push(cmd);
+                    }
                 }
 
                 prev_space_after = effective_style.space_after;

@@ -123,7 +123,7 @@ pub(super) fn extract_floating_images(
 pub(super) fn extract_floating_shapes(
     para: &Paragraph,
     ctx: &BuildContext,
-    state: &BuildState,
+    state: &mut BuildState,
     frame: AnchorFrame,
 ) -> Vec<FloatingShape> {
     use crate::model::{GraphicContent, ImagePlacement, Inline};
@@ -210,6 +210,18 @@ pub(super) fn extract_floating_shapes(
 
         let (x, y) = resolve_anchor_position(anchor, w, h, state, frame);
 
+        // §17.17.1: lay out the shape's text-box content (`wps:txbx`) into
+        // shape-local Pt commands. Restricted to paragraph- and line-anchored
+        // shapes — page-anchored shapes resolve their y in absolute page
+        // coordinates and the sub-layout doesn't carry that frame yet, so we
+        // leave their text empty (the inline-fragment collector still picks
+        // it up at the host paragraph's y as a Tier 0 placeholder).
+        let text_commands = if anchors_to_paragraph(anchor) {
+            build_shape_text_commands(wsp, extent, ctx, state)
+        } else {
+            Vec::new()
+        };
+
         shapes.push(FloatingShape {
             x,
             y,
@@ -225,6 +237,7 @@ pub(super) fn extract_floating_shapes(
             fill: visuals.fill,
             stroke: visuals.stroke,
             effects: visuals.effects,
+            text_commands,
         });
     }
 
@@ -271,9 +284,7 @@ fn extract_vml_floating_images(
             Inline::Hyperlink(link) => {
                 extract_vml_floating_images(&link.content, state, frame, ctx, out)
             }
-            Inline::Field(f) => {
-                extract_vml_floating_images(&f.content, state, frame, ctx, out)
-            }
+            Inline::Field(f) => extract_vml_floating_images(&f.content, state, frame, ctx, out),
             Inline::AlternateContent(_) => {}
             _ => {}
         }
@@ -530,6 +541,10 @@ fn build_vml_rect_shape(
         fill,
         stroke: None,
         effects: vec![],
+        // VML rect text-box content is still picked up at the host paragraph
+        // y by the inline-fragment collector. Sub-layout into shape-local
+        // commands isn't wired for VML primitives yet.
+        text_commands: Vec::new(),
     })
 }
 
@@ -603,7 +618,9 @@ fn resolve_anchor_x(
             alignment,
         } => {
             let (area_left, area_width) = match relative_from {
-                AnchorRelativeFrom::Page => (page_anchor_offset, page_width.max(pc.page_size.width)),
+                AnchorRelativeFrom::Page => {
+                    (page_anchor_offset, page_width.max(pc.page_size.width))
+                }
                 AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => {
                     (margin_left, content_width)
                 }
@@ -737,7 +754,9 @@ fn vml_absolute_position(style: &model::VmlStyle) -> Option<(Pt, Pt)> {
 /// the `Solid` fill type is honored here; the others log once and
 /// degrade to `ResolvedFill::None` so the shape's outline / text
 /// content still renders.
-fn resolve_vml_solid_fill(common: &model::VmlCommonAttrs) -> crate::render::layout::draw_command::ResolvedFill {
+fn resolve_vml_solid_fill(
+    common: &model::VmlCommonAttrs,
+) -> crate::render::layout::draw_command::ResolvedFill {
     use crate::model::{VmlColor, VmlFillType};
     use crate::render::layout::draw_command::ResolvedFill;
     use crate::render::resolve::drawing_color::Rgba;
@@ -782,6 +801,90 @@ fn resolve_vml_solid_fill(common: &model::VmlCommonAttrs) -> crate::render::layo
         .as_ref()
         .and_then(to_solid)
         .unwrap_or(ResolvedFill::None)
+}
+
+/// True when the anchor's vertical position resolves relative to the host
+/// paragraph or line — the only case where the shape's eventual page-y is a
+/// function of `paragraph_top` rather than an absolute frame. The shape-text
+/// sub-layout assumes paragraph-relative placement (the stacker ties
+/// `text_commands` to the same `(fs.x, shape_y)` it uses for the path), so
+/// page-anchored shapes get their text emitted via the legacy inline-fragment
+/// collector instead. Tier 1 follow-up: extend the sub-layout to honor
+/// page/margin frames so all wsp shapes can use the typed path.
+fn anchors_to_paragraph(anchor: &crate::model::AnchorProperties) -> bool {
+    use crate::model::{AnchorPosition, AnchorRelativeFrom};
+    let relative_from = match &anchor.vertical_position {
+        AnchorPosition::Offset { relative_from, .. } => relative_from,
+        AnchorPosition::Align { relative_from, .. } => relative_from,
+    };
+    matches!(
+        relative_from,
+        AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line
+    )
+}
+
+/// §17.17.1 / §20.1.2.1.1: lay out a shape's `wps:txbx/w:txbxContent` into
+/// shape-local draw commands. Output is in shape-local Pt with origin at the
+/// shape's top-left; the stacker shifts by `(fs.x, shape_y)` when emitting,
+/// so the text appears inside the shape's bounding box on top of the fill.
+///
+/// Body insets (§20.1.2.1.1 lIns/tIns/rIns/bIns) deflate the available width
+/// and shift the inner origin. The function also runs a fresh `BuildState`
+/// for list/footnote counters so the shape's interior doesn't pollute the
+/// outer document; `field_ctx` is copied so PAGE/NUMPAGES inside a shape's
+/// text body still resolve against the host page.
+pub(super) fn build_shape_text_commands(
+    wsp: &crate::model::WordProcessingShape,
+    extent: PtSize,
+    ctx: &BuildContext,
+    state: &BuildState,
+) -> Vec<crate::render::layout::draw_command::DrawCommand> {
+    if wsp.txbx_content.is_empty() {
+        return Vec::new();
+    }
+
+    // §20.1.2.1.1 spec defaults: 91440 EMU horizontal, 45720 EMU vertical.
+    let default_lr = Pt::new(91440.0 / 12700.0); // ≈ 7.2pt
+    let default_tb = Pt::new(45720.0 / 12700.0); // ≈ 3.6pt
+    let (left_inset, top_inset, right_inset, _bot_inset) =
+        wsp.body_pr
+            .as_ref()
+            .map_or((default_lr, default_tb, default_lr, default_tb), |bp| {
+                (
+                    bp.left_inset.map_or(default_lr, Pt::from),
+                    bp.top_inset.map_or(default_tb, Pt::from),
+                    bp.right_inset.map_or(default_lr, Pt::from),
+                    bp.bottom_inset.map_or(default_tb, Pt::from),
+                )
+            });
+
+    let content_width = (extent.width - left_inset - right_inset).max(Pt::ZERO);
+    if content_width <= Pt::ZERO {
+        return Vec::new();
+    }
+
+    // Sub-state with the host's page dimensions and field context. Counters
+    // are reset so a footnote/list inside a shape body doesn't bump the
+    // outer counters.
+    let mut sub_state = BuildState {
+        page_config: state.page_config.clone(),
+        footnote_counter: 0,
+        endnote_counter: 0,
+        list_counters: std::collections::HashMap::new(),
+        field_ctx: state.field_ctx,
+    };
+
+    let hf = super::build_header_footer_content(&wsp.txbx_content, ctx, &mut sub_state);
+    let line_height = super::default_line_height(ctx);
+    let result =
+        crate::render::layout::section::stack_blocks(&hf.blocks, content_width, line_height, None);
+
+    let mut commands = Vec::with_capacity(result.commands.len());
+    for mut cmd in result.commands {
+        cmd.shift(left_inset, top_inset);
+        commands.push(cmd);
+    }
+    commands
 }
 
 /// Convert a VML CSS length to points.

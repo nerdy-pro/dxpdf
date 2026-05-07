@@ -96,10 +96,7 @@ pub(crate) enum VmlPrimitiveXml {
 }
 
 impl VmlPrimitiveXml {
-    fn into_model(
-        self,
-        ctx: &mut crate::docx::parse::body::ConvertCtx,
-    ) -> Option<VmlPrimitive> {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> Option<VmlPrimitive> {
         Some(match self {
             VmlPrimitiveXml::Shape(s) => VmlPrimitive::Shape(s.into_model(ctx)),
             VmlPrimitiveXml::Rect(r) => VmlPrimitive::Rect(r.into_model(ctx)),
@@ -182,14 +179,11 @@ impl From<FillXml> for crate::docx::model::VmlFill {
             fill_type,
             color: x.color.as_deref().and_then(|s| parse_color(s).ok()),
             color2: x.color2.as_deref().and_then(|s| parse_color(s).ok()),
-            opacity: x
-                .opacity
-                .as_deref()
-                .and_then(|s| {
-                    // VML opacity admits "0.5" or "32768f" (fixed-point fraction
-                    // of 65536). For phase C we accept the float form.
-                    s.parse::<f32>().ok()
-                }),
+            opacity: x.opacity.as_deref().and_then(|s| {
+                // VML opacity admits "0.5" or "32768f" (fixed-point fraction
+                // of 65536). For phase C we accept the float form.
+                s.parse::<f32>().ok()
+            }),
             src: x.src,
             rel_id: x.rel_id.map(crate::docx::model::RelId::new),
         }
@@ -323,16 +317,52 @@ impl ShapeXml {
 //    arc / curve / image / group) ──────────────────────────────────────
 
 /// VML §14.1.2.16 `<v:rect>`.
+///
+/// Common attrs are inlined here (rather than via
+/// `#[serde(flatten)]` on a `CommonAttrsXml`) because quick-xml's
+/// serde drops the deeply-nested `<v:textbox><w:txbxContent>...`
+/// when the field carrying `<v:textbox>` lives behind a flatten
+/// boundary — the rect's textbox content silently vanishes. Inlining
+/// keeps every child element on the same struct level so it parses
+/// faithfully. The other primitives keep `flatten` because they
+/// don't host text-box content in practice (or do but were simpler
+/// to wire that way).
 #[derive(Deserialize)]
 pub(crate) struct RectXml {
-    #[serde(flatten)]
-    pub common: CommonAttrsXml,
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
+    #[serde(rename = "@style", default)]
+    pub style: Option<String>,
+    #[serde(rename = "@fillcolor", default)]
+    pub fillcolor: Option<String>,
+    #[serde(rename = "@stroked", default)]
+    pub stroked: Option<VmlBool>,
+    #[serde(rename = "stroke", default)]
+    pub stroke: Option<StrokeXml>,
+    #[serde(rename = "textbox", default)]
+    pub textbox: Option<TextBoxXml>,
+    #[serde(rename = "wrap", default)]
+    pub wrap: Option<WrapXml>,
+    #[serde(rename = "imagedata", default)]
+    pub imagedata: Option<ImageDataXml>,
+    #[serde(rename = "fill", default)]
+    pub fill: Option<FillXml>,
 }
 
 impl RectXml {
     fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlRect {
         VmlRect {
-            common: self.common.into_model(ctx),
+            common: VmlCommonAttrs {
+                id: self.id.map(VmlShapeId::new),
+                style: parse_style(self.style),
+                fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
+                stroked: self.stroked.map(|b| b.0),
+                stroke: self.stroke.map(Into::into),
+                text_box: self.textbox.map(|t| t.into_model(ctx)),
+                wrap: self.wrap.map(Into::into),
+                image_data: self.imagedata.map(Into::into),
+                fill: self.fill.map(Into::into),
+            },
         }
     }
 }
@@ -867,7 +897,10 @@ mod tests {
             Some("_x0000_t202")
         );
         assert_eq!(s.common.stroked, Some(false));
-        assert!(matches!(s.common.fill_color, Some(VmlColor::Rgb(0xFF, 0, 0))));
+        assert!(matches!(
+            s.common.fill_color,
+            Some(VmlColor::Rgb(0xFF, 0, 0))
+        ));
     }
 
     #[test]
@@ -1013,10 +1046,7 @@ mod tests {
         let VmlPrimitive::Rect(r) = &p.primitives[0] else {
             panic!("expected VmlPrimitive::Rect, got {:?}", p.primitives[0]);
         };
-        assert_eq!(
-            r.common.id.as_ref().map(|v| v.as_str()),
-            Some("r1"),
-        );
+        assert_eq!(r.common.id.as_ref().map(|v| v.as_str()), Some("r1"),);
         assert!(matches!(
             r.common.fill_color,
             Some(VmlColor::Rgb(0x88, 0x8B, 0x8D))
@@ -1167,6 +1197,32 @@ mod tests {
     }
 
     #[test]
+    fn rect_textbox_content_is_populated() {
+        // Regression for the gray-bar text bug: `<v:rect>` with a
+        // `<v:textbox><w:txbxContent>` should reach the model with
+        // its inner paragraphs intact, just like `<v:shape>` does.
+        // The `flatten` indirection on `RectXml.common` was dropping
+        // the inner content when this test was first added.
+        use crate::docx::model::VmlPrimitive;
+        let p = parse(
+            r#"<pict>
+                <rect id="r" style="width:100pt;height:50pt">
+                    <textbox>
+                        <txbxContent>
+                            <w:p><w:r><w:t>Inside the rect</w:t></w:r></w:p>
+                        </txbxContent>
+                    </textbox>
+                </rect>
+            </pict>"#,
+        );
+        let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+            panic!();
+        };
+        let tb = r.common.text_box.as_ref().expect("textbox parsed");
+        assert_eq!(tb.content.len(), 1, "textbox should contain one paragraph");
+    }
+
+    #[test]
     fn rect_with_fill_child_carries_fill_type_and_color() {
         // §14.1.2.5: `<v:fill>` overrides `@fillcolor`. The model
         // carries both — the renderer's fill resolver picks the
@@ -1182,7 +1238,10 @@ mod tests {
         let VmlPrimitive::Rect(r) = &p.primitives[0] else {
             panic!();
         };
-        assert!(matches!(r.common.fill_color, Some(VmlColor::Rgb(0xFF, 0, 0))));
+        assert!(matches!(
+            r.common.fill_color,
+            Some(VmlColor::Rgb(0xFF, 0, 0))
+        ));
         let fill = r.common.fill.as_ref().expect("fill child parsed");
         assert_eq!(fill.fill_type, VmlFillType::Solid);
         assert!(matches!(fill.color, Some(VmlColor::Rgb(0, 0xFF, 0))));

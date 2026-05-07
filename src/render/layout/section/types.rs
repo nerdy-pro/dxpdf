@@ -154,6 +154,15 @@ pub struct FloatingShape {
     pub stroke: Option<ResolvedStroke>,
     /// Resolved post-processing effects (painter may defer all in Tier 0).
     pub effects: Vec<ResolvedEffect>,
+    /// §17.17.1 / §20.1.2.1.1: pre-laid-out commands for the shape's
+    /// text-box content (`wps:wsp/wps:txbx/w:txbxContent`). Each
+    /// command is in shape-local coordinates; the stacker shifts
+    /// them by the shape's resolved origin (plus body insets, pre-
+    /// applied during sub-layout) and emits them *after* the shape's
+    /// path so the text overlays the fill. Empty for shapes without
+    /// text-box content or whose anchor model isn't supported by the
+    /// sub-layout code yet (page-anchored vertical positions).
+    pub text_commands: Vec<crate::render::layout::draw_command::DrawCommand>,
 }
 
 impl FloatingShape {
