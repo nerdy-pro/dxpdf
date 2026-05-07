@@ -139,6 +139,9 @@ jobs:
           manylinux: 2_28
           before-script-linux: dnf install -y fontconfig-devel clang ninja-build gcc-toolset-13
           target: ${{ matrix.target.triple }}
+          # maturin-action filters env vars by prefix (CC/CXX/CFLAGS pass; SKIA_*
+          # and BINDGEN_* don't). Forward the two we set above explicitly.
+          docker-options: -e SKIA_GN_ARGS -e BINDGEN_EXTRA_CLANG_ARGS
 
       - name: Build wheel (macos)
         if: matrix.target.os == 'macos'
