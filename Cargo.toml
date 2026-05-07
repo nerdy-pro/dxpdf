@@ -20,12 +20,17 @@ bitflags = "2"
 quick-xml = { version = "0.39", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
-skia-safe = "0.93"
+skia-safe = { version = "0.93", features = ["embed-freetype"] }
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
-pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+# `abi3-py38` builds against Python's stable ABI (PEP 384), so a single wheel
+# per (os, arch) works on Python 3.8 and every newer release without rebuilding.
+# Without it, maturin emits CPython-version-locked wheels (`cp311`, `cp312`),
+# forcing pip to fall back to source-build sdist on any unmatched Python —
+# which then fails on hosts missing the freetype/fontconfig dev headers.
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"], optional = true }
 fontcull = { version = "2", optional = true }
 unicode-segmentation = "1.13.2"
 unicode-properties = "0.1.4"

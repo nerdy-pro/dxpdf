@@ -9,29 +9,75 @@ permissions:
 
 jobs:
   build-wheels:
-    name: Build wheels (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build wheels (${{ matrix.target.label }})
+    runs-on: ${{ matrix.target.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        target:
+          # `triple` is the canonical Rust target triple; `label` is the
+          # human-readable artifact suffix. Rust uses `aarch64-…`, not
+          # `arm64-…`, so the label and the triple disagree on macOS arm.
+          - label: linux-x86_64
+            os: linux
+            runner: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+          # Native ARM Linux hosted runner — free for public repos. If this
+          # repo ever moves private, swap `ubuntu-24.04-arm` back to
+          # `ubuntu-latest` and add `--target aarch64-unknown-linux-gnu` to
+          # let maturin-action cross-compile via QEMU.
+          - label: linux-aarch64
+            os: linux
+            runner: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+          - label: macos-arm64
+            os: macos
+            runner: macos-latest
+            triple: aarch64-apple-darwin
+          - label: macos-x86_64
+            os: macos
+            runner: macos-15-intel
+            triple: x86_64-apple-darwin
+          - label: windows-x86_64
+            os: windows
+            runner: windows-latest
+            triple: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
+          # abi3-py38 means the resulting wheel runs on every Python ≥ 3.8;
+          # the host Python here only drives maturin and is not encoded in
+          # the wheel filename.
           python-version: "3.12"
 
-      - name: Build wheels
+      - name: Build wheels (linux)
+        if: matrix.target.os == 'linux'
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --features python
           manylinux: 2_28
-          before-script-linux: dnf install -y fontconfig-devel freetype-devel
+          before-script-linux: dnf install -y fontconfig-devel clang ninja-build
+          target: ${{ matrix.target.triple }}
+
+      - name: Build wheels (macos)
+        if: matrix.target.os == 'macos'
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist --features python
+          target: ${{ matrix.target.triple }}
+
+      - name: Build wheels (windows)
+        if: matrix.target.os == 'windows'
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist --features python
+          target: ${{ matrix.target.triple }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.target.label }}
           path: dist
 
   build-sdist:
