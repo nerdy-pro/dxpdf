@@ -55,11 +55,33 @@ jobs:
       - name: Build wheels (linux)
         if: matrix.target.os == 'linux'
         uses: PyO3/maturin-action@v1
+        env:
+          # skia-bindings only supports clang on Linux: it unconditionally
+          # injects clang-only `--target=<triple>` into Skia's GN cflags.
+          # AlmaLinux 8's default libstdc++ (GCC 8) lacks C++20 <compare>,
+          # so point clang at gcc-toolset-13's libstdc++ via --gcc-toolchain.
+          # Skia's GN build does NOT propagate CFLAGS/CXXFLAGS — we have to
+          # inject the toolchain flag through SKIA_GN_ARGS (`+=` to preserve
+          # skia-bindings' own extra_cflags like `-O3` and `--target=...`).
+          CC: clang
+          CXX: clang++
+          CFLAGS: --gcc-toolchain=/opt/rh/gcc-toolset-13/root/usr
+          CXXFLAGS: --gcc-toolchain=/opt/rh/gcc-toolset-13/root/usr
+          BINDGEN_EXTRA_CLANG_ARGS: --gcc-toolchain=/opt/rh/gcc-toolset-13/root/usr
+          # `+=` requires the variable to already exist in the GN scope.
+          # `extra_cflags` is auto-set by skia-bindings (so `+=` extends it);
+          # `extra_ldflags` is not, so we'd get "Undefined identifier" on `+=`.
+          # The Skia build only emits static archives (no link step), so we
+          # don't need extra_ldflags here — the cdylib link is rustc's job.
+          SKIA_GN_ARGS: 'extra_cflags+=["--gcc-toolchain=/opt/rh/gcc-toolset-13/root/usr"]'
         with:
           args: --release --out dist --features python
           manylinux: 2_28
-          before-script-linux: dnf install -y fontconfig-devel clang ninja-build
+          before-script-linux: dnf install -y fontconfig-devel clang ninja-build gcc-toolset-13
           target: ${{ matrix.target.triple }}
+          # maturin-action filters env vars by prefix (CC/CXX/CFLAGS pass; SKIA_*
+          # and BINDGEN_* don't). Forward the two we set above explicitly.
+          docker-options: -e SKIA_GN_ARGS -e BINDGEN_EXTRA_CLANG_ARGS
 
       - name: Build wheels (macos)
         if: matrix.target.os == 'macos'
