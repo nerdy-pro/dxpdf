@@ -642,6 +642,54 @@ fn vorlage_baustellenkoordinator_v12_page_one_header_is_blank() {
     );
 }
 
+/// Regression for per-part image-rId collisions — the same fixture
+/// has overlapping `rId1` references in `header2.xml.rels`,
+/// `header3.xml.rels`, and `footer3.xml.rels`. Pre-fix, the global
+/// `media` map only ever held one entry under "rId1" (whichever rel
+/// was loaded last), so the first-page header silently displayed the
+/// footer's image. The fix synthesizes per-part unique rIds; this
+/// test pins down the contract by inspecting the parsed document
+/// directly.
+#[test]
+fn vorlage_baustellenkoordinator_v12_per_part_image_rels_do_not_collide() {
+    let path = std::path::Path::new("test-cases/vorlage_baustellenkoordinator_v12.docx");
+    if !path.exists() {
+        eprintln!("SKIPPED: {} not present", path.display());
+        return;
+    }
+    let bytes = std::fs::read(path).expect("read fixture");
+    let doc = dxpdf::docx::parse(&bytes).expect("parse fixture");
+
+    // Every image rel from a header/footer part must have been keyed
+    // under a synthesized unique id (containing the part path), not
+    // a bare numeric rId. The bare rId would mean it shared a key
+    // with another part — exactly the collision we're guarding
+    // against.
+    assert!(
+        !doc.media.contains_key(&dxpdf::model::RelId::new("rId1")),
+        "no media entry should be keyed by bare 'rId1' — that namespace \
+         is shared across parts"
+    );
+
+    // Header part `word/header3.xml` is the title-page header; its
+    // logo must be a distinct media entry from the footer that
+    // happens to also use rId1 in its own rels file.
+    let header3_logo = doc
+        .media
+        .get(&dxpdf::model::RelId::new("word/header3.xml::rId1"))
+        .expect("header3's image must have its own synthesized media entry");
+    let footer3_image = doc
+        .media
+        .get(&dxpdf::model::RelId::new("word/footer3.xml::rId1"))
+        .expect("footer3's image must have its own synthesized media entry");
+    assert_ne!(
+        header3_logo.0.len(),
+        footer3_image.0.len(),
+        "header and footer images must point at different bytes — if \
+         they're equal we may have re-introduced the rId collision"
+    );
+}
+
 #[test]
 fn footer_selection_follows_same_rules_as_header() {
     let mut doc = empty_document();
