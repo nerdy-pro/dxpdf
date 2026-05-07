@@ -744,16 +744,8 @@ fn choice_has_paragraph_anchored_wsp(choices: &[crate::model::McChoice]) -> bool
                 {
                     return true;
                 }
-                Inline::Hyperlink(link) => {
-                    if walk(&link.content) {
-                        return true;
-                    }
-                }
-                Inline::Field(f) => {
-                    if walk(&f.content) {
-                        return true;
-                    }
-                }
+                Inline::Hyperlink(link) if walk(&link.content) => return true,
+                Inline::Field(f) if walk(&f.content) => return true,
                 _ => {}
             }
         }
