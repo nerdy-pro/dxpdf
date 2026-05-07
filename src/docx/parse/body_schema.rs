@@ -23,7 +23,7 @@ use crate::docx::parse::primitives::st_enums::{StBrClear, StFldCharType};
 use crate::docx::parse::properties::schema::paragraph::PPrXml;
 use crate::docx::parse::properties::schema::run::RPrXml;
 use crate::docx::parse::properties::schema::section::SectPrXml;
-use crate::docx::parse::properties::schema::table::{TblPrXml, TcPrXml, TrPrXml};
+use crate::docx::parse::properties::schema::table::{TblPrExXml, TblPrXml, TcPrXml, TrPrXml};
 
 // ── root-level ─────────────────────────────────────────────────────────────
 
@@ -475,6 +475,11 @@ pub(crate) struct TableRowXml {
     #[serde(rename = "@rsidTr", default)]
     pub rsid_tr: Option<String>,
 
+    /// §17.4.61 `<w:tblPrEx>` — per-row exceptions to table-level
+    /// properties. Spec mandates that when present, it appears *before*
+    /// `<w:trPr>` inside `<w:tr>`.
+    #[serde(rename = "tblPrEx", default)]
+    pub tbl_pr_ex: Option<TblPrExXml>,
     #[serde(rename = "trPr", default)]
     pub tr_pr: Option<TrPrXml>,
     #[serde(rename = "tc", default)]

@@ -498,6 +498,7 @@ fn convert_table_row(r: TableRowXml, ctx: &mut ConvertCtx) -> TableRow {
         tr: hex_rsid(r.rsid_tr.as_deref()),
     };
     let properties = r.tr_pr.map(TableRowProperties::from).unwrap_or_default();
+    let property_exceptions = r.tbl_pr_ex.map(Into::into);
     let cells = r
         .cells
         .into_iter()
@@ -507,6 +508,7 @@ fn convert_table_row(r: TableRowXml, ctx: &mut ConvertCtx) -> TableRow {
         properties,
         cells,
         rsids,
+        property_exceptions,
     }
 }
 

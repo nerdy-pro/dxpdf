@@ -365,6 +365,7 @@ mod tests {
             properties: TableRowProperties::default(),
             cells: vec![cell],
             rsids: TableRowRevisionIds::default(),
+            property_exceptions: None,
         };
         let mut blocks = vec![Block::Table(Box::new(Table {
             properties: TableProperties::default(),

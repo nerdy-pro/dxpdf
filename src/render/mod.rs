@@ -494,6 +494,7 @@ mod tests {
                     },
                 ],
                 rsids: TableRowRevisionIds::default(),
+                property_exceptions: None,
             }],
         }))];
 
