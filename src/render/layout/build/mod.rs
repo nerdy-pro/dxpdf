@@ -116,6 +116,18 @@ pub struct HeaderFooterContent {
     /// on `LayoutBlock::Paragraph.floating_shapes` so the stacker can anchor
     /// them to the owning paragraph's y position.
     pub floating_images: Vec<crate::render::layout::section::FloatingImage>,
+    /// Page-anchored floating shapes (vertical `relativeFrom` is
+    /// `page` / `margin` / `topMargin` / `bottomMargin` / etc.).
+    ///
+    /// Their `y` is `FloatingImageY::Absolute(...)` resolved in `Page`
+    /// frame, and the renderer emits them directly without applying the
+    /// header/footer stack shift — so a `<wp:positionV relativeFrom="page">`
+    /// shape in a footer (e.g. a "Seite X von Y" indicator pinned just
+    /// below the gray address bar) lands at its authored page-y.
+    /// Paragraph- / line-anchored shapes still travel on
+    /// `LayoutBlock::Paragraph.floating_shapes` so they follow the host
+    /// paragraph's y.
+    pub floating_shapes: Vec<crate::render::layout::section::FloatingShape>,
 }
 
 /// Build header/footer content from blocks.
@@ -130,6 +142,7 @@ pub fn build_header_footer_content(
 ) -> HeaderFooterContent {
     let mut layout_blocks = Vec::new();
     let mut all_floating_images = Vec::new();
+    let mut all_page_anchored_shapes = Vec::new();
     let mut absolute_position: Option<(Pt, Pt)> = None;
 
     let available_width = state.page_config.content_width();
@@ -170,8 +183,29 @@ pub fn build_header_footer_content(
                 // be applied twice. §17.10.1: z-ordering against the
                 // surrounding text in Tier 0 is paragraph-granular, matching
                 // the stack-frame emission order.
-                let paragraph_shapes =
-                    floating::extract_floating_shapes(p, ctx, state, AnchorFrame::Stack);
+                let paragraph_shapes = floating::extract_floating_shapes(
+                    p,
+                    ctx,
+                    state,
+                    AnchorFrame::Stack,
+                    floating::ShapeAnchorClass::ParagraphAnchored,
+                );
+
+                // §17.10.1 / §20.4.2.10: shapes whose vertical position is
+                // page/margin-relative resolve to a fixed absolute y. They
+                // can't ride on the per-paragraph anchoring used by
+                // `paragraph_shapes`, so collect them at the
+                // header/footer level — `render_header`/`render_footer`
+                // emits them outside `stack_blocks` (no shift) so the
+                // resolved page-y is honored.
+                let page_anchored_shapes = floating::extract_floating_shapes(
+                    p,
+                    ctx,
+                    state,
+                    AnchorFrame::Page,
+                    floating::ShapeAnchorClass::PageAnchored,
+                );
+                all_page_anchored_shapes.extend(page_anchored_shapes);
 
                 // §17.10.1: empty non-last paragraphs in headers/footers still
                 // occupy a line height (from the paragraph mark's font size).
@@ -222,6 +256,7 @@ pub fn build_header_footer_content(
         blocks: layout_blocks,
         absolute_position,
         floating_images: all_floating_images,
+        floating_shapes: all_page_anchored_shapes,
     }
 }
 

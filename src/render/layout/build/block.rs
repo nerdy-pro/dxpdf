@@ -226,7 +226,13 @@ pub(super) fn build_paragraph_block(
         AnchorFrame::Page
     };
     let floating_images = extract_floating_images(p, ctx, state, frame);
-    let floating_shapes = super::floating::extract_floating_shapes(p, ctx, state, frame);
+    let floating_shapes = super::floating::extract_floating_shapes(
+        p,
+        ctx,
+        state,
+        frame,
+        super::floating::ShapeAnchorClass::All,
+    );
 
     Some(LayoutBlock::Paragraph {
         fragments,

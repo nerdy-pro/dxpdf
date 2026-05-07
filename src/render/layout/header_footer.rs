@@ -252,8 +252,11 @@ fn render_header(
             image_data: fi.image_data.clone(),
         });
     }
-    // Floating shapes are emitted by `stack_blocks` into `result.commands`
-    // above — they travel on their owning paragraph for per-paragraph y.
+    // Paragraph-anchored shapes ride through `result.commands` above (their
+    // y depends on the host paragraph). Page-anchored shapes were resolved
+    // in `Page` frame so their absolute y is authoritative — emit them here
+    // without applying the header's offset shift.
+    emit_page_anchored_shapes(&hf.floating_shapes, &mut header_cmds);
 
     // Prepend header commands before body content.
     header_cmds.append(&mut page.commands);
@@ -314,8 +317,44 @@ fn render_footer(
             image_data: fi.image_data.clone(),
         });
     }
-    // Floating shapes are emitted by `stack_blocks` into `result.commands`
-    // above — they travel on their owning paragraph for per-paragraph y.
+    // Paragraph-anchored shapes ride through `result.commands` above (their
+    // y depends on the host paragraph). Page-anchored shapes were resolved
+    // in `Page` frame so their absolute y is authoritative — emit them here
+    // without applying the footer's stack shift.
+    emit_page_anchored_shapes(&hf.floating_shapes, &mut page.commands);
+}
+
+/// Emit page-anchored floating shapes (§20.4.2.10 vertical anchor =
+/// `page` / `margin` / etc.) as Path + text commands at their absolute
+/// page coordinates. Mirrors the in-stacker emission in `stacker.rs`,
+/// but skipped here for clarity:
+/// no spacing collapse / paragraph anchoring, just absolute placement.
+fn emit_page_anchored_shapes(shapes: &[super::section::FloatingShape], out: &mut Vec<DrawCommand>) {
+    use super::section::FloatingImageY;
+    for fs in shapes {
+        let shape_y = match fs.y {
+            FloatingImageY::Absolute(y) => y,
+            // The extractor only routes Absolute-y shapes here; treat
+            // any RelativeToParagraph as an unreachable misroute and
+            // skip it rather than stacking on a non-existent paragraph.
+            FloatingImageY::RelativeToParagraph(_) => continue,
+        };
+        out.push(DrawCommand::Path {
+            origin: crate::render::geometry::PtOffset::new(fs.x, shape_y),
+            rotation: fs.rotation,
+            flip_h: fs.flip_h,
+            flip_v: fs.flip_v,
+            extent: fs.size,
+            paths: fs.paths.clone(),
+            fill: fs.fill.clone(),
+            stroke: fs.stroke.clone(),
+            effects: fs.effects.clone(),
+        });
+        for mut cmd in fs.text_commands.iter().cloned() {
+            cmd.shift(fs.x, shape_y);
+            out.push(cmd);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -340,6 +379,7 @@ mod tests {
             }],
             absolute_position: None,
             floating_images: vec![],
+            floating_shapes: vec![],
         }
     }
 
@@ -412,6 +452,7 @@ mod tests {
             blocks: vec![],
             absolute_position: None,
             floating_images: vec![],
+            floating_shapes: vec![],
         };
         render_header(
             &mut pages[0],

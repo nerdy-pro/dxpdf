@@ -727,14 +727,13 @@ where
 }
 
 /// True when any choice in the AlternateContent contains a DrawingML
-/// `wps:wsp` whose anchor binds the vertical position to a paragraph or
-/// line — the case where the floating-shape extractor lays the shape's
-/// text out itself (so the inline collector must not also walk the VML
-/// fallback's textbox content).
+/// `wps:wsp` — the case where the floating-shape extractor lays the
+/// shape's text out itself (so the inline collector must not also walk
+/// the VML fallback's textbox content). Both paragraph- and page-
+/// anchored wsp shapes now route through the typed sub-layout, so any
+/// wsp in a Choice suppresses the fallback walk.
 fn choice_has_paragraph_anchored_wsp(choices: &[crate::model::McChoice]) -> bool {
-    use crate::model::{
-        AnchorPosition, AnchorRelativeFrom, GraphicContent, ImagePlacement, Inline,
-    };
+    use crate::model::{GraphicContent, ImagePlacement, Inline};
 
     fn walk(inlines: &[Inline]) -> bool {
         for inline in inlines {
@@ -743,19 +742,7 @@ fn choice_has_paragraph_anchored_wsp(choices: &[crate::model::McChoice]) -> bool
                     if matches!(img.placement, ImagePlacement::Anchor(_))
                         && matches!(img.graphic, Some(GraphicContent::WordProcessingShape(_))) =>
                 {
-                    let ImagePlacement::Anchor(ref anchor) = img.placement else {
-                        continue;
-                    };
-                    let relative_from = match &anchor.vertical_position {
-                        AnchorPosition::Offset { relative_from, .. } => relative_from,
-                        AnchorPosition::Align { relative_from, .. } => relative_from,
-                    };
-                    if matches!(
-                        relative_from,
-                        AnchorRelativeFrom::Paragraph | AnchorRelativeFrom::Line
-                    ) {
-                        return true;
-                    }
+                    return true;
                 }
                 Inline::Hyperlink(link) => {
                     if walk(&link.content) {

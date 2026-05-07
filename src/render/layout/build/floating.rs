@@ -34,6 +34,29 @@ pub(super) enum AnchorFrame {
     Stack,
 }
 
+/// Filter applied at extraction time so a shape's vertical anchor type can
+/// route it through the correct frame.
+///
+/// Shapes whose vertical position is `paragraph`/`line` are paragraph-bound
+/// (their absolute y is a function of the host paragraph's y), so they
+/// travel on the owning paragraph through `stack_blocks`. Shapes with
+/// `page`/`margin` vertical anchors resolve to a fixed page-y and must
+/// bypass the stacker's per-paragraph anchoring — header/footer routes
+/// them through a separate page-level vec, similar to how floating images
+/// are split out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ShapeAnchorClass {
+    /// Take every wsp shape regardless of its vertical anchor. Used by
+    /// body paragraphs and table cells, where the legacy single-channel
+    /// behaviour is still in effect.
+    All,
+    /// Only shapes whose vertical anchor is `paragraph` or `line`.
+    ParagraphAnchored,
+    /// Only shapes whose vertical anchor is `page` / `margin` /
+    /// `topMargin` / `bottomMargin` / `insideMargin` / `outsideMargin`.
+    PageAnchored,
+}
+
 /// Extract floating (anchor) images from a paragraph's inlines.
 ///
 /// Positions are resolved in the coordinate system implied by `frame`
@@ -125,6 +148,7 @@ pub(super) fn extract_floating_shapes(
     ctx: &BuildContext,
     state: &mut BuildState,
     frame: AnchorFrame,
+    restrict: ShapeAnchorClass,
 ) -> Vec<FloatingShape> {
     use crate::model::{GraphicContent, ImagePlacement, Inline};
 
@@ -168,6 +192,16 @@ pub(super) fn extract_floating_shapes(
         let ImagePlacement::Anchor(ref anchor) = img.placement else {
             continue;
         };
+        // Filter by anchor class so each call site only sees the shapes whose
+        // vertical anchor matches the frame it's resolving in.
+        let class_match = match restrict {
+            ShapeAnchorClass::All => true,
+            ShapeAnchorClass::ParagraphAnchored => anchors_to_paragraph(anchor),
+            ShapeAnchorClass::PageAnchored => !anchors_to_paragraph(anchor),
+        };
+        if !class_match {
+            continue;
+        }
         let wsp = match img.graphic.as_ref() {
             Some(GraphicContent::WordProcessingShape(w)) => w,
             _ => continue,
@@ -211,16 +245,11 @@ pub(super) fn extract_floating_shapes(
         let (x, y) = resolve_anchor_position(anchor, w, h, state, frame);
 
         // §17.17.1: lay out the shape's text-box content (`wps:txbx`) into
-        // shape-local Pt commands. Restricted to paragraph- and line-anchored
-        // shapes — page-anchored shapes resolve their y in absolute page
-        // coordinates and the sub-layout doesn't carry that frame yet, so we
-        // leave their text empty (the inline-fragment collector still picks
-        // it up at the host paragraph's y as a Tier 0 placeholder).
-        let text_commands = if anchors_to_paragraph(anchor) {
-            build_shape_text_commands(wsp, extent, ctx, state)
-        } else {
-            Vec::new()
-        };
+        // shape-local Pt commands. Both paragraph- and page-anchored shapes
+        // benefit from the typed sub-layout — the consumer shifts the
+        // commands by the shape's resolved origin (whether `RelativeToParagraph`
+        // or `Absolute`), so text always lands on the shape's fill.
+        let text_commands = build_shape_text_commands(wsp, extent, ctx, state);
 
         shapes.push(FloatingShape {
             x,
