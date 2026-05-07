@@ -4,12 +4,261 @@ use super::content::Block;
 use super::identifiers::{RelId, VmlShapeId};
 
 /// §17.3.3.19: VML picture container. Wraps legacy VML shape content.
+///
+/// The `<w:pict>` element admits any of the VML primitive shape
+/// elements (§14.1.2): `<v:shape>`, `<v:rect>`, `<v:roundrect>`,
+/// `<v:oval>`, `<v:line>`, `<v:polyline>`, `<v:arc>`, `<v:curve>`,
+/// `<v:image>`, `<v:group>`. We model the choice as a tagged enum
+/// (`VmlPrimitive`) so each variant carries its element-specific
+/// shape, while sharing common style/fill/stroke/etc. via
+/// `VmlCommonAttrs`.
 #[derive(Clone, Debug)]
 pub struct Pict {
     /// VML §14.1.2.20: optional reusable shape type definition.
     pub shape_type: Option<VmlShapeType>,
-    /// VML §14.1.2.19: shape instances.
-    pub shapes: Vec<VmlShape>,
+    /// VML §14.1.2.* — primitive shape children in document order.
+    pub primitives: Vec<VmlPrimitive>,
+}
+
+impl Pict {
+    /// Convenience accessor: yields every `VmlShape` (the generic
+    /// `<v:shape>` variant). Other primitive variants are skipped.
+    /// Use this where the caller only handles `<v:shape>` today —
+    /// new code should match on `VmlPrimitive` directly.
+    pub fn shapes(&self) -> impl Iterator<Item = &VmlShape> {
+        self.primitives.iter().filter_map(|p| match p {
+            VmlPrimitive::Shape(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// Mutable counterpart to [`Pict::shapes`].
+    pub fn shapes_mut(&mut self) -> impl Iterator<Item = &mut VmlShape> {
+        self.primitives.iter_mut().filter_map(|p| match p {
+            VmlPrimitive::Shape(s) => Some(s),
+            _ => None,
+        })
+    }
+}
+
+/// VML §14.1.2 — every primitive shape child of `<w:pict>`. Variants
+/// share a `VmlCommonAttrs` payload accessed via [`VmlPrimitive::common`].
+#[derive(Clone, Debug)]
+pub enum VmlPrimitive {
+    /// `<v:shape>` — generic shape with shapetype reference or own path.
+    Shape(VmlShape),
+    /// `<v:rect>` (§14.1.2.16) — bounding-box rectangle.
+    Rect(VmlRect),
+    /// `<v:roundrect>` (§14.1.2.17) — `@arcsize` corner radius.
+    RoundRect(VmlRoundRect),
+    /// `<v:oval>` (§14.1.2.13).
+    Oval(VmlOval),
+    /// `<v:line>` (§14.1.2.12) — `@from`/`@to` endpoints.
+    Line(VmlLine),
+    /// `<v:polyline>` (§14.1.2.15) — `@points` list.
+    PolyLine(VmlPolyLine),
+    /// `<v:arc>` (§14.1.2.3) — `@startangle`/`@endangle`.
+    Arc(VmlArc),
+    /// `<v:curve>` (§14.1.2.7) — Bezier with two control points.
+    Curve(VmlCurve),
+    /// `<v:image>` (§14.1.2.10) — image element with `@src`.
+    Image(VmlImage),
+    /// `<v:group>` (§14.1.2.9) — recursive shape grouping with its
+    /// own coordinate system.
+    Group(Box<VmlGroup>),
+}
+
+impl VmlPrimitive {
+    /// Borrow the common attribute set every variant carries.
+    pub fn common(&self) -> &VmlCommonAttrs {
+        match self {
+            VmlPrimitive::Shape(s) => &s.common,
+            VmlPrimitive::Rect(r) => &r.common,
+            VmlPrimitive::RoundRect(r) => &r.common,
+            VmlPrimitive::Oval(o) => &o.common,
+            VmlPrimitive::Line(l) => &l.common,
+            VmlPrimitive::PolyLine(p) => &p.common,
+            VmlPrimitive::Arc(a) => &a.common,
+            VmlPrimitive::Curve(c) => &c.common,
+            VmlPrimitive::Image(i) => &i.common,
+            VmlPrimitive::Group(g) => &g.common,
+        }
+    }
+
+    /// Mutable counterpart to [`VmlPrimitive::common`].
+    pub fn common_mut(&mut self) -> &mut VmlCommonAttrs {
+        match self {
+            VmlPrimitive::Shape(s) => &mut s.common,
+            VmlPrimitive::Rect(r) => &mut r.common,
+            VmlPrimitive::RoundRect(r) => &mut r.common,
+            VmlPrimitive::Oval(o) => &mut o.common,
+            VmlPrimitive::Line(l) => &mut l.common,
+            VmlPrimitive::PolyLine(p) => &mut p.common,
+            VmlPrimitive::Arc(a) => &mut a.common,
+            VmlPrimitive::Curve(c) => &mut c.common,
+            VmlPrimitive::Image(i) => &mut i.common,
+            VmlPrimitive::Group(g) => &mut g.common,
+        }
+    }
+}
+
+/// VML §14.1.2.18 CoreAttributes plus the shared child elements every
+/// primitive admits: `<v:fill>`, `<v:stroke>`, `<v:textbox>`,
+/// `<v:wrap>`, `<v:imagedata>`. Extracting these out of `VmlShape`
+/// lets every other primitive type share the same parse-and-render
+/// machinery without copying ten fields.
+#[derive(Clone, Debug, Default)]
+pub struct VmlCommonAttrs {
+    /// Shape identifier.
+    pub id: Option<VmlShapeId>,
+    /// Parsed CSS2 style properties.
+    pub style: VmlStyle,
+    /// `@fillcolor` attribute fill color.
+    pub fill_color: Option<VmlColor>,
+    /// Whether the shape has a stroke.
+    pub stroked: Option<bool>,
+    /// VML §14.1.2.21: stroke child element.
+    pub stroke: Option<VmlStroke>,
+    /// VML §14.1.2.22: text box child element.
+    pub text_box: Option<VmlTextBox>,
+    /// VML §14.1.2.23: text wrapping around shape.
+    pub wrap: Option<VmlWrap>,
+    /// VML §14.1.2.11: image data reference.
+    pub image_data: Option<VmlImageData>,
+    /// VML §14.1.2.5 `<v:fill>` — fill child element. When present,
+    /// overrides the `@fillcolor` attribute. Carries gradient/pattern/
+    /// image fill specifications that the attribute can't express.
+    pub fill: Option<VmlFill>,
+}
+
+/// VML §14.1.2.5 `<v:fill>` — fill specification on any shape.
+///
+/// The element carries many attributes; we model the most-used
+/// subset and grow on demand. Non-solid fills (gradient/tile/pattern/
+/// frame) are modeled but only `Solid` is renderered today; the
+/// renderer falls through with a one-time `log::warn!` for the rest.
+#[derive(Clone, Debug, Default)]
+pub struct VmlFill {
+    /// `@type` — fill kind. Defaults to `Solid` when omitted (matches
+    /// spec).
+    pub fill_type: VmlFillType,
+    /// `@color` — primary color (used by Solid and most gradient
+    /// types as the start color).
+    pub color: Option<VmlColor>,
+    /// `@color2` — secondary color (gradient end / pattern bg).
+    pub color2: Option<VmlColor>,
+    /// `@opacity` — 0..1; missing means opaque.
+    pub opacity: Option<f32>,
+    /// `@src` — relative path to a fill image (Tile/Frame).
+    pub src: Option<String>,
+    /// `r:id` — relationship-ID alternative to `@src` for fill image.
+    pub rel_id: Option<RelId>,
+}
+
+/// VML §14.1.2.5 `@type` values. The spec also defines
+/// `gradientCenter` and `gradientUnscaled`, which we treat as
+/// gradient kinds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VmlFillType {
+    /// Solid color (default).
+    #[default]
+    Solid,
+    /// Linear/axial gradient.
+    Gradient,
+    /// Radial gradient.
+    GradientRadial,
+    /// Tiled image fill.
+    Tile,
+    /// Frame (single-image) fill.
+    Frame,
+    /// Pattern fill with foreground/background colors.
+    Pattern,
+}
+
+/// VML §14.1.2.16 `<v:rect>` — bounding-box rectangle.
+#[derive(Clone, Debug)]
+pub struct VmlRect {
+    pub common: VmlCommonAttrs,
+}
+
+/// VML §14.1.2.17 `<v:roundrect>` — rectangle with rounded corners.
+#[derive(Clone, Debug)]
+pub struct VmlRoundRect {
+    pub common: VmlCommonAttrs,
+    /// `@arcsize` — corner radius as fraction of the smaller half-side.
+    /// Stored as 0..=1; the spec admits values up to 0.5 in practice
+    /// but Word emits up to 1.0.
+    pub arcsize: Option<f32>,
+}
+
+/// VML §14.1.2.13 `<v:oval>`.
+#[derive(Clone, Debug)]
+pub struct VmlOval {
+    pub common: VmlCommonAttrs,
+}
+
+/// VML §14.1.2.12 `<v:line>` — single segment between two points.
+#[derive(Clone, Debug)]
+pub struct VmlLine {
+    pub common: VmlCommonAttrs,
+    pub from: Option<VmlPoint>,
+    pub to: Option<VmlPoint>,
+}
+
+/// VML §14.1.2.15 `<v:polyline>`.
+#[derive(Clone, Debug)]
+pub struct VmlPolyLine {
+    pub common: VmlCommonAttrs,
+    pub points: Vec<VmlPoint>,
+}
+
+/// VML §14.1.2.3 `<v:arc>`.
+#[derive(Clone, Debug)]
+pub struct VmlArc {
+    pub common: VmlCommonAttrs,
+    pub start_angle: Option<f32>,
+    pub end_angle: Option<f32>,
+}
+
+/// VML §14.1.2.7 `<v:curve>` — cubic Bezier from `from` to `to` with
+/// two control points.
+#[derive(Clone, Debug)]
+pub struct VmlCurve {
+    pub common: VmlCommonAttrs,
+    pub from: Option<VmlPoint>,
+    pub control1: Option<VmlPoint>,
+    pub control2: Option<VmlPoint>,
+    pub to: Option<VmlPoint>,
+}
+
+/// VML §14.1.2.10 `<v:image>` — image element with `@src` attribute.
+/// Distinct from `<v:shape>`+`<v:imagedata>` even though the rendering
+/// outcome can be identical.
+#[derive(Clone, Debug)]
+pub struct VmlImage {
+    pub common: VmlCommonAttrs,
+    /// `@src` — file path or URL of the image.
+    pub src: Option<String>,
+}
+
+/// VML §14.1.2.9 `<v:group>` — nested primitives with their own
+/// coordinate system.
+#[derive(Clone, Debug)]
+pub struct VmlGroup {
+    pub common: VmlCommonAttrs,
+    /// Coordinate space declared by the group (`@coordsize`).
+    pub coord_size: Option<VmlVector2D>,
+    /// Origin of the group's coord space (`@coordorigin`).
+    pub coord_origin: Option<VmlVector2D>,
+    /// Child primitives in the group's coordinate system.
+    pub children: Vec<VmlPrimitive>,
+}
+
+/// VML 2D point — typically `(x,y)` in the parent coord space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VmlPoint {
+    pub x: f32,
+    pub y: f32,
 }
 
 // ── Path Commands ────────────────────────────────────────────────────────────
@@ -210,29 +459,18 @@ pub struct VmlShapeType {
     pub lock: Option<VmlLock>,
 }
 
-/// VML §14.1.2.19: a shape instance.
+/// VML §14.1.2.19 `<v:shape>` — generic shape instance, optionally
+/// referencing a `<v:shapetype>` and/or carrying its own path.
+/// Common attribute and child elements live on
+/// [`VmlCommonAttrs`]; only shape-specific fields stay here.
 #[derive(Clone, Debug)]
 pub struct VmlShape {
-    /// Shape identifier.
-    pub id: Option<VmlShapeId>,
-    /// Reference to a shape type (e.g., "#_x0000_t202").
+    /// Common attribute group + shared children.
+    pub common: VmlCommonAttrs,
+    /// `@type` — reference to a shapetype id (e.g., "#_x0000_t202").
     pub shape_type_ref: Option<VmlShapeId>,
-    /// Parsed CSS2 style properties.
-    pub style: VmlStyle,
-    /// Fill color.
-    pub fill_color: Option<VmlColor>,
-    /// Whether the shape has a stroke.
-    pub stroked: Option<bool>,
-    /// VML §14.1.2.21: stroke child element.
-    pub stroke: Option<VmlStroke>,
-    /// VML §14.1.2.14: path child element.
+    /// VML §14.1.2.14 `<v:path>` — explicit path child element.
     pub vml_path: Option<VmlPath>,
-    /// VML §14.1.2.22: text box child element.
-    pub text_box: Option<VmlTextBox>,
-    /// VML §14.1.2.23: text wrapping around shape.
-    pub wrap: Option<VmlWrap>,
-    /// VML §14.1.2.11: image data reference.
-    pub image_data: Option<VmlImageData>,
 }
 
 // ── Wrapping ─────────────────────────────────────────────────────────────────

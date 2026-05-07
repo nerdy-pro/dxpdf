@@ -544,18 +544,32 @@ where
                     }
                 }
                 Inline::AlternateContent(ac) => {
-                    // Pick fallback content (safest for PDF rendering)
-                    if let Some(ref fallback) = ac.fallback {
-                        let mut sub = collect_fragments(
-                            fallback,
-                            ctx,
-                            hyperlink_url,
-                            measure_text,
-                            footnote_counter,
-                            endnote_counter,
-                            field_ctx,
-                        );
-                        fragments.append(&mut sub);
+                    // §M.2.1 / §17.17.1: when a Choice carries a paragraph-
+                    // anchored DrawingML wsp shape, that shape's `txbx`
+                    // contents are laid out into shape-local commands by the
+                    // floating-shape extractor and emitted on top of the
+                    // shape's path. Walking the VML fallback here would
+                    // duplicate the text into the host paragraph at the
+                    // wrong y. Skip the fallback for that case.
+                    //
+                    // For Choices without a paragraph-anchored wsp (e.g. a
+                    // page-anchored shape, or Choice we don't extract yet)
+                    // we fall back to the legacy inline path so the user
+                    // still sees the text — it lands at the host paragraph
+                    // y as a Tier 0 placeholder.
+                    if !choice_has_paragraph_anchored_wsp(&ac.choices) {
+                        if let Some(ref fallback) = ac.fallback {
+                            let mut sub = collect_fragments(
+                                fallback,
+                                ctx,
+                                hyperlink_url,
+                                measure_text,
+                                footnote_counter,
+                                endnote_counter,
+                                field_ctx,
+                            );
+                            fragments.append(&mut sub);
+                        }
                     }
                 }
                 Inline::Symbol(sym) => {
@@ -664,11 +678,21 @@ where
                     });
                 }
                 Inline::Pict(pict) => {
-                    // Render text content from VML text box shapes inline.
-                    // Does not handle absolute positioning — text appears inline
-                    // with the surrounding paragraph.
-                    for shape in &pict.shapes {
-                        if let Some(ref text_box) = shape.text_box {
+                    // Render text content from VML text-box-bearing
+                    // primitives inline. Every primitive variant
+                    // (`<v:shape>`, `<v:rect>`, `<v:roundrect>`,
+                    // `<v:oval>`, …) admits a `<v:textbox>` child via
+                    // `VmlCommonAttrs.text_box`; the previous code
+                    // only walked the `Shape` variant and silently
+                    // dropped text from rect / roundrect / oval text
+                    // boxes (the case footer3.xml of the vorlage doc
+                    // exercised — the gray bar is a `<v:rect>`).
+                    //
+                    // Does not handle absolute positioning — text
+                    // appears inline with the surrounding paragraph.
+                    for primitive in &pict.primitives {
+                        let common = primitive.common();
+                        if let Some(ref text_box) = common.text_box {
                             for block in &text_box.content {
                                 if let Block::Paragraph(p) = block {
                                     let pict_ctx = FragmentCtx {
@@ -700,6 +724,35 @@ where
     }
 
     fragments
+}
+
+/// True when any choice in the AlternateContent contains a DrawingML
+/// `wps:wsp` — the case where the floating-shape extractor lays the
+/// shape's text out itself (so the inline collector must not also walk
+/// the VML fallback's textbox content). Both paragraph- and page-
+/// anchored wsp shapes now route through the typed sub-layout, so any
+/// wsp in a Choice suppresses the fallback walk.
+fn choice_has_paragraph_anchored_wsp(choices: &[crate::model::McChoice]) -> bool {
+    use crate::model::{GraphicContent, ImagePlacement, Inline};
+
+    fn walk(inlines: &[Inline]) -> bool {
+        for inline in inlines {
+            match inline {
+                Inline::Image(img)
+                    if matches!(img.placement, ImagePlacement::Anchor(_))
+                        && matches!(img.graphic, Some(GraphicContent::WordProcessingShape(_))) =>
+                {
+                    return true;
+                }
+                Inline::Hyperlink(link) if walk(&link.content) => return true,
+                Inline::Field(f) if walk(&f.content) => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    choices.iter().any(|c| walk(&c.content))
 }
 
 #[cfg(test)]

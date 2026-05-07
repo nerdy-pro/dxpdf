@@ -246,6 +246,7 @@ mod tests {
             cant_split: None,
             grid_before,
             grid_after,
+            border_overrides: None,
         }
     }
 

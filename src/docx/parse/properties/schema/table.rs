@@ -164,6 +164,25 @@ pub(crate) struct TblpPrXml {
     y: Option<crate::docx::model::dimension::Dimension<Twips>>,
 }
 
+/// §17.4.61 `<w:tblPrEx>` — table-level property exceptions scoped to
+/// a single row. Per the spec it accepts the same vocabulary as
+/// `<w:tblPr>` minus `tblStyle` and `tblpPr`. We model only the slice
+/// the layout currently honors (table borders); other fields can be
+/// added incrementally.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct TblPrExXml {
+    #[serde(rename = "tblBorders", default)]
+    tbl_borders: Option<TableBordersXml>,
+}
+
+impl From<TblPrExXml> for crate::docx::model::TableRowPropertyExceptions {
+    fn from(x: TblPrExXml) -> Self {
+        Self {
+            borders: x.tbl_borders.map(Into::into),
+        }
+    }
+}
+
 impl TblPrXml {
     pub(crate) fn split(self) -> (TableProperties, Option<StyleId>) {
         let style_id = self.tbl_style.map(|v| StyleId::new(v.val));

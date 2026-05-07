@@ -236,6 +236,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 grid_after: 0,
+                border_overrides: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             border_config: None,

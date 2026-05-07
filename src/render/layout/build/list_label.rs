@@ -61,8 +61,9 @@ pub(super) fn inject_list_label(
             let rel_id = bullet
                 .pict
                 .as_ref()?
-                .shapes
-                .first()?
+                .shapes()
+                .next()?
+                .common
                 .image_data
                 .as_ref()?
                 .rel_id

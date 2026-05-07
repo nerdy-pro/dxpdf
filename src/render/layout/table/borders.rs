@@ -330,6 +330,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -384,5 +385,106 @@ mod tests {
         // §17.4.43: shared edges drawn once after conflict resolution.
         // Top(2) + bottom(2) + left(1) + insideV(1) + right(1) = 7 border rects.
         assert_eq!(border_rect_count, 7);
+    }
+
+    /// §17.4.61 tblPrEx — when a row carries a `tblBorders` override,
+    /// it fully replaces the table's tblBorders for *that row only*.
+    /// Here row 0 sets every side to "no border", row 1 doesn't.
+    /// The table-wide config has all sides set to single. Expectation:
+    /// row 0's cell contributes zero border rects, while row 1's cell
+    /// produces the usual top/left/right/bottom set.
+    #[test]
+    fn row_border_override_replaces_table_borders_for_that_row() {
+        let single = TableBorderLine {
+            width: Pt::new(0.5),
+            color: RgbColor::BLACK,
+            style: TableBorderStyle::Single,
+        };
+        let all_single = TableBorderConfig {
+            top: Some(single),
+            bottom: Some(single),
+            left: Some(single),
+            right: Some(single),
+            inside_h: Some(single),
+            inside_v: Some(single),
+        };
+        let no_borders = TableBorderConfig {
+            top: None,
+            bottom: None,
+            left: None,
+            right: None,
+            inside_h: None,
+            inside_v: None,
+        };
+        let rows = vec![
+            TableRowInput {
+                cells: vec![simple_cell("opt-out")],
+                height_rule: None,
+                is_header: None,
+                cant_split: None,
+                grid_before: 0,
+                grid_after: 0,
+                border_overrides: Some(no_borders),
+            },
+            TableRowInput {
+                cells: vec![simple_cell("normal")],
+                height_rule: None,
+                is_header: None,
+                cant_split: None,
+                grid_before: 0,
+                grid_after: 0,
+                border_overrides: None,
+            },
+        ];
+        let col_widths = vec![Pt::new(100.0)];
+        let result = layout_table(
+            &rows,
+            &col_widths,
+            &body_constraints(),
+            Pt::new(14.0),
+            Some(&all_single),
+            None,
+            false,
+        );
+
+        // Group border rects by their y position. The opt-out row is
+        // first (lower y), the normal row second. We know the order
+        // because layout_table walks rows top-down.
+        let border_rects: Vec<_> = result
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => Some(*rect),
+                _ => None,
+            })
+            .collect();
+
+        // No rect should sit entirely within row 0's vertical span —
+        // not the cell's top, not its sides, not its bottom (with row 1
+        // having a top border, conflict resolution gives row 0 a
+        // bottom from row 1's top, but that's drawn at the boundary,
+        // not inside row 0).
+        // We exercise this by asserting that no rect's *vertical*
+        // extent falls within (epsilon, row_0_height - epsilon) — the
+        // strict interior of row 0.
+        let row_0_height = Pt::new(14.0);
+        let interior_eps = Pt::new(0.1);
+        let interior_top = interior_eps;
+        let interior_bottom = row_0_height - interior_eps;
+        for rect in &border_rects {
+            let r_top = rect.origin.y;
+            let r_bottom = rect.origin.y + rect.size.height;
+            let entirely_inside = r_top >= interior_top && r_bottom <= interior_bottom;
+            assert!(
+                !entirely_inside,
+                "row 0 (border-override = all None) must not host a \
+                 black border rect strictly inside its content area; got rect \
+                 y=[{:.2}..{:.2}] (interior was ({:.2}..{:.2}))",
+                r_top.raw(),
+                r_bottom.raw(),
+                interior_top.raw(),
+                interior_bottom.raw(),
+            );
+        }
     }
 }

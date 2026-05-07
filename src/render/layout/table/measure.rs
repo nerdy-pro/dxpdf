@@ -43,11 +43,20 @@ pub(super) fn measure_table_rows(
             // §17.4.17: gridBefore — the row's first cell starts at grid_col
             // `grid_before`, leaving the leftmost columns empty.
             let mut grid_idx = row.grid_before as usize;
+            // §17.4.61: a row may carry per-row border overrides
+            // (`<w:tblPrEx><w:tblBorders/></w:tblPrEx>`). When set,
+            // it's the *fully merged* effective table borders for this
+            // row — the build layer already overlaid the override on
+            // the table's own borders so the model-layer
+            // "explicitly none" vs "not specified" distinction is
+            // preserved during conversion. Use it verbatim; otherwise
+            // fall back to the table-wide config.
+            let row_table_borders = row.border_overrides.as_ref().or(borders);
             for cell_input in row.cells.iter() {
                 let span = cell_input.grid_span.max(1) as usize;
                 let (mut b_top, mut b_bottom, b_left, b_right) = resolve_cell_effective_borders(
                     cell_input,
-                    borders,
+                    row_table_borders,
                     row_idx,
                     grid_idx,
                     span,

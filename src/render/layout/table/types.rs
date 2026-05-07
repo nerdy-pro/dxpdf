@@ -31,6 +31,17 @@ pub struct TableRowInput {
     /// §17.4.16: number of grid columns to skip after the row's last cell.
     /// The last cell's rightmost grid column is `num_grid_cols - grid_after - 1`.
     pub grid_after: u32,
+    /// §17.4.61 `<w:tblPrEx><w:tblBorders/></w:tblPrEx>` — per-row
+    /// override of the table-level `tblBorders`. When set, each side
+    /// independently replaces the corresponding side of the table's
+    /// `TableBorderConfig` for this row only; sides absent from the
+    /// override fall through to the table's value.
+    ///
+    /// Note that an override side of `None` means "explicitly no
+    /// border" (Word's `<w:top w:val="none"/>`) — the parser converts
+    /// `val="none"` to `None` here, matching the layout's invariant
+    /// that `None` is "draw nothing" everywhere else in this module.
+    pub border_overrides: Option<TableBorderConfig>,
 }
 
 /// §17.4.84: cell vertical alignment.

@@ -11,9 +11,11 @@
 use serde::Deserialize;
 
 use crate::docx::model::{
-    Block, Pict, RelId, VmlConnectType, VmlDashStyle, VmlExtHandling, VmlFormula, VmlImageData,
-    VmlJoinStyle, VmlLock, VmlPath, VmlShape, VmlShapeId, VmlShapeType, VmlStroke, VmlTextBox,
-    VmlTextBoxInset, VmlVector2D, VmlWrap, VmlWrapSide, VmlWrapType,
+    Block, Pict, RelId, VmlArc, VmlCommonAttrs, VmlConnectType, VmlCurve, VmlDashStyle,
+    VmlExtHandling, VmlFormula, VmlGroup, VmlImage, VmlImageData, VmlJoinStyle, VmlLine, VmlLock,
+    VmlOval, VmlPath, VmlPoint, VmlPolyLine, VmlPrimitive, VmlRect, VmlRoundRect, VmlShape,
+    VmlShapeId, VmlShapeType, VmlStroke, VmlTextBox, VmlTextBoxInset, VmlVector2D, VmlWrap,
+    VmlWrapSide, VmlWrapType,
 };
 use crate::docx::parse::body_schema::BlockChildXml;
 
@@ -24,13 +26,19 @@ use super::style::{parse_length, parse_style};
 
 // ── pict ──────────────────────────────────────────────────────────────────
 
-/// `<w:pict>` — legacy VML picture container.
+/// `<w:pict>` — legacy VML picture container. Per ECMA-376 Part 4
+/// §14.1.1, the children form a sequence: optional `<v:shapetype>`
+/// definitions followed by any of the primitive shape elements
+/// (`<v:shape>`, `<v:rect>`, `<v:roundrect>`, `<v:oval>`, `<v:line>`,
+/// `<v:polyline>`, `<v:arc>`, `<v:curve>`, `<v:image>`, `<v:group>`).
+/// We capture every child via `$value` and dispatch through
+/// [`VmlPrimitiveXml`].
 #[derive(Deserialize)]
 pub(crate) struct PictXml {
     #[serde(rename = "shapetype", default)]
     pub shape_type: Option<ShapeTypeXml>,
-    #[serde(rename = "shape", default)]
-    pub shapes: Vec<ShapeXml>,
+    #[serde(rename = "$value", default)]
+    pub primitives: Vec<VmlPrimitiveXml>,
 }
 
 impl PictXml {
@@ -39,7 +47,161 @@ impl PictXml {
     pub(crate) fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> Pict {
         Pict {
             shape_type: self.shape_type.map(Into::into),
-            shapes: self.shapes.into_iter().map(|s| s.into_model(ctx)).collect(),
+            primitives: self
+                .primitives
+                .into_iter()
+                .filter_map(|p| p.into_model(ctx))
+                .collect(),
+        }
+    }
+}
+
+/// VML §14.1.2 shape choice — a `<w:pict>` admits any of these as
+/// children. `ShapeType` here is *not* a primitive but appears in
+/// the same sibling list; serde routes it into this variant so we
+/// don't have to special-case `<v:shapetype>` in the deserializer
+/// (the dedicated `PictXml::shape_type` field also captures it).
+/// `Other` absorbs unknown VML elements (or extension namespaces) so
+/// parsing never fails on a strange child.
+#[derive(Deserialize)]
+pub(crate) enum VmlPrimitiveXml {
+    #[serde(rename = "shape")]
+    Shape(Box<ShapeXml>),
+    #[serde(rename = "rect")]
+    Rect(RectXml),
+    #[serde(rename = "roundrect")]
+    RoundRect(RoundRectXml),
+    #[serde(rename = "oval")]
+    Oval(OvalXml),
+    #[serde(rename = "line")]
+    Line(LineXml),
+    #[serde(rename = "polyline")]
+    PolyLine(PolyLineXml),
+    #[serde(rename = "arc")]
+    Arc(ArcXml),
+    #[serde(rename = "curve")]
+    Curve(CurveXml),
+    #[serde(rename = "image")]
+    Image(ImageXml),
+    #[serde(rename = "group")]
+    Group(Box<GroupXml>),
+    /// `<v:shapetype>` is captured separately on `PictXml.shape_type`,
+    /// but `$value` collects *every* child — this variant lets serde
+    /// absorb the duplicate match without erroring.
+    #[serde(rename = "shapetype")]
+    ShapeType(Box<ShapeTypeXml>),
+    /// Unknown / unsupported VML element. Dropped at conversion time.
+    #[serde(other)]
+    Other,
+}
+
+impl VmlPrimitiveXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> Option<VmlPrimitive> {
+        Some(match self {
+            VmlPrimitiveXml::Shape(s) => VmlPrimitive::Shape(s.into_model(ctx)),
+            VmlPrimitiveXml::Rect(r) => VmlPrimitive::Rect(r.into_model(ctx)),
+            VmlPrimitiveXml::RoundRect(r) => VmlPrimitive::RoundRect(r.into_model(ctx)),
+            VmlPrimitiveXml::Oval(o) => VmlPrimitive::Oval(o.into_model(ctx)),
+            VmlPrimitiveXml::Line(l) => VmlPrimitive::Line(l.into_model(ctx)),
+            VmlPrimitiveXml::PolyLine(p) => VmlPrimitive::PolyLine(p.into_model(ctx)),
+            VmlPrimitiveXml::Arc(a) => VmlPrimitive::Arc(a.into_model(ctx)),
+            VmlPrimitiveXml::Curve(c) => VmlPrimitive::Curve(c.into_model(ctx)),
+            VmlPrimitiveXml::Image(i) => VmlPrimitive::Image(i.into_model(ctx)),
+            VmlPrimitiveXml::Group(g) => VmlPrimitive::Group(Box::new(g.into_model(ctx))),
+            // Captured separately on `PictXml.shape_type`; drop the duplicate.
+            VmlPrimitiveXml::ShapeType(_) | VmlPrimitiveXml::Other => return None,
+        })
+    }
+}
+
+/// Common attributes + child elements shared by every VML primitive
+/// (§14.1.2.18 CoreAttributes plus `<v:stroke>` / `<v:textbox>` /
+/// `<v:wrap>` / `<v:imagedata>`). Each per-primitive schema struct
+/// embeds this via `#[serde(flatten)]` so we don't repeat the eight
+/// field declarations across nine primitive types.
+#[derive(Deserialize, Default)]
+pub(crate) struct CommonAttrsXml {
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
+    #[serde(rename = "@style", default)]
+    pub style: Option<String>,
+    #[serde(rename = "@fillcolor", default)]
+    pub fillcolor: Option<String>,
+    #[serde(rename = "@stroked", default)]
+    pub stroked: Option<VmlBool>,
+    #[serde(rename = "stroke", default)]
+    pub stroke: Option<StrokeXml>,
+    #[serde(rename = "textbox", default)]
+    pub textbox: Option<TextBoxXml>,
+    #[serde(rename = "wrap", default)]
+    pub wrap: Option<WrapXml>,
+    #[serde(rename = "imagedata", default)]
+    pub imagedata: Option<ImageDataXml>,
+    #[serde(rename = "fill", default)]
+    pub fill: Option<FillXml>,
+}
+
+/// VML §14.1.2.5 `<v:fill>` — every primitive can carry one. Fields
+/// are admitted as attributes, not children.
+#[derive(Deserialize, Default)]
+pub(crate) struct FillXml {
+    #[serde(rename = "@type", default)]
+    pub fill_type: Option<String>,
+    #[serde(rename = "@color", default)]
+    pub color: Option<String>,
+    #[serde(rename = "@color2", default)]
+    pub color2: Option<String>,
+    #[serde(rename = "@opacity", default)]
+    pub opacity: Option<String>,
+    #[serde(rename = "@src", default)]
+    pub src: Option<String>,
+    #[serde(rename = "@id", default)]
+    pub rel_id: Option<String>,
+}
+
+impl From<FillXml> for crate::docx::model::VmlFill {
+    fn from(x: FillXml) -> Self {
+        use crate::docx::model::{VmlFill, VmlFillType};
+        let fill_type = match x.fill_type.as_deref() {
+            Some("solid") | None => VmlFillType::Solid,
+            Some("gradient") | Some("gradientCenter") | Some("gradientUnscaled") => {
+                VmlFillType::Gradient
+            }
+            Some("gradientRadial") => VmlFillType::GradientRadial,
+            Some("tile") => VmlFillType::Tile,
+            Some("frame") => VmlFillType::Frame,
+            Some("pattern") => VmlFillType::Pattern,
+            // Unknown type → treat as solid; the renderer logs a warn
+            // when it can't honor a fill, never panics.
+            Some(_) => VmlFillType::Solid,
+        };
+        VmlFill {
+            fill_type,
+            color: x.color.as_deref().and_then(|s| parse_color(s).ok()),
+            color2: x.color2.as_deref().and_then(|s| parse_color(s).ok()),
+            opacity: x.opacity.as_deref().and_then(|s| {
+                // VML opacity admits "0.5" or "32768f" (fixed-point fraction
+                // of 65536). For phase C we accept the float form.
+                s.parse::<f32>().ok()
+            }),
+            src: x.src,
+            rel_id: x.rel_id.map(crate::docx::model::RelId::new),
+        }
+    }
+}
+
+impl CommonAttrsXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlCommonAttrs {
+        VmlCommonAttrs {
+            id: self.id.map(VmlShapeId::new),
+            style: parse_style(self.style),
+            fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
+            stroked: self.stroked.map(|b| b.0),
+            stroke: self.stroke.map(Into::into),
+            text_box: self.textbox.map(|t| t.into_model(ctx)),
+            wrap: self.wrap.map(Into::into),
+            image_data: self.imagedata.map(Into::into),
+            fill: self.fill.map(Into::into),
         }
     }
 }
@@ -125,24 +287,332 @@ pub(crate) struct ShapeXml {
     pub wrap: Option<WrapXml>,
     #[serde(rename = "imagedata", default)]
     pub imagedata: Option<ImageDataXml>,
+    #[serde(rename = "fill", default)]
+    pub fill: Option<FillXml>,
 }
 
 impl ShapeXml {
     fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlShape {
         VmlShape {
-            id: self.id.map(VmlShapeId::new),
+            common: crate::model::VmlCommonAttrs {
+                id: self.id.map(VmlShapeId::new),
+                style: parse_style(self.style),
+                fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
+                stroked: self.stroked.map(|b| b.0),
+                stroke: self.stroke.map(Into::into),
+                text_box: self.textbox.map(|t| t.into_model(ctx)),
+                wrap: self.wrap.map(Into::into),
+                image_data: self.imagedata.map(Into::into),
+                fill: self.fill.map(Into::into),
+            },
             shape_type_ref: self
                 .ty
                 .map(|s| VmlShapeId::new(s.strip_prefix('#').unwrap_or(&s))),
-            style: parse_style(self.style),
-            fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
-            stroked: self.stroked.map(|b| b.0),
-            stroke: self.stroke.map(Into::into),
             vml_path: self.vml_path.map(Into::into),
-            text_box: self.textbox.map(|t| t.into_model(ctx)),
-            wrap: self.wrap.map(Into::into),
-            image_data: self.imagedata.map(Into::into),
         }
+    }
+}
+
+// ── primitive shapes (rect / roundrect / oval / line / polyline /
+//    arc / curve / image / group) ──────────────────────────────────────
+
+/// VML §14.1.2.16 `<v:rect>`.
+///
+/// Common attrs are inlined here (rather than via
+/// `#[serde(flatten)]` on a `CommonAttrsXml`) because quick-xml's
+/// serde drops the deeply-nested `<v:textbox><w:txbxContent>...`
+/// when the field carrying `<v:textbox>` lives behind a flatten
+/// boundary — the rect's textbox content silently vanishes. Inlining
+/// keeps every child element on the same struct level so it parses
+/// faithfully. The other primitives keep `flatten` because they
+/// don't host text-box content in practice (or do but were simpler
+/// to wire that way).
+#[derive(Deserialize)]
+pub(crate) struct RectXml {
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
+    #[serde(rename = "@style", default)]
+    pub style: Option<String>,
+    #[serde(rename = "@fillcolor", default)]
+    pub fillcolor: Option<String>,
+    #[serde(rename = "@stroked", default)]
+    pub stroked: Option<VmlBool>,
+    #[serde(rename = "stroke", default)]
+    pub stroke: Option<StrokeXml>,
+    #[serde(rename = "textbox", default)]
+    pub textbox: Option<TextBoxXml>,
+    #[serde(rename = "wrap", default)]
+    pub wrap: Option<WrapXml>,
+    #[serde(rename = "imagedata", default)]
+    pub imagedata: Option<ImageDataXml>,
+    #[serde(rename = "fill", default)]
+    pub fill: Option<FillXml>,
+}
+
+impl RectXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlRect {
+        VmlRect {
+            common: VmlCommonAttrs {
+                id: self.id.map(VmlShapeId::new),
+                style: parse_style(self.style),
+                fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
+                stroked: self.stroked.map(|b| b.0),
+                stroke: self.stroke.map(Into::into),
+                text_box: self.textbox.map(|t| t.into_model(ctx)),
+                wrap: self.wrap.map(Into::into),
+                image_data: self.imagedata.map(Into::into),
+                fill: self.fill.map(Into::into),
+            },
+        }
+    }
+}
+
+/// VML §14.1.2.17 `<v:roundrect>`.
+#[derive(Deserialize)]
+pub(crate) struct RoundRectXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    /// `@arcsize` — corner radius as a fraction (e.g. "10923f" = ~16.7%
+    /// in the spec's fixed-point format, or a plain decimal). We accept
+    /// floats; downstream layout clamps to [0, 1].
+    #[serde(rename = "@arcsize", default)]
+    pub arcsize: Option<f32>,
+}
+
+impl RoundRectXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlRoundRect {
+        VmlRoundRect {
+            common: self.common.into_model(ctx),
+            arcsize: self.arcsize,
+        }
+    }
+}
+
+/// VML §14.1.2.13 `<v:oval>`.
+#[derive(Deserialize)]
+pub(crate) struct OvalXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+}
+
+impl OvalXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlOval {
+        VmlOval {
+            common: self.common.into_model(ctx),
+        }
+    }
+}
+
+/// VML §14.1.2.12 `<v:line>` — endpoints in `@from` / `@to` as
+/// comma-separated lengths (e.g. "10pt,20pt").
+#[derive(Deserialize)]
+pub(crate) struct LineXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    #[serde(rename = "@from", default)]
+    pub from: Option<String>,
+    #[serde(rename = "@to", default)]
+    pub to: Option<String>,
+}
+
+impl LineXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlLine {
+        VmlLine {
+            common: self.common.into_model(ctx),
+            from: self.from.as_deref().and_then(parse_vml_point),
+            to: self.to.as_deref().and_then(parse_vml_point),
+        }
+    }
+}
+
+/// VML §14.1.2.15 `<v:polyline>`. `@points` is a space-and-comma
+/// separated list of x,y pairs.
+#[derive(Deserialize)]
+pub(crate) struct PolyLineXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    #[serde(rename = "@points", default)]
+    pub points: Option<String>,
+}
+
+impl PolyLineXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlPolyLine {
+        VmlPolyLine {
+            common: self.common.into_model(ctx),
+            points: self
+                .points
+                .as_deref()
+                .map(parse_vml_points)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// VML §14.1.2.3 `<v:arc>`.
+#[derive(Deserialize)]
+pub(crate) struct ArcXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    #[serde(rename = "@startangle", default)]
+    pub start_angle: Option<f32>,
+    #[serde(rename = "@endangle", default)]
+    pub end_angle: Option<f32>,
+}
+
+impl ArcXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlArc {
+        VmlArc {
+            common: self.common.into_model(ctx),
+            start_angle: self.start_angle,
+            end_angle: self.end_angle,
+        }
+    }
+}
+
+/// VML §14.1.2.7 `<v:curve>` — cubic Bezier with two control points.
+#[derive(Deserialize)]
+pub(crate) struct CurveXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    #[serde(rename = "@from", default)]
+    pub from: Option<String>,
+    #[serde(rename = "@control1", default)]
+    pub control1: Option<String>,
+    #[serde(rename = "@control2", default)]
+    pub control2: Option<String>,
+    #[serde(rename = "@to", default)]
+    pub to: Option<String>,
+}
+
+impl CurveXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlCurve {
+        VmlCurve {
+            common: self.common.into_model(ctx),
+            from: self.from.as_deref().and_then(parse_vml_point),
+            control1: self.control1.as_deref().and_then(parse_vml_point),
+            control2: self.control2.as_deref().and_then(parse_vml_point),
+            to: self.to.as_deref().and_then(parse_vml_point),
+        }
+    }
+}
+
+/// VML §14.1.2.10 `<v:image>` — image element. `@src` carries the
+/// path; rels (`<v:imagedata r:id>`) are still picked up via the
+/// shared `CommonAttrsXml.imagedata`, so either form works.
+#[derive(Deserialize)]
+pub(crate) struct ImageXml {
+    #[serde(flatten)]
+    pub common: CommonAttrsXml,
+    #[serde(rename = "@src", default)]
+    pub src: Option<String>,
+}
+
+impl ImageXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlImage {
+        VmlImage {
+            common: self.common.into_model(ctx),
+            src: self.src,
+        }
+    }
+}
+
+/// VML §14.1.2.9 `<v:group>` — recursive shape grouping.
+///
+/// The common attribute fields are inlined here (rather than via
+/// `#[serde(flatten)]` like the other primitives) because flatten
+/// fights with `$value` for child capture: with flatten enabled,
+/// quick-xml's serde resolver routes `<rect>`/`<oval>`/etc. through
+/// the flattened struct first, which rejects them as unknown fields
+/// and drops them. Inlining keeps the children path clean.
+#[derive(Deserialize)]
+pub(crate) struct GroupXml {
+    #[serde(rename = "@id", default)]
+    pub id: Option<String>,
+    #[serde(rename = "@style", default)]
+    pub style: Option<String>,
+    #[serde(rename = "@fillcolor", default)]
+    pub fillcolor: Option<String>,
+    #[serde(rename = "@stroked", default)]
+    pub stroked: Option<VmlBool>,
+    #[serde(rename = "@coordsize", default)]
+    pub coord_size: Option<String>,
+    #[serde(rename = "@coordorigin", default)]
+    pub coord_origin: Option<String>,
+    /// Recursive: a group's children are themselves primitives.
+    #[serde(rename = "$value", default)]
+    pub children: Vec<VmlPrimitiveXml>,
+}
+
+impl GroupXml {
+    fn into_model(self, ctx: &mut crate::docx::parse::body::ConvertCtx) -> VmlGroup {
+        VmlGroup {
+            common: VmlCommonAttrs {
+                id: self.id.map(VmlShapeId::new),
+                style: parse_style(self.style),
+                fill_color: self.fillcolor.as_deref().and_then(|s| parse_color(s).ok()),
+                stroked: self.stroked.map(|b| b.0),
+                ..VmlCommonAttrs::default()
+            },
+            coord_size: parse_vector2d(self.coord_size),
+            coord_origin: parse_vector2d(self.coord_origin),
+            children: self
+                .children
+                .into_iter()
+                .filter_map(|c| c.into_model(ctx))
+                .collect(),
+        }
+    }
+}
+
+/// Parse a single VML 2D point from a comma-separated `"x,y"` string,
+/// honoring CSS-like length units. Returns `None` on parse error so
+/// callers can drop malformed values without aborting the whole parse.
+fn parse_vml_point(s: &str) -> Option<VmlPoint> {
+    let s = s.trim();
+    let (xs, ys) = s.split_once(',')?;
+    let x = parse_length(xs.trim())?;
+    let y = parse_length(ys.trim())?;
+    Some(VmlPoint {
+        x: pt_value(&x),
+        y: pt_value(&y),
+    })
+}
+
+/// Parse a `<v:polyline>`-style points list: pairs separated by
+/// whitespace and/or commas. Skips malformed pairs rather than failing.
+fn parse_vml_points(s: &str) -> Vec<VmlPoint> {
+    let toks: Vec<&str> = s
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .collect();
+    toks.chunks_exact(2)
+        .filter_map(|pair| {
+            let x = parse_length(pair[0])?;
+            let y = parse_length(pair[1])?;
+            Some(VmlPoint {
+                x: pt_value(&x),
+                y: pt_value(&y),
+            })
+        })
+        .collect()
+}
+
+/// Convert a parsed `VmlLength` to a plain `f32` in points, honoring
+/// the unit. Used by primitive coord parsers; the layout layer keeps
+/// the typed `VmlLength` for shape geometry but points/curves are
+/// scalar enough that a flat `f32` suffices.
+fn pt_value(len: &crate::docx::model::VmlLength) -> f32 {
+    use crate::docx::model::VmlLengthUnit;
+    let v = len.value as f32;
+    match len.unit {
+        VmlLengthUnit::Pt => v,
+        VmlLengthUnit::In => v * 72.0,
+        VmlLengthUnit::Cm => v * 28.3465,
+        VmlLengthUnit::Mm => v * 2.83465,
+        VmlLengthUnit::Px => v * 0.75,
+        // Em / Ex / Pc / Percent / Unitless: degrade to the raw value
+        // — these aren't expected on primitive coordinate attributes.
+        _ => v,
     }
 }
 
@@ -398,11 +868,15 @@ mod tests {
         w.pict.into_model(&mut ctx)
     }
 
+    fn shapes(p: &Pict) -> Vec<&VmlShape> {
+        p.shapes().collect()
+    }
+
     #[test]
     fn empty_pict() {
         let p = parse(r#"<pict/>"#);
         assert!(p.shape_type.is_none());
-        assert!(p.shapes.is_empty());
+        assert!(p.primitives.is_empty());
     }
 
     #[test]
@@ -414,15 +888,19 @@ mod tests {
                        fillcolor="#ff0000" stroked="f"/>
             </pict>"##,
         );
-        assert_eq!(p.shapes.len(), 1);
-        let s = &p.shapes[0];
-        assert_eq!(s.id.as_ref().map(|v| v.as_str()), Some("s1"));
+        let shapes = shapes(&p);
+        assert_eq!(shapes.len(), 1);
+        let s = shapes[0];
+        assert_eq!(s.common.id.as_ref().map(|v| v.as_str()), Some("s1"));
         assert_eq!(
             s.shape_type_ref.as_ref().map(|v| v.as_str()),
             Some("_x0000_t202")
         );
-        assert_eq!(s.stroked, Some(false));
-        assert!(matches!(s.fill_color, Some(VmlColor::Rgb(0xFF, 0, 0))));
+        assert_eq!(s.common.stroked, Some(false));
+        assert!(matches!(
+            s.common.fill_color,
+            Some(VmlColor::Rgb(0xFF, 0, 0))
+        ));
     }
 
     #[test]
@@ -464,7 +942,8 @@ mod tests {
                 </shape>
             </pict>"##,
         );
-        let id = p.shapes[0].image_data.as_ref().unwrap();
+        let shapes = shapes(&p);
+        let id = shapes[0].common.image_data.as_ref().unwrap();
         assert_eq!(id.rel_id.as_ref().map(|r| r.as_str()), Some("rId7"));
         assert_eq!(id.title.as_deref(), Some("Logo"));
     }
@@ -480,7 +959,8 @@ mod tests {
                 </shape>
             </pict>"#,
         );
-        let tb = p.shapes[0].text_box.as_ref().unwrap();
+        let shapes = shapes(&p);
+        let tb = shapes[0].common.text_box.as_ref().unwrap();
         assert!(tb.content.is_empty());
         assert!(tb.inset.is_some());
     }
@@ -498,7 +978,8 @@ mod tests {
                 </shape>
             </pict>"#,
         );
-        let tb = p.shapes[0].text_box.as_ref().unwrap();
+        let shapes = shapes(&p);
+        let tb = shapes[0].common.text_box.as_ref().unwrap();
         assert_eq!(tb.content.len(), 1);
         match &tb.content[0] {
             Block::Paragraph(_) => (),
@@ -515,7 +996,8 @@ mod tests {
                 </shape>
             </pict>"#,
         );
-        let w = p.shapes[0].wrap.unwrap();
+        let shapes = shapes(&p);
+        let w = shapes[0].common.wrap.unwrap();
         assert_eq!(w.wrap_type, Some(VmlWrapType::Square));
         assert_eq!(w.side, Some(VmlWrapSide::Both));
     }
@@ -529,9 +1011,10 @@ mod tests {
                 <shape id="c" style="width:30pt"/>
             </pict>"#,
         );
-        assert_eq!(p.shapes.len(), 3);
-        assert_eq!(p.shapes[0].id.as_ref().unwrap().as_str(), "a");
-        assert_eq!(p.shapes[2].id.as_ref().unwrap().as_str(), "c");
+        let shapes = shapes(&p);
+        assert_eq!(shapes.len(), 3);
+        assert_eq!(shapes[0].common.id.as_ref().unwrap().as_str(), "a");
+        assert_eq!(shapes[2].common.id.as_ref().unwrap().as_str(), "c");
     }
 
     #[test]
@@ -541,9 +1024,286 @@ mod tests {
                 <shape id="s" style="position:absolute;left:10pt;top:20pt;width:100pt;height:50pt;z-index:5"/>
             </pict>"#,
         );
-        let st = &p.shapes[0].style;
+        let shapes = shapes(&p);
+        let st = &shapes[0].common.style;
         assert!(st.position.is_some());
         assert!(st.left.is_some());
         assert_eq!(st.z_index, Some(5));
+    }
+
+    // ── §14.1.2 primitive shapes ────────────────────────────────────────
+
+    #[test]
+    fn rect_parses_into_rect_primitive() {
+        let p = parse(
+            r##"<pict>
+                <rect id="r1"
+                      style="position:absolute;margin-left:-.5pt;margin-top:0;width:596.5pt;height:40.5pt"
+                      fillcolor="#888b8d" stroked="f"/>
+            </pict>"##,
+        );
+        assert_eq!(p.primitives.len(), 1);
+        let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+            panic!("expected VmlPrimitive::Rect, got {:?}", p.primitives[0]);
+        };
+        assert_eq!(r.common.id.as_ref().map(|v| v.as_str()), Some("r1"),);
+        assert!(matches!(
+            r.common.fill_color,
+            Some(VmlColor::Rgb(0x88, 0x8B, 0x8D))
+        ));
+        assert_eq!(r.common.stroked, Some(false));
+        assert!(r.common.style.width.is_some());
+    }
+
+    #[test]
+    fn rect_and_shape_in_same_pict_preserve_order() {
+        let p = parse(
+            r##"<pict>
+                <rect id="r1" style="width:10pt;height:10pt"/>
+                <shape id="s1" style="width:20pt;height:20pt"/>
+                <rect id="r2" style="width:30pt;height:30pt"/>
+            </pict>"##,
+        );
+        assert_eq!(p.primitives.len(), 3);
+        assert!(matches!(p.primitives[0], VmlPrimitive::Rect(_)));
+        assert!(matches!(p.primitives[1], VmlPrimitive::Shape(_)));
+        assert!(matches!(p.primitives[2], VmlPrimitive::Rect(_)));
+    }
+
+    #[test]
+    fn roundrect_carries_arcsize() {
+        let p = parse(
+            r##"<pict>
+                <roundrect id="rr" arcsize="0.25" style="width:50pt;height:30pt" fillcolor="#ff0000"/>
+            </pict>"##,
+        );
+        let VmlPrimitive::RoundRect(rr) = &p.primitives[0] else {
+            panic!();
+        };
+        assert!((rr.arcsize.unwrap() - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn oval_parses_into_oval_primitive() {
+        let p = parse(r#"<pict><oval id="o" style="width:40pt;height:20pt"/></pict>"#);
+        assert!(matches!(p.primitives[0], VmlPrimitive::Oval(_)));
+    }
+
+    #[test]
+    fn line_carries_from_and_to_points() {
+        let p = parse(
+            r#"<pict>
+                <line id="l" from="10pt,20pt" to="100pt,120pt" stroked="t"/>
+            </pict>"#,
+        );
+        let VmlPrimitive::Line(l) = &p.primitives[0] else {
+            panic!();
+        };
+        let from = l.from.unwrap();
+        let to = l.to.unwrap();
+        assert!((from.x - 10.0).abs() < 1e-3);
+        assert!((from.y - 20.0).abs() < 1e-3);
+        assert!((to.x - 100.0).abs() < 1e-3);
+        assert!((to.y - 120.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn polyline_collects_points_from_attribute() {
+        let p = parse(
+            r#"<pict>
+                <polyline id="pl" points="0pt,0pt 10pt,20pt,30pt,40pt"/>
+            </pict>"#,
+        );
+        let VmlPrimitive::PolyLine(pl) = &p.primitives[0] else {
+            panic!();
+        };
+        assert_eq!(pl.points.len(), 3);
+        assert!((pl.points[2].x - 30.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn arc_carries_start_and_end_angles() {
+        let p = parse(
+            r#"<pict>
+                <arc id="a" startangle="0" endangle="90" style="width:50pt;height:50pt"/>
+            </pict>"#,
+        );
+        let VmlPrimitive::Arc(a) = &p.primitives[0] else {
+            panic!();
+        };
+        assert_eq!(a.start_angle, Some(0.0));
+        assert_eq!(a.end_angle, Some(90.0));
+    }
+
+    #[test]
+    fn curve_parses_all_four_points() {
+        let p = parse(
+            r#"<pict>
+                <curve id="c"
+                       from="0pt,0pt"
+                       control1="10pt,10pt"
+                       control2="20pt,30pt"
+                       to="40pt,50pt"/>
+            </pict>"#,
+        );
+        let VmlPrimitive::Curve(c) = &p.primitives[0] else {
+            panic!();
+        };
+        assert!(c.from.is_some());
+        assert!(c.control1.is_some());
+        assert!(c.control2.is_some());
+        assert!(c.to.is_some());
+    }
+
+    #[test]
+    fn image_carries_src_and_image_data() {
+        let p = parse(
+            r#"<pict>
+                <image id="i" src="photo.png" style="width:100pt;height:80pt">
+                    <imagedata r:id="rId9"/>
+                </image>
+            </pict>"#,
+        );
+        let VmlPrimitive::Image(img) = &p.primitives[0] else {
+            panic!();
+        };
+        assert_eq!(img.src.as_deref(), Some("photo.png"));
+        assert_eq!(
+            img.common
+                .image_data
+                .as_ref()
+                .and_then(|d| d.rel_id.as_ref().map(|r| r.as_str())),
+            Some("rId9"),
+        );
+    }
+
+    #[test]
+    fn group_recursively_parses_children() {
+        let p = parse(
+            r##"<pict>
+                <group id="g" coordsize="21600,21600" coordorigin="0,0">
+                    <rect id="r" style="width:10pt;height:10pt" fillcolor="#ff0000"/>
+                    <oval id="o" style="width:20pt;height:20pt"/>
+                </group>
+            </pict>"##,
+        );
+        let VmlPrimitive::Group(g) = &p.primitives[0] else {
+            panic!();
+        };
+        assert_eq!(g.children.len(), 2);
+        assert!(matches!(g.children[0], VmlPrimitive::Rect(_)));
+        assert!(matches!(g.children[1], VmlPrimitive::Oval(_)));
+        assert_eq!(g.coord_size.as_ref().map(|v| v.x), Some(21600));
+    }
+
+    #[test]
+    fn rect_textbox_content_is_populated() {
+        // Regression for the gray-bar text bug: `<v:rect>` with a
+        // `<v:textbox><w:txbxContent>` should reach the model with
+        // its inner paragraphs intact, just like `<v:shape>` does.
+        // The `flatten` indirection on `RectXml.common` was dropping
+        // the inner content when this test was first added.
+        use crate::docx::model::VmlPrimitive;
+        let p = parse(
+            r#"<pict>
+                <rect id="r" style="width:100pt;height:50pt">
+                    <textbox>
+                        <txbxContent>
+                            <w:p><w:r><w:t>Inside the rect</w:t></w:r></w:p>
+                        </txbxContent>
+                    </textbox>
+                </rect>
+            </pict>"#,
+        );
+        let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+            panic!();
+        };
+        let tb = r.common.text_box.as_ref().expect("textbox parsed");
+        assert_eq!(tb.content.len(), 1, "textbox should contain one paragraph");
+    }
+
+    #[test]
+    fn rect_with_fill_child_carries_fill_type_and_color() {
+        // §14.1.2.5: `<v:fill>` overrides `@fillcolor`. The model
+        // carries both — the renderer's fill resolver picks the
+        // child when present.
+        use crate::docx::model::{VmlFillType, VmlPrimitive};
+        let p = parse(
+            r##"<pict>
+                <rect id="r" style="width:50pt;height:30pt" fillcolor="#ff0000">
+                    <fill type="solid" color="#00ff00"/>
+                </rect>
+            </pict>"##,
+        );
+        let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+            panic!();
+        };
+        assert!(matches!(
+            r.common.fill_color,
+            Some(VmlColor::Rgb(0xFF, 0, 0))
+        ));
+        let fill = r.common.fill.as_ref().expect("fill child parsed");
+        assert_eq!(fill.fill_type, VmlFillType::Solid);
+        assert!(matches!(fill.color, Some(VmlColor::Rgb(0, 0xFF, 0))));
+    }
+
+    #[test]
+    fn fill_type_gradient_and_tile_are_modeled() {
+        use crate::docx::model::{VmlFillType, VmlPrimitive};
+        for (input, expected) in [
+            ("gradient", VmlFillType::Gradient),
+            ("gradientRadial", VmlFillType::GradientRadial),
+            ("tile", VmlFillType::Tile),
+            ("frame", VmlFillType::Frame),
+            ("pattern", VmlFillType::Pattern),
+        ] {
+            let xml = format!(
+                r##"<pict>
+                    <rect id="r" style="width:10pt;height:10pt">
+                        <fill type="{input}" color="#aabbcc"/>
+                    </rect>
+                </pict>"##
+            );
+            let p = parse(&xml);
+            let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+                panic!();
+            };
+            assert_eq!(
+                r.common.fill.as_ref().unwrap().fill_type,
+                expected,
+                "fill type {input} should map to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fill_with_image_source_carries_src_attribute() {
+        use crate::docx::model::VmlPrimitive;
+        let p = parse(
+            r#"<pict>
+                <rect id="r" style="width:10pt;height:10pt">
+                    <fill type="frame" src="watermark.png"/>
+                </rect>
+            </pict>"#,
+        );
+        let VmlPrimitive::Rect(r) = &p.primitives[0] else {
+            panic!();
+        };
+        let fill = r.common.fill.as_ref().unwrap();
+        assert_eq!(fill.src.as_deref(), Some("watermark.png"));
+    }
+
+    #[test]
+    fn unknown_vml_element_falls_into_other_and_is_dropped() {
+        let p = parse(
+            r#"<pict>
+                <rect id="r" style="width:10pt;height:10pt"/>
+                <unknownVmlThing foo="bar"/>
+            </pict>"#,
+        );
+        // Only the rect survives; the unknown element is silently
+        // discarded by `VmlPrimitiveXml::Other` → `into_model = None`.
+        assert_eq!(p.primitives.len(), 1);
+        assert!(matches!(p.primitives[0], VmlPrimitive::Rect(_)));
     }
 }

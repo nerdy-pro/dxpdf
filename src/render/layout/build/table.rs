@@ -143,6 +143,21 @@ pub(super) fn build_table(
     let col_band_size = t.properties.style_col_band_size.unwrap_or(1);
     let num_rows = t.rows.len();
 
+    // §17.4.38: resolve table borders — merge direct properties over table style.
+    // Direct tblBorders may specify only a subset of edges (e.g. insideH=none);
+    // unspecified edges inherit from the table style. Computed up front so
+    // per-row tblPrEx merges (§17.4.61) below have a stable basis.
+    let style_borders = raw_table_style
+        .and_then(|s| s.table.as_ref())
+        .and_then(|tp| tp.borders.as_ref());
+    let tbl_borders = match (t.properties.borders.as_ref(), style_borders) {
+        (Some(direct), Some(style)) => Some(merge_table_borders(direct, style)),
+        (Some(direct), None) => Some(*direct),
+        (None, Some(style)) => Some(*style),
+        (None, None) => None,
+    };
+    let border_config = tbl_borders.as_ref().map(convert_table_border_config);
+
     // Build rows by iterating cells and recursing into their content.
     let rows: Vec<TableRowInput> = t
         .rows
@@ -212,23 +227,26 @@ pub(super) fn build_table(
                 cant_split: row.properties.cant_split,
                 grid_before: row.properties.grid_before,
                 grid_after: row.properties.grid_after,
+                // §17.4.61: row-level tblPrEx.tblBorders — per-side
+                // override of the table's effective borders. We merge
+                // *at the model layer* (Option<Border> with style=None
+                // is preserved), then convert to layout — that keeps
+                // the spec's "specified as none" vs "not specified"
+                // distinction that converting first would erase.
+                border_overrides: row
+                    .property_exceptions
+                    .as_ref()
+                    .and_then(|ex| ex.borders.as_ref())
+                    .map(|over| {
+                        let merged = match tbl_borders.as_ref() {
+                            Some(table) => merge_table_borders(over, table),
+                            None => *over,
+                        };
+                        convert_table_border_config(&merged)
+                    }),
             }
         })
         .collect();
-
-    // §17.4.38: resolve table borders — merge direct properties over table style.
-    // Direct tblBorders may specify only a subset of edges (e.g. insideH=none);
-    // unspecified edges inherit from the table style.
-    let style_borders = raw_table_style
-        .and_then(|s| s.table.as_ref())
-        .and_then(|tp| tp.borders.as_ref());
-    let tbl_borders = match (t.properties.borders.as_ref(), style_borders) {
-        (Some(direct), Some(style)) => Some(merge_table_borders(direct, style)),
-        (Some(direct), None) => Some(*direct),
-        (None, Some(style)) => Some(*style),
-        (None, None) => None,
-    };
-    let border_config = tbl_borders.as_ref().map(convert_table_border_config);
 
     // §17.4.58: floating table positioning.
     let float_info = t.properties.positioning.as_ref().map(|pos| {

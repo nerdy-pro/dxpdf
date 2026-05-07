@@ -445,6 +445,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -478,6 +479,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 grid_after: 0,
+                border_overrides: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
@@ -486,6 +488,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 grid_after: 0,
+                border_overrides: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
@@ -538,6 +541,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
@@ -563,6 +567,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -610,6 +615,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
         let result = layout_table(
@@ -654,6 +660,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -699,6 +706,7 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             grid_after: 1,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
         let result = layout_table(
@@ -736,6 +744,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 2,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
         let result = layout_table(
@@ -774,6 +783,7 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             grid_after: 1,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(50.0), Pt::new(50.0), Pt::new(10.0)];
         let borders = TableBorderConfig {
@@ -866,6 +876,7 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             grid_after: 0,
+            border_overrides: None,
         };
         let row_b = TableRowInput {
             cells: vec![
@@ -886,6 +897,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         };
         let col_widths = vec![Pt::new(50.0), Pt::new(100.0), Pt::new(150.0)];
         let result = layout_table(
@@ -961,6 +973,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -1004,6 +1017,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
 
@@ -1081,6 +1095,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         };
         let row1 = TableRowInput {
             cells: vec![
@@ -1100,6 +1115,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         };
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -1175,6 +1191,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         }
     }
 
@@ -1340,6 +1357,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         };
         let row1 = TableRowInput {
             cells: vec![TableCellInput {
@@ -1356,6 +1374,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             grid_after: 0,
+            border_overrides: None,
         };
         let col_widths = vec![Pt::new(40.0)];
         let slices = layout_table_paginated(

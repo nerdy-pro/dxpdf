@@ -93,6 +93,23 @@ pub struct TableRow {
     pub properties: TableRowProperties,
     pub cells: Vec<TableCell>,
     pub rsids: TableRowRevisionIds,
+    /// §17.4.61 `<w:tblPrEx>` — table-level property *exceptions*
+    /// scoped to this row. The spec admits the full vocabulary of
+    /// `<w:tblPr>` minus tblStyle/tblpPr; we carry only the slice we
+    /// honor today (currently borders) and grow as needed. Values
+    /// here override the corresponding entries on the table's
+    /// `TableProperties` for this row's cells only.
+    pub property_exceptions: Option<TableRowPropertyExceptions>,
+}
+
+/// §17.4.61 — the subset of `<w:tblPrEx>` we currently honor. Each
+/// field, when `Some`, replaces the matching field on the parent
+/// table's `TableProperties` for the row that owns this struct;
+/// `None` falls through to the table's value.
+#[derive(Clone, Debug, Default)]
+pub struct TableRowPropertyExceptions {
+    /// Per-row replacement for `TableProperties.borders`.
+    pub borders: Option<TableBorders>,
 }
 
 #[derive(Clone, Debug, Default)]
