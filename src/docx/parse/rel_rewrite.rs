@@ -38,7 +38,8 @@ use std::collections::HashMap;
 
 use crate::model::{
     Blip, BlipFill, Block, DrawingFill, GraphicContent, HyperlinkTarget, Image, Inline, Outline,
-    Pict, RelId, ShapeProperties, VmlImageData, VmlShape, VmlTextBox, WordProcessingShape,
+    Pict, RelId, ShapeProperties, VmlCommonAttrs, VmlImageData, VmlPrimitive, VmlTextBox,
+    WordProcessingShape,
 };
 
 /// Apply `remap` to every relationship-bearing `RelId` inside
@@ -168,18 +169,44 @@ fn rewrite_blip(blip: &mut Blip, remap: &HashMap<RelId, RelId>) {
 }
 
 fn rewrite_in_pict(pict: &mut Pict, remap: &HashMap<RelId, RelId>) {
-    for shape in &mut pict.shapes {
-        rewrite_in_vml_shape(shape, remap);
+    for primitive in &mut pict.primitives {
+        rewrite_in_vml_primitive(primitive, remap);
     }
 }
 
-fn rewrite_in_vml_shape(shape: &mut VmlShape, remap: &HashMap<RelId, RelId>) {
-    if let Some(ref mut data) = shape.image_data {
+/// Walk a single VML primitive, rewriting every `RelId` it owns
+/// directly (image data) or holds nested (text-box content, group
+/// children). Adding new primitive variants in
+/// `crate::model::VmlPrimitive` requires adding them here too — the
+/// match arms are exhaustive deliberately.
+fn rewrite_in_vml_primitive(p: &mut VmlPrimitive, remap: &HashMap<RelId, RelId>) {
+    rewrite_in_vml_common(p.common_mut(), remap);
+    match p {
+        VmlPrimitive::Group(group) => {
+            for child in &mut group.children {
+                rewrite_in_vml_primitive(child, remap);
+            }
+        }
+        // Other variants have no nested rels beyond the common attrs.
+        VmlPrimitive::Shape(_)
+        | VmlPrimitive::Rect(_)
+        | VmlPrimitive::RoundRect(_)
+        | VmlPrimitive::Oval(_)
+        | VmlPrimitive::Line(_)
+        | VmlPrimitive::PolyLine(_)
+        | VmlPrimitive::Arc(_)
+        | VmlPrimitive::Curve(_)
+        | VmlPrimitive::Image(_) => {}
+    }
+}
+
+fn rewrite_in_vml_common(c: &mut VmlCommonAttrs, remap: &HashMap<RelId, RelId>) {
+    if let Some(ref mut data) = c.image_data {
         rewrite_vml_image_data(data, remap);
     }
     // §14.1.2.22: a VML shape can host a `<v:textbox>` with block
     // content; images inside it share the part's rels namespace.
-    if let Some(ref mut tb) = shape.text_box {
+    if let Some(ref mut tb) = c.text_box {
         rewrite_in_vml_text_box(tb, remap);
     }
 }
@@ -586,22 +613,18 @@ mod tests {
         let inner_image = picture_with_blip("rId1");
         let pict = Pict {
             shape_type: None,
-            shapes: vec![VmlShape {
-                id: None,
+            primitives: vec![VmlPrimitive::Shape(VmlShape {
+                common: VmlCommonAttrs {
+                    text_box: Some(VmlTextBox {
+                        style: VmlStyle::default(),
+                        inset: None,
+                        content: vec![paragraph_with_image(inner_image)],
+                    }),
+                    ..VmlCommonAttrs::default()
+                },
                 shape_type_ref: None,
-                style: VmlStyle::default(),
-                fill_color: None,
-                stroked: None,
-                stroke: None,
                 vml_path: None,
-                text_box: Some(VmlTextBox {
-                    style: VmlStyle::default(),
-                    inset: None,
-                    content: vec![paragraph_with_image(inner_image)],
-                }),
-                wrap: None,
-                image_data: None,
-            }],
+            })],
         };
         let mut blocks = vec![Block::Paragraph(Box::new(Paragraph {
             style_id: None,
@@ -620,7 +643,8 @@ mod tests {
         let Inline::Pict(pict) = &p.content[0] else {
             panic!();
         };
-        let tb = pict.shapes[0].text_box.as_ref().unwrap();
+        let shape = pict.shapes().next().unwrap();
+        let tb = shape.common.text_box.as_ref().unwrap();
         let Block::Paragraph(inner_p) = &tb.content[0] else {
             panic!();
         };

@@ -223,7 +223,200 @@ pub(super) fn extract_floating_shapes(
         });
     }
 
+    // VML primitives (`<v:rect>` and friends) coexist in the same
+    // paragraph and resolve to the same `FloatingShape` shape format.
+    // We append them here so both DrawingML and VML floats live in one
+    // ordered list passed downstream.
+    extract_vml_primitive_shapes(&para.content, state, frame, &mut shapes);
+
     shapes
+}
+
+/// Walk the inlines for `Inline::Pict` containers and emit a
+/// [`FloatingShape`] for every renderable VML primitive variant.
+/// Phase B handles `<v:rect>`; later phases can extend this to
+/// `RoundRect`, `Oval`, `Line`, `PolyLine`, `Image`, and grouped
+/// children.
+///
+/// Position resolution uses [`vml_absolute_position`] — currently
+/// page-relative when `position:absolute` and `margin-left`/
+/// `margin-top` are present. The vorlage gray-bar pattern fits this
+/// shape exactly.
+fn extract_vml_primitive_shapes(
+    inlines: &[crate::model::Inline],
+    state: &BuildState,
+    frame: AnchorFrame,
+    out: &mut Vec<FloatingShape>,
+) {
+    use crate::model::Inline;
+    for inline in inlines {
+        match inline {
+            Inline::Pict(pict) => {
+                for primitive in &pict.primitives {
+                    extract_vml_primitive(primitive, state, frame, out);
+                }
+            }
+            Inline::Hyperlink(link) => {
+                extract_vml_primitive_shapes(&link.content, state, frame, out)
+            }
+            Inline::Field(f) => extract_vml_primitive_shapes(&f.content, state, frame, out),
+            // §M.1.2: `<mc:AlternateContent>` carries the same shape
+            // twice — modern DrawingML in `<mc:Choice>` and a VML
+            // fallback in `<mc:Fallback>` — for older clients. As a
+            // modern renderer we honor the Choice (the DrawingML
+            // walker `find_anchor_shapes` already extracts it
+            // alongside us in `extract_floating_shapes`) and skip the
+            // Fallback. Walking it would emit a duplicate shape for
+            // the same logical rectangle. If a future case needs the
+            // Fallback (e.g. Choice that fails our `Requires`
+            // namespace test), we can add a Choice-fed signal here.
+            Inline::AlternateContent(_) => {}
+            _ => {}
+        }
+    }
+}
+
+fn extract_vml_primitive(
+    primitive: &model::VmlPrimitive,
+    state: &BuildState,
+    frame: AnchorFrame,
+    out: &mut Vec<FloatingShape>,
+) {
+    use crate::model::VmlPrimitive;
+    match primitive {
+        VmlPrimitive::Rect(r) => {
+            if let Some(shape) = build_vml_rect_shape(&r.common, state, frame) {
+                out.push(shape);
+            }
+        }
+        // §14.1.2.9: groups carry their own coord system; for now we
+        // recurse without applying the transform — most groups in
+        // practice use the page coord system anyway. Phase D will
+        // honor `coordsize`/`coordorigin`.
+        VmlPrimitive::Group(g) => {
+            for child in &g.children {
+                extract_vml_primitive(child, state, frame, out);
+            }
+        }
+        // Other variants are modeled but not yet emitted as shapes.
+        // Their text-box content is still consumed by the inline
+        // fragment collector, which keeps `<v:shape>`-style text
+        // boxes working as before.
+        VmlPrimitive::Shape(_)
+        | VmlPrimitive::RoundRect(_)
+        | VmlPrimitive::Oval(_)
+        | VmlPrimitive::Line(_)
+        | VmlPrimitive::PolyLine(_)
+        | VmlPrimitive::Arc(_)
+        | VmlPrimitive::Curve(_)
+        | VmlPrimitive::Image(_) => {}
+    }
+}
+
+/// Build a [`FloatingShape`] for a `<v:rect>`-like primitive whose
+/// `common` carries an absolute position + width/height in its
+/// `style`. Returns `None` when the spec-required attributes are
+/// absent so the rect can't be placed (in which case Word would
+/// silently skip it too).
+///
+/// The returned shape's `x` lives in the coordinate frame implied by
+/// `frame`: in `AnchorFrame::Stack` the downstream emitter (e.g.
+/// `render_footer`) adds `margins.left` back, so we subtract it here
+/// to keep the page-relative `margin-left` honest.
+fn build_vml_rect_shape(
+    common: &model::VmlCommonAttrs,
+    state: &BuildState,
+    frame: AnchorFrame,
+) -> Option<FloatingShape> {
+    use crate::render::geometry::PtOffset;
+    use crate::render::layout::draw_command::ResolvedFill;
+    use crate::render::resolve::drawing_color::Rgba;
+    use crate::render::resolve::shape_geometry::{PathVerb, SubPath};
+
+    // Position via `position:absolute` + `margin-left/top`. VML's
+    // `margin-left` is page-relative when the shape's
+    // `mso-position-horizontal-relative` is `page` (the vorlage gray
+    // bar's case) — we don't model that style attribute yet, so
+    // assume page-relative and let phase D add the discriminator.
+    //
+    // In `AnchorFrame::Stack` the eventual emitter shifts every
+    // command by `margins.left` to convert stack→page; we subtract
+    // it from `x` up front so the round-trip preserves the
+    // page-relative offset.
+    let (page_x, y) = vml_absolute_position(&common.style)?;
+    let x = match frame {
+        AnchorFrame::Page => page_x,
+        AnchorFrame::Stack => page_x - state.page_config.margins.left,
+    };
+
+    // Size via `style.width` / `style.height`. A rect with no extent
+    // can't meaningfully render.
+    let width = common.style.width.map(vml_length_to_pt)?;
+    let height = common.style.height.map(vml_length_to_pt)?;
+    if width <= Pt::ZERO || height <= Pt::ZERO {
+        return None;
+    }
+    let extent = PtSize::new(width, height);
+
+    // Resolve fill from `@fillcolor`. Tier 0 only handles solid
+    // colors; gradients and patterns log-and-fall-through elsewhere.
+    let fill = match common.fill_color {
+        Some(crate::model::VmlColor::Rgb(r, g, b)) => ResolvedFill::Solid(Rgba {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: 1.0,
+        }),
+        Some(crate::model::VmlColor::Named(_)) | None => ResolvedFill::None,
+    };
+
+    // Build a closed-rectangle path in shape-local Pt. The painter
+    // applies the `(x, y)` and `size` to position the path.
+    let paths = vec![SubPath {
+        verbs: vec![
+            PathVerb::MoveTo(PtOffset::new(Pt::ZERO, Pt::ZERO)),
+            PathVerb::LineTo(PtOffset::new(extent.width, Pt::ZERO)),
+            PathVerb::LineTo(PtOffset::new(extent.width, extent.height)),
+            PathVerb::LineTo(PtOffset::new(Pt::ZERO, extent.height)),
+            PathVerb::Close,
+        ],
+        fill_mode: crate::model::PathFillMode::Norm,
+        stroked: matches!(common.stroked, Some(true)),
+    }];
+
+    // Vertical position resolution depends on the
+    // `mso-position-vertical-relative` style attribute:
+    // * `page`/`margin` → absolute page coordinates
+    // * `text`/`paragraph` (Word's default in body and footer) →
+    //   relative to the owning paragraph
+    //
+    // Phase B only honors the latter (the vorlage gray-bar case);
+    // page-anchored vertical resolution lands in phase D when the
+    // full position resolver is wired in. Until then we treat the
+    // y offset as relative to the host paragraph — which matches
+    // Word's default and lets the footer rect render correctly.
+    let y_image = FloatingImageY::RelativeToParagraph(y);
+
+    Some(FloatingShape {
+        x,
+        y: y_image,
+        size: extent,
+        rotation: crate::model::dimension::Dimension::new(0),
+        flip_h: false,
+        flip_v: false,
+        // §14.1.2.16: VML rects don't usually wrap surrounding text
+        // — they sit at an absolute z-index. Treat them as wrapNone.
+        wrap_mode: crate::render::layout::section::WrapMode::None,
+        dist_left: Pt::ZERO,
+        dist_right: Pt::ZERO,
+        // §14.1.2 z-index drives layering. For Tier 0 we treat all
+        // VML primitives as non-behind-text (drawn in document order).
+        behind_doc: false,
+        paths,
+        fill,
+        stroke: None,
+        effects: vec![],
+    })
 }
 
 /// Shared anchor-position resolver used by both `extract_floating_images`
@@ -259,30 +452,44 @@ fn resolve_anchor_x(
     use crate::model::{AnchorAlignment, AnchorPosition, AnchorRelativeFrom};
 
     let pc = &state.page_config;
+    // The "frame-zeroed" margins are used when the anchor is
+    // margin-relative: in `Stack` we treat the body left margin as
+    // origin (margin_left = 0) so the result is stack-relative;
+    // `render_header`/`render_footer` re-adds the real margin later.
+    //
+    // Page-relative anchors (`AnchorRelativeFrom::Page`) need a
+    // different convention: the spec puts the offset in *page*
+    // coordinates, but downstream still adds `margins.left` back, so
+    // we subtract the real margin here to keep the round-trip honest.
     let (page_width, margin_left, margin_right) = match frame {
         AnchorFrame::Page => (pc.page_size.width, pc.margins.left, pc.margins.right),
         AnchorFrame::Stack => (Pt::ZERO, Pt::ZERO, Pt::ZERO),
     };
     let content_width = (page_width - margin_left - margin_right).max(Pt::ZERO);
 
+    // The compensation we apply for Page-relative anchors so the
+    // post-shift value lands on the actual page coordinate. Zero for
+    // `AnchorFrame::Page` (no shift happens) and `-pc.margins.left`
+    // for `AnchorFrame::Stack`.
+    let page_anchor_offset = match frame {
+        AnchorFrame::Page => Pt::ZERO,
+        AnchorFrame::Stack => -pc.margins.left,
+    };
+
     match &anchor.horizontal_position {
         AnchorPosition::Offset {
             relative_from,
             offset,
-        } => {
-            let base = match relative_from {
-                AnchorRelativeFrom::Page => Pt::ZERO,
-                AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => margin_left,
-                _ => margin_left,
-            };
-            base + Pt::from(*offset)
-        }
+        } => match relative_from {
+            AnchorRelativeFrom::Page => page_anchor_offset + Pt::from(*offset),
+            _ => margin_left + Pt::from(*offset),
+        },
         AnchorPosition::Align {
             relative_from,
             alignment,
         } => {
             let (area_left, area_width) = match relative_from {
-                AnchorRelativeFrom::Page => (Pt::ZERO, page_width),
+                AnchorRelativeFrom::Page => (page_anchor_offset, page_width.max(pc.page_size.width)),
                 AnchorRelativeFrom::Margin | AnchorRelativeFrom::Column => {
                     (margin_left, content_width)
                 }
@@ -390,9 +597,9 @@ pub(super) fn find_vml_absolute_position(inline: &model::Inline) -> Option<(Pt, 
 }
 
 fn find_vml_pos_in_pict(pict: &model::Pict) -> Option<(Pt, Pt)> {
-    for shape in &pict.shapes {
-        if shape.text_box.is_some() {
-            if let Some(pos) = vml_absolute_position(&shape.style) {
+    for shape in pict.shapes() {
+        if shape.common.text_box.is_some() {
+            if let Some(pos) = vml_absolute_position(&shape.common.style) {
                 return Some(pos);
             }
         }

@@ -667,8 +667,8 @@ where
                     // Render text content from VML text box shapes inline.
                     // Does not handle absolute positioning — text appears inline
                     // with the surrounding paragraph.
-                    for shape in &pict.shapes {
-                        if let Some(ref text_box) = shape.text_box {
+                    for shape in pict.shapes() {
+                        if let Some(ref text_box) = shape.common.text_box {
                             for block in &text_box.content {
                                 if let Block::Paragraph(p) = block {
                                     let pict_ctx = FragmentCtx {

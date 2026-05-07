@@ -560,7 +560,7 @@ pub(super) fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
     use crate::model::VmlLengthUnit;
 
     let default = PtSize::new(Pt::new(9.0), Pt::new(9.0));
-    let shape = match bullet.pict.as_ref().and_then(|p| p.shapes.first()) {
+    let shape = match bullet.pict.as_ref().and_then(|p| p.shapes().next()) {
         Some(s) => s,
         None => return default,
     };
@@ -578,12 +578,14 @@ pub(super) fn pic_bullet_size(bullet: &model::NumPicBullet) -> PtSize {
     };
 
     let w = shape
+        .common
         .style
         .width
         .as_ref()
         .map(to_pt)
         .unwrap_or(default.width);
     let h = shape
+        .common
         .style
         .height
         .as_ref()
