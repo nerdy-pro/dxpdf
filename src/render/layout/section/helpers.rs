@@ -90,19 +90,53 @@ pub(super) fn render_page_footnotes(
     }
 }
 
-/// §17.4.28: compute the table's x offset based on alignment and indent.
+/// §17.4.28 `jc` and §17.4.50 `tblInd`: where the table's left edge lands.
+///
+/// Both inputs are **logical**, and `base` is what makes them physical.
+/// `Alignment` has been `Start`/`Center`/`End` since the enum was written and
+/// the parse seam maps `w:jc="left"` → `Start`, `"right"` → `End` (the
+/// `start`/`end` aliases in `st_enums.rs` are the same variants); §17.4.50 is
+/// literally "Table Indent from **Leading** Margin". So under
+/// [`BaseDirection::Rtl`](crate::i18n::bidi::BaseDirection::Rtl) the two ends swap
+/// and the indent measures inward from
+/// the right.
+///
+/// `base` comes from §17.6.6 `w:bidi` on the section, **not** from §17.4.1
+/// `w:bidiVisual`: that one reverses the cells inside a table and says nothing
+/// about where the table sits, and a document may set either alone.
+///
+/// This is the block-level half of the reading
+/// `paragraph::line_emit::align_offset` already applies to lines — including
+/// the consequence that a table with *no* `w:jc` right-aligns in an RTL
+/// section, since absent alignment is `Start`.
 pub(super) fn table_x_offset(
     alignment: Option<crate::model::Alignment>,
     indent: Pt,
     table_width: Pt,
     content_width: Pt,
     margin_left: Pt,
+    base: crate::i18n::bidi::BaseDirection,
 ) -> Pt {
+    use crate::i18n::bidi::BaseDirection;
     use crate::model::Alignment;
-    match alignment {
-        Some(Alignment::Center) => margin_left + (content_width - table_width) * 0.5,
-        Some(Alignment::End) => margin_left + content_width - table_width,
-        _ => margin_left + indent,
+    // Centre has no leading edge, so it is the one case direction cannot move.
+    if matches!(alignment, Some(Alignment::Center)) {
+        return margin_left + (content_width - table_width) * 0.5;
+    }
+    let at_start = !matches!(alignment, Some(Alignment::End));
+    let leading_is_left = match base {
+        BaseDirection::Ltr => at_start,
+        BaseDirection::Rtl => !at_start,
+    };
+    // The indent applies at the *leading* edge, which is the same edge
+    // `at_start` selects — so it is only ever added on the side the table was
+    // placed against, and a trailing-aligned table ignores it exactly as it did
+    // before this took a direction.
+    let indent = if at_start { indent } else { Pt::ZERO };
+    if leading_is_left {
+        margin_left + indent
+    } else {
+        margin_left + content_width - table_width - indent
     }
 }
 
@@ -204,16 +238,18 @@ mod tests {
 
     // ── §17.4.28 table alignment ─────────────────────────────────────────
 
+    use crate::i18n::bidi::BaseDirection::{Ltr, Rtl};
+
     #[test]
     fn table_x_offset_centers_and_right_aligns_within_the_content_area() {
         let (indent, width, content, margin) =
             (Pt::ZERO, Pt::new(100.0), Pt::new(400.0), Pt::new(72.0));
         assert_eq!(
-            table_x_offset(Some(Alignment::Center), indent, width, content, margin).raw(),
+            table_x_offset(Some(Alignment::Center), indent, width, content, margin, Ltr).raw(),
             72.0 + 150.0,
         );
         assert_eq!(
-            table_x_offset(Some(Alignment::End), indent, width, content, margin).raw(),
+            table_x_offset(Some(Alignment::End), indent, width, content, margin, Ltr).raw(),
             72.0 + 300.0,
         );
     }
@@ -223,11 +259,59 @@ mod tests {
         let (width, content, margin) = (Pt::new(100.0), Pt::new(400.0), Pt::new(72.0));
         for alignment in [None, Some(Alignment::Start), Some(Alignment::Both)] {
             assert_eq!(
-                table_x_offset(alignment, Pt::new(20.0), width, content, margin).raw(),
+                table_x_offset(alignment, Pt::new(20.0), width, content, margin, Ltr).raw(),
                 92.0,
                 "{alignment:?} places at margin + indent"
             );
         }
+    }
+
+    /// §17.6.6: the same three inputs, read against a right-to-left section.
+    ///
+    /// `Start` and `End` swap and `tblInd` measures inward from the right, so
+    /// each case is the LTR answer reflected about the content area. Asserted
+    /// as the reflection rather than as fresh literals, so the pair cannot
+    /// drift apart.
+    #[test]
+    fn table_x_offset_swaps_the_two_ends_under_a_right_to_left_section() {
+        let (width, content, margin) = (Pt::new(100.0), Pt::new(400.0), Pt::new(72.0));
+        let reflect = |x: Pt| margin + content - width - (x - margin);
+
+        for (alignment, indent) in [
+            (None, Pt::ZERO),
+            (Some(Alignment::Start), Pt::ZERO),
+            (Some(Alignment::End), Pt::ZERO),
+            (None, Pt::new(20.0)),
+            (Some(Alignment::Start), Pt::new(20.0)),
+        ] {
+            let ltr = table_x_offset(alignment, indent, width, content, margin, Ltr);
+            let rtl = table_x_offset(alignment, indent, width, content, margin, Rtl);
+            assert_eq!(
+                rtl,
+                reflect(ltr),
+                "{alignment:?} with indent {indent:?} must reflect"
+            );
+        }
+
+        // …and centre is the one that does not, since it has no leading edge.
+        assert_eq!(
+            table_x_offset(
+                Some(Alignment::Center),
+                Pt::ZERO,
+                width,
+                content,
+                margin,
+                Rtl
+            ),
+            table_x_offset(
+                Some(Alignment::Center),
+                Pt::ZERO,
+                width,
+                content,
+                margin,
+                Ltr
+            ),
+        );
     }
 
     /// §17.4.51: `tblInd` is deliberately ignored for centered and right-
@@ -237,9 +321,13 @@ mod tests {
     fn table_x_offset_ignores_indent_when_centered_or_right_aligned() {
         let (width, content, margin) = (Pt::new(100.0), Pt::new(400.0), Pt::new(72.0));
         for alignment in [Alignment::Center, Alignment::End] {
-            let without = table_x_offset(Some(alignment), Pt::ZERO, width, content, margin);
-            let with = table_x_offset(Some(alignment), Pt::new(50.0), width, content, margin);
-            assert_eq!(without, with, "{alignment:?} ignores tblInd");
+            for base in [Ltr, Rtl] {
+                let without =
+                    table_x_offset(Some(alignment), Pt::ZERO, width, content, margin, base);
+                let with =
+                    table_x_offset(Some(alignment), Pt::new(50.0), width, content, margin, base);
+                assert_eq!(without, with, "{alignment:?} ignores tblInd in {base:?}");
+            }
         }
     }
 }

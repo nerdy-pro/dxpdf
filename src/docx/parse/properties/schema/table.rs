@@ -216,6 +216,14 @@ pub(crate) struct TblPrExXml {
         deserialize_with = "deserialize_vec_nonnegative_table_measure"
     )]
     tbl_cell_spacing: Vec<TableMeasureXml>,
+    /// §17.4.1 on a row: this row's columns run right to left, independently of
+    /// the table's own `w:bidiVisual`.
+    ///
+    /// Modelled so it is *visible* — an unnamed child vanishes into
+    /// [`UnknownChildren`] and only ever surfaces under `RUST_LOG=warn` — but
+    /// nothing acts on it yet. See `TableRowPropertyExceptions::bidi_visual`.
+    #[serde(rename = "bidiVisual", default)]
+    bidi_visual: Vec<OnOff>,
     /// Children this schema does not name — recorded so an unimplemented
     /// table property is visible under `RUST_LOG=warn` instead of vanishing.
     /// See [`UnknownChildren`].
@@ -229,6 +237,7 @@ impl From<TblPrExXml> for crate::docx::model::TableRowPropertyExceptions {
         Self {
             borders: Dup::from(x.tbl_borders).into_value().map(Into::into),
             cell_spacing: Dup::from(x.tbl_cell_spacing).into_value().map(Into::into),
+            bidi_visual: last_toggle(x.bidi_visual),
         }
     }
 }
@@ -754,6 +763,35 @@ mod tests {
 
     /// LibreOffice's tdf#167843 regression fixture, verbatim: `val="04A0"`
     /// alongside a single `firstRow="0"`. 04A0 clears lastRow (0x040) and
+    /// §17.4.1 on a *row* (`w:tblPrEx`) is a separate element from the one on
+    /// the table, and this is the only thing that currently observes it.
+    ///
+    /// Nothing acts on it — `TableRowPropertyExceptions::bidi_visual` says why
+    /// — so without this test the field could be renamed, misspelled or dropped
+    /// and every render would agree. That is exactly the failure mode modelling
+    /// it was meant to end: an unnamed child vanishes silently.
+    #[test]
+    fn tbl_pr_ex_bidi_visual_is_modelled_rather_than_unknown() {
+        let parse = |xml: &str| -> (crate::docx::model::TableRowPropertyExceptions, Vec<String>) {
+            let x: TblPrExXml = quick_xml::de::from_str(xml).unwrap();
+            let unknown: Vec<String> = x.unknown.names().iter().map(|n| n.to_string()).collect();
+            (x.into(), unknown)
+        };
+
+        let (ex, unknown) = parse("<tblPrEx><bidiVisual/></tblPrEx>");
+        assert_eq!(ex.bidi_visual, Some(true));
+        assert!(
+            unknown.is_empty(),
+            "a modelled child must not also be recorded as unknown: {unknown:?}"
+        );
+
+        let (off, _) = parse(r#"<tblPrEx><bidiVisual val="0"/></tblPrEx>"#);
+        assert_eq!(off.bidi_visual, Some(false), "an explicit off is stated");
+
+        let (absent, _) = parse("<tblPrEx/>");
+        assert_eq!(absent.bidi_visual, None);
+    }
+
     /// §17.4.1 `w:bidiVisual` is a `CT_OnOff`, so all four of its states have to
     /// be distinguishable at this seam — and the two that are *not* "on" are the
     /// ones the render tests cannot see.

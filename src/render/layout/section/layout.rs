@@ -2232,6 +2232,7 @@ pub(crate) fn layout_section_with_clearance(
                         table.size.width,
                         content_width,
                         config.margins.left,
+                        config.base_direction,
                     );
                     // §17.4.57: apply tblpXSpec horizontal alignment override.
                     let table_x = match fi.x_align {
@@ -2447,6 +2448,7 @@ pub(crate) fn layout_section_with_clearance(
                     table_width,
                     content_width,
                     config.margins.left,
+                    config.base_direction,
                 );
 
                 for (slice_idx, slice) in slices.into_iter().enumerate() {

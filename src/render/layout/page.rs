@@ -30,6 +30,24 @@ pub struct PageConfig {
     pub footer_margin: Pt,
     /// §17.6.4: column layout. Single-element vec for normal single-column.
     pub columns: Vec<ColumnGeometry>,
+    /// §17.6.6 `w:bidi`: which side of the content area is the section's
+    /// **leading** margin.
+    ///
+    /// Carried as the same [`BaseDirection`](crate::i18n::bidi::BaseDirection) a
+    /// paragraph resolves its own
+    /// `w:bidi` to, rather than a second boolean, so the one block-level reader
+    /// (`section::helpers::table_x_offset`) asks the question in the engine's
+    /// existing vocabulary.
+    ///
+    /// **What reads it, and what deliberately does not.** §17.6.6 also makes
+    /// right-to-left the default *paragraph* direction inside the section and
+    /// reverses the order of a multi-column layout. Neither is wired: a
+    /// paragraph already resolves its own `w:bidi` (`ParagraphStyle::base_direction`)
+    /// and giving it a section-level default is its own unit with its own
+    /// regression surface, and column order is untouched by anything here. Only
+    /// table placement — §17.4.28 `jc` and §17.4.50 `tblInd` — consults this
+    /// today.
+    pub base_direction: crate::i18n::bidi::BaseDirection,
 }
 
 impl Default for PageConfig {
@@ -49,6 +67,7 @@ impl Default for PageConfig {
                 x_offset: Pt::ZERO,
                 width: content_width,
             }],
+            base_direction: crate::i18n::bidi::BaseDirection::Ltr,
         }
     }
 }
@@ -92,6 +111,11 @@ impl PageConfig {
         // page whose margins exceed its width yields zero-width columns rather
         // than negative ones.
         cfg.columns = compute_columns(cfg.content_width(), sect.columns.get());
+
+        // §17.6.6: absent or `w:val="0"` leaves the section left-to-right.
+        if sect.bidi == Some(true) {
+            cfg.base_direction = crate::i18n::bidi::BaseDirection::Rtl;
+        }
 
         cfg
     }

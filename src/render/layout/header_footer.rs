@@ -584,6 +584,7 @@ mod tests {
     fn test_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(612.0), Pt::new(792.0)),
             margins: PtEdgeInsets::new(Pt::new(72.0), Pt::new(72.0), Pt::new(72.0), Pt::new(72.0)),
             header_margin: Pt::new(36.0),

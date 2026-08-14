@@ -275,6 +275,7 @@ mod tests {
     fn small_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -447,6 +448,7 @@ mod tests {
     fn two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -2785,6 +2787,7 @@ mod tests {
     fn tall_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(160.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -3498,6 +3501,7 @@ mod tests {
     fn unequal_two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),

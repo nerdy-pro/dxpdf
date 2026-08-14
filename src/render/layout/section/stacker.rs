@@ -387,6 +387,14 @@ pub fn stack_blocks(
                     table.size.width,
                     content_width,
                     Pt::ZERO,
+                    // §17.6.6 is a *section* property, and this function lays
+                    // out table cells and headers/footers — containers that
+                    // reach it without one. Left-to-right until a direction is
+                    // threaded through `stack_blocks`, which is its own unit:
+                    // seven call sites, and the question of whether a nested
+                    // table follows the section or its own cell is not one this
+                    // change answers.
+                    crate::i18n::bidi::BaseDirection::Ltr,
                 );
 
                 for mut cmd in table.commands {

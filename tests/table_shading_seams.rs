@@ -22,29 +22,24 @@
 //!
 //! > two **consecutive** rects of the same colour never share an edge.
 //!
-//! Consecutive is the load-bearing word. Merging a pair with nothing painted
-//! between them cannot change what reaches the page — the union is the same
-//! region, in the same place in the paint order — so any such pair is a seam
-//! that costs nothing to remove, and `coalesce_abutting_rects` removes it.
+//! Consecutive is the load-bearing word for the *fix*: fusing a pair with
+//! nothing painted between them cannot change what reaches the page, so
+//! `coalesce_abutting_rects` fuses exactly those and nothing else.
 //!
-//! A pair with commands *between* them is a different question, and this file
-//! deliberately does not ask it. Merging there would move the later fill earlier
-//! in the paint order, which is not sound in general: the border layer paints
-//! overlapping junction squares (`tests/table_border_corners.rs`), and a
-//! reordering across those would reopen exactly the class those guard.
+//! The **audit is deliberately stricter than the fix**. It looks at consecutive
+//! *fills* — ignoring whatever lies between them — because a seam is a seam
+//! whether or not a glyph was drawn in the gap, and a rasterizer does not care
+//! about the paint order that separated them. Anything it finds is therefore a
+//! real defect that has to be closed by making the pair adjacent, not by
+//! loosening the merge: reordering across the border layer's overlapping
+//! junction squares (`tests/table_border_corners.rs`) would reopen exactly the
+//! class those guard.
 //!
-//! **What that leaves open, measured rather than assumed.** Widening the audit
-//! to consecutive *fills* — ignoring what lies between them — finds three more
-//! pairs in the committed corpus, in `sample-docx-files-sample1.docx` and
-//! `sample-emoji.docx`, and a few dozen in the untracked one. Every one is
-//! §17.3.2.32 run shading, which `paragraph::line_emit` emits per fragment
-//! immediately before that fragment's own text, so adjacent runs of one colour
-//! interleave as fill/text/fill/text. Those pairs are side by side and each
-//! text sits inside its own fill, so fusing them would in fact paint the same
-//! page — but establishing that in general needs horizontal bounds for a text
-//! command, which `DrawCommand` does not carry. It is a real seam of the same
-//! family and a separate fix; what would settle it is bounds on `DrawCommand`,
-//! not a wider merge rule here.
+//! That is how §17.3.2.32 run shading was closed. `paragraph::line_emit` used
+//! to emit a line as fill/text/fill/text, so two adjacent runs of one colour
+//! were never consecutive and their seam survived; it now emits a line's
+//! backgrounds ahead of its glyphs, the way `table::emit` has always layered
+//! shading before content, and the existing merge does the rest.
 
 use dxpdf::render::layout::draw_command::{DrawCommand, LayoutedPage};
 use dxpdf::render::resolve_and_layout;
@@ -118,20 +113,19 @@ fn share_an_edge(a: &Fill, b: &Fill) -> bool {
     side_by_side || stacked
 }
 
-/// Every pair of **adjacent commands** that are both rects, share an edge and
-/// share a colour — as a report line each. Empty is the passing answer.
+/// Every pair of **adjacent fills** that share an edge and a colour — as a
+/// report line each. Empty is the passing answer.
 ///
-/// Adjacency is over the whole command stream, not over the rects in it: a pair
-/// with a text command between them is the case the module doc explains this
-/// does not ask.
+/// Adjacency is over the rects, not over the command stream: a pair with a text
+/// command between them still meets on the page, so it still seams. That is
+/// stricter than what `coalesce_abutting_rects` can fuse on its own, and
+/// deliberately so — see the module doc.
 fn seams(pages: &[LayoutedPage]) -> Vec<String> {
     let mut out = Vec::new();
     for (i, page) in pages.iter().enumerate() {
-        for w in page.commands.windows(2) {
-            let (Some(a), Some(b)) = (as_fill(&w[0]), as_fill(&w[1])) else {
-                continue;
-            };
-            if share_an_edge(&a, &b) {
+        let f = fills(page);
+        for (a, b) in f.iter().zip(f.iter().skip(1)) {
+            if share_an_edge(a, b) {
                 out.push(format!("page {}: {a:?} abuts {b:?}", i + 1));
             }
         }
@@ -332,5 +326,88 @@ fn no_local_corpus_document_paints_a_seam() {
         failures.is_empty(),
         "consecutive same-colour rects sharing an edge:\n{}",
         failures.join("\n")
+    );
+}
+
+// ── §17.3.2.32 run shading ──────────────────────────────────────────────────
+
+/// Two adjacent runs sharing one `w:shd` fill are one rect, not two.
+///
+/// The paragraph counterpart of `a_row_of_identically_shaded_cells_is_painted_as_one_rect`,
+/// and the case the corpus audit above kept finding. Run shading is a *run*
+/// property, so an author who splits a sentence — for a bookmark, a spell-check
+/// boundary, an `rsid`, or nothing at all — gets two fills where they wrote one
+/// highlight, and the join shows.
+#[test]
+fn adjacent_runs_of_one_fill_are_painted_as_one_rect() {
+    let shd = r#"<w:rPr><w:shd w:val="clear" w:color="auto" w:fill="4BACC6"/></w:rPr>"#;
+    let body = format!(
+        r#"<w:p>
+             <w:r>{shd}<w:t xml:space="preserve">first </w:t></w:r>
+             <w:r>{shd}<w:t xml:space="preserve">second</w:t></w:r>
+           </w:p>"#
+    );
+    let pages = layout(&body);
+    let shaded: Vec<_> = fills(&pages[0])
+        .into_iter()
+        .filter(|(_, _, _, _, c)| *c == (0x4B, 0xAC, 0xC6))
+        .collect();
+
+    assert_eq!(shaded.len(), 1, "two runs, one highlight: {shaded:?}");
+    assert!(
+        shaded[0].2 > 0.0,
+        "and it spans both runs rather than collapsing"
+    );
+}
+
+/// The control: two runs of *different* fills stay two rects, so the fix above
+/// is a fusion of equals and not a fusion of neighbours.
+#[test]
+fn adjacent_runs_of_different_fills_stay_two_rects() {
+    let body = r#"<w:p>
+         <w:r><w:rPr><w:shd w:val="clear" w:color="auto" w:fill="4BACC6"/></w:rPr>
+              <w:t xml:space="preserve">first </w:t></w:r>
+         <w:r><w:rPr><w:shd w:val="clear" w:color="auto" w:fill="FFCC00"/></w:rPr>
+              <w:t xml:space="preserve">second</w:t></w:r>
+       </w:p>"#;
+    let f = fills(&layout(body)[0]);
+    let count = |c: (u8, u8, u8)| f.iter().filter(|r| r.4 == c).count();
+    assert_eq!(count((0x4B, 0xAC, 0xC6)), 1);
+    assert_eq!(count((0xFF, 0xCC, 0x00)), 1);
+}
+
+/// …and the glyphs are still on top of the backgrounds.
+///
+/// Hoisting a line's fills ahead of its text is the mechanism, so the risk it
+/// carries is the opposite of the seam: a background emitted later than a
+/// neighbour's glyphs could bury them. Asserted as an ordering over the command
+/// stream, which is the thing that actually decides it.
+#[test]
+fn a_lines_backgrounds_are_painted_before_its_glyphs() {
+    let shd = r#"<w:rPr><w:shd w:val="clear" w:color="auto" w:fill="4BACC6"/></w:rPr>"#;
+    let body = format!(
+        r#"<w:p>
+             <w:r>{shd}<w:t xml:space="preserve">first </w:t></w:r>
+             <w:r>{shd}<w:t xml:space="preserve">second</w:t></w:r>
+           </w:p>"#
+    );
+    let pages = layout(&body);
+    let last_fill = pages[0]
+        .commands
+        .iter()
+        .rposition(|c| {
+            matches!(c, DrawCommand::Rect { color, .. }
+            if (color.r, color.g, color.b) == (0x4B, 0xAC, 0xC6))
+        })
+        .expect("the highlight");
+    let first_text = pages[0]
+        .commands
+        .iter()
+        .position(|c| matches!(c, DrawCommand::Text { .. }))
+        .expect("the text");
+    assert!(
+        last_fill < first_text,
+        "every background of the line precedes every glyph of it: \
+         fill at {last_fill}, text at {first_text}"
     );
 }

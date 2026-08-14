@@ -2702,6 +2702,7 @@ mod tests {
         let mut t = table_of(props, &[2000, 2000], 2);
         t.rows.push(model_row(0, &[1, 1]));
         t.rows[1].property_exceptions = Some(model::TableRowPropertyExceptions {
+            bidi_visual: None,
             borders: Some(model::TableBorders {
                 top: border(16, model::BorderStyle::Single),
                 inside_v: border(8, model::BorderStyle::None),
@@ -2770,6 +2771,7 @@ mod tests {
             t.rows[0].properties.cell_spacing = model::Dup::from(row);
             if exception.is_some() {
                 t.rows[0].property_exceptions = Some(model::TableRowPropertyExceptions {
+                    bidi_visual: None,
                     borders: None,
                     cell_spacing: exception,
                 });

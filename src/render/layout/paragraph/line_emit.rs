@@ -576,6 +576,30 @@ pub(super) fn emit_line_commands(
             emit_bar_rules(commands, &style.tabs, bar_color, *cursor_y, line_height);
         }
 
+        // §17.3.2.32: this line's run shading, held back until the whole line
+        // has been walked and then spliced in ahead of its glyphs.
+        //
+        // Shading is a *run* property, so one highlight an author wrote across a
+        // sentence arrives as one fill per run — and a sentence is split into
+        // runs for reasons that have nothing to do with formatting (a bookmark,
+        // a spell-check boundary, an `rsid`). Emitted inline, those fills are
+        // separated by their own runs' glyphs, and two that abut can then never
+        // be fused: `coalesce_abutting_rects` only merges *consecutive*
+        // commands, because merging across an intervening one would move a fill
+        // later in the paint order. Abutting fills that are never fused leave a
+        // pale hairline under any rasterizer that anti-aliases each separately
+        // — see `tests/table_shading_seams.rs` for why poppler cannot see it.
+        //
+        // Collecting them makes the pairs adjacent, which is the same layering
+        // `table::emit` has always used (`TableCommandBuffers`: shading, then
+        // content, then borders) and is independently the safer order — a run's
+        // background can no longer be painted over its neighbour's glyphs.
+        //
+        // It is spliced *after* the bar rules above rather than at the head of
+        // the line, so the existing bar-versus-shading order is unchanged.
+        let line_content_start = commands.len();
+        let mut line_backgrounds: Vec<DrawCommand> = Vec::new();
+
         // Emit text commands for this line
         let mut x = x_start;
         for pos in 0..order.len() {
@@ -607,9 +631,11 @@ pub(super) fn emit_line_commands(
 
                     // §17.3.2.32: render run-level shading behind text.
                     // Uses text bounds (ascent+descent), not full line height.
+                    // Held in `line_backgrounds` and spliced ahead of the
+                    // line's glyphs — see where that buffer is declared.
                     if let Some(bg_color) = shading {
                         let text_top = *cursor_y + line.ascent - metrics.ascent;
-                        commands.push(DrawCommand::Rect {
+                        line_backgrounds.push(DrawCommand::Rect {
                             rect: crate::render::geometry::PtRect::from_xywh(
                                 x,
                                 text_top,
@@ -901,6 +927,14 @@ pub(super) fn emit_line_commands(
                     });
                 }
             }
+        }
+
+        // The line is walked; put its backgrounds under it.
+        if !line_backgrounds.is_empty() {
+            commands.splice(
+                line_content_start..line_content_start,
+                line_backgrounds.drain(..),
+            );
         }
 
         *cursor_y += line_height;
