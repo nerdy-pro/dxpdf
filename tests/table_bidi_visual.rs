@@ -20,12 +20,19 @@
 //! `<w:bidiVisual/>`**, not a list of coordinates. A cell's box must satisfy
 //!
 //! ```text
-//! x_rtl == table_left + table_right − (x_ltr + w_ltr)
+//! x_rtl − table_left_rtl == table_right_ltr − (x_ltr + w_ltr)
 //! ```
 //!
-//! with its width unchanged — a reflection about the table's own edges. Written
+//! with its width unchanged — a reflection about each table's own edges, stated
+//! as a distance from those edges so it holds wherever the table sits. Written
 //! that way, no page origin, cell margin or glyph metric has to be known, and
 //! the assertions survive any later refinement of the geometry they reflect.
+//!
+//! **Where the table sits is a separate claim**, and it is asserted in
+//! `tests/table_leading_margin.rs` rather than here: §17.4.1 also makes the
+//! table's leading margin the right one, so the two tables in a pair do *not*
+//! share a span. Reflecting about a shared span was this file's first reading
+//! and is what made the defect invisible.
 //!
 //! The declared grid is deliberately **unequal** (1000/2000/3000 twips). With
 //! three equal columns, reversing the cells while leaving the slot widths in
@@ -158,34 +165,45 @@ const RED: (u8, u8, u8) = (0xFF, 0x00, 0x00);
 const GREEN: (u8, u8, u8) = (0x00, 0xFF, 0x00);
 const BLUE: (u8, u8, u8) = (0x00, 0x00, 0xFF);
 
+/// The `(left, right)` extent of a set of boxes.
+fn extent(rects: impl Iterator<Item = Rect>) -> (f32, f32) {
+    rects.fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(l, r), (x, _, w, _)| (l.min(x), r.max(x + w)),
+    )
+}
+
 /// The table's own span, as `(left, right)`, taken from the shaded boxes rather
 /// than from the page margin — so the reflection is about the table's edges and
 /// not about anything the section happens to set.
 fn span(rects: &HashMap<(u8, u8, u8), Rect>) -> (f32, f32) {
-    let left = rects.values().map(|r| r.0).fold(f32::INFINITY, f32::min);
-    let right = rects
-        .values()
-        .map(|r| r.0 + r.2)
-        .fold(f32::NEG_INFINITY, f32::max);
-    (left, right)
+    extent(rects.values().copied())
 }
 
-/// Assert that every box in `rtl` is the reflection of its `ltr` twin about the
-/// table's own edges, with its width unchanged.
+/// Assert that every box in `rtl` is the reflection of its `ltr` twin about its
+/// own table's edges, with its width unchanged.
+///
+/// Measured as a distance from each table's own left edge, because the two
+/// tables do **not** share a span: §17.4.1 puts the right-to-left one at the
+/// right margin (`tests/table_leading_margin.rs`). Asserting the spans equal is
+/// what this file used to do, and it pinned the placement defect in place.
 fn assert_mirrored(ltr: &HashMap<(u8, u8, u8), Rect>, rtl: &HashMap<(u8, u8, u8), Rect>) {
     assert_eq!(ltr.len(), rtl.len(), "same cells either way");
     let (l, r) = span(ltr);
-    assert_eq!((l, r), span(rtl), "the table itself must not move");
+    let (rl, rr) = span(rtl);
+    assert_eq!(rr - rl, r - l, "a mirrored table is the same width");
     for (colour, &(x, _, w, _)) in ltr {
         let &(rx, _, rw, _) = rtl
             .get(colour)
             .unwrap_or_else(|| panic!("no {colour:?} cell in the mirrored table"));
         assert_eq!(rw, w, "{colour:?}: a mirrored cell keeps its width");
         assert_eq!(
-            rx,
-            l + r - (x + w),
-            "{colour:?}: expected the reflection of {x}..{} about {l}..{r}",
-            x + w
+            rx - rl,
+            r - (x + w),
+            "{colour:?}: {x}..{} sits {} from the control's right edge, so its \
+             mirror must sit that far from the mirrored table's left edge",
+            x + w,
+            r - (x + w)
         );
     }
 }
@@ -283,8 +301,12 @@ fn a_grid_before_gap_moves_to_the_visual_right() {
         50.0,
         "without the flag the skipped 1000-twip column is on the left"
     );
+    // Against the *mirrored* table's own right edge — §17.4.1 moves the table
+    // to the right margin, so `r` above is the control's edge and not this
+    // table's (`tests/table_leading_margin.rs`).
+    let (_, rr) = span(&rtl);
     assert_eq!(
-        r - (rtl[&RED].0 + rtl[&RED].2),
+        rr - (rtl[&RED].0 + rtl[&RED].2),
         50.0,
         "with it the same column is skipped on the right"
     );
@@ -611,22 +633,41 @@ fn the_committed_fixture_mirrors_its_own_control() {
     }
     assert_eq!(cells.len(), 11);
 
-    // The tables share a left and right edge, taken from the cells themselves.
-    let left = cells.iter().map(|c| c.1 .0).fold(f32::INFINITY, f32::min);
-    let right = cells
-        .iter()
-        .map(|c| c.1 .0 + c.1 .2)
-        .fold(f32::NEG_INFINITY, f32::max);
+    // Each table's own edges, taken from its own cells. The two are *not* the
+    // same span — see the placement assertion below.
+    let (ctrl_left, ctrl_right) = extent(cells.iter().map(|c| c.1));
+    let (mirror_left, mirror_right) = extent(cells.iter().map(|c| c.2));
+
+    // §17.4.28 / §17.4.50: the whole reason the two spans differ. Neither table
+    // carries a `w:jc` and the section carries no `w:bidi`, so each sits at its
+    // *own* leading margin — and `w:bidiVisual` is what makes the second one's
+    // the right. This is what Word renders, and the fixture is a controlled
+    // experiment for it: every cell paragraph in both tables is RTL, so
+    // paragraph direction cannot be what moves one and not the other.
+    //
+    // The page is 12240 twips wide with 1440-twip margins.
+    const CONTENT_LEFT: f32 = 72.0;
+    const CONTENT_RIGHT: f32 = 72.0 + 468.0;
+    assert_eq!(ctrl_left, CONTENT_LEFT, "the control is flush left");
+    assert_eq!(
+        mirror_right, CONTENT_RIGHT,
+        "the w:bidiVisual table is flush right"
+    );
+    assert_eq!(
+        mirror_right - mirror_left,
+        ctrl_right - ctrl_left,
+        "the two tables are the same width, so only their placement differs"
+    );
 
     let mut moved = 0;
     for (colour, ctrl, mirror) in &cells {
         assert_eq!(mirror.2, ctrl.2, "{colour:?} keeps its width");
         assert_eq!(
-            mirror.0,
-            left + right - (ctrl.0 + ctrl.2),
-            "{colour:?}: {ctrl:?} must reflect about {left}..{right}"
+            mirror.0 - mirror_left,
+            ctrl_right - (ctrl.0 + ctrl.2),
+            "{colour:?}: {ctrl:?} must reflect about its own table's edges"
         );
-        if mirror.0 != ctrl.0 {
+        if mirror.0 - mirror_left != ctrl.0 - ctrl_left {
             moved += 1;
         }
     }

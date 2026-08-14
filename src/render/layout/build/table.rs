@@ -33,6 +33,9 @@ pub(super) struct BuiltTable {
     pub(super) indent: Pt,
     /// §17.4.28: table horizontal alignment (left/center/right).
     pub(super) alignment: Option<model::Alignment>,
+    /// §17.4.1 `bidiVisual` as a direction, or `None` when the table declares
+    /// none and inherits the section's §17.6.6 one.
+    pub(super) direction: Option<crate::i18n::bidi::BaseDirection>,
     pub(super) float_info: Option<super::super::section::TableFloatInfo>,
 }
 
@@ -593,7 +596,25 @@ pub(super) fn build_table(
     let tbl_look = t.properties.look.get();
     let positioning = t.properties.positioning.get();
     let overlap = t.properties.overlap.cloned();
-    let bidi_visual = t.properties.bidi_visual.get().copied().unwrap_or(false);
+    let declared_bidi_visual = t.properties.bidi_visual.get().copied();
+    let bidi_visual = declared_bidi_visual.unwrap_or(false);
+
+    // §17.4.1 is a statement about the table, not only about its cells: a
+    // `bidiVisual` table *is* a right-to-left table, so it also decides which
+    // margin is leading for §17.4.28 `jc` and §17.4.50 `tblInd`. Carried as an
+    // `Option` because absent is not the same as `w:val="0"` here — absent
+    // inherits the section's §17.6.6 direction, which only the placement site
+    // can see, and an explicit `0` overrides it.
+    //
+    // See `mirror_columns` for the evidence, and `tests/table_leading_margin.rs`
+    // for the assertions.
+    let direction = declared_bidi_visual.map(|rtl| {
+        if rtl {
+            crate::i18n::bidi::BaseDirection::Rtl
+        } else {
+            crate::i18n::bidi::BaseDirection::Ltr
+        }
+    });
 
     // §17.4.63: resolve table width from tblW.
     let is_auto_width = matches!(
@@ -610,6 +631,13 @@ pub(super) fn build_table(
     // by half the margins, producing a width discrepancy when consecutive
     // centered tables have different cell margins (cf. the stacked
     // "Anhang: Sauberkeit" tables in the Volvo Annahme-Protokoll).
+    //
+    // "Left-aligned" here means *start*-aligned, which is why the test is
+    // written as "neither centre nor end" and needs no direction of its own: the
+    // shift is carried as a negative `indent`, and `table_x_offset` applies an
+    // indent at whichever margin leads. A full-width right-to-left table
+    // therefore extends to the right, putting its leading cell's content back on
+    // the right margin — the same alignment, reflected.
     let extends_for_alignment = !matches!(
         alignment,
         Some(model::Alignment::Center) | Some(model::Alignment::End)
@@ -948,6 +976,7 @@ pub(super) fn build_table(
         border_config,
         indent,
         alignment,
+        direction,
         float_info,
     }
 }
@@ -1094,12 +1123,18 @@ fn grid_span(cell: &TableCell) -> u32 {
 /// A cell's `w:left` border therefore belongs at its logical start, which under
 /// `bidiVisual` is on the right.
 ///
-/// # What is deliberately not mirrored
+/// # What this function does not do, and what does it instead
 ///
-/// §17.4.50 `tblInd` and §17.4.28 `jc` place the *table*, not its columns, and
-/// stay as declared: whether an RTL table indents from the right margin is a
-/// separate question from which order its cells run in, and no corpus document
-/// pairs them. §17.4.60 `tblPrEx` may also carry `bidiVisual` to flip a single
+/// §17.4.50 `tblInd` and §17.4.28 `jc` place the *table*, not its columns, so
+/// they are not rewritten here — but they **are** read against this element, at
+/// the placement site, through `BuiltTable::direction`. This function was once
+/// the whole of §17.4.1's implementation, on the reading that the element scopes
+/// to cell order; `test-files/bidi-visual-table.docx` rendered in Word refutes
+/// that, putting the `bidiVisual` table at the right margin and its otherwise
+/// identical control at the left. The fixture is a controlled experiment for it:
+/// every cell paragraph in both tables is RTL, so paragraph direction cannot be
+/// what moves one and not the other. §17.4.60 `tblPrEx` may also carry
+/// `bidiVisual` to flip a single
 /// row, which is not read — a row mirrored against its own table would break the
 /// one-grid-order-per-table assumption every subsystem above relies on, so it
 /// needs its own design rather than a flag here.
@@ -1471,6 +1506,7 @@ fn build_cell_blocks(
                     border_config: built.border_config,
                     indent: built.indent,
                     alignment: built.alignment,
+                    direction: built.direction,
                     float_info: built.float_info,
                     style_id: nested_t.properties.style_id.clone(),
                 });

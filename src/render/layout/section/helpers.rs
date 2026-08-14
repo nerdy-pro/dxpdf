@@ -101,9 +101,10 @@ pub(super) fn render_page_footnotes(
 /// and the indent measures inward from
 /// the right.
 ///
-/// `base` comes from §17.6.6 `w:bidi` on the section, **not** from §17.4.1
-/// `w:bidiVisual`: that one reverses the cells inside a table and says nothing
-/// about where the table sits, and a document may set either alone.
+/// `base` is the answer to *which margin leads*, and two elements can give it:
+/// §17.4.1 `w:bidiVisual` on the table and §17.6.6 `w:bidi` on the section. The
+/// table's own wins where it declares one; the caller resolves that, because
+/// only it holds both halves. This function takes the answer, not the inputs.
 ///
 /// This is the block-level half of the reading
 /// `paragraph::line_emit::align_offset` already applies to lines — including

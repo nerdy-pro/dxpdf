@@ -267,6 +267,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         }
@@ -1958,6 +1959,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         }];
@@ -2098,6 +2100,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: Some(super::TableFloatInfo {
                 right_gap: Pt::ZERO,
                 bottom_gap: Pt::ZERO,
@@ -2465,6 +2468,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2598,6 +2602,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2661,6 +2666,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2996,6 +3002,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: Some(super::TableFloatInfo {
                 right_gap: Pt::ZERO,
                 bottom_gap: Pt::ZERO,
@@ -3257,6 +3264,7 @@ mod tests {
             }),
             indent: Pt::ZERO,
             alignment,
+            direction: None,
             float_info,
             style_id: None,
         }

@@ -704,12 +704,21 @@ fn a_table_style_cannot_reverse_the_column_order() {
         &styles_with("<w:tblPr/>"),
     );
     let control = layout(&table_document(""), &styles_with("<w:tblPr/>"));
-    assert_eq!(
-        x_of(&direct, "A"),
-        x_of(&control, "B"),
-        "cell A takes cell B's column once the columns reverse"
+
+    // As a *gap between the two cells*, not as two absolute x values: §17.4.1
+    // also makes the table's leading margin the right one, so the mirrored table
+    // no longer occupies the control's span (`tests/table_leading_margin.rs`).
+    // The columns are equal, so a correct mirror puts A exactly as far to the
+    // right of B as B was of A.
+    assert!(
+        x_of(&control, "A") < x_of(&control, "B"),
+        "the control runs left to right"
     );
-    assert_eq!(x_of(&direct, "B"), x_of(&control, "A"), "…and B takes A's");
+    assert_eq!(
+        x_of(&direct, "A") - x_of(&direct, "B"),
+        x_of(&control, "B") - x_of(&control, "A"),
+        "cell A takes cell B's column once the columns reverse, and B takes A's"
+    );
 }
 
 // ── §17.7.4.3: `basedOn` inheritance of the style's own `<w:tblPr>` ─────────

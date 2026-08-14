@@ -572,6 +572,7 @@ mod tests {
                 border_config: None,
                 indent: Pt::ZERO,
                 alignment: None,
+                direction: None,
                 float_info: None,
                 style_id: None,
             }],

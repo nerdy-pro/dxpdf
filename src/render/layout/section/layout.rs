@@ -2203,9 +2203,15 @@ pub(crate) fn layout_section_with_clearance(
                 border_config,
                 indent,
                 alignment,
+                direction,
                 float_info,
                 style_id,
             } => {
+                // §17.4.1 over §17.6.6: the table's own direction where it
+                // declares one, the section's otherwise. Both spellings say
+                // which margin is *leading*, and a document may carry either
+                // alone.
+                let direction = direction.unwrap_or(config.base_direction);
                 // §17.4.57: floating table — render and register as a float so
                 // subsequent text wraps around it. Floating tables are absolutely
                 // positioned and do not participate in adjacent border collapse.
@@ -2232,7 +2238,7 @@ pub(crate) fn layout_section_with_clearance(
                         table.size.width,
                         content_width,
                         config.margins.left,
-                        config.base_direction,
+                        direction,
                     );
                     // §17.4.57: apply tblpXSpec horizontal alignment override.
                     let table_x = match fi.x_align {
@@ -2448,7 +2454,7 @@ pub(crate) fn layout_section_with_clearance(
                     table_width,
                     content_width,
                     config.margins.left,
-                    config.base_direction,
+                    direction,
                 );
 
                 for (slice_idx, slice) in slices.into_iter().enumerate() {
