@@ -37,6 +37,20 @@ the wrong reason. The paragraphs carry `w:bidi` so the cell content is RTL too;
 `w:bidiVisual` governs the columns and nothing else, and keeping the two
 independent is the point of setting both here.
 
+**This fixture is meant to be opened in Word and measured**, which is a stricter
+requirement than being renderable, and it is why the package carries a
+`styles.xml` it does not otherwise need. Every value a row's height or a cell's
+inset depends on — face, size, complex-script face and size, line rule, space
+before and after, kerning, cell margins — is stated in the file rather than left
+to a default, because the defaults are exactly where the two readers part
+company: §17.7.2 makes an absent `w:docDefaults` application-defined, and Word
+fills it from its own template while dxpdf falls back to what ECMA states. See
+`STYLES` and `table()` for what each value settles.
+
+That makes the two renders comparable, not bit-identical: glyph rasterization
+still differs between Word and Skia. Compare *positions* — row heights, column
+edges, baselines — and not antialiased pixels.
+
 Run `scripts/verify_docx.py` on the result before committing — this parser is
 tolerant enough to read packages Word refuses to open.
 
@@ -57,6 +71,7 @@ CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>
 """
 
@@ -64,6 +79,73 @@ ROOT_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>
+"""
+
+#: The `xmlns` is the relationship-*part* URI. Declaring the relationship-*type*
+#: URI here instead produces a package Word rejects as "unreadable content"
+#: while this parser reads it happily — the trap three `issue-165-*` fixtures
+#: fell into, recorded in AGENTS.md.
+DOC_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>
+"""
+
+#: §17.7.5 `w:docDefaults` — the part that makes this fixture *comparable to
+#: Word* rather than merely renderable.
+#:
+#: A package with no `styles.xml` declares no font, no size and no spacing, and
+#: §17.7.2 leaves an absent `docDefaults` application-defined. The two readers
+#: then disagree by construction: dxpdf falls back to the values ECMA states
+#: (§17.8.3.2 Times New Roman, 10pt) with zero paragraph spacing, and Word fills
+#: the same hole from its own default template — Calibri 11pt with `after=160`
+#: and `line=259`, which is roughly **twice** the row height. Nothing in the
+#: document decides between them, so no amount of layout work would make the two
+#: agree.
+#:
+#: So every value a line box depends on is stated here:
+#:
+#:   * `w:rFonts` names the same face for `ascii`, `hAnsi` **and `cs`**. The `cs`
+#:     one is not redundant: §17.3.2.30 `w:rtl` makes a run complex-script, and
+#:     Word then takes its face from `w:cs` and its size from `w:szCs`. Every run
+#:     in this fixture is `w:rtl`, so `w:ascii` alone would leave the Hebrew to
+#:     whatever Word picks.
+#:   * Times New Roman because it ships with macOS (`/System/Library/Fonts/
+#:     Supplemental`) and with Word, so both read the *same file*; and because
+#:     its cmap covers Hebrew, which keeps per-glyph fallback out of the
+#:     comparison on both sides.
+#:   * 10pt (`w:sz`/`w:szCs` = 20 half-points) is what dxpdf already defaulted
+#:     to, so stating it changes nothing here and moves only Word.
+#:   * `w:spacing` zeroes both margins and pins `w:line` to single, so the
+#:     template's 8pt `after` and 1.08 multiple cannot apply.
+#:   * `w:kern` at 1pt keeps kerning **on** in Word, matching this engine, which
+#:     shapes through HarfBuzz and so applies GPOS kerning unconditionally.
+#:
+#: An explicit `Normal` marked `w:default="1"` is what stops Word merging its
+#: template's own Normal on top of these.
+STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault>
+      <w:rPr>
+        <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"
+                  w:eastAsia="Times New Roman" w:cs="Times New Roman"/>
+        <w:kern w:val="2"/>
+        <w:sz w:val="20"/>
+        <w:szCs w:val="20"/>
+      </w:rPr>
+    </w:rPrDefault>
+    <w:pPrDefault>
+      <w:pPr>
+        <w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>
+      </w:pPr>
+    </w:pPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+  </w:style>
+</w:styles>
 """
 
 #: The three declared columns, deliberately unequal — see the module docstring.
@@ -128,19 +210,35 @@ def rows() -> str:
 
 
 def table(bidi: bool) -> str:
+    """One table. Children follow the `CT_TblPrBase` sequence — `bidiVisual`,
+    `tblW`, `tblBorders`, `tblLayout`, `tblCellMar` — rather than the order they
+    were first written in, so nothing rests on a reader's tolerance.
+
+    `tblCellMar` is stated for the same reason as `docDefaults`: a table naming
+    no style takes the stylesheet's `w:default="1"` table style (§17.7.4.17),
+    which in Word is `TableNormal` and carries 108-twip left and right margins.
+    This package has no such style, so dxpdf gives the cells **zero** margins
+    while Word supplies its own — 5.4pt per side of disagreement that no test
+    would catch, since every assertion here is a relation within one render.
+    Declaring Word's own default settles it in the file.
+    """
     flag = "<w:bidiVisual/>" if bidi else ""
     return (
         "<w:tbl><w:tblPr>"
+        f"{flag}"
         '<w:tblW w:w="6000" w:type="dxa"/>'
-        '<w:tblLayout w:type="fixed"/>'
-        '<w:tblBorders>'
+        "<w:tblBorders>"
         '<w:top w:val="single" w:sz="8" w:space="0" w:color="808080"/>'
         '<w:bottom w:val="single" w:sz="8" w:space="0" w:color="808080"/>'
         '<w:insideH w:val="single" w:sz="8" w:space="0" w:color="808080"/>'
         '<w:insideV w:val="single" w:sz="8" w:space="0" w:color="808080"/>'
         '<w:left w:val="nil"/><w:right w:val="nil"/>'
         "</w:tblBorders>"
-        f"{flag}"
+        '<w:tblLayout w:type="fixed"/>'
+        "<w:tblCellMar>"
+        '<w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/>'
+        '<w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/>'
+        "</w:tblCellMar>"
         "</w:tblPr>"
         f"<w:tblGrid>{GRID}</w:tblGrid>{rows()}</w:tbl>"
     )
@@ -177,6 +275,8 @@ def main() -> None:
         for name, data in (
             ("[Content_Types].xml", CONTENT_TYPES),
             ("_rels/.rels", ROOT_RELS),
+            ("word/_rels/document.xml.rels", DOC_RELS),
+            ("word/styles.xml", STYLES),
             ("word/document.xml", DOCUMENT),
         ):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
