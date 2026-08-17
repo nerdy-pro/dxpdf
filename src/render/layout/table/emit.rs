@@ -292,6 +292,21 @@ fn emit_one_row(
             band.cover(entry.cell_x, entry.cell_x + entry.cell_w);
         }
     }
+    // §17.4.39: then the runs of this boundary that belong to neither row, in
+    // the same place as the bottom borders because they are the rest of the same
+    // line.
+    //
+    // Before the verticals rather than after, for a reason the corpus does not
+    // currently exhibit: `OpenBand::covers` decides by midpoint, so a fill whose
+    // midpoint happened to fall inside an interval a vertical had already
+    // claimed would be dropped whole, leaving the hole this exists to close.
+    // Claiming first cannot lose that way, and it also keeps a fill from
+    // overpainting a crossing it overlaps. Both orders paint the same page in
+    // `grid-gap-borders.docx`, so no test here separates them — see that
+    // fixture's tests, which assert the *result* rather than the order.
+    for &(x0, x1, line) in &mr.band_fills {
+        band.fill_row_boundary(bufs.border_commands, &line, x0, x1);
+    }
     cross_band(&mut band, bufs.border_commands, mr);
     cursor.band = band;
     cursor.y += mr.height + mr.border_gap_below;

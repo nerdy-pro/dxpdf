@@ -174,6 +174,13 @@ pub(super) struct MeasuredRow {
     pub(super) leading_gap: Pt,
     /// §17.4.38: maximum bottom border width for gap between this row and the next.
     pub(super) border_gap_below: Pt,
+    /// §17.4.39: `(x0, x1, line)` runs of the boundary **below** this row that
+    /// neither it nor the row under it will paint, because a cell paints one
+    /// border across its whole width and the two rows break at different
+    /// columns. Painted into the strip by `emit`, so the line stays at one y.
+    /// Empty for every row of every table whose rows share their column breaks,
+    /// which is all but the gapped-against-gapped case.
+    pub(super) band_fills: Vec<(Pt, Pt, TableBorderLine)>,
 }
 
 /// Result of the table measurement phase.

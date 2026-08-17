@@ -348,6 +348,10 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             height: first_h,
             leading_gap: mr.leading_gap,
             border_gap_below: Pt::ZERO,
+            // The cut is this half's lower boundary and reserves no strip, so
+            // there is nothing below it to fill; the original boundary travels
+            // with the continuation.
+            band_fills: Vec::new(),
         },
         second: MeasuredRow {
             entries: second_entries,
@@ -355,6 +359,7 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             height: second_h,
             leading_gap: mr.leading_gap,
             border_gap_below: mr.border_gap_below,
+            band_fills: mr.band_fills.clone(),
         },
     }
 }

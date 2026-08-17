@@ -61,6 +61,7 @@ type Band = (f32, f32);
 const RED_LEFT: Colour = (0xC0, 0x00, 0x00);
 const GREEN_RIGHT: Colour = (0x00, 0xB0, 0x50);
 const BLUE_INSIDE_V: Colour = (0x00, 0x70, 0xC0);
+const GREY_HORIZONTAL: Colour = (0x80, 0x80, 0x80);
 const EVERY_BORDER: [Colour; 3] = [RED_LEFT, GREEN_RIGHT, BLUE_INSIDE_V];
 
 // The fixture's cell fills. Named rather than inlined because most tests below
@@ -350,5 +351,116 @@ fn no_grid_line_is_painted_in_two_different_bands() {
         seen.len() >= 8,
         "the audit must actually see borders — only {} found",
         seen.len()
+    );
+}
+
+// ── a row boundary is one line across ───────────────────────────────────────
+
+/// Horizontal border runs lying on the line `y`, of any colour, clipped to
+/// `x0..x1` and sorted.
+///
+/// "Lying on `y`" is *vertical extent contains `y`*, not *origin equals `y`*,
+/// because a row boundary's line can be drawn either in the strip reserved
+/// between the two rows (an upper cell's `bottom`) or inset into a cell's own
+/// box (a `top`, where no strip was reserved). Both touch the boundary; only one
+/// has its origin there.
+fn horizontal_runs_on(pages: &[LayoutedPage], y: f32, x0: f32, x1: f32) -> Vec<Band> {
+    let mut out: Vec<Band> = Vec::new();
+    for colour in [GREY_HORIZONTAL, RED_LEFT, GREEN_RIGHT, BLUE_INSIDE_V] {
+        for (rx, ry, rw, rh) in rects(pages, colour) {
+            if rw > rh && ry - 0.05 <= y && y <= ry + rh + 0.05 {
+                let (a, b) = (rx.max(x0), (rx + rw).min(x1));
+                if b > a {
+                    out.push((a, b));
+                }
+            }
+        }
+    }
+    out.sort_by(|p, q| p.0.total_cmp(&q.0));
+    out
+}
+
+/// Whether `runs` leave no hole in `x0..x1`.
+fn leaves_no_hole(runs: &[Band], x0: f32, x1: f32) -> bool {
+    let mut reached = x0;
+    for &(a, b) in runs {
+        if a > reached + 0.05 {
+            return false;
+        }
+        reached = reached.max(b);
+    }
+    reached >= x1 - 0.05
+}
+
+/// §17.4.39: a cell wider than the row above it still gets its whole top border.
+///
+/// Cell `E` spans grid columns 0–1; the row above spans 1–2, so column 0 has no
+/// cell above it at all. The boundary resolves to `insideH` over every column —
+/// column 0 from `E`'s own top, with nothing facing it — so the line must run
+/// across `E` from end to end.
+///
+/// The reported symptom is the left 50pt of it missing: §17.4.66's edge is owned
+/// by one side, a cell paints one border across its whole width, and neither row
+/// covers every bordered column here, so the part only `E` covers had no owner.
+#[test]
+fn a_cell_wider_than_the_row_above_still_gets_its_whole_top_border() {
+    let pages = layout();
+    let (e, _) = cell(&pages, E);
+    let (x0, x1) = (e.0, e.0 + e.2);
+    let runs = horizontal_runs_on(&pages, e.1, x0, x1);
+
+    assert!(
+        leaves_no_hole(&runs, x0, x1),
+        "E spans {x0}..{x1} but its top edge is painted only over {runs:?}"
+    );
+}
+
+/// The general property, over every cell of both tables: a cell's top and bottom
+/// edges are each painted across the cell's whole width, or not at all — never
+/// partly.
+///
+/// Stated as an audit rather than at the one boundary that was reported, because
+/// the rule is about ownership of a shared edge and the next hole will be
+/// somewhere else. It is satisfied vacuously by an edge that carries no border,
+/// so the count assertion at the end keeps it honest.
+#[test]
+fn no_cell_edge_is_painted_across_only_part_of_its_width() {
+    let pages = layout();
+    let mut painted_edges = 0;
+    for fill in [A, B, C, D, E, F, G, H] {
+        let (upper, lower) = cell(&pages, fill);
+        for cell_box in [upper, lower] {
+            let (x0, x1) = (cell_box.0, cell_box.0 + cell_box.2);
+            for (edge, y) in [("top", cell_box.1), ("bottom", cell_box.1 + cell_box.3)] {
+                let runs = horizontal_runs_on(&pages, y, x0, x1);
+                if runs.is_empty() {
+                    continue;
+                }
+                painted_edges += 1;
+                assert!(
+                    leaves_no_hole(&runs, x0, x1),
+                    "{fill:?}'s {edge} edge spans {x0}..{x1} but is painted only over {runs:?}"
+                );
+                // …and covered once. Two rects on one boundary overlapping means
+                // something painted over a claim another had already made, which
+                // the strip's bookkeeping exists to prevent — and which a
+                // rasterizer shows as a colour deciding on paint order.
+                for (i, &(a0, a1)) in runs.iter().enumerate() {
+                    for &(b0, b1) in &runs[i + 1..] {
+                        assert!(
+                            b0 >= a1 - 0.05 || a0 >= b1 - 0.05,
+                            "{fill:?}'s {edge} edge is painted twice: \
+                             {:?} overlaps {:?}",
+                            (a0, a1),
+                            (b0, b1)
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        painted_edges >= 16,
+        "the audit must actually see painted edges — only {painted_edges}"
     );
 }

@@ -122,10 +122,13 @@ pub(super) fn resolve_table_cell_borders(
     cell_spacing: Pt,
     // §17.4.38: adjacent-table collapse — see `measure_table_rows`.
     suppress_first_row_top: bool,
-) -> Vec<Vec<CellBorders>> {
+) -> ResolvedTableBorders {
     let num_rows = rows.len();
     let mut resolved_borders: Vec<Vec<CellBorders>> = Vec::new();
     let mut grid_indices: Vec<Vec<usize>> = Vec::new();
+    // Indexed by the boundary's **upper** row; the last row has no boundary
+    // below it and keeps its empty vec.
+    let mut band_fills: Vec<Vec<BandFill>> = vec![Vec::new(); num_rows];
     for (row_idx, row) in rows.iter().enumerate() {
         let mut row_borders = Vec::new();
         let mut row_grid = Vec::new();
@@ -295,13 +298,37 @@ pub(super) fn resolve_table_cell_borders(
                     if (start..end).any(|gc| covered[gc]) {
                         // Any column already painted from above → defer the
                         // whole cell so a partly-covered span can't double up.
+                        // The columns it *would* have covered alone become a
+                        // band fill below.
                         resolved_borders[lower][ci].top = CellEdge::Absent;
                     } else if (start..end).all(|gc| resolved[gc].paints_same(resolved[start])) {
                         resolved_borders[lower][ci].top = resolved[start];
+                        for c in covered.iter_mut().take(end).skip(start) {
+                            *c = true;
+                        }
                     } else {
                         resolved_borders[lower][ci].top = CellEdge::Absent;
                     }
                 }
+
+                // §17.4.39: whatever neither side could paint.
+                //
+                // Ownership is per *row* because a cell paints one border across
+                // its whole width — so where the two rows break at different
+                // columns, a run can resolve to a line and have no owner at all.
+                // A row gapped by §17.4.15 `gridBefore` above a row gapped by
+                // §17.4.14 `gridAfter` is the shape that does it: neither covers
+                // every bordered column, `can_own` fails for both, and the
+                // columns only the lower row reaches are dropped with its whole
+                // cell.
+                //
+                // Those runs belong to the boundary rather than to either row,
+                // which is exactly what [`OpenBand`] already models, so they are
+                // handed to it and painted at the *band's* y — the same line the
+                // owning side drew, not one border-width below it. Painting them
+                // from the lower cell's own box instead would step the line, the
+                // hazard this whole ownership rule exists to avoid.
+                band_fills[upper] = unowned_runs(&resolved, &covered, num_grid_cols);
             }
         }
     }
@@ -313,7 +340,62 @@ pub(super) fn resolve_table_cell_borders(
         }
     }
 
-    resolved_borders
+    ResolvedTableBorders {
+        cells: resolved_borders,
+        band_fills,
+    }
+}
+
+/// What §17.4.66 resolution decides: every cell's four edges, plus the runs of a
+/// row boundary that belong to neither row.
+pub(super) struct ResolvedTableBorders {
+    pub(super) cells: Vec<Vec<CellBorders>>,
+    /// Indexed by the boundary's **upper** row.
+    pub(super) band_fills: Vec<Vec<BandFill>>,
+}
+
+/// A run of grid columns on one row boundary that neither adjoining row paints,
+/// and the line it resolved to.
+///
+/// Produced only by the both-rows-gapped case in `resolve_table_cell_borders`;
+/// every other edge is owned by one side and needs none of this. Carried in
+/// **grid columns** because that is the vocabulary border resolution speaks;
+/// `measure_table_rows` turns them into x, being the phase that knows column
+/// widths.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BandFill {
+    /// Grid columns `start_col..end_col`, half-open.
+    pub(super) start_col: usize,
+    pub(super) end_col: usize,
+    pub(super) line: TableBorderLine,
+}
+
+/// Group the bordered columns nobody painted into maximal runs of one line.
+///
+/// Maximal so that two adjacent unowned columns carrying the same line become
+/// one rect: the band's own bookkeeping is per interval, and a run split into
+/// singletons would leave hairlines between the pieces under a rasterizer that
+/// anti-aliases each separately — the defect `tests/table_shading_seams.rs`
+/// exists for.
+fn unowned_runs(resolved: &[CellEdge], painted: &[bool], num_grid_cols: usize) -> Vec<BandFill> {
+    let mut runs = Vec::new();
+    let mut gc = 0;
+    while gc < num_grid_cols {
+        let Some(line) = resolved[gc].line().filter(|_| !painted[gc]) else {
+            gc += 1;
+            continue;
+        };
+        let start = gc;
+        while gc < num_grid_cols && !painted[gc] && resolved[gc].line() == Some(line) {
+            gc += 1;
+        }
+        runs.push(BandFill {
+            start_col: start,
+            end_col: gc,
+            line,
+        });
+    }
+    runs
 }
 
 /// Where one cell sits in the table's grid.
@@ -806,6 +888,30 @@ impl OpenBand {
         x0: Pt,
         x1: Pt,
     ) {
+        self.claim(commands, line, x0, x1);
+    }
+
+    /// §17.4.39: paint a run of the row boundary itself, where neither adjoining
+    /// row's cells could.
+    ///
+    /// The same claim as [`Self::cross`] makes, and deliberately the same code —
+    /// what differs is only which caller has the line. A vertical crossing is a
+    /// cell's edge reaching *through* the strip; this is the strip's own line,
+    /// the continuation of the bottom borders that just covered the rest of it.
+    /// Both must go through the strip's bookkeeping or the two would paint over
+    /// each other where a fill meets a border.
+    pub(super) fn fill_row_boundary(
+        &mut self,
+        commands: &mut Vec<DrawCommand>,
+        line: &TableBorderLine,
+        x0: Pt,
+        x1: Pt,
+    ) {
+        self.claim(commands, line, x0, x1);
+    }
+
+    /// Take `x0..x1` of the strip unless something already has it.
+    fn claim(&mut self, commands: &mut Vec<DrawCommand>, line: &TableBorderLine, x0: Pt, x1: Pt) {
         if self.height <= Pt::ZERO || self.covers(x0, x1) {
             return;
         }

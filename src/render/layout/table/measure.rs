@@ -65,13 +65,14 @@ pub(super) fn measure_table_rows(
     // Pass 2a: §17.4.66 border resolution — what each cell declares, then who
     // owns each shared edge. Both live in `borders.rs`; this phase only needs
     // the answer.
-    let resolved_borders = resolve_table_cell_borders(
+    let resolved = resolve_table_cell_borders(
         rows,
         col_widths.len(),
         borders,
         cell_spacing,
         suppress_first_row_top,
     );
+    let resolved_borders = resolved.cells;
 
     // Pass 2b: lay out each cell.
     let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
@@ -214,12 +215,26 @@ pub(super) fn measure_table_rows(
             } else {
                 Pt::ZERO
             };
+            // §17.4.39: the runs of the boundary below this row that neither it
+            // nor the row under it paints, turned from grid columns into x.
+            // Same arithmetic as `cell_x`/`cell_w` above — the run starts where
+            // its first column does and ends where its last one does, so a fill
+            // abuts the borders on either side of it exactly.
+            let band_fills = resolved.band_fills[row_idx]
+                .iter()
+                .map(|f| {
+                    let x0 = col_widths[..f.start_col].iter().copied().sum::<Pt>() + cell_spacing;
+                    let x1 = col_widths[..f.end_col].iter().copied().sum::<Pt>() + cell_spacing;
+                    (x0, x1, f.line)
+                })
+                .collect();
             MeasuredRow {
                 entries,
                 borders,
                 height,
                 leading_gap: cell_spacing,
                 border_gap_below,
+                band_fills,
             }
         })
         .collect();
