@@ -157,6 +157,12 @@ fn emit_one_row(
 ) {
     // §17.4.45: the row's box starts one cell-spacing below the cursor; its
     // content box is what remains. Both are zero-cost when no spacing is set.
+    // §17.4.66: borders collapse exactly when the table sets no
+    // `w:tblCellSpacing`, and `leading_gap` is that spacing — `measure_table_rows`
+    // puts it on every row. It decides where a border sits, not merely whether
+    // the resolution pass ran: collapsed, adjacent cells share an edge and the
+    // border is centred on it; spaced, each keeps its border inside its own box.
+    let collapsed = mr.leading_gap <= Pt::ZERO;
     let leading = mr.leading_gap;
     let row_top = cursor.y + leading;
     let row_height = mr.height - leading;
@@ -174,6 +180,7 @@ fn emit_one_row(
     // it had an edge that needed to reach through it. See [`OpenBand`].
     cross_band(&mut cursor.band, bufs.border_commands, mr);
 
+    let (h_top, h_bottom) = (mr.h_top, mr.h_bottom);
     for (cell_ci, (entry, cell_input)) in mr.entries.iter().zip(row.cells.iter()).enumerate() {
         // §17.4.84: the merged span, used below for vAlign and here for
         // shading. Hoisted above the shading so both read the same height —
@@ -270,6 +277,21 @@ fn emit_one_row(
                 y: row_top,
                 h: row_height,
                 band_below,
+                // §17.4.66: from the *table's* grid, not this row's cells — see
+                // `MeasuredRow::v_at_grid`.
+                v_leading: mr
+                    .v_at_grid
+                    .get(entry.grid_col)
+                    .copied()
+                    .unwrap_or(Pt::ZERO),
+                v_trailing: mr
+                    .v_at_grid
+                    .get(entry.grid_col + cell_input.grid_span.max(1) as usize)
+                    .copied()
+                    .unwrap_or(Pt::ZERO),
+                h_top,
+                h_bottom,
+                collapsed,
             },
         );
     }
@@ -320,8 +342,9 @@ fn emit_one_row(
 /// rules that have to agree. The band itself decides who paints — see
 /// [`OpenBand`].
 fn cross_band(band: &mut OpenBand, commands: &mut Vec<DrawCommand>, mr: &MeasuredRow) {
+    let collapsed = mr.leading_gap <= Pt::ZERO;
     for (entry, borders) in mr.entries.iter().zip(mr.borders.iter()) {
-        for (line, x0, x1) in vertical_bands(borders, entry.cell_x, entry.cell_w)
+        for (line, x0, x1) in vertical_bands(borders, entry.cell_x, entry.cell_w, collapsed)
             .into_iter()
             .flatten()
         {

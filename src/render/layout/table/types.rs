@@ -181,6 +181,27 @@ pub(super) struct MeasuredRow {
     /// Empty for every row of every table whose rows share their column breaks,
     /// which is all but the gapped-against-gapped case.
     pub(super) band_fills: Vec<(Pt, Pt, TableBorderLine)>,
+    /// §17.4.66: the width of the vertical border standing on each **grid**
+    /// boundary, maxed over every row of the table. Indexed by grid column, so
+    /// it has one more entry than there are columns.
+    ///
+    /// Table-level and not row-level because a junction square's width belongs
+    /// to the vertical *line*: a row that paints no vertical at a boundary still
+    /// sits on one that other rows paint, and its horizontals have to leave that
+    /// square alone rather than stop at their own cell box. Every row carries
+    /// the same vector — it is a property of the table, and the row is simply
+    /// what `emit` has in hand.
+    pub(super) v_at_grid: Vec<Pt>,
+    /// §17.4.66: the widest horizontal border on this row's top and bottom
+    /// **boundaries**, taken across both rows that meet on each — how far this
+    /// row's verticals must reach to cover their junction squares.
+    ///
+    /// Boundary-level for the same reason as `v_at_grid`: resolution gives a
+    /// shared horizontal edge to one of the two rows, so a row whose own `top`
+    /// is `Absent` still sits under a line the row above paints, and its
+    /// verticals have to reach it.
+    pub(super) h_top: Pt,
+    pub(super) h_bottom: Pt,
 }
 
 /// Result of the table measurement phase.

@@ -74,6 +74,37 @@ pub(super) fn measure_table_rows(
     );
     let resolved_borders = resolved.cells;
 
+    // §17.4.66: the vertical border width on each grid boundary, over the whole
+    // table. See `MeasuredRow::v_at_grid` for why this is not per row.
+    let v_at_grid: Vec<Pt> = {
+        let n = col_widths.len();
+        let mut v = vec![Pt::ZERO; n + 1];
+        for (row_idx, row) in rows.iter().enumerate() {
+            let mut gi = (row.grid_before as usize).min(n);
+            for (ci, cell) in row.cells.iter().enumerate() {
+                let end = (gi + cell.grid_span.max(1) as usize).min(n);
+                let b = &resolved_borders[row_idx][ci];
+                v[gi] = v[gi].max(border_width(b.left));
+                v[end] = v[end].max(border_width(b.right));
+                gi = end;
+            }
+        }
+        v
+    };
+
+    // §17.4.66: the horizontal border width on each row boundary, over both rows
+    // that meet on it. See `MeasuredRow::h_top`.
+    let h_at: Vec<Pt> = {
+        let mut h = vec![Pt::ZERO; num_rows + 1];
+        for (row_idx, bs) in resolved_borders.iter().enumerate() {
+            for b in bs {
+                h[row_idx] = h[row_idx].max(border_width(b.top));
+                h[row_idx + 1] = h[row_idx + 1].max(border_width(b.bottom));
+            }
+        }
+        h
+    };
+
     // Pass 2b: lay out each cell.
     let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
 
@@ -235,6 +266,9 @@ pub(super) fn measure_table_rows(
                 leading_gap: cell_spacing,
                 border_gap_below,
                 band_fills,
+                v_at_grid: v_at_grid.clone(),
+                h_top: h_at[row_idx],
+                h_bottom: h_at[row_idx + 1],
             }
         })
         .collect();

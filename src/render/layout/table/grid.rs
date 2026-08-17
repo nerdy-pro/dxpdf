@@ -463,6 +463,9 @@ mod tests {
                     leading_gap: Pt::ZERO,
                     border_gap_below: Pt::new(gap),
                     band_fills: Vec::new(),
+                    v_at_grid: Vec::new(),
+                    h_top: Pt::ZERO,
+                    h_bottom: Pt::ZERO,
                 })
                 .collect(),
             table_width: Pt::new(100.0),

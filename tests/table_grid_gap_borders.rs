@@ -349,62 +349,94 @@ fn an_interior_boundary_inside_a_gapped_row_is_still_painted() {
 
 // ── one grid line, one band ─────────────────────────────────────────────────
 
-/// No grid line is painted in two different bands **by the same border**.
+/// The y-extent of a horizontal border lying on `y` at `x`, as `(y0, y1)`.
+fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
+    [GREY_HORIZONTAL, RED_LEFT, GREEN_RIGHT, BLUE_INSIDE_V]
+        .into_iter()
+        .find_map(|colour| {
+            rects(pages, colour)
+                .into_iter()
+                .find(|&(rx, ry, rw, rh)| {
+                    rw > rh && rx <= x && x <= rx + rw && ry - 0.6 <= y && y <= ry + rh + 0.6
+                })
+                .map(|(_, ry, _, rh)| (ry, ry + rh))
+        })
+}
+
+/// §17.4.66: a collapsed border is **centred on the boundary it belongs to**.
 ///
-/// Which cell owns an edge decides which side of the grid line the band lands
-/// on: §17.4.66 hands a collapsed interior edge to the cell on the **left**, and
-/// a border is painted inward from its owner's box, so an edge owned by the cell
-/// on the *right* comes out one border-width over. A `gridBefore` leading edge
-/// used to be exactly that, seeded from `insideV` and drawn inside the lower
-/// cell, so row 1 painted x = 122 at 121..122 while row 2 painted it at
-/// 122..123 — one line, two positions, a visible step.
+/// A cell edge is a line, not a strip. Word draws a collapsed border straddling
+/// it — half the declared `w:sz` on each side — so a 1pt `insideV` on the grid
+/// line at x = 122 occupies 121.5..122.5 and a 3pt `w:left` on the same line
+/// occupies 120.5..123.5. This engine used to paint each border *inside* the
+/// cell that owned it, which put those two on opposite sides of the line
+/// instead: 121..122 against 122..125.
 ///
-/// Restricted to *one border* — matched by colour, which in this fixture is
-/// one-to-one with `w:left`/`w:right`/`insideV` — because two **different**
-/// borders can legitimately meet at one grid line and this engine puts each
-/// inside its own cell: row 1's 1pt blue `insideV` occupies 121..122 while row
-/// 2's 3pt red `w:left` occupies 122..125, both belonging to x = 122. Whether
-/// they should instead be concentric is the collapsed-border **centring**
-/// question — Word centres a collapsed border on the grid line, which would put
-/// them at 121.5..122.5 and 120.5..123.5 — and it is a separate change touching
-/// every border in every table. Asserting it here would fail for a reason this
-/// test is not about.
-///
-/// Stated as an audit over every vertical edge of every cell rather than at the
-/// one boundary that was reported, because the property is general and the next
-/// violation will not be in the same place.
+/// Asserted as an audit over every vertical edge of every cell, because the
+/// claim is about the model rather than about one border: wherever a border is
+/// painted, the midpoint of its band is the edge it belongs to.
 #[test]
-fn no_grid_line_is_painted_in_two_different_bands() {
+fn every_vertical_border_is_centred_on_its_grid_line() {
     let pages = layout();
-    // Keyed by grid line **and** border colour and table, so the only bands
-    // compared are two renderings of one border on one line.
-    let mut seen: Vec<((i64, Colour, i64), Band)> = Vec::new();
-    let mut compared = 0;
+    let mut checked = 0;
     for fill in [A, B, C, D, E, F, G, H] {
         let (upper, lower) = cell(&pages, fill);
-        for (table, cell_box) in [(0i64, upper), (1, lower)] {
+        for cell_box in [upper, lower] {
             for x in [cell_box.0, cell_box.0 + cell_box.2] {
-                for colour in EVERY_BORDER {
-                    let Some(band) = band_at(&pages, colour, x, cell_box) else {
-                        continue;
-                    };
-                    let key = ((x * 1000.0).round() as i64, colour, table);
-                    if let Some((_, prev)) = seen.iter().find(|(k, _)| *k == key) {
-                        compared += 1;
-                        assert_eq!(
-                            band, *prev,
-                            "the grid line at x={x} is painted in two bands by one border"
-                        );
-                    } else {
-                        seen.push((key, band));
-                    }
-                }
+                let Some((_, (x0, x1))) = anything_at(&pages, x, cell_box) else {
+                    continue;
+                };
+                checked += 1;
+                assert!(
+                    ((x0 + x1) * 0.5 - x).abs() < 0.05,
+                    "{fill:?}: the border on the grid line at x={x} occupies \
+                     {x0}..{x1}, whose centre is {}",
+                    (x0 + x1) * 0.5
+                );
             }
         }
     }
+    assert!(checked >= 8, "the audit must see borders — only {checked}");
+}
+
+/// The reported pair, stated directly: two borders of **different weights** on
+/// one grid line come out concentric.
+///
+/// Row 1 puts a 1pt `insideV` on the line between `A` and `B`; row 2 puts the
+/// 3pt `w:left` of its gapped row on the same line. Under the old
+/// inside-the-cell model they sat on opposite sides of it and read as a step.
+#[test]
+fn borders_of_different_weights_on_one_grid_line_are_concentric() {
+    let pages = layout();
+    let (a, _) = cell(&pages, A);
+    let (d, _) = cell(&pages, D);
+
+    let grid_line = a.0 + a.2;
+    assert_eq!(grid_line, d.0, "A ends where D begins — one grid line");
+
+    let thin = band_at(&pages, BLUE_INSIDE_V, grid_line, a).expect("row 1's insideV");
+    let thick = band_at(&pages, RED_LEFT, grid_line, d).expect("row 2's w:left");
+
+    assert!(thick.1 - thick.0 > thin.1 - thin.0, "3pt against 1pt");
     assert!(
-        compared >= 2,
-        "the audit must actually compare two renderings of one line — only {compared}"
+        ((thin.0 + thin.1) * 0.5 - (thick.0 + thick.1) * 0.5).abs() < 0.05,
+        "concentric: {thin:?} and {thick:?} must share a centre"
+    );
+}
+
+/// The same rule on a horizontal edge: the table's own top border straddles the
+/// first row's top rather than sitting inside it.
+#[test]
+fn the_tables_top_border_is_centred_on_the_first_rows_top() {
+    let pages = layout();
+    let (a, _) = cell(&pages, A);
+
+    let (y0, y1) = horizontal_band_on(&pages, a.1, a.0 + a.2 * 0.5).expect("the table's top rule");
+    assert!(
+        ((y0 + y1) * 0.5 - a.1).abs() < 0.05,
+        "the top rule occupies {y0}..{y1}, whose centre is {} rather than {}",
+        (y0 + y1) * 0.5,
+        a.1
     );
 }
 

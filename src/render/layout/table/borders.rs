@@ -687,6 +687,39 @@ pub(super) struct CellBox {
     /// on the table's last row and on a row that ends a page slice at a cut,
     /// where the bottom border is inset into the content box instead.
     pub(super) band_below: Pt,
+    /// §17.4.66: the width of the vertical border standing on this cell's
+    /// **leading** and **trailing** edges, whichever cell owns it.
+    ///
+    /// Not derivable from `CellBorders`: resolution hands a shared edge to one
+    /// of the two cells that meet on it, so a cell's own `left` is `Absent`
+    /// exactly when its neighbour is the one painting that line. The row knows,
+    /// and computes both before emitting any of its cells.
+    ///
+    /// They are what a horizontal segment stops at. See `emit_cell_borders`.
+    pub(super) v_leading: Pt,
+    pub(super) v_trailing: Pt,
+    /// §17.4.66: the widest horizontal border standing on the row's top and
+    /// bottom boundaries — how far a vertical must reach to cover the junction
+    /// squares at its two ends.
+    ///
+    /// The row's maximum, not this cell's: a cell whose own horizontals are
+    /// `nil` still has verticals that must reach the line its neighbours paint,
+    /// which is exactly the shape that left junctions unpainted. Where segments
+    /// on one boundary differ in width this overshoots the thinner ones by half
+    /// the difference — the same step those differing widths already draw, and
+    /// the direction that cannot leave a hole.
+    pub(super) h_top: Pt,
+    pub(super) h_bottom: Pt,
+    /// §17.4.66: whether this table's borders **collapse**, which is exactly
+    /// `w:tblCellSpacing` being zero.
+    ///
+    /// It decides where a border sits. Collapsed, adjacent cells share one edge
+    /// and the border is centred on it, half in each neighbour. Spaced, there
+    /// is no shared edge to centre on — the spec's own words are that with
+    /// non-zero spacing "all cell borders and outer table borders display" —
+    /// so each cell keeps its border inside its own box, which is also what
+    /// `emit_table_outline` assumes when it draws the table's own outline.
+    pub(super) collapsed: bool,
 }
 
 /// The x-intervals a cell's two vertical borders paint in, empty where an edge
@@ -699,12 +732,23 @@ pub(super) fn vertical_bands(
     b: &CellBorders,
     cell_x: Pt,
     cell_w: Pt,
+    collapsed: bool,
 ) -> [Option<(TableBorderLine, Pt, Pt)>; 2] {
+    // §17.4.66: **centred on the edge**, not inset behind it. A cell edge is a
+    // line the two neighbouring cells share, and a collapsed border straddles
+    // it — half the declared `w:sz` on each side. So a 1pt `insideV` and a 3pt
+    // `w:left` meeting on one grid line come out concentric rather than on
+    // opposite sides of it, which is what Word renders and what the
+    // inside-the-cell model this replaced could not express.
+    // Half the width straddles the edge when the borders collapse; a spaced
+    // table has no shared edge, so its borders stay inside their own box.
+    let out = |l: &TableBorderLine| if collapsed { l.width * 0.5 } else { Pt::ZERO };
+    let inn = |l: &TableBorderLine| if collapsed { l.width * 0.5 } else { l.width };
     [
-        b.left.line().map(|l| (l, cell_x, cell_x + l.width)),
+        b.left.line().map(|l| (l, cell_x - out(&l), cell_x + inn(&l))),
         b.right
             .line()
-            .map(|l| (l, cell_x + cell_w - l.width, cell_x + cell_w)),
+            .map(|l| (l, cell_x + cell_w - inn(&l), cell_x + cell_w + out(&l))),
     ]
 }
 
@@ -736,41 +780,98 @@ pub(super) fn emit_cell_borders(commands: &mut Vec<DrawCommand>, b: CellBorders,
     let top_w = top.map(|b| b.width).unwrap_or(Pt::ZERO);
     let bot_w = bottom.map(|b| b.width).unwrap_or(Pt::ZERO);
 
-    // Where the bottom border starts, which is also where the verticals stop:
-    // the top of the reserved band, or `bot_w` above the content box's foot
-    // where no band was reserved.
-    let bottom_y = if cell.band_below > Pt::ZERO {
-        cell.y + cell.h
+    // §17.4.66: a horizontal border is centred on the boundary it belongs to,
+    // exactly as `vertical_bands` centres a vertical one.
+    //
+    // Which boundary that is differs by case, and the band is why. Where
+    // §17.4.38 reserved a strip between this row and the next, *the strip is
+    // the boundary* — it exists to hold this edge and takes its height from the
+    // widest border on it — so a border centres within it, and one as wide as
+    // the strip fills it exactly as before. Where no strip was reserved (the
+    // table's own top and bottom, a page cut, a §17.4.45-spaced table) the
+    // boundary is the content box's own edge and the border straddles that.
+    //
+    // Centring in the strip also settles a question the previous model left
+    // open at this site: where a border *narrower* than the strip it shares
+    // belongs. It used to sit flush with the strip's top; it now sits in the
+    // middle, which is the same rule as everywhere else.
+    // Where the two boundaries this cell sits between actually are. The lower
+    // one is the middle of the reserved strip where there is one, and the
+    // content box's foot where there is not.
+    let bottom_boundary = if cell.band_below > Pt::ZERO {
+        cell.y + cell.h + cell.band_below * 0.5
     } else {
-        cell.y + cell.h - bot_w
+        cell.y + cell.h
+    };
+    let (top_y, bottom_y) = if cell.collapsed {
+        (cell.y - top_w * 0.5, bottom_boundary - bot_w * 0.5)
+    } else {
+        // Spaced: inside the cell's own box, as before, and as
+        // `emit_table_outline` expects when it draws the table's outline.
+        (
+            cell.y,
+            if cell.band_below > Pt::ZERO {
+                cell.y + cell.h
+            } else {
+                cell.y + cell.h - bot_w
+            },
+        )
     };
 
-    // Horizontal borders: full cell width, covering corner squares.
-    if let Some(ref border) = top {
-        emit_border_rect(
-            commands,
-            border,
-            PtRect::from_xywh(cell.x, cell.y, cell.w, top_w),
-            true,
-        );
-    }
-    if let Some(ref border) = bottom {
-        emit_border_rect(
-            commands,
-            border,
-            PtRect::from_xywh(cell.x, bottom_y, cell.w, bot_w),
-            true,
-        );
+    // Horizontal borders: shrunk at each end by half the vertical standing
+    // there, so a junction square belongs to that vertical alone. A spaced
+    // table has no junctions to yield, so its horizontals keep the full width.
+    let (h_start, h_end) = if cell.collapsed {
+        (
+            cell.x + cell.v_leading * 0.5,
+            cell.x + cell.w - cell.v_trailing * 0.5,
+        )
+    } else {
+        (cell.x, cell.x + cell.w)
+    };
+    let h_width = (h_end - h_start).max(Pt::ZERO);
+    if h_width > Pt::ZERO {
+        if let Some(ref border) = top {
+            emit_border_rect(
+                commands,
+                border,
+                PtRect::from_xywh(h_start, top_y, h_width, top_w),
+                true,
+            );
+        }
+        if let Some(ref border) = bottom {
+            emit_border_rect(
+                commands,
+                border,
+                PtRect::from_xywh(h_start, bottom_y, h_width, bot_w),
+                true,
+            );
+        }
     }
 
-    // Vertical borders: whatever the horizontals leave between them.
-    let v_height = bottom_y - (cell.y + top_w);
+    // Vertical borders. Collapsed, they run from the outer edge of the top
+    // border to the outer edge of the bottom one, so they cover both junction
+    // squares — the horizontals have already stepped aside in x. Spaced, the
+    // old rule stands: the horizontals own the corners and the verticals fill
+    // what is left between them.
+    let (v_top, v_bottom) = if cell.collapsed {
+        (
+            cell.y - cell.h_top * 0.5,
+            bottom_boundary + cell.h_bottom * 0.5,
+        )
+    } else {
+        (top_y + top_w, bottom_y)
+    };
+    let v_height = v_bottom - v_top;
     if v_height > Pt::ZERO {
-        for (border, x0, x1) in vertical_bands(&b, cell.x, cell.w).into_iter().flatten() {
+        for (border, x0, x1) in vertical_bands(&b, cell.x, cell.w, cell.collapsed)
+            .into_iter()
+            .flatten()
+        {
             emit_border_rect(
                 commands,
                 &border,
-                PtRect::from_xywh(x0, cell.y + top_w, x1 - x0, v_height),
+                PtRect::from_xywh(x0, v_top, x1 - x0, v_height),
                 false,
             );
         }
