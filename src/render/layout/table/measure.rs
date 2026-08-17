@@ -9,7 +9,7 @@ use crate::render::dimension::Pt;
 
 use crate::render::layout::cell::{layout_cell, CellLayout};
 
-use super::borders::{border_width, resolve_table_cell_borders};
+use super::borders::{border_width, plan_table_borders, resolve_table_cell_borders};
 use super::grid::{expand_rows_for_vmerge, is_vmerge_continue};
 use super::types::{
     CellLayoutEntry, MeasuredRow, MeasuredTable, RowHeightRule, TableBorderConfig, TableRowInput,
@@ -74,36 +74,15 @@ pub(super) fn measure_table_rows(
     );
     let resolved_borders = resolved.cells;
 
-    // §17.4.66: the vertical border width on each grid boundary, over the whole
-    // table. See `MeasuredRow::v_at_grid` for why this is not per row.
-    let v_at_grid: Vec<Pt> = {
-        let n = col_widths.len();
-        let mut v = vec![Pt::ZERO; n + 1];
-        for (row_idx, row) in rows.iter().enumerate() {
-            let mut gi = (row.grid_before as usize).min(n);
-            for (ci, cell) in row.cells.iter().enumerate() {
-                let end = (gi + cell.grid_span.max(1) as usize).min(n);
-                let b = &resolved_borders[row_idx][ci];
-                v[gi] = v[gi].max(border_width(b.left));
-                v[end] = v[end].max(border_width(b.right));
-                gi = end;
-            }
-        }
-        v
-    };
+    // §17.4.66: what stands on each line of the grid — the painting answer, kept
+    // separate from the charging one above. See `borders.rs`' module doc.
+    let plan = plan_table_borders(rows, col_widths.len(), borders, suppress_first_row_top);
 
-    // §17.4.66: the horizontal border width on each row boundary, over both rows
-    // that meet on it. See `MeasuredRow::h_top`.
-    let h_at: Vec<Pt> = {
-        let mut h = vec![Pt::ZERO; num_rows + 1];
-        for (row_idx, bs) in resolved_borders.iter().enumerate() {
-            for b in bs {
-                h[row_idx] = h[row_idx].max(border_width(b.top));
-                h[row_idx + 1] = h[row_idx + 1].max(border_width(b.bottom));
-            }
-        }
-        h
-    };
+    // x of every vertical grid line. §17.4.45's spacing offsets the whole grid
+    // by one, matching `cell_x` below; a collapsed table adds zero.
+    let grid_x: Vec<Pt> = (0..=col_widths.len())
+        .map(|c| col_widths[..c].iter().copied().sum::<Pt>() + cell_spacing)
+        .collect();
 
     // Pass 2b: lay out each cell.
     let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
@@ -246,29 +225,13 @@ pub(super) fn measure_table_rows(
             } else {
                 Pt::ZERO
             };
-            // §17.4.39: the runs of the boundary below this row that neither it
-            // nor the row under it paints, turned from grid columns into x.
-            // Same arithmetic as `cell_x`/`cell_w` above — the run starts where
-            // its first column does and ends where its last one does, so a fill
-            // abuts the borders on either side of it exactly.
-            let band_fills = resolved.band_fills[row_idx]
-                .iter()
-                .map(|f| {
-                    let x0 = col_widths[..f.start_col].iter().copied().sum::<Pt>() + cell_spacing;
-                    let x1 = col_widths[..f.end_col].iter().copied().sum::<Pt>() + cell_spacing;
-                    (x0, x1, f.line)
-                })
-                .collect();
             MeasuredRow {
                 entries,
                 borders,
                 height,
                 leading_gap: cell_spacing,
                 border_gap_below,
-                band_fills,
-                v_at_grid: v_at_grid.clone(),
-                h_top: h_at[row_idx],
-                h_bottom: h_at[row_idx + 1],
+                plan_row: row_idx,
             }
         })
         .collect();
@@ -276,6 +239,8 @@ pub(super) fn measure_table_rows(
     MeasuredTable {
         rows: measured_rows,
         table_width,
+        plan,
+        grid_x,
     }
 }
 

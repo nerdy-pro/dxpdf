@@ -174,40 +174,25 @@ pub(super) struct MeasuredRow {
     pub(super) leading_gap: Pt,
     /// §17.4.38: maximum bottom border width for gap between this row and the next.
     pub(super) border_gap_below: Pt,
-    /// §17.4.39: `(x0, x1, line)` runs of the boundary **below** this row that
-    /// neither it nor the row under it will paint, because a cell paints one
-    /// border across its whole width and the two rows break at different
-    /// columns. Painted into the strip by `emit`, so the line stays at one y.
-    /// Empty for every row of every table whose rows share their column breaks,
-    /// which is all but the gapped-against-gapped case.
-    pub(super) band_fills: Vec<(Pt, Pt, TableBorderLine)>,
-    /// §17.4.66: the width of the vertical border standing on each **grid**
-    /// boundary, maxed over every row of the table. Indexed by grid column, so
-    /// it has one more entry than there are columns.
+    /// Which row of the table's [`BorderPlan`](super::borders::BorderPlan) this
+    /// row's borders come from.
     ///
-    /// Table-level and not row-level because a junction square's width belongs
-    /// to the vertical *line*: a row that paints no vertical at a boundary still
-    /// sits on one that other rows paint, and its horizontals have to leave that
-    /// square alone rather than stop at their own cell box. Every row carries
-    /// the same vector — it is a property of the table, and the row is simply
-    /// what `emit` has in hand.
-    pub(super) v_at_grid: Vec<Pt>,
-    /// §17.4.66: the widest horizontal border on this row's top and bottom
-    /// **boundaries**, taken across both rows that meet on each — how far this
-    /// row's verticals must reach to cover their junction squares.
-    ///
-    /// Boundary-level for the same reason as `v_at_grid`: resolution gives a
-    /// shared horizontal edge to one of the two rows, so a row whose own `top`
-    /// is `Absent` still sits under a line the row above paints, and its
-    /// verticals have to reach it.
-    pub(super) h_top: Pt,
-    pub(super) h_bottom: Pt,
+    /// Not the same as its index in `MeasuredTable::rows`, and that is the whole
+    /// reason it is carried: a §17.4.49 repeated header appears once in the plan
+    /// and many times on the page, and a split row's two halves are both the
+    /// same plan row on two different pages.
+    pub(super) plan_row: usize,
 }
 
 /// Result of the table measurement phase.
 pub(super) struct MeasuredTable {
     pub(super) rows: Vec<MeasuredRow>,
     pub(super) table_width: Pt,
+    /// §17.4.66: what stands on each line of the border grid. Table-wide and
+    /// independent of pagination — only the y of each boundary is per slice.
+    pub(super) plan: super::borders::BorderPlan,
+    /// x of each vertical grid line, `col_widths.len() + 1` entries.
+    pub(super) grid_x: Vec<Pt>,
 }
 
 /// Per-cell layout result with positioning info from pass 2.

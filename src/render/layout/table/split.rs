@@ -348,13 +348,10 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             height: first_h,
             leading_gap: mr.leading_gap,
             border_gap_below: Pt::ZERO,
-            // The cut is this half's lower boundary and reserves no strip, so
-            // there is nothing below it to fill; the original boundary travels
-            // with the continuation.
-            band_fills: Vec::new(),
-            v_at_grid: mr.v_at_grid.clone(),
-            h_top: mr.h_top,
-            h_bottom: mr.h_bottom,
+            // Both halves are the *same* row of the border grid, which is the
+            // whole reason `plan_row` is not a position in `MeasuredTable::rows`:
+            // a row split across two pages has one set of verticals, drawn twice.
+            plan_row: mr.plan_row,
         },
         second: MeasuredRow {
             entries: second_entries,
@@ -362,10 +359,7 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             height: second_h,
             leading_gap: mr.leading_gap,
             border_gap_below: mr.border_gap_below,
-            band_fills: mr.band_fills.clone(),
-            v_at_grid: mr.v_at_grid.clone(),
-            h_top: mr.h_top,
-            h_bottom: mr.h_bottom,
+            plan_row: mr.plan_row,
         },
     }
 }

@@ -456,19 +456,19 @@ mod tests {
         MeasuredTable {
             rows: rows
                 .iter()
-                .map(|&(h, gap)| MeasuredRow {
+                .enumerate()
+                .map(|(i, &(h, gap))| MeasuredRow {
                     entries: Vec::new(),
                     borders: Vec::new(),
                     height: Pt::new(h),
                     leading_gap: Pt::ZERO,
                     border_gap_below: Pt::new(gap),
-                    band_fills: Vec::new(),
-                    v_at_grid: Vec::new(),
-                    h_top: Pt::ZERO,
-                    h_bottom: Pt::ZERO,
+                    plan_row: i,
                 })
                 .collect(),
             table_width: Pt::new(100.0),
+            plan: super::super::borders::plan_table_borders(&[], 0, None, false),
+            grid_x: Vec::new(),
         }
     }
 

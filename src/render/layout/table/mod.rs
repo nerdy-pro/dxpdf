@@ -24,7 +24,7 @@ mod types;
 pub use grid::compute_column_widths;
 pub use types::*;
 
-use borders::emit_table_outline;
+use borders::{emit_table_outline, rasterize_border_grid};
 use emit::{emit_split_row, emit_table_rows, SliceCursor, TableCommandBuffers};
 use grid::{build_row_groups, row_group_end};
 use measure::measure_table_rows;
@@ -131,6 +131,13 @@ impl SliceBuilder {
     /// without that, a table that happens to paginate would lose the bottom gap
     /// the same table keeps when it fits on one page.
     ///
+    /// §17.4.66: the two constructors part here, and they are exclusive. A
+    /// **collapsed** table (`cell_spacing == 0`) has one grid its cells share,
+    /// and the whole slice's borders are rasterized from it in one pass — every
+    /// rect disjoint from every other, see [`rasterize_border_grid`]. A
+    /// **spaced** one has no shared edges at all: each cell closed its own frame
+    /// as it was emitted, and only the table's own rectangle is left.
+    ///
     /// Issue #168: a spaced table's outer border is its own rectangle, because
     /// the cells no longer touch the table's edges. Left and right bound every
     /// slice; top and bottom follow the same two conditions the gap does.
@@ -139,12 +146,13 @@ impl SliceBuilder {
     /// there is nothing for it to suppress.
     fn finish(
         mut self,
-        table_width: Pt,
+        measured: &MeasuredTable,
         cell_spacing: Pt,
         borders: Option<&TableBorderConfig>,
         carries_top: bool,
         carries_bottom: bool,
     ) -> TableSlice {
+        let table_width = measured.table_width;
         let height = self.cursor.y
             + if carries_bottom {
                 cell_spacing
@@ -159,6 +167,14 @@ impl SliceBuilder {
                 PtRect::from_xywh(Pt::ZERO, Pt::ZERO, table_width, height),
                 carries_top,
                 carries_bottom,
+            );
+        } else {
+            rasterize_border_grid(
+                &mut self.border_commands,
+                &measured.plan,
+                &measured.grid_x,
+                &self.cursor.placed,
+                PtSize::new(table_width, height),
             );
         }
 
@@ -222,7 +238,7 @@ pub fn layout_table(
     );
 
     // The whole table is one slice, so it carries both of the table's edges.
-    builder.finish(measured.table_width, cell_spacing, borders, true, true)
+    builder.finish(&measured, cell_spacing, borders, true, true)
 }
 
 /// Pagination parameters for `layout_table_paginated`.
@@ -528,7 +544,7 @@ pub(crate) fn layout_table_paginated_with_page_heights(
             // The table's own top edge is on the first slice and its own bottom
             // edge on the last; every slice in between ends at a page cut.
             builder.finish(
-                measured.table_width,
+                &measured,
                 cell_spacing,
                 borders,
                 slice_idx == 0,
@@ -1061,11 +1077,15 @@ mod tests {
         verticals.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         // Cell A occupies 10..60 and B 60..110 (grid 10/50/50/10, one column
-        // skipped). So: the row's leading edge inside A, the shared A|B edge
-        // resolved onto A's right, and the trailing edge inside B.
+        // skipped). So three verticals, on grid lines 10, 60 and 110: the row's
+        // leading edge, the shared A|B edge resolved once, and the trailing
+        // edge. Asserted as centres, because §17.4.66 centres a collapsed border
+        // on its grid line — which is what makes the 4pt and the 1pt comparable
+        // at all, since their rects begin at different distances from it.
+        let centres: Vec<(f32, f32)> = verticals.iter().map(|&(x, w)| (x + w * 0.5, w)).collect();
         assert_eq!(
-            verticals,
-            vec![(10.0, 4.0), (59.0, 1.0), (106.0, 4.0)],
+            centres,
+            vec![(10.0, 4.0), (60.0, 1.0), (110.0, 4.0)],
             "leading 4pt w:left, interior 1pt insideV, trailing 4pt w:right"
         );
     }
@@ -1243,42 +1263,90 @@ mod tests {
         }];
         let col_widths = vec![Pt::new(100.0)];
 
-        // Without suppression: top border present.
-        let normal = layout_table(
-            &rows,
-            &col_widths,
-            Pt::ZERO,
-            Pt::new(14.0),
-            Some(&borders),
-            None,
-            false,
-        );
-        let normal_borders: Vec<_> = normal
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
-            .collect();
+        let render = |suppress| {
+            layout_table(
+                &rows,
+                &col_widths,
+                Pt::ZERO,
+                Pt::new(14.0),
+                Some(&borders),
+                None,
+                suppress,
+            )
+        };
+        let normal = render(false);
+        let suppressed = render(true);
 
-        // With suppression: top border removed.
-        let suppressed = layout_table(
-            &rows,
-            &col_widths,
-            Pt::ZERO,
-            Pt::new(14.0),
-            Some(&borders),
-            None,
-            true,
-        );
-        let suppressed_borders: Vec<_> = suppressed
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
-            .collect();
+        // §17.4.66: how far ink reaches along a boundary, as the union of the
+        // x-intervals of every border rect crossing that y.
+        //
+        // A *count* of rects would not do, and used to: the grid rasterizer
+        // paints each junction square as its own command, so "four borders" is
+        // eight rects and the number says nothing about where any of them is.
+        // What suppression means is that one boundary is bare and the other
+        // three are not, which is what this measures — and it measures it as a
+        // difference between two renders of one table, so no coordinate but the
+        // 0.5pt border width is pinned.
+        let ink_at_y = |slice: &TableSlice, y: Pt| -> Pt {
+            slice
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                        (rect.origin.y <= y && y <= rect.origin.y + rect.size.height)
+                            .then_some(rect.size.width)
+                    }
+                    _ => None,
+                })
+                .fold(Pt::ZERO, |a, w| a + w)
+        };
+        // The top boundary is sampled inside its own band. A border on the
+        // table's own edge lies wholly within it (§17.4.66 — see
+        // `rasterize_border_grid`), so half a border-width down is inside the
+        // top border where one exists. The verticals reach that y too, which is
+        // why the assertion is on *how much* ink, not whether there is any:
+        // with a top border the whole 100pt column is covered, without it only
+        // the two verticals are.
+        let top = border_line.width * 0.5;
+        let bottom = normal.size.height;
+        let mid = bottom * 0.5;
 
-        // Normal has 4 borders (top, bottom, left, right).
-        assert_eq!(normal_borders.len(), 4, "all 4 borders present");
-        // Suppressed has 3 borders (bottom, left, right — no top).
-        assert_eq!(suppressed_borders.len(), 3, "top border suppressed");
+        assert_eq!(
+            ink_at_y(&normal, top),
+            col_widths[0],
+            "the unsuppressed table paints its own top boundary, right across"
+        );
+        assert_eq!(
+            ink_at_y(&suppressed, top),
+            border_line.width + border_line.width,
+            "§17.4.38: suppression leaves the top boundary bare — only the two \
+             verticals cross that y"
+        );
+        // The controls. Suppression reaches that boundary and nothing else: both
+        // renders still paint their bottom edge and both verticals, measured at
+        // each table's *own* foot because the two are no longer the same height.
+        //
+        // And the height difference is itself the assertion, not an allowance —
+        // it is exactly one border, because a border is charged to the content
+        // box it insets (`resolve_table_cell_borders`), so removing one gives
+        // that room back. A rasterizer change that quietly altered the charging
+        // would show up here as some other number.
+        assert_eq!(
+            normal.size.height - suppressed.size.height,
+            border_line.width,
+            "the suppressed top gives its charged width back to the row"
+        );
+        for (label, y) in [("verticals", mid), ("bottom", bottom)] {
+            let (a, b) = (
+                ink_at_y(&normal, y),
+                ink_at_y(
+                    &suppressed,
+                    y - (normal.size.height - suppressed.size.height),
+                ),
+            );
+            assert_eq!(a, b, "suppression must not touch the {label}");
+            assert!(b > Pt::ZERO, "{label} still painted");
+        }
     }
 
     #[test]
@@ -1355,27 +1423,50 @@ mod tests {
             None,
             false,
         );
-        let mut right_edge_segments: Vec<_> = result
+        // The ink a ray down the table's right edge (grid line 2, x = 200) meets,
+        // merged into runs. Two runs would mean a gap where the merged cell
+        // crosses the boundary its sibling column paints a horizontal on; one
+        // run means the line is whole.
+        //
+        // Asserted as the union rather than as a pair of segments, because the
+        // grid rasterizer splits every line at its junctions: how many rects
+        // arrive is a property of the decomposition, and continuity is not.
+        let mut runs: Vec<(f32, f32)> = result
             .commands
             .iter()
             .filter_map(|command| match command {
-                DrawCommand::Rect { rect, color }
-                    if *color == RgbColor::BLACK
-                        && rect.origin.x.raw() == 199.0
-                        && rect.size.width.raw() == 1.0 =>
-                {
-                    Some(*rect)
+                DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                    let (x0, x1) = (
+                        rect.origin.x.raw(),
+                        rect.origin.x.raw() + rect.size.width.raw(),
+                    );
+                    (x0 <= 200.0 && 200.0 <= x1).then(|| {
+                        (
+                            rect.origin.y.raw(),
+                            rect.origin.y.raw() + rect.size.height.raw(),
+                        )
+                    })
                 }
                 _ => None,
             })
             .collect();
-        right_edge_segments.sort_by(|a, b| a.origin.y.raw().total_cmp(&b.origin.y.raw()));
-
-        let first_end = right_edge_segments[0].origin.y + right_edge_segments[0].size.height;
-        let continuation_start = right_edge_segments[1].origin.y;
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (a, b) in runs {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1e-4 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
         assert_eq!(
-            first_end, continuation_start,
-            "a vertically merged outer border must cross the inter-row border band"
+            merged.len(),
+            1,
+            "a vertically merged outer border must cross the row boundary its \
+             sibling column paints a horizontal on: {merged:?}"
+        );
+        assert!(
+            merged[0].1 - merged[0].0 >= result.size.height.raw(),
+            "and it must run the whole height of the table: {merged:?}"
         );
     }
 

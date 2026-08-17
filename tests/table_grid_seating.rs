@@ -132,36 +132,94 @@ pub fn layout(bytes: &[u8]) -> Vec<LayoutedPage> {
 
 /// Every cell's drawn `(x, width)` in the table's first row, in cell order.
 ///
-/// Read off the horizontal border rects at the table's top edge: each cell
-/// draws exactly one, spanning that cell's column slice. That makes a cell the
-/// grid could not seat directly visible as a `width` of 0 rather than something
-/// inferred from where its text landed.
+/// Read off the table's top edge, where the border network lays one horizontal
+/// line across the whole first row. The line arrives in pieces — the rasterizer
+/// splits it at every grid line, into a segment per column and a junction square
+/// on each line — so the columns are recovered rather than read off directly:
+/// the ink is continuous from the table's left edge to its right, and the grid
+/// lines are the two ends of that ink plus the middle of each gap between
+/// consecutive segments.
+///
+/// Recovering rather than counting rects is the point. A rect count measures the
+/// decomposition; the geometry these tests are about is where the grid lines
+/// fall, which is what a cell's column *is*.
 pub fn first_row_cells(pages: &[LayoutedPage]) -> Vec<(f32, f32)> {
-    let rects: Vec<(f32, f32, f32)> = pages
+    // Every border rect as `(x0, x1, y0, y1)` — thin one way or the other. A
+    // shading rect or an image would swamp the search.
+    let rects: Vec<(f32, f32, f32, f32)> = pages
         .iter()
         .flat_map(|p| &p.commands)
         .filter_map(|c| match c {
-            // Horizontal edges only: a border rect is 0.5 pt thick one way.
-            DrawCommand::Rect { rect, .. } if rect.size.height.raw() <= 1.0 => Some((
-                rect.origin.y.raw(),
-                rect.origin.x.raw(),
-                rect.size.width.raw(),
-            )),
+            DrawCommand::Rect { rect, .. } => {
+                let (x, y) = (rect.origin.x.raw(), rect.origin.y.raw());
+                let (w, h) = (rect.size.width.raw(), rect.size.height.raw());
+                (w.min(h) <= 1.0).then_some((x, x + w, y, y + h))
+            }
             _ => None,
         })
         .collect();
+
+    // A horizontal segment: thin in y, and wider than it is tall.
+    let is_segment = |&(x0, x1, y0, y1): &(f32, f32, f32, f32)| y1 - y0 <= 1.0 && x1 - x0 > y1 - y0;
     let top = rects
         .iter()
-        .map(|(y, _, _)| *y)
+        .filter(|r| is_segment(r))
+        .map(|(_, _, y0, _)| *y0)
         .fold(f32::INFINITY, f32::min);
-    rects
+    if !top.is_finite() {
+        return Vec::new();
+    }
+    let mut segments: Vec<(f32, f32)> = rects
         .iter()
-        .filter(|(y, _, _)| (*y - top).abs() < 0.01)
-        .map(|(_, x, w)| (*x, *w))
-        .collect()
+        .filter(|r| is_segment(r) && (r.2 - top).abs() < 0.01)
+        .map(|(x0, x1, ..)| (*x0, *x1))
+        .collect();
+    segments.sort_by(|p, q| p.0.total_cmp(&q.0));
+    if segments.is_empty() {
+        return Vec::new();
+    }
+
+    // The two outer grid lines are the ends of **all** ink crossing that
+    // boundary, verticals included — not only the segments'. Once
+    // `coalesce_abutting_rects` fuses the junction at each end with the vertical
+    // running down from it, the ink there arrives inside a tall rect, and a
+    // filter that looked only at thin-in-y rects would place the table's own
+    // edge half a border inside itself.
+    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for (x0, x1, ..) in rects
+        .iter()
+        .filter(|r| r.2 - 0.01 <= top && top <= r.3 + 0.01)
+    {
+        lo = lo.min(*x0);
+        hi = hi.max(*x1);
+    }
+
+    let mut lines = vec![lo];
+    for pair in segments.windows(2) {
+        lines.push((pair[0].1 + pair[1].0) * 0.5);
+    }
+    lines.push(hi);
+    lines.windows(2).map(|p| (p[0], p[1] - p[0])).collect()
 }
 
-/// Assert `got` matches `want` as `(x, width)` pairs, to 0.01 pt.
+/// How far a recovered column may sit from its grid line: **half a border**.
+///
+/// The interior grid lines come back exactly — they are the middle of the gap
+/// between two segments, which is the line whatever the borders do. The two
+/// **outer** ends do not: §17.4.66 puts a border wholly inside the table's own
+/// edge and straddling every other line, and a `gridBefore`/`gridAfter` row ends
+/// on an *interior* line, so the ink's outer end is the grid line in one case
+/// and half a border past it in the other. Nothing in the command stream says
+/// which without knowing the table's own extent, and adding that to
+/// `DrawCommand` for a test's benefit is not worth it.
+///
+/// So the tolerance is exactly that half-border, doubled for a width because a
+/// column has two ends. It costs these tests nothing: they are about columns
+/// tens of points wide, and where a border sits on its line is
+/// `tests/table_grid_gap_borders.rs`' subject, not this file's.
+const HALF_BORDER: f32 = 0.26;
+
+/// Assert `got` matches `want` as `(x, width)` pairs, to [`HALF_BORDER`].
 pub fn assert_cells(got: &[(f32, f32)], want: &[(f32, f32)], what: &str) {
     assert_eq!(
         got.len(),
@@ -172,7 +230,7 @@ pub fn assert_cells(got: &[(f32, f32)], want: &[(f32, f32)], what: &str) {
     );
     for (i, (g, w)) in got.iter().zip(want).enumerate() {
         assert!(
-            (g.0 - w.0).abs() < 0.01 && (g.1 - w.1).abs() < 0.01,
+            (g.0 - w.0).abs() < HALF_BORDER && (g.1 - w.1).abs() < 2.0 * HALF_BORDER,
             "{what}: cell {i} drawn at x={:.2} w={:.2}, expected x={:.2} w={:.2} — all: {got:?}",
             g.0,
             g.1,

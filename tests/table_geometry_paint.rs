@@ -131,23 +131,33 @@ fn one_cell_table(style: &str) -> String {
 /// tests read.
 type Run = (f32, f32);
 
-/// The horizontal border rects (wide and thin) as `(y, height)`, sorted by y,
-/// and the verticals as `(x, width)`, sorted by x.
+/// The **distinct** horizontal border runs as `(y, height)`, sorted by y, and
+/// the verticals as `(x, width)`, sorted by x.
+///
+/// Distinct, because a line arrives in pieces: the border rasterizer splits
+/// every one at the junctions along it, so one 3pt edge is a junction square,
+/// a segment and another junction square — three rects at one `(start,
+/// thickness)`. How many pieces a line comes in is a property of that
+/// decomposition; how many *lines* there are, and how thick each is, is the
+/// question here, and collapsing equal runs asks exactly it.
 fn edge_runs(pages: &[LayoutedPage]) -> (Vec<Run>, Vec<Run>) {
     let all = rects(pages);
-    let mut horizontal: Vec<Run> = all
+    let distinct = |mut v: Vec<Run>| -> Vec<Run> {
+        v.sort_by(|a: &Run, b: &Run| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        v.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4);
+        v
+    };
+    let horizontal = all
         .iter()
         .filter(|(_, _, w, h)| w > h)
         .map(|&(_, y, _, h)| (y, h))
         .collect();
-    let mut vertical: Vec<Run> = all
+    let vertical = all
         .iter()
         .filter(|(_, _, w, h)| w <= h)
         .map(|&(x, _, w, _)| (x, w))
         .collect();
-    horizontal.sort_by(|a, b| a.0.total_cmp(&b.0));
-    vertical.sort_by(|a, b| a.0.total_cmp(&b.0));
-    (horizontal, vertical)
+    (distinct(horizontal), distinct(vertical))
 }
 
 /// A `w:val="double"` edge reaches the page as **two** lines of a third the

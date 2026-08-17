@@ -6,7 +6,7 @@ use crate::render::geometry::PtRect;
 use crate::render::layout::draw_command::DrawCommand;
 
 use super::borders::{
-    border_width, emit_cell_borders, vertical_bands, CellBorders, CellBox, CellEdge, OpenBand,
+    border_width, emit_cell_frame, BoundarySource, CellBorders, CellBox, CellEdge, PlacedRow,
 };
 use super::grid::is_vmerge_continue;
 use super::types::{
@@ -27,25 +27,25 @@ pub(super) struct TableCommandBuffers<'a> {
 
 /// The vertical state a page slice accumulates as rows are emitted into it.
 ///
-/// Two things travel together because a row needs both and neither survives the
-/// slice: where the next row's box starts, and the [`OpenBand`] the last row
-/// left behind it. Carrying the band here is what lets a row see the boundary it
-/// shares with the row above — which on a continuation slice is the repeated
-/// header or the other half of a split row, not the row before it in the
-/// document.
+/// Two things travel together because neither survives the slice: where the next
+/// row's box starts, and every row placed so far. The second is what makes the
+/// border grid expressible at all — a border stands on a boundary *between* two
+/// rows, and which two rows those are is a fact about this page rather than
+/// about the table. A continuation slice puts a repeated header above a row that
+/// does not follow it, and the other half of a split row above nothing at all.
 pub(super) struct SliceCursor {
     /// Where the next row's box starts, in table-local coordinates.
     pub(super) y: Pt,
-    /// §17.4.38: the band the row above reserved and did not finish painting.
-    band: OpenBand,
+    /// Every row this slice has placed, top to bottom.
+    pub(super) placed: Vec<PlacedRow>,
 }
 
 impl SliceCursor {
-    /// A fresh slice: at its top, with no band above its first row.
+    /// A fresh slice: at its top, with nothing placed.
     pub(super) fn new() -> Self {
         Self {
             y: Pt::ZERO,
-            band: OpenBand::default(),
+            placed: Vec::new(),
         }
     }
 }
@@ -174,13 +174,40 @@ fn emit_one_row(
         Pt::ZERO
     };
 
-    // The band the row above left open, crossed by this row's verticals
-    // wherever it is still unpainted. Every hole reported so far was here: the
-    // row above finished with the band, and nothing asked the row below whether
-    // it had an edge that needed to reach through it. See [`OpenBand`].
-    cross_band(&mut cursor.band, bufs.border_commands, mr);
+    // §17.4.66: where this row's two boundaries fall, and where the line on the
+    // upper one comes from. `bottom` is the middle of the strip §17.4.38
+    // reserved, because *the strip is the boundary* — it exists to hold that
+    // edge and takes its height from the widest border on it. Where none was
+    // reserved (the table's foot, a page cut) the boundary is the content box's
+    // own edge.
+    let top_source = BoundarySource {
+        plan_boundary: match cursor.placed.last() {
+            // A §17.4.49 seam — a repeated header above a row that does not
+            // follow it. The line is the header's *own* lower boundary, not the
+            // one the row below would name.
+            Some(prev) if prev.plan_row + 1 != mr.plan_row => prev.plan_row + 1,
+            // Adjacent in the plan, or the slice's first row: this row's own
+            // upper boundary.
+            _ => mr.plan_row,
+        },
+        // §17.4.38: only the slice's first row can have had its top edge left on
+        // the page before, so only it takes a restore.
+        restore: cursor
+            .placed
+            .is_empty()
+            .then_some(top_border_override)
+            .flatten(),
+    };
+    // The row above already fixed this row's top boundary; the slice's first row
+    // has none above it and takes its own content edge.
+    let top = cursor.placed.last().map_or(row_top, |prev| prev.bottom);
+    cursor.placed.push(PlacedRow {
+        plan_row: mr.plan_row,
+        top,
+        bottom: row_top + row_height + band_below * 0.5,
+        top_source,
+    });
 
-    let (h_top, h_bottom) = (mr.h_top, mr.h_bottom);
     for (cell_ci, (entry, cell_input)) in mr.entries.iter().zip(row.cells.iter()).enumerate() {
         // §17.4.84: the merged span, used below for vAlign and here for
         // shading. Hoisted above the shading so both read the same height —
@@ -263,94 +290,30 @@ fn emit_one_row(
             bufs.content_commands.push(cmd);
         }
 
-        emit_cell_borders(
-            bufs.border_commands,
-            CellBorders {
-                top: cell_top,
-                bottom: b_bottom,
-                left: b_left,
-                right: b_right,
-            },
-            CellBox {
-                x: entry.cell_x,
-                w: entry.cell_w,
-                y: row_top,
-                h: row_height,
-                band_below,
-                // §17.4.66: from the *table's* grid, not this row's cells — see
-                // `MeasuredRow::v_at_grid`.
-                v_leading: mr
-                    .v_at_grid
-                    .get(entry.grid_col)
-                    .copied()
-                    .unwrap_or(Pt::ZERO),
-                v_trailing: mr
-                    .v_at_grid
-                    .get(entry.grid_col + cell_input.grid_span.max(1) as usize)
-                    .copied()
-                    .unwrap_or(Pt::ZERO),
-                h_top,
-                h_bottom,
-                collapsed,
-            },
-        );
-    }
-
-    // Open the band below this row: its own bottom borders paint in it first —
-    // each across the full width of its cell — and then its verticals cross
-    // whatever is left. The row after this one is handed what remains.
-    //
-    // A cell whose bottom is *narrower* than the band it shares — two cells in
-    // one row declaring different `w:sz` — paints flush with the band's top and
-    // claims the whole of its x anyway, so the rest of the band stays unpainted
-    // under it. That is a different question, and an open one: where within a
-    // boundary band a border narrower than the band belongs. **Word reference
-    // render needed**: one row whose two cells declare bottom borders of
-    // different widths, measuring whether the narrower line sits flush with the
-    // upper row's content, flush with the lower row's, or centred between them.
-    let mut band = OpenBand::new(row_top + row_height, band_below);
-    for (entry, borders) in mr.entries.iter().zip(mr.borders.iter()) {
-        if borders.bottom.line().is_some() {
-            band.cover(entry.cell_x, entry.cell_x + entry.cell_w);
+        // §17.4.45: a spaced table has no grid to collapse onto, so each cell
+        // closes its own frame here. A collapsed one paints nothing per cell —
+        // its borders stand on grid lines and are rasterized once for the whole
+        // slice, by `SliceBuilder::finish`.
+        if !collapsed {
+            emit_cell_frame(
+                bufs.border_commands,
+                &CellBorders {
+                    top: cell_top,
+                    bottom: b_bottom,
+                    left: b_left,
+                    right: b_right,
+                },
+                CellBox {
+                    x: entry.cell_x,
+                    w: entry.cell_w,
+                    y: row_top,
+                    h: row_height,
+                },
+            );
         }
     }
-    // §17.4.39: then the runs of this boundary that belong to neither row, in
-    // the same place as the bottom borders because they are the rest of the same
-    // line.
-    //
-    // Before the verticals rather than after, for a reason the corpus does not
-    // currently exhibit: `OpenBand::covers` decides by midpoint, so a fill whose
-    // midpoint happened to fall inside an interval a vertical had already
-    // claimed would be dropped whole, leaving the hole this exists to close.
-    // Claiming first cannot lose that way, and it also keeps a fill from
-    // overpainting a crossing it overlaps. Both orders paint the same page in
-    // `grid-gap-borders.docx`, so no test here separates them — see that
-    // fixture's tests, which assert the *result* rather than the order.
-    for &(x0, x1, line) in &mr.band_fills {
-        band.fill_row_boundary(bufs.border_commands, &line, x0, x1);
-    }
-    cross_band(&mut band, bufs.border_commands, mr);
-    cursor.band = band;
+
     cursor.y += mr.height + mr.border_gap_below;
-}
-
-/// Every vertical border in the row crosses `band` wherever it is still
-/// unpainted.
-///
-/// Called once per row for each of the two bands it touches, which is what makes
-/// the two sides of a row boundary the same question asked twice rather than two
-/// rules that have to agree. The band itself decides who paints — see
-/// [`OpenBand`].
-fn cross_band(band: &mut OpenBand, commands: &mut Vec<DrawCommand>, mr: &MeasuredRow) {
-    let collapsed = mr.leading_gap <= Pt::ZERO;
-    for (entry, borders) in mr.entries.iter().zip(mr.borders.iter()) {
-        for (line, x0, x1) in vertical_bands(borders, entry.cell_x, entry.cell_w, collapsed)
-            .into_iter()
-            .flatten()
-        {
-            band.cross(commands, &line, x0, x1);
-        }
-    }
 }
 
 /// Total vertical space owned by a vMerge=Restart cell at `grid_col`.
@@ -638,6 +601,43 @@ mod tests {
             .expect("expected command not emitted")
     }
 
+    /// Emit a range of rows into a fresh slice and rasterize the border grid it
+    /// placed — the two halves `SliceBuilder` puts together.
+    ///
+    /// A test that reads border commands needs both, and only both: placement
+    /// decides which of the plan's boundaries this page shows and where, and
+    /// rasterization turns that into rects. Neither half emits a border on its
+    /// own, which is the point of the split.
+    fn slice_border_commands(
+        measured: &MeasuredTable,
+        rows: &[TableRowInput],
+        range: std::ops::Range<usize>,
+        top_border_override: Option<TableBorderLine>,
+    ) -> Vec<DrawCommand> {
+        let (mut commands, mut content, mut borders) = (Vec::new(), Vec::new(), Vec::new());
+        let mut cursor = SliceCursor::new();
+        emit_table_rows(
+            measured,
+            rows,
+            range,
+            &mut cursor,
+            &mut TableCommandBuffers {
+                commands: &mut commands,
+                content_commands: &mut content,
+                border_commands: &mut borders,
+            },
+            top_border_override,
+        );
+        crate::render::layout::table::borders::rasterize_border_grid(
+            &mut borders,
+            &measured.plan,
+            &measured.grid_x,
+            &cursor.placed,
+            crate::render::geometry::PtSize::new(measured.table_width, cursor.y),
+        );
+        borders
+    }
+
     /// The three buffers concatenate as shading → content → borders, and that
     /// order is load-bearing: a cell's background is painted before its
     /// neighbours' borders, so a background can never cover a shared edge, and
@@ -714,34 +714,30 @@ mod tests {
             "both cells must resolve to no top border for this test to mean anything"
         );
 
-        let mut commands = Vec::new();
-        let mut content = Vec::new();
-        let mut borders = Vec::new();
-        let mut cursor = SliceCursor::new();
-        emit_table_rows(
-            &measured,
-            &rows,
-            0..1,
-            &mut cursor,
-            &mut TableCommandBuffers {
-                commands: &mut commands,
-                content_commands: &mut content,
-                border_commands: &mut borders,
-            },
-            Some(single(3.0, RED)),
-        );
+        let borders = slice_border_commands(&measured, &rows, 0..1, Some(single(3.0, RED)));
 
-        let restored_xs: Vec<f32> = borders
+        // The restored line as an x-interval. The grid columns are 50pt each, so
+        // "cell 1 only" is 50..100 — asserted as the span rather than as a rect
+        // count, because the rasterizer is free to split one line at a junction
+        // and a count would then measure the decomposition instead of the line.
+        let restored: Vec<(f32, f32)> = borders
             .iter()
             .filter_map(|c| match c {
-                DrawCommand::Rect { rect, color } if *color == RED => Some(rect.origin.x.raw()),
+                DrawCommand::Rect { rect, color } if *color == RED => Some((
+                    rect.origin.x.raw(),
+                    rect.origin.x.raw() + rect.size.width.raw(),
+                )),
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            restored_xs,
-            vec![50.0],
-            "only cell 1 (x=50) takes the override; cell 0 asked for no top border"
+        let reach = |x: f32| restored.iter().any(|&(a, b)| a <= x && x <= b);
+        assert!(
+            !reach(25.0),
+            "cell 0 asked for no top border and must not get one: {restored:?}"
+        );
+        assert!(
+            reach(75.0),
+            "cell 1 said nothing, so §17.4.38 restores its top: {restored:?}"
         );
     }
 
@@ -763,28 +759,31 @@ mod tests {
             false,
         );
 
-        let mut commands = Vec::new();
-        let mut content = Vec::new();
-        let mut borders = Vec::new();
-        let mut cursor = SliceCursor::new();
-        emit_table_rows(
-            &measured,
-            &rows,
-            0..2,
-            &mut cursor,
-            &mut TableCommandBuffers {
-                commands: &mut commands,
-                content_commands: &mut content,
-                border_commands: &mut borders,
-            },
-            Some(single(3.0, RED)),
-        );
+        let borders = slice_border_commands(&measured, &rows, 0..2, Some(single(3.0, RED)));
 
-        let count = borders
+        // The restored edge as the set of y values it reaches. One row boundary,
+        // not two: whichever y the override lands on, it must be a single one,
+        // and it must be the slice's top — asserted as `min`, so a second
+        // restored edge lower down shows up as a differing set rather than as a
+        // count this decomposition could satisfy by accident.
+        let mut ys: Vec<f32> = borders
             .iter()
-            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RED))
-            .count();
-        assert_eq!(count, 1, "exactly one restored top edge, on row 0");
+            .filter_map(|c| match c {
+                DrawCommand::Rect { rect, color } if *color == RED => Some(rect.origin.y.raw()),
+                _ => None,
+            })
+            .collect();
+        ys.sort_by(f32::total_cmp);
+        ys.dedup();
+        assert_eq!(
+            ys.len(),
+            1,
+            "exactly one restored boundary, not one per row: {ys:?}"
+        );
+        assert!(
+            ys[0] < Pt::ZERO.raw() + f32::EPSILON,
+            "and it is the slice's own top: {ys:?}"
+        );
     }
 
     /// A row that ends a page slice but not the *table* keeps its reserved
@@ -1183,22 +1182,23 @@ mod tests {
             false,
         );
 
-        // The band is the 3pt strip between the two rows' content boxes.
+        // The boundary between the two rows is the middle of the 3pt strip they
+        // reserve: 28pt of content, then half of 3. The junction square sits on
+        // it, 3pt tall, and the crossing is at grid line 2 — x = 120.
         let (band_top, band_bottom) = (28.0, 31.0);
-        let in_band: Vec<(f32, f32, f32, f32)> = border_rects(&table.commands)
+        let in_band: Vec<(f32, f32)> = border_rects(&table.commands)
             .into_iter()
             .filter(|(x0, x1, y0, y1)| {
-                *y0 >= band_top - 0.001
-                    && *y1 <= band_bottom + 0.001
-                    && *x0 > 100.0
-                    && *x1 < 120.001
+                *y0 >= band_top - 0.001 && *y1 <= band_bottom + 0.001 && *x0 > 118.0 && *x1 < 122.0
             })
+            .map(|(x0, x1, ..)| (x0, x1))
             .collect();
         assert_eq!(
             in_band,
-            vec![(117.0, 118.0, 28.0, 31.0), (119.0, 120.0, 28.0, 31.0)],
-            "the spacer's right edge crosses the band as its own two sub-lines, \
-             each `sz`/3 wide and the full height of the band"
+            vec![(118.5, 119.5), (120.5, 121.5)],
+            "the spacer's right edge crosses the boundary as its own two \
+             sub-lines, each `sz`/3 wide and side by side — not as rungs across \
+             the gap, which is what splitting on the wrong axis draws"
         );
     }
 
@@ -1432,25 +1432,43 @@ mod tests {
         );
     }
 
-    /// The control. A cell whose bottom *does* paint keeps yielding the band to
-    /// it: its verticals stop at the row's content box, exactly as before.
-    /// Pins the fix to the case where nothing else paints the corner.
+    /// The control on how a vertical and the row boundary it crosses divide the
+    /// square where they meet: the vertical yields **exactly** the junction and
+    /// not a point more.
+    ///
+    /// `spacer_table`'s columns are 100pt and every border 0.5pt, so grid line 1
+    /// is at x = 100 and the vertical there straddles it, 99.75..100.25. Down
+    /// that line the ink comes in three pieces — segment, junction, segment —
+    /// and what this asserts is that the two segments stop where the junction
+    /// starts. A segment that stopped short would leave the hole three reports
+    /// have been filed about; one that ran on would paint the square twice and
+    /// leave its colour to emission order.
     #[test]
     fn a_bordered_cell_still_yields_the_reserved_band_to_its_own_bottom_border() {
         let table = spacer_table();
-        // Column 0's right edge, at x = 99.5..100 — the vertical it wins from
-        // `insideV` against column 1's left.
-        let verticals: Vec<(f32, f32)> = border_rects(&table.commands)
+        let mut down_the_line: Vec<(f32, f32)> = border_rects(&table.commands)
             .into_iter()
-            .filter(|(x0, x1, _, _)| (*x0 - 99.5).abs() < 0.001 && (*x1 - 100.0).abs() < 0.001)
+            .filter(|&(x0, x1, ..)| x0 <= 100.0 && 100.0 <= x1)
             .map(|(_, _, y0, y1)| (y0, y1))
             .collect();
+        down_the_line.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        // The boundary between the two rows: 28pt of content, then half of the
+        // 0.5pt strip reserved for the widest bottom border on it.
+        let boundary = 28.25_f32;
+        let half = 0.25_f32;
+        // Five pieces, because the table's own top and bottom boundaries have a
+        // junction here too: junction, segment, junction, segment, junction.
+        assert_eq!(down_the_line.len(), 5, "got {down_the_line:?}");
         assert_eq!(
-            verticals,
-            vec![(0.5, 28.0), (28.5, 56.0)],
-            "row 0's vertical stops at its content box (0.5..28, the band \
-             28..28.5 being its own bottom border's), and row 1's runs between \
-             its own top and bottom borders"
+            down_the_line[2],
+            (boundary - half, boundary + half),
+            "the junction is the border's own width, centred on the boundary"
+        );
+        assert_eq!(
+            (down_the_line[1].1, down_the_line[3].0),
+            (boundary - half, boundary + half),
+            "and the two verticals stop exactly at it — neither short nor over"
         );
     }
 }

@@ -363,7 +363,8 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
         })
 }
 
-/// §17.4.66: a collapsed border is **centred on the boundary it belongs to**.
+/// §17.4.66: a collapsed border **straddles the line two cells share, and goes
+/// inside a line shared with nothing**.
 ///
 /// A cell edge is a line, not a strip. Word draws a collapsed border straddling
 /// it — half the declared `w:sz` on each side — so a 1pt `insideV` on the grid
@@ -372,13 +373,29 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
 /// cell that owned it, which put those two on opposite sides of the line
 /// instead: 121..122 against 122..125.
 ///
+/// The table's own two vertical edges are the exception, and are asserted here
+/// rather than skipped: nothing shares them, so there is nothing to straddle and
+/// the border goes inside — which is also what keeps a table's ink within the
+/// box it reports (`tests/table_auto_width.rs`).
+///
 /// Asserted as an audit over every vertical edge of every cell, because the
-/// claim is about the model rather than about one border: wherever a border is
-/// painted, the midpoint of its band is the edge it belongs to.
+/// claim is about the model rather than about one border.
 #[test]
-fn every_vertical_border_is_centred_on_its_grid_line() {
+fn every_vertical_border_straddles_a_shared_line_and_goes_inside_an_outer_one() {
     let pages = layout();
-    let mut checked = 0;
+    // The tables' own left and right, taken from the cells rather than written
+    // down: whatever the fixture's grid is, these are its two ends.
+    let (mut left, mut right) = (f32::INFINITY, f32::NEG_INFINITY);
+    for fill in [A, B, C, D, E, F, G, H] {
+        let (upper, lower) = cell(&pages, fill);
+        for b in [upper, lower] {
+            left = left.min(b.0);
+            right = right.max(b.0 + b.2);
+        }
+    }
+
+    let mut straddled = 0;
+    let mut inset = 0;
     for fill in [A, B, C, D, E, F, G, H] {
         let (upper, lower) = cell(&pages, fill);
         for cell_box in [upper, lower] {
@@ -386,17 +403,30 @@ fn every_vertical_border_is_centred_on_its_grid_line() {
                 let Some((_, (x0, x1))) = anything_at(&pages, x, cell_box) else {
                     continue;
                 };
-                checked += 1;
+                let (want, what) = if (x - left).abs() < 0.05 {
+                    (x0, "start at the table's own left")
+                } else if (x - right).abs() < 0.05 {
+                    (x1, "end at the table's own right")
+                } else {
+                    ((x0 + x1) * 0.5, "be centred on its shared grid line")
+                };
+                if what.starts_with("be centred") {
+                    straddled += 1;
+                } else {
+                    inset += 1;
+                }
                 assert!(
-                    ((x0 + x1) * 0.5 - x).abs() < 0.05,
+                    (want - x).abs() < 0.05,
                     "{fill:?}: the border on the grid line at x={x} occupies \
-                     {x0}..{x1}, whose centre is {}",
-                    (x0 + x1) * 0.5
+                     {x0}..{x1}, which does not {what}"
                 );
             }
         }
     }
-    assert!(checked >= 8, "the audit must see borders — only {checked}");
+    // Both halves of the rule must actually have been exercised, or the audit
+    // proves only the half the fixture happened to contain.
+    assert!(straddled >= 4, "only {straddled} shared lines seen");
+    assert!(inset >= 2, "only {inset} outer lines seen");
 }
 
 /// The reported pair, stated directly: two borders of **different weights** on
@@ -424,18 +454,38 @@ fn borders_of_different_weights_on_one_grid_line_are_concentric() {
     );
 }
 
-/// The same rule on a horizontal edge: the table's own top border straddles the
-/// first row's top rather than sitting inside it.
+/// The same rule on a horizontal edge, both halves of it: the boundary `A` and
+/// `D` share is straddled, and the table's own top — shared with nothing — goes
+/// inside the first row.
 #[test]
-fn the_tables_top_border_is_centred_on_the_first_rows_top() {
+fn a_shared_row_boundary_is_straddled_and_the_tables_top_goes_inside() {
     let pages = layout();
     let (a, _) = cell(&pages, A);
+    let (b, _) = cell(&pages, B);
+    let (d, _) = cell(&pages, D);
 
+    // The interior boundary is the middle of the §17.4.38 strip the two rows
+    // reserve between their content boxes — the strip exists to hold that rule,
+    // so its centre *is* the boundary. Row 2's `gridBefore` puts `D` under `B`
+    // and not under `A`, which is the whole subject of this fixture, so the test
+    // had better not assume otherwise.
+    let (foot, head) = (b.1 + b.3, d.1);
+    assert!(head >= foot - 0.05, "D's box begins at or below B's foot");
+    let shared = (foot + head) * 0.5;
+    let (y0, y1) = horizontal_band_on(&pages, shared, d.0 + d.2 * 0.5).expect("the shared rule");
+    assert!(
+        ((y0 + y1) * 0.5 - shared).abs() < 0.05,
+        "the shared rule occupies {y0}..{y1}, whose centre is {} rather than {shared}",
+        (y0 + y1) * 0.5,
+    );
+
+    // The table's own top: no row above it, so the whole border is below the
+    // line rather than half of it.
     let (y0, y1) = horizontal_band_on(&pages, a.1, a.0 + a.2 * 0.5).expect("the table's top rule");
     assert!(
-        ((y0 + y1) * 0.5 - a.1).abs() < 0.05,
-        "the top rule occupies {y0}..{y1}, whose centre is {} rather than {}",
-        (y0 + y1) * 0.5,
+        (y0 - a.1).abs() < 0.05,
+        "the top rule occupies {y0}..{y1}, which does not begin at the table's \
+         own top edge {}",
         a.1
     );
 }
@@ -454,7 +504,19 @@ fn horizontal_runs_on(pages: &[LayoutedPage], y: f32, x0: f32, x1: f32) -> Vec<B
     let mut out: Vec<Band> = Vec::new();
     for colour in [GREY_HORIZONTAL, RED_LEFT, GREEN_RIGHT, BLUE_INSIDE_V] {
         for (rx, ry, rw, rh) in rects(pages, colour) {
-            if rw > rh && ry - 0.05 <= y && y <= ry + rh + 0.05 {
+            // Any rect crossing `y`, whatever its shape. Filtering to
+            // wider-than-tall ones would ask a different question than the one
+            // these audits mean: a junction square is as much a part of the line
+            // through it as a segment is, and once
+            // `coalesce_abutting_rects` fuses a junction with the *vertical*
+            // below it — which is what keeps that pair from seaming — the ink at
+            // the boundary's end arrives inside a tall rect. Reported as a hole,
+            // it is the opposite of what this is looking for.
+            //
+            // The looseness costs little: a vertical that merely passes through
+            // covers one border's width of the boundary, and a real hole in a
+            // horizontal is a whole grid column wide.
+            if ry - 0.05 <= y && y <= ry + rh + 0.05 {
                 let (a, b) = (rx.max(x0), (rx + rw).min(x1));
                 if b > a {
                     out.push((a, b));
@@ -527,21 +589,15 @@ fn no_cell_edge_is_painted_across_only_part_of_its_width() {
                     leaves_no_hole(&runs, x0, x1),
                     "{fill:?}'s {edge} edge spans {x0}..{x1} but is painted only over {runs:?}"
                 );
-                // …and covered once. Two rects on one boundary overlapping means
-                // something painted over a claim another had already made, which
-                // the strip's bookkeeping exists to prevent — and which a
-                // rasterizer shows as a colour deciding on paint order.
-                for (i, &(a0, a1)) in runs.iter().enumerate() {
-                    for &(b0, b1) in &runs[i + 1..] {
-                        assert!(
-                            b0 >= a1 - 0.05 || a0 >= b1 - 0.05,
-                            "{fill:?}'s {edge} edge is painted twice: \
-                             {:?} overlaps {:?}",
-                            (a0, a1),
-                            (b0, b1)
-                        );
-                    }
-                }
+                // The other half of the rule — that no square is painted
+                // *twice* — used to be asserted here and is not any more. It
+                // cannot be, from these runs: `horizontal_runs_on` counts every
+                // rect crossing the boundary, verticals included, and two
+                // verticals of different widths on one grid line genuinely
+                // overlap in the x-window a cell clips them to without anything
+                // being painted twice. The property is real and still audited,
+                // over whole pages and with the geometry to do it correctly, by
+                // `tests/table_border_corners.rs`.
             }
         }
     }
