@@ -6,22 +6,25 @@ where a row's cells stop short of the table's grid.
 `gridBefore` leaves the leftmost grid columns of a row **blank** — no `<w:tc>`
 covers them. The row's first cell therefore has a grid column to its left but no
 *cell* to its left, and §17.4.36 defines `insideV` as the border on the table's
-"interior vertical edges" without ever defining "interior". Two readings follow,
-and they paint different pages:
+"interior vertical edges" without ever defining "interior".
 
-  A. interior is a property of the **grid** — there are columns to the left, so
-     the edge is interior and takes `insideV`. This is what dxpdf does today
-     (`table::borders::resolve_cell_effective_borders`, whose `is_first_col` is
-     keyed on the absolute grid column, past `gridBefore`).
-  B. interior is a property of the row's **cells** — nothing is to the left, so
-     the edge is the row's leading edge and takes the table's `w:left`.
-  C. the edge is not painted at all, whatever the table declares.
+**This fixture has now been rendered in Word, and it answers the question**: the
+gap-facing edge takes the table's own `w:left` (or `w:right`). Word draws a 3pt
+red line on the leading edge of `D`, `F` and `G`, and a 3pt green one on the
+trailing edge of `E` and `F`. A row's first `<w:tc>` has no cell facing it, so
+§17.4.66's "cell borders and outer table borders" leaves the table's border as
+what it faces; `gridBefore` moves where that edge is, not what it is.
 
-A Word render of `bidi-visual-table.docx` already ruled out A: Word draws no line
-there. It could not separate B from C, because that table's `w:left` is `nil` and
-both readings then predict nothing. **That is the gap this fixture exists to
-close**, and it is why the first table's outer borders are visible rather than
-nil.
+Two other readings were held and refuted, and the fixture is kept because it is
+what refuted them: `insideV`, because grid columns exist to the left — ruled out
+by `bidi-visual-table.docx`, whose `nil` outer border leaves that edge bare; and
+*nothing at all*, because §17.4.35 places `w:left` "around the table" and this
+edge is 50pt inside it — argued from the spec's wording, consistent with every
+measurement available then, and ruled out by this render.
+
+Table 2 is the same rows with the outer borders set to `nil`, which under the
+answer above predicts a bare edge — the originally reported symptom, and now the
+control that keeps one rule covering both documents.
 
 ---------------------------------------------------------------------------
 How to read a Word render
@@ -37,24 +40,21 @@ Horizontals are 1pt grey so they cannot be confused with any of the three. Row 1
 of each table spans the whole grid and is the **legend**: it shows all three at
 once, so the reader never has to trust a colour name.
 
-Then, at cell `D`'s leading edge in table 1 (50pt in from the table's left):
+What Word draws, and what this engine now draws with it:
 
-    3pt red     -> reading B, the row's leading edge takes `w:left`
-    1pt blue    -> reading A, today's dxpdf behaviour
-    nothing     -> reading C
+    D, F, G  leading edge   3pt red    (the table's `w:left`)
+    E, F     trailing edge  3pt green  (the table's `w:right`)
+    G|H                     1pt blue   (`insideV` — a cell faces it)
 
-Row 3 asks the mirror-image question of §17.4.14 `gridAfter` at cell `E`'s
-trailing edge, where the candidates are 3pt green / 1pt blue / nothing. Row 4
-puts a gap on *both* sides of cell `F`, which is the case that would expose a fix
-that handles one end and not the other. Row 5 gaps the row's start but then has
-**two** cells, so the `G|H` boundary is genuinely interior and must keep its 1pt
-blue whatever is decided about the gap-facing edge — without it, suppressing
-every vertical border in a gapped row would satisfy every other row here.
+Row 3 is the §17.4.14 `gridAfter` mirror of row 2, and row 4 gaps cell `F` at
+both ends — the case that exposes a fix reaching one end and not the other. Row 5
+gaps the row's start but then has **two** cells, so `G|H` is genuinely interior
+and keeps its blue: without it, giving every cell of a gapped row the outer
+border would satisfy every other row here.
 
-Table 2 is the same four rows with `w:left` and `w:right` set to `nil`. It
-reproduces the originally reported symptom in isolation — no `w:bidiVisual`, no
-Hebrew — so the defect has a minimal case of its own. Word draws nothing at
-either gap edge there; dxpdf draws 1pt blue.
+Table 2 is the same five rows with `w:left` and `w:right` set to `nil`, so the
+same rule predicts a bare edge. That is the originally reported symptom, and
+keeping both tables is what holds one rule to both documents.
 
 ---------------------------------------------------------------------------
 Why the styles part

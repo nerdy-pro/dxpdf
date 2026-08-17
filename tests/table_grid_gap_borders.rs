@@ -19,26 +19,32 @@
 //!   which is 50pt further left. A cell that wants a line there still says
 //!   `w:tcBorders`.
 //!
-//! # Which one this file asserts, and why
+//! # Which one is right: measured, not argued
 //!
-//! A Word render of `test-files/bidi-visual-table.docx` **rules out A**: Word
-//! paints nothing on that edge. It cannot separate B from C, because that
-//! table's `w:left` is `nil` and both then predict nothing.
+//! **Word paints the table's own `w:left` and `w:right` there — reading B.**
+//! Rendering `test-files/grid-gap-borders.docx` shows a 3pt red line on the
+//! leading edge of `D`, `F` and `G`, and a 3pt green one on the trailing edge of
+//! `E` and `F`: every gap-facing edge in the fixture, each in the table's outer
+//! colour rather than `insideV`'s blue.
 //!
-//! The engine implements **C**, and the argument is §17.4.35/§17.4.37's own
-//! wording: `w:left` and `w:right` are the borders displayed *around the
-//! specified table*. In row 2 the table's left side is at x = 72 and the row's
-//! first cell begins at x = 122, so reading B paints an outer table border 50pt
-//! inside the table — a red 3pt line with the table's own edge visible to the
-//! left of it. §17.4.66's conflict vocabulary is "cell borders and outer table
-//! borders", and at this edge there is neither a facing cell border nor an outer
-//! boundary, so nothing is seeded. C also removes a line rather than inventing
-//! one, which is the conservative direction when the spec is silent.
+//! That also explains the observation this fixture was built from. In
+//! `test-files/bidi-visual-table.docx` the same edge is bare — but that table's
+//! `w:left` is `nil`, which is exactly what B predicts. One rule now covers both
+//! renders, where before they needed two.
 //!
-//! **What would settle it.** `test-files/grid-gap-borders.docx` is built so one
-//! Word render decides: at cell `D`'s leading edge, a 3pt red line means B and
-//! this file is wrong; nothing means C. The fixture's first table exists
-//! precisely because the originally reported one could not tell them apart.
+//! So a row's **first cell takes `w:left` and its last takes `w:right`**,
+//! whether or not those cells reach the table's grid. §17.4.66 resolves a
+//! cell edge against "cell borders and outer table borders", and a row's first
+//! cell has no cell facing its leading edge, so the table's border is what is
+//! left to face — `w:gridBefore` moves where that edge *is*, not what it is.
+//!
+//! Two earlier readings of this file were wrong and are recorded because the
+//! way they failed is worth keeping. **A** — `insideV`, because grid columns
+//! exist to the left — was refuted by the `nil` render. **C** — nothing at all,
+//! because §17.4.35 places `w:left` "around the table" and the edge is 50pt
+//! inside it — was argued from the spec's wording with no render behind it, fit
+//! the one measurement then available, and is refuted by this one. The geometry
+//! that made C plausible is real; it just is not what Word does.
 //!
 //! # How these tests are written
 //!
@@ -187,51 +193,93 @@ fn legend_row_shows_three_distinguishable_vertical_borders() {
 
 // ── what a gap-facing edge takes ────────────────────────────────────────────
 
-/// §17.4.15: the edge facing a `gridBefore` gap takes no table-level border.
+/// §17.4.15: the edge facing a `gridBefore` gap takes the table's `w:left`.
 ///
-/// Reading C. `insideV` is ruled out by Word (see the module doc); `w:left`
-/// would put an outer table border 50pt inside the table, with the table's real
-/// left edge still visible to the left of it.
+/// Word paints a 3pt red line on cell `D`'s leading edge — the outer border, in
+/// the outer colour, 50pt inside the table's own left side. Asserted by weight
+/// *and* colour, which is what the fixture's palette is for: `insideV` here is
+/// 1pt blue, so a renderer treating the edge as interior fails on both counts.
 #[test]
-fn a_grid_before_gap_edge_takes_no_table_level_border() {
+fn a_grid_before_gap_edge_takes_the_tables_left_border() {
     let pages = layout();
     let (d, _) = cell(&pages, D);
 
     assert_eq!(
-        anything_at(&pages, d.0, d),
+        band_at(&pages, RED_LEFT, d.0, d).map(|(x0, x1)| x1 - x0),
+        Some(3.0),
+        "D's leading edge takes w:left, as Word renders it"
+    );
+    assert_eq!(
+        band_at(&pages, BLUE_INSIDE_V, d.0, d),
         None,
-        "nothing faces D's leading edge, so no table-level border reaches it"
+        "…and not insideV, the reading the nil render already refuted"
     );
 }
 
-/// §17.4.14: the mirror image, at the trailing edge of a `gridAfter` row.
+/// §17.4.14: the mirror image — a `gridAfter` row's trailing edge takes
+/// `w:right`, which Word paints green on cell `E`.
 ///
-/// The two are one rule, and the pair is what stops a fix reaching only the end
-/// that was reported.
+/// The pair is what stops a fix reaching only the end that was reported first.
 #[test]
-fn a_grid_after_gap_edge_takes_no_table_level_border() {
+fn a_grid_after_gap_edge_takes_the_tables_right_border() {
     let pages = layout();
     let (e, _) = cell(&pages, E);
 
-    assert_eq!(anything_at(&pages, e.0 + e.2, e), None);
+    assert_eq!(
+        band_at(&pages, GREEN_RIGHT, e.0 + e.2, e).map(|(x0, x1)| x1 - x0),
+        Some(3.0)
+    );
+    assert_eq!(band_at(&pages, BLUE_INSIDE_V, e.0 + e.2, e), None);
 }
 
-/// A row gapped at **both** ends takes a border at neither.
+/// A row gapped at **both** ends takes the outer border at both — red on the
+/// left of `F`, green on its right.
+///
+/// Its value is that a fix reaching one end and not the other passes the two
+/// tests above in whichever order it was written and fails here.
 #[test]
-fn a_row_gapped_at_both_ends_takes_a_border_at_neither() {
+fn a_row_gapped_at_both_ends_takes_an_outer_border_at_each() {
     let pages = layout();
     let (f, _) = cell(&pages, F);
 
-    assert_eq!(anything_at(&pages, f.0, f), None, "F's leading edge");
-    assert_eq!(anything_at(&pages, f.0 + f.2, f), None, "F's trailing edge");
+    assert_eq!(
+        band_at(&pages, RED_LEFT, f.0, f).map(|(x0, x1)| x1 - x0),
+        Some(3.0),
+        "F's leading edge"
+    );
+    assert_eq!(
+        band_at(&pages, GREEN_RIGHT, f.0 + f.2, f).map(|(x0, x1)| x1 - x0),
+        Some(3.0),
+        "F's trailing edge"
+    );
+}
+
+/// The rule is about the row's cells, not the grid: `G` is its row's first cell
+/// and takes `w:left` even though `H` follows it and the row reaches the grid's
+/// end.
+///
+/// Without this, "the row's first cell" and "a row with exactly one cell" are
+/// indistinguishable — every other gapped row in the fixture holds a single
+/// cell, so a fix keyed on that would pass everything else here.
+#[test]
+fn the_first_cell_of_a_gapped_row_takes_the_left_border_even_with_cells_after_it() {
+    let pages = layout();
+    let (g, _) = cell(&pages, G);
+
+    assert_eq!(
+        band_at(&pages, RED_LEFT, g.0, g).map(|(x0, x1)| x1 - x0),
+        Some(3.0),
+        "G is its row's first cell, so its leading edge is the table's"
+    );
 }
 
 /// The reported case, isolated: the same rows with `w:left`/`w:right` set to
-/// `nil`. Word paints nothing at either gap edge, and now so does the engine.
+/// `nil`. The rule is the same one — the gap-facing edge takes the table's outer
+/// border — and here that border is `nil`, so nothing is painted.
 ///
 /// This is `bidi-visual-table.docx`'s symptom with no `w:bidiVisual` and no
-/// Hebrew involved — the one assertion in this file standing directly on a Word
-/// measurement rather than on a reading of the spec.
+/// Hebrew involved, and the case that makes the pair with the tests above: one
+/// rule has to produce a line in the first table and none in this one.
 #[test]
 fn the_nil_table_paints_nothing_at_either_gap_edge() {
     let pages = layout();
@@ -289,68 +337,74 @@ fn an_interior_boundary_inside_a_gapped_row_is_still_painted() {
         Some(1.0),
         "a cell faces this edge, so it is interior however the row starts"
     );
-    // …while the same row's gap-facing edge takes nothing, which is what makes
-    // this a discrimination rather than a restatement.
-    assert_eq!(anything_at(&pages, g.0, g), None, "G's leading edge");
+    // …while the same row's gap-facing edge takes the *outer* border, which is
+    // what makes this a discrimination rather than a restatement: one edge of
+    // one cell is interior and the other is the table's.
+    assert_eq!(
+        band_at(&pages, RED_LEFT, g.0, g).map(|(x0, x1)| x1 - x0),
+        Some(3.0),
+        "G's leading edge"
+    );
 }
 
 // ── one grid line, one band ─────────────────────────────────────────────────
 
-/// No grid line is painted in two different bands.
+/// No grid line is painted in two different bands **by the same border**.
 ///
-/// A grid line is one line, and which cell owns it decides which side of it the
-/// band lands on: §17.4.66 hands a collapsed interior edge to the cell on the
-/// **left**, and a border is painted inward from its owner's box, so an edge
-/// owned by the cell on the *right* comes out one border-width over. That is
-/// what a `gridBefore` leading edge used to be, and it showed as row 1 painting
-/// x = 122 at 121..122 while row 2 painted it at 122..123.
+/// Which cell owns an edge decides which side of the grid line the band lands
+/// on: §17.4.66 hands a collapsed interior edge to the cell on the **left**, and
+/// a border is painted inward from its owner's box, so an edge owned by the cell
+/// on the *right* comes out one border-width over. A `gridBefore` leading edge
+/// used to be exactly that, seeded from `insideV` and drawn inside the lower
+/// cell, so row 1 painted x = 122 at 121..122 while row 2 painted it at
+/// 122..123 — one line, two positions, a visible step.
 ///
-/// Asserted as an audit over every vertical edge of every cell rather than at
-/// the one boundary that was reported, because the property is general and the
-/// next violation will not be in the same place. It knows nothing about gaps,
-/// which is the point — a future reading-B implementation that painted `w:left`
-/// inward at a gap-facing edge would reintroduce exactly this and be caught here
-/// without anyone remembering to look.
+/// Restricted to *one border* — matched by colour, which in this fixture is
+/// one-to-one with `w:left`/`w:right`/`insideV` — because two **different**
+/// borders can legitimately meet at one grid line and this engine puts each
+/// inside its own cell: row 1's 1pt blue `insideV` occupies 121..122 while row
+/// 2's 3pt red `w:left` occupies 122..125, both belonging to x = 122. Whether
+/// they should instead be concentric is the collapsed-border **centring**
+/// question — Word centres a collapsed border on the grid line, which would put
+/// them at 121.5..122.5 and 120.5..123.5 — and it is a separate change touching
+/// every border in every table. Asserting it here would fail for a reason this
+/// test is not about.
+///
+/// Stated as an audit over every vertical edge of every cell rather than at the
+/// one boundary that was reported, because the property is general and the next
+/// violation will not be in the same place.
 #[test]
 fn no_grid_line_is_painted_in_two_different_bands() {
     let pages = layout();
-    let fills = [A, B, C, D, E, F, G, H];
-
-    // Both tables at once: a band is keyed by its y as well as its x, so the two
-    // tables' copies of a grid line never compare against each other.
-    let mut seen: Vec<(i64, i64, i64, i64)> = Vec::new();
-    for fill in fills {
+    // Keyed by grid line **and** border colour and table, so the only bands
+    // compared are two renderings of one border on one line.
+    let mut seen: Vec<((i64, Colour, i64), Band)> = Vec::new();
+    let mut compared = 0;
+    for fill in [A, B, C, D, E, F, G, H] {
         let (upper, lower) = cell(&pages, fill);
-        for cell_box in [upper, lower] {
+        for (table, cell_box) in [(0i64, upper), (1, lower)] {
             for x in [cell_box.0, cell_box.0 + cell_box.2] {
-                let Some((_, (x0, x1))) = anything_at(&pages, x, cell_box) else {
-                    continue;
-                };
-                let key = (
-                    (x * 1000.0).round() as i64,
-                    (cell_box.1 * 1000.0).round() as i64,
-                    (x0 * 1000.0).round() as i64,
-                    (x1 * 1000.0).round() as i64,
-                );
-                if let Some(prev) = seen
-                    .iter()
-                    .find(|p| p.0 == key.0 && p.1 != key.1 && (p.2, p.3) != (key.2, key.3))
-                {
-                    panic!(
-                        "the grid line at x={x} is painted in two bands: \
-                         {:?} and {:?}",
-                        (prev.2 as f32 / 1000.0, prev.3 as f32 / 1000.0),
-                        (x0, x1)
-                    );
+                for colour in EVERY_BORDER {
+                    let Some(band) = band_at(&pages, colour, x, cell_box) else {
+                        continue;
+                    };
+                    let key = ((x * 1000.0).round() as i64, colour, table);
+                    if let Some((_, prev)) = seen.iter().find(|(k, _)| *k == key) {
+                        compared += 1;
+                        assert_eq!(
+                            band, *prev,
+                            "the grid line at x={x} is painted in two bands by one border"
+                        );
+                    } else {
+                        seen.push((key, band));
+                    }
                 }
-                seen.push(key);
             }
         }
     }
     assert!(
-        seen.len() >= 8,
-        "the audit must actually see borders — only {} found",
-        seen.len()
+        compared >= 2,
+        "the audit must actually compare two renderings of one line — only {compared}"
     );
 }
 

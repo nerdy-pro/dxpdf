@@ -986,20 +986,29 @@ mod tests {
         assert_eq!(result.size.width.raw(), 320.0);
     }
 
-    /// §17.4.15 + §17.4.38: a row inset from **both** table edges takes
-    /// `inside_v` on both sides, never the outer `left`/`right`.
+    /// §17.4.15 + §17.4.66: a row inset from **both** table edges takes the
+    /// outer `left`/`right` at its own two ends, and `inside_v` only between
+    /// its cells.
     ///
     /// `grid_before = 1` moves the first cell off the left edge; the two cells
     /// then span only grid columns 1–2 of 4, so the last one stops short of the
-    /// right edge as well. Distinct widths identify which border was applied —
-    /// `left`/`right` are 4pt, `inside_v` is 1pt — so a single 4pt rect
-    /// anywhere in the output means an outer border leaked onto an interior
-    /// edge.
+    /// right edge as well. §17.4.66 resolves an edge against "cell borders and
+    /// outer table borders" — neither of this row's outer ends has a cell
+    /// facing it, so the table's border is what faces them, wherever across the
+    /// grid they fall.
     ///
-    /// The right-edge half of this used to be spelled `grid_after: 1` on a
-    /// field no layout code read; it is the cells' spans that place that edge.
+    /// Distinct widths identify which border was applied: `left`/`right` are
+    /// 4pt and `inside_v` is 1pt, so the whole claim is three rects and their x.
+    ///
+    /// **This test asserted the opposite until a Word render of
+    /// `test-files/grid-gap-borders.docx` settled it** — that a gapped row's
+    /// ends are interior and take `inside_v`. It is inverted rather than
+    /// deleted because the geometry it pins is the same; only the answer
+    /// changed. Its old form merely *forbade* a 4pt rect without saying what
+    /// stood at those ends, which is why it also passed under a third reading
+    /// (nothing at all) that was equally wrong.
     #[test]
-    fn row_inset_from_both_edges_uses_inside_v_on_both_sides() {
+    fn row_inset_from_both_edges_takes_the_outer_borders_at_its_own_ends() {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("A"), simple_cell("B")],
             height_rule: None,
@@ -1009,25 +1018,20 @@ mod tests {
             border_overrides: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(50.0), Pt::new(50.0), Pt::new(10.0)];
+        let line = |w: f32| {
+            Some(TableBorderLine {
+                width: Pt::new(w),
+                color: RgbColor::BLACK,
+                style: TableBorderStyle::Single,
+            })
+        };
         let borders = TableBorderConfig {
             top: None,
             bottom: None,
-            left: Some(TableBorderLine {
-                width: Pt::new(4.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
-            right: Some(TableBorderLine {
-                width: Pt::new(4.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
+            left: line(4.0),
+            right: line(4.0),
             inside_h: None,
-            inside_v: Some(TableBorderLine {
-                width: Pt::new(1.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
+            inside_v: line(1.0),
         };
         let result = layout_table(
             &rows,
@@ -1039,31 +1043,30 @@ mod tests {
             false,
         );
 
-        // Vertical border rects have width equal to the border thickness
-        // (depth) and height >= 1. Find any 4pt-thick border rect.
-        let has_thick_vertical = result.commands.iter().any(|c| match c {
-            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
-                rect.size.width.raw() == 4.0 && rect.size.height.raw() > 1.0
-            }
-            _ => false,
-        });
-        assert!(
-            !has_thick_vertical,
-            "no 4pt-thick vertical border should appear: gridBefore/gridAfter \
-             mean cells aren't at the table's left/right edges, so left/right \
-             borders are not applied"
-        );
+        // Every vertical border rect, as (x, width). With no top/bottom borders
+        // configured there are no horizontals to filter out beyond the height
+        // test.
+        let mut verticals: Vec<(f32, f32)> = result
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Rect { rect, color }
+                    if *color == RgbColor::BLACK && rect.size.height.raw() > 1.0 =>
+                {
+                    Some((rect.origin.x.raw(), rect.size.width.raw()))
+                }
+                _ => None,
+            })
+            .collect();
+        verticals.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-        // Inside_v (1pt) should appear at the boundary between cell A and cell B.
-        let has_inside_v = result.commands.iter().any(|c| match c {
-            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
-                rect.size.width.raw() == 1.0
-            }
-            _ => false,
-        });
-        assert!(
-            has_inside_v,
-            "1pt inside_v border between cells must appear"
+        // Cell A occupies 10..60 and B 60..110 (grid 10/50/50/10, one column
+        // skipped). So: the row's leading edge inside A, the shared A|B edge
+        // resolved onto A's right, and the trailing edge inside B.
+        assert_eq!(
+            verticals,
+            vec![(10.0, 4.0), (59.0, 1.0), (106.0, 4.0)],
+            "leading 4pt w:left, interior 1pt insideV, trailing 4pt w:right"
         );
     }
 

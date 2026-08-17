@@ -150,12 +150,9 @@ pub(super) fn resolve_table_cell_borders(
             let mut cell_borders = resolve_cell_effective_borders(
                 cell_input,
                 row_table_borders,
-                GridPosition {
+                CellPosition {
                     row: row_idx,
-                    col: grid_idx,
-                    span,
                     num_rows,
-                    num_grid_cols,
                     first_in_row: cell_i == 0,
                     last_in_row: cell_i + 1 == cells_in_row,
                 },
@@ -398,45 +395,25 @@ fn unowned_runs(resolved: &[CellEdge], painted: &[bool], num_grid_cols: usize) -
     runs
 }
 
-/// Where one cell sits in the table's grid.
+/// Which edges of the table, and of its own row, one cell touches.
 ///
-/// The five indices travel together because they answer one question between
-/// them — is this cell at the table's top, bottom, left or right edge? — and
-/// none of them answers it alone. `col` is the cell's **absolute** starting grid
-/// column, past the row's §17.4.15 `gridBefore`, which is what makes the
-/// question different from "is it first or last in its row": `gridBefore` and
-/// §17.4.14 `gridAfter` can leave a row's first or last cell short of the
-/// table's edge.
-///
-/// Those two questions being different is exactly why both are carried. Crossing
-/// them gives three reachable states per vertical side, and each takes a
-/// different border:
-///
-/// | | at the table's edge (`col == 0`) | short of it |
-/// |---|---|---|
-/// | **first cell of its row** | the table's `w:left` | *nothing* — a gap faces it |
-/// | a later cell | unreachable | `insideV` — a cell faces it |
-///
-/// The bottom-right box is an interior edge under any reading. The top-right one
-/// is the case §17.4.36 leaves open; `tests/table_grid_gap_borders.rs` holds the
-/// argument for painting nothing there, and names the Word render that would
-/// overturn it.
+/// Deliberately **not** a grid position. The border rule turned out to be about
+/// the row's cells rather than the grid: a row's first `<w:tc>` takes the
+/// table's `w:left` whether or not it starts at grid column 0, because nothing
+/// faces its leading edge either way. Carrying `col`/`span`/`num_grid_cols`
+/// here invited the grid-column reading that two Word renders have now refuted,
+/// and nothing read them once the rule was right.
 #[derive(Clone, Copy)]
-pub(super) struct GridPosition {
+pub(super) struct CellPosition {
     pub(super) row: usize,
-    pub(super) col: usize,
-    /// §17.4.17 `gridSpan`, at least 1.
-    pub(super) span: usize,
     pub(super) num_rows: usize,
-    /// Grid columns in the whole table, not in this row.
-    pub(super) num_grid_cols: usize,
     /// Whether this cell is the first `<w:tc>` of its `<w:tr>` — *not* whether
     /// it starts at grid column 0. The two differ exactly when §17.4.15
-    /// `gridBefore` gaps the row.
+    /// `gridBefore` gaps the row, and the border rule follows this one.
     pub(super) first_in_row: bool,
     /// The same for the last `<w:tc>`, which §17.4.14 `gridAfter` — or a row
-    /// whose cells simply do not reach the grid's end — separates from
-    /// `col + span == num_grid_cols`.
+    /// whose cells simply do not reach the grid's end — separates from reaching
+    /// the last grid column.
     pub(super) last_in_row: bool,
 }
 
@@ -446,7 +423,7 @@ pub(super) struct GridPosition {
 pub(super) fn resolve_cell_effective_borders(
     cell: &TableCellInput,
     table_borders: Option<&TableBorderConfig>,
-    at: GridPosition,
+    at: CellPosition,
     // §17.4.45: whether this table has a non-zero `w:tblCellSpacing`. See the
     // `outer` closure below — it is the whole reason this parameter exists.
     spaced: bool,
@@ -458,8 +435,6 @@ pub(super) fn resolve_cell_effective_borders(
     // an empty table. No caller passes `num_rows == 0` today, but the field is
     // free and the guard would live entirely in the callers.
     let is_last_row = at.row + 1 == at.num_rows;
-    let is_first_col = at.col == 0;
-    let is_last_col = at.col + at.span >= at.num_grid_cols;
 
     // §17.4.45 / issue #168: with a non-zero cell spacing the outer edges are
     // **not** seeded from the table's own borders. A spaced cell is inset from
@@ -494,39 +469,37 @@ pub(super) fn resolve_cell_effective_borders(
     } else {
         tb.and_then(|b| b.inside_h).into()
     };
-    // §17.4.36 against §17.4.15/§17.4.14: a vertical side is one of three
-    // things, and only the first two have a table-level border to take.
+    // §17.4.36 against §17.4.15/§17.4.14: the question is about the row's
+    // **cells**, not about the grid.
     //
-    // A cell short of the table's edge that is nonetheless the first (or last)
-    // `<w:tc>` of its row has a **gap** beside it, not a cell: `gridBefore`
-    // leaves those grid columns blank. §17.4.36 gives `insideV` to "interior
-    // vertical edges" and never defines interior, but nothing faces this one, so
-    // it is not shared with anything; and §17.4.35/§17.4.37 place `w:left` and
-    // `w:right` *around the table*, whose boundary is elsewhere. So no
-    // table-level border is seeded and the cell's own `w:tcBorders` is left as
-    // the only way to ask for a line there.
+    // §17.4.66 resolves a cell edge against "cell borders and outer table
+    // borders". A row's first `<w:tc>` has no cell facing its leading edge —
+    // §17.4.15 `gridBefore` leaves those grid columns blank — so the table's own
+    // border is what faces it, wherever across the grid that edge happens to
+    // fall. `gridBefore` moves where the edge *is*, not what it is. Same for the
+    // last cell and §17.4.14 `gridAfter`.
     //
-    // **Word reference render needed** to separate this from the rival reading —
-    // that the gap-facing edge is the row's leading edge and takes `w:left`.
-    // `test-files/grid-gap-borders.docx` is built for exactly that measurement:
-    // a 3pt red line at cell `D`'s leading edge means the rival is right and
-    // this arm becomes `outer(tb.and_then(|b| b.left))`. What is already
-    // settled is that `insideV` is *wrong* here — Word paints nothing on that
-    // edge in `bidi-visual-table.docx`, where `w:left` is `nil`.
-    let leading_faces_a_gap = !is_first_col && at.first_in_row;
-    let trailing_faces_a_gap = !is_last_col && at.last_in_row;
-
-    let mut left: CellEdge = if is_first_col {
+    // So this is deliberately keyed on the cell's index in its row and not on
+    // its grid column, and the two differ exactly when a row is gapped.
+    // **Measured, not reasoned**: Word renders `grid-gap-borders.docx` with a
+    // 3pt red `w:left` on the leading edge of `D`, `F` and `G` and a 3pt green
+    // `w:right` on the trailing edge of `E` and `F`. It renders the same edge
+    // bare in `bidi-visual-table.docx`, whose `w:left` is `nil` — the same rule,
+    // since `nil` paints nothing.
+    //
+    // Two other readings were held here and both were wrong, which is why the
+    // grid-column form is not worth trying again: `insideV` (grid columns exist
+    // to the left, so the edge is interior) is refuted by the `nil` render, and
+    // *nothing at all* (§17.4.35 places `w:left` "around the table", and this
+    // edge is 50pt inside it) is refuted by this one. The second was argued from
+    // the spec's wording and fit every measurement available at the time.
+    let mut left: CellEdge = if at.first_in_row {
         outer(tb.and_then(|b| b.left))
-    } else if leading_faces_a_gap {
-        CellEdge::Absent
     } else {
         tb.and_then(|b| b.inside_v).into()
     };
-    let mut right: CellEdge = if is_last_col {
+    let mut right: CellEdge = if at.last_in_row {
         outer(tb.and_then(|b| b.right))
-    } else if trailing_faces_a_gap {
-        CellEdge::Absent
     } else {
         tb.and_then(|b| b.inside_v).into()
     };
@@ -2302,15 +2275,12 @@ mod edge_mapping_tests {
         let b = resolve_cell_effective_borders(
             &plain_cell(),
             Some(&config()),
-            GridPosition {
+            CellPosition {
                 row: row_idx,
-                col: grid_col,
-                span: 1,
                 num_rows,
-                num_grid_cols,
                 // A full row of single-column cells, which is what these cases
                 // model: cell index and grid column coincide, so no gap exists
-                // and the two "first/last" questions have the same answer.
+                // and "first in row" and "at grid column 0" have one answer.
                 first_in_row: grid_col == 0,
                 last_in_row: grid_col + 1 == num_grid_cols,
             },
