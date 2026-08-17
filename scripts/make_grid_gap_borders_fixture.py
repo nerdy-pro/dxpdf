@@ -46,7 +46,10 @@ Then, at cell `D`'s leading edge in table 1 (50pt in from the table's left):
 Row 3 asks the mirror-image question of §17.4.14 `gridAfter` at cell `E`'s
 trailing edge, where the candidates are 3pt green / 1pt blue / nothing. Row 4
 puts a gap on *both* sides of cell `F`, which is the case that would expose a fix
-that handles one end and not the other.
+that handles one end and not the other. Row 5 gaps the row's start but then has
+**two** cells, so the `G|H` boundary is genuinely interior and must keep its 1pt
+blue whatever is decided about the gap-facing edge — without it, suppressing
+every vertical border in a gapped row would satisfy every other row here.
 
 Table 2 is the same four rows with `w:left` and `w:right` set to `nil`. It
 reproduces the originally reported symptom in isolation — no `w:bidiVisual`, no
@@ -195,6 +198,16 @@ def rows() -> str:
             #     shows up here and nowhere else.
             "<w:tr><w:trPr><w:gridBefore w:val=\"1\"/><w:gridAfter w:val=\"1\"/></w:trPr>"
             + cell("F", "F4CCCC")
+            + "</w:tr>",
+            # 5 — a gapped row that still has an *interior* boundary of its own,
+            #     between G and H. This is the trap-detector: every other row
+            #     here has a single cell, so a change that suppressed every
+            #     vertical border in a row with a gap would satisfy all of them.
+            #     The G|H edge has a cell on both sides and must stay painted
+            #     whatever is decided about the gap-facing one.
+            "<w:tr><w:trPr><w:gridBefore w:val=\"1\"/></w:trPr>"
+            + cell("G", "D9EAD3")
+            + cell("H", "CFE2F3")
             + "</w:tr>",
         ]
     )
