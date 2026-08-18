@@ -213,7 +213,15 @@ fn reserve_cell_spacing(col_widths: Vec<Pt>, cell_spacing: Pt) -> Vec<Pt> {
 ///   reach past the edge by that displacement;
 /// * a *nested* table is measured against the page rather than against its
 ///   cell, so it may still overflow the cell — but the enclosing table's own
-///   width already keeps it on the sheet.
+///   width already keeps it on the sheet;
+/// * §17.4.66 draws a table's outer border **outside** its box
+///   (`table::borders::rasterize_border_grid`), and this is given the grid,
+///   not the borders that will be drawn around it — so a clamped table's own
+///   right border hangs off the sheet by its own width. Threading the resolved
+///   border config down here to subtract it would make the guard depend on a
+///   later phase; the overflow it leaves is one border wide rather than the
+///   460 pt the reported defect drew, and `tests/table_auto_width.rs` bounds it
+///   at exactly that.
 ///
 /// **Word reference render needed**: what width Word actually gives an
 /// overflowing `w:type="auto"` table, at `tblLayout` both `fixed` and
@@ -961,12 +969,36 @@ pub(super) fn build_table(
     // reading under which the shift is not a special case at all but the same
     // rule at zero — is not settled here; a **Word reference render** of a
     // full-width left-aligned table at a non-zero `tblInd` would settle it.
+    //
+    // # The leading border's half
+    //
+    // §17.4.66 straddles a table's own left edge on its first grid line, so half
+    // of that border falls to the left of the grid and half is charged to the
+    // first cell's content (`table::borders`, `measure_table_rows`). Word puts
+    // that cell's **text** at the indent, not the grid line: measured against
+    // `test-files/border-outer-box.docx`, whose two tables differ only in outer
+    // border weight — the 12pt one draws its frame at 60..72 against a 300pt
+    // grid and carries its *interior* line 6pt left with it, which straddling
+    // alone cannot do. So the grid starts half a leading border to the left of
+    // the indent, and the charged half puts the text back on it.
+    //
+    // Which is the same rule as the cell-margin shift above, one level up: both
+    // are the first cell's content inset, and the content is inset by whichever
+    // of the two is larger. They are combined only where that shift applies,
+    // though — the corpus tuning it was drawn from is untouched by this
+    // measurement, whose fixture declares no cell margins at all.
+    let leading_border = border_config
+        .as_ref()
+        .and_then(|b| b.left.as_ref())
+        .map(|l| crate::render::layout::table::borders::drawn_width(l) * 0.5)
+        .unwrap_or(Pt::ZERO);
     let indent = match table_indent {
-        Some(model::TableMeasure::Twips(tw)) if tw.raw() != 0 => Pt::from(*tw),
+        Some(model::TableMeasure::Twips(tw)) if tw.raw() != 0 => Pt::from(*tw) - leading_border,
         _ if is_full_width && is_left_aligned => -default_cell_margins
             .map(|m| Pt::from(m.left))
-            .unwrap_or(Pt::ZERO),
-        _ => Pt::ZERO,
+            .unwrap_or(Pt::ZERO)
+            .max(leading_border),
+        _ => -leading_border,
     };
 
     BuiltTable {

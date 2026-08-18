@@ -850,7 +850,7 @@ fn edge_width(e: CellEdge) -> Pt {
 /// it weighed a double at 3x while drawing it inside a single's band, dividing
 /// `w:sz` into thirds, and `tests/table_geometry_paint.rs` cited the weight rule
 /// as the justification with the inference running backwards.
-pub(super) fn drawn_width(b: &TableBorderLine) -> Pt {
+pub(crate) fn drawn_width(b: &TableBorderLine) -> Pt {
     b.width
         * match b.style {
             TableBorderStyle::Single => 1.0,
@@ -979,42 +979,62 @@ pub(super) fn rasterize_border_grid(
         edge_width(above).max(edge_width(below))
     };
 
-    // §17.4.66: **a border straddles a line two cells share, and sits inside an
-    // unshared one.** The interior of the grid is all shared edges, so a border
-    // there is centred on its line and a 1pt `insideV` comes out concentric with
-    // a 3pt `w:left` meeting it. The four lines bounding the slice are shared
-    // with nothing — there is no cell beyond them — so a border on one of them
-    // goes *inside*, which is the same rule [`emit_cell_frame`] applies to every
-    // edge of a spaced table, where no edge is shared at all.
+    // §17.4.66: **every vertical border straddles its grid line, the table's
+    // own two included.** A 1pt `insideV` and a 3pt `w:left` meeting at one line
+    // come out concentric on it, and so do the table's own edges — half of each
+    // falls outside the box the table reports.
     //
-    // Centring those four as well is what this fixed. The table's ink then ran
-    // half a border past its own declared box on every side: `TableSlice::size`
-    // stopped containing what the slice draws, and §17.4.63's auto-width guard —
-    // which is drawn at the *paper* edge — let 0.2pt of a full-width table off
-    // the page (`tests/table_auto_width.rs`).
+    // **Measured**, against `test-files/border-outer-box.docx`: a paragraph at
+    // the page margin above two tables of one `w:tblInd` and one `w:tblW`
+    // differing only in outer border weight. Word draws the 12pt frame at
+    // 60..72 and 360..372 against a 300pt grid, and moves the *interior* line
+    // 6pt left with it. Straddling alone would put that frame at 66..78 and
+    // leave the interior line where it was, so the whole table has shifted left
+    // by half its leading border — which is `build::table`'s indent, and the
+    // reading it already names: §17.4.50 `w:tblInd` measures to the **first
+    // cell's text edge**, so the grid sits half a leading border to the left of
+    // it and that cell's content lands back on the indent.
     //
-    // **Word reference render needed** for the half this does not settle: whether
-    // Word's own table box contains its outer borders or straddles them, which
-    // decides whether `w:tblInd` measures to the border's outer edge or to its
-    // centre. Both readings keep the ink on the paper, so nothing here is
-    // evidence between them; a table with `w:left` at 0.5pt and at 6pt, measuring
-    // the first column's text x, would be.
+    // Two readings were held here before and both are refuted by that render.
+    // Shifting these four *inside* the box kept `TableSlice::size` containing
+    // the ink but pushed the first column's text in by the whole border; hanging
+    // them wholly outside put the frame in the right place and the interior line
+    // in the wrong one, and vertically painted a top border straight through the
+    // paragraph above.
     //
-    // Expressed against the slice's box rather than against the *index* of the
-    // outermost line, and the difference is a case the index gets wrong: a page
-    // cut's boundary is the last one this slice paints but sits half a reserved
-    // strip above the slice's foot, so it is interior after all and its border
-    // belongs centred on it. Shift, never clamp — a border keeps the width it
-    // declared and moves, so a row too short to hold its own borders still
-    // paints both of them (at full width, overlapping) rather than two slivers.
-    let inside = |centre: Pt, w: Pt, limit: Pt| -> Pt {
-        let lo = centre - w * 0.5;
-        if lo < Pt::ZERO {
+    // What it costs is stated rather than hidden: a table's ink reaches half a
+    // border past the box it reports on the left and the right, so a full-width
+    // table paints into the page margin. That is what Word does, and §17.4.63's
+    // auto-width guard is drawn at the *paper* edge rather than the text
+    // column's precisely so the margin has room to absorb it
+    // (`tests/table_auto_width.rs`).
+    //
+    // The **horizontals are a different question and are left alone**, because
+    // nothing has measured them and the obvious symmetry is destructive: down
+    // the page there is no margin to hang into, only the block above and the
+    // block below, and `TableSlice::size` is what the stacker flows against. So
+    // a table's own top and bottom go *inside* the box, which is what `place_y`
+    // does and what it did before any of this.
+    //
+    // **Word reference render needed** for that half: a table with a 12pt
+    // `w:top` under a paragraph, measuring whether the paragraph's last baseline
+    // moves when the border grows. `border-outer-box.docx` asks only the
+    // horizontal question.
+    //
+    // `place_y` is expressed against the slice's box rather than against the
+    // *index* of the outermost line, and the difference is a case the index gets
+    // wrong: a page cut's boundary is the last one this slice paints but sits
+    // half a reserved strip above the slice's foot, so it is interior after all
+    // and its border belongs centred on it.
+    let place_x = |centre: Pt, w: Pt| -> Pt { centre - w * 0.5 };
+    let place_y = |centre: Pt, w: Pt, limit: Pt| -> Pt {
+        let straddling = centre - w * 0.5;
+        if straddling < Pt::ZERO {
             Pt::ZERO
-        } else if lo + w > limit {
+        } else if straddling + w > limit {
             limit - w
         } else {
-            lo
+            straddling
         }
     };
 
@@ -1054,10 +1074,7 @@ pub(super) fn rasterize_border_grid(
             else {
                 continue;
             };
-            let (jx, jy) = (
-                inside(gx, vw, box_size.width),
-                inside(*y, hw, box_size.height),
-            );
+            let (jx, jy) = (place_x(gx, vw), place_y(*y, hw, box_size.height));
             // §17.4.66's weight step, which is `drawn_width`: the heavier line
             // takes the square, and the horizontal wins only a tie.
             let along_vertical = drawn_width(&vertical) > drawn_width(&horizontal);
@@ -1163,7 +1180,7 @@ pub(super) fn rasterize_border_grid(
                 }
                 let Some(line) = edge.line() else { continue };
                 let w = drawn_width(&line);
-                let y0 = inside(*y, w, box_size.height);
+                let y0 = place_y(*y, w, box_size.height);
                 let band = (y0, y0 + w);
                 let Some((ry, rh)) = sub_rules(line.style, band.0, w).nth(k) else {
                     continue;
@@ -1191,7 +1208,7 @@ pub(super) fn rasterize_border_grid(
                     continue;
                 };
                 let w = drawn_width(&line);
-                let x0 = inside(gx, w, box_size.width);
+                let x0 = place_x(gx, w);
                 let band = (x0, x0 + w);
                 let Some((rx, rw)) = sub_rules(line.style, band.0, w).nth(k) else {
                     continue;
@@ -1671,15 +1688,19 @@ mod tests {
             false,
         );
 
+        // The box is the grid across x — the two outer verticals straddle its
+        // edges, half in and half out — and the grid plus its own two
+        // horizontals down y, which stay inside.
         assert_eq!(
             result.size,
             crate::render::geometry::PtSize::new(Pt::new(200.0), Pt::new(15.0))
         );
-        // Every border is 0.5pt (`w`) and half of one is `h`. The four lines
-        // bounding the table go **inside** it; the shared line at x = 100
-        // straddles. So the grid's four ordinates on the page are:
+        // Every border is 0.5pt (`w`) and half of one is `h`. **Every** vertical
+        // straddles its grid line, the table's own two included, while its top
+        // and bottom stay inside the box (`place_x`/`place_y`). So the grid's
+        // four ordinates on the page are:
         let (w, h) = (0.5_f32, 0.25_f32);
-        let (left, mid, right) = (0.0, 100.0 - h, 200.0 - w);
+        let (left, mid, right) = (-h, 100.0 - h, 200.0 - h);
         let (top, bottom) = (0.0, 15.0 - w);
         // The order is asserted along with the geometry, and is not incidental:
         // every junction is emitted **among the horizontals**, whose colour it
@@ -2147,19 +2168,20 @@ mod tests {
 
         // Down the middle of the cell: the two horizontals, each two 3pt rules a
         // 3pt gap apart — `drawn_width`, so a `w:sz` of 3pt occupies 9. These
-        // are the table's own boundaries, so each band goes **inside** it,
-        // keeping its outer face: 0..9 at the top and 11..20 at the foot of a
-        // 20pt row.
+        // are the table's own boundaries, and a *horizontal* one stays inside
+        // the box (`place_y`), keeping its outer face: 0..9 at the top and
+        // 11..20 at the foot of a 20pt row.
         assert_eq!(
             down(50.0),
             vec![(0.0, 3.0), (6.0, 9.0), (11.0, 14.0), (17.0, 20.0)],
             "a horizontal double splits along its short axis — stacked, not side by side"
         );
-        // Across the middle of the row: the two verticals, split the other way,
-        // in the bands 0..9 and 91..100.
+        // Across the middle of the row: the two verticals, split the other way
+        // and **straddling** their grid lines (`place_x`), so the 9pt bands are
+        // centred on x = 0 and x = 100.
         assert_eq!(
             across(10.0),
-            vec![(0.0, 3.0), (6.0, 9.0), (91.0, 94.0), (97.0, 100.0)],
+            vec![(-4.5, -1.5), (1.5, 4.5), (95.5, 98.5), (101.5, 104.5)],
             "a vertical double splits along *its* short axis"
         );
     }
@@ -2172,9 +2194,11 @@ mod tests {
     /// the claim is a relation between the two styles, and pinning the double's
     /// coordinates alone could not tell "three times" from "numbers I typed".
     /// Each run the single fills whole comes back as two runs of exactly that
-    /// width, one gap of it apart, growing **inward** from whichever face of the
-    /// control faces out — which says the rule width, the gap width and the
-    /// direction it grows in, all three.
+    /// width, one gap of it apart, on the same side of the box the control's
+    /// single sits on — which says the rule width, the gap width and the
+    /// direction it grows in, all three. The direction differs by axis, and that
+    /// is the point of probing both: a vertical straddles its grid line and a
+    /// horizontal stays inside the box (`place_x`/`place_y`).
     ///
     /// The rays cross the middle of an edge, never a corner, and that is
     /// load-bearing: a corner is the *product* of its two axes' rules
@@ -2220,18 +2244,33 @@ mod tests {
             let (near, far) = (control[0], control[1]);
             let w = near.1 - near.0;
             assert_eq!(w, far.1 - far.0, "the control's two edges: {control:?}");
-            assert_eq!(
-                runs(&dbl),
+            // A ray down the page crosses the two *horizontals*, which stay
+            // inside the box (`place_y`) and so grow inward from their own outer
+            // face; a ray across it crosses the two verticals, which straddle
+            // their grid lines (`place_x`) and so grow outward about their own
+            // centres.
+            let want = if probe {
                 vec![
-                    // The near edge grows inward from its own outer face…
                     (near.0, near.0 + w),
                     (near.0 + 2.0 * w, near.0 + 3.0 * w),
-                    // …and the far edge inward from its own.
                     (far.1 - 3.0 * w, far.1 - 2.0 * w),
                     (far.1 - w, far.1),
-                ],
-                "two rules of the declared width, one of it apart, growing \
-                 inward from the face that stays put — probe vertical={probe}"
+                ]
+            } else {
+                let centre = |r: (f32, f32)| (r.0 + r.1) * 0.5;
+                [near, far]
+                    .into_iter()
+                    .flat_map(|edge| {
+                        let c = centre(edge);
+                        [(c - 1.5 * w, c - 0.5 * w), (c + 0.5 * w, c + 1.5 * w)]
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                runs(&dbl),
+                want,
+                "two rules of the declared width, one of it apart — probe \
+                 vertical={probe}"
             );
         }
     }
@@ -2320,13 +2359,14 @@ mod tests {
         assert_eq!(
             verticals,
             vec![
-                // The table's own left edge, on grid line 0 and wholly inside it.
-                (0.0, 1.0),
+                // The table's own left edge, straddling grid line 0 — half of
+                // it left of the box, which begins at x = 0.
+                (-0.5, 1.0),
                 // The one interior vertical: the 2pt winner, straddling grid
                 // line 2 at x = 100 — the span cell's far side.
                 (100.0 - 1.0, 2.0),
-                // The table's own right edge, on grid line 3 and inside it.
-                (150.0 - 1.0, 1.0),
+                // The table's own right edge, straddling grid line 3 at x = 150.
+                (149.5, 1.0),
             ],
             "nothing may be painted at x = 50 — that grid boundary is interior \
              to the span — and the shared edge is drawn once, not once per cell"
@@ -2347,18 +2387,21 @@ mod tests {
     /// And the two horizontals still paint at full width, so neither declared
     /// border is silently dropped.
     ///
-    /// The verticals *are* dropped, and there is nowhere to put them: the span
-    /// they would occupy has negative height. What a renderer should instead do
-    /// with a row shorter than its borders — grow it, or clip the borders into
-    /// it — is not something §17.4.80 or §17.4.66 settles, and this test
-    /// deliberately does not pin an answer to it.
+    /// The verticals survive, and that is the whole of what changed here: a
+    /// table's own top and bottom edges hang **outside** the box
+    /// (`rasterize_border_grid`, measured against
+    /// `test-files/border-outer-box.docx`), so a 2pt row is not short of
+    /// anything and its verticals get their full 2pt. The pathology this test
+    /// was written for — a row with negative space left between its own
+    /// borders — cannot arise from *outer* ones at all now.
     ///
-    /// **This is the one case where two border rects legitimately overlap**, and
-    /// the only exception to the invariant the rasterizer otherwise guarantees
-    /// by construction (`tests/table_border_corners.rs`). The two boundaries are
-    /// 2pt apart and each carries a 3pt line centred on it, so the bands cross
-    /// whatever the model: it is the author's geometry that is impossible, not
-    /// the decomposition's. Any audit of the overlap invariant has to allow it.
+    /// It can still arise between two **interior** boundaries, which do straddle
+    /// their lines: an `hRule="exact"` row shorter than the two shared borders
+    /// above and below it, or an empty `<w:tr/>` between two rows. That is the
+    /// one case where two border rects legitimately overlap, it is the author's
+    /// geometry being impossible rather than the decomposition's, and any audit
+    /// of the overlap invariant has to allow it — see `is_parallel_crowding` in
+    /// `tests/table_border_corners.rs`.
     #[test]
     fn a_row_shorter_than_its_own_borders_drops_no_horizontal_and_inverts_nothing() {
         let thick = TableBorderLine {
@@ -2401,13 +2444,13 @@ mod tests {
                 .all(|&(_, y, _, h)| h == 3.0 && (y == 0.0 || y == -1.0)),
             "only the two 3pt boundary bands may be painted, got {r:?}"
         );
-        // And both are there at full width. The segments stop where the
-        // junctions at their ends begin (the 1pt `w:left`/`w:right`), and the
-        // junctions fill exactly that, so each band reaches 0..100 as a union.
+        // And both are there at full width. Each spans the cell *and* the half
+        // of the 1pt `w:left`/`w:right` that straddles out past either end of
+        // it, which the junctions at the band's two ends fill.
         for (label, y) in [("top", 0.5_f32), ("bottom", 1.5_f32)] {
             assert_eq!(
                 ink_along(&result.commands, y, false),
-                vec![(0.0, 100.0)],
+                vec![(-0.5, 100.5)],
                 "the {label} border spans the cell, junctions included"
             );
         }

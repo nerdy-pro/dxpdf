@@ -14,7 +14,7 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::{PtRect, PtSize};
 use crate::render::layout::draw_command::DrawCommand;
 
-mod borders;
+pub(crate) mod borders;
 mod emit;
 mod grid;
 mod measure;
@@ -1300,21 +1300,25 @@ mod tests {
                 })
                 .fold(Pt::ZERO, |a, w| a + w)
         };
-        // The top boundary is sampled inside its own band. A border on the
-        // table's own edge lies wholly within it (§17.4.66 — see
-        // `rasterize_border_grid`), so half a border-width down is inside the
-        // top border where one exists. The verticals reach that y too, which is
-        // why the assertion is on *how much* ink, not whether there is any:
-        // with a top border the whole 100pt column is covered, without it only
-        // the two verticals are.
+        // The top boundary is sampled inside its own band. A *horizontal* on the
+        // table's own edge lies wholly within the box (§17.4.66 — see `place_y`
+        // in `rasterize_border_grid`), so half a border-width down is inside the
+        // top border where one exists. Its two verticals do not: they straddle
+        // the box's own edges (`place_x`, measured against
+        // `test-files/border-outer-box.docx`), half of each falling outside. So
+        // with a top border the band reaches the whole 100pt column plus half a
+        // border of overhang at each end, and without one only the two verticals
+        // cross that y.
         let top = border_line.width * 0.5;
         let bottom = normal.size.height;
         let mid = bottom * 0.5;
 
         assert_eq!(
             ink_at_y(&normal, top),
-            col_widths[0],
-            "the unsuppressed table paints its own top boundary, right across"
+            col_widths[0] + border_line.width,
+            "the unsuppressed table paints its own top boundary, right across \
+             the column and over the halves of the two verticals straddling its \
+             ends"
         );
         assert_eq!(
             ink_at_y(&suppressed, top),
@@ -1327,10 +1331,10 @@ mod tests {
         // each table's *own* foot because the two are no longer the same height.
         //
         // And the height difference is itself the assertion, not an allowance —
-        // it is exactly one border, because a border is charged to the content
-        // box it insets (`resolve_table_cell_borders`), so removing one gives
-        // that room back. A rasterizer change that quietly altered the charging
-        // would show up here as some other number.
+        // it is exactly one border, because a table's own *horizontal* edge is
+        // charged to the content box it insets (`measure_table_rows`), so
+        // removing one gives that room back. Its verticals are charged nothing,
+        // hanging outside the box, and neither of them is what this measures.
         assert_eq!(
             normal.size.height - suppressed.size.height,
             border_line.width,
