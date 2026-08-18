@@ -11,34 +11,39 @@
 //!
 //! `test-files/border-junction-colour.docx` is the probe that asks, authored so
 //! each candidate reading predicts a *different picture*, and it has now been
-//! **measured in Word**. Its first two tables carry 12pt `insideV` and `insideH`
-//! of equal weight and style and swap which axis is darker:
+//! **measured in Word**. It answers in two halves.
+//!
+//! Tables 1 and 2 carry 12pt `insideV` and `insideH` of equal weight and style
+//! and swap which axis is darker:
 //!
 //! | reading | table 1 (V dark) | table 2 (H dark) |
 //! |---|---|---|
 //! | §17.4.66 precedence, darker wins | dark | dark |
 //! | the vertical always wins | dark | pale |
-//! | **the horizontal always wins** | **pale** | **dark** |
+//! | **the horizontal wins** | **pale** | **dark** |
 //!
-//! Word draws pale then dark. **The horizontal takes the square**, whatever the
-//! precedence order says — which refutes both the engine's rule and its
-//! tie-break in one render. The two tables tie on weight and style on purpose,
-//! which is what makes them a test of colour and also what keeps them silent
-//! about weight; `border-junction-colour.docx`'s fifth table is the follow-up
-//! that asks it, and `borders::junction_axes` records that the answer here is
-//! taken as unconditional on inference rather than on measurement.
+//! Word draws pale then dark — so **colour never decides**, and both of the
+//! engine's rules died in one render.
 //!
-//! Its third table crosses two 12pt `double`s, and Word draws the crossing as a
-//! 2 × 2 lattice of ink with *both* gaps running through it — reported as "the
-//! borders are negative space, so it looks like every cell has its own border",
-//! which is what a lattice looks like and what a square drawn along one axis
-//! never can: with the gaps interrupted at every crossing the picture is a
-//! continuous double-ruled grid, not a set of separated per-cell rectangles.
+//! Table 5 pairs a 12pt vertical with a 3pt horizontal, which is the case those
+//! two are silent about, since they tie the weights on purpose. Word draws the
+//! vertical through it. So the whole order is **§17.4.66's weight step and
+//! nothing after it**: the heavier line takes the square, the horizontal breaks
+//! a tie, and style and colour are never consulted.
 //!
-//! Both assertions below are *relations between two renders of one document* —
-//! a table against the same table with the two colours exchanged, and a `double`
-//! table against the same table drawn `single`. No page origin, glyph metric or
-//! absolute coordinate is pinned.
+//! Table 3 crosses two 12pt `double`s, and Word draws the crossing as a 2 × 2
+//! lattice of ink with *both* gaps running through it — reported as "the borders
+//! are negative space, so it looks like every cell has its own border", which is
+//! what a lattice looks like and what a square drawn along one axis never can:
+//! with the gaps interrupted at every crossing the picture is a continuous
+//! double-ruled grid, not a set of separated per-cell rectangles. That fixes the
+//! *geometry* of a square independently of who colours it — it is the product of
+//! the two axes' §17.18.2 rules either way.
+//!
+//! Every assertion below is a *relation between two renders of one document* —
+//! a table against the same table with its two colours exchanged, with its two
+//! weights exchanged, or drawn `single` instead of `double`. No page origin,
+//! glyph metric or absolute coordinate is pinned.
 
 use std::io::Write;
 
@@ -97,6 +102,12 @@ fn make_docx(document_xml: &str) -> Vec<u8> {
 /// 48pt tall and a horizontal one 88pt wide, so nothing but a junction is
 /// square, and [`squares`] needs to know no coordinate to find them.
 fn junction_table(v_colour: &str, h_colour: &str, style: &str) -> String {
+    weighted_table(v_colour, h_colour, style, SZ, SZ)
+}
+
+/// [`junction_table`] with a `w:sz` per axis, so the two lines meeting at a
+/// crossing can differ in weight.
+fn weighted_table(v_colour: &str, h_colour: &str, style: &str, v_sz: &str, h_sz: &str) -> String {
     let cells: String = (0..3)
         .map(|_| {
             r#"<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr><w:p/></w:tc>"#.to_string()
@@ -113,8 +124,8 @@ fn junction_table(v_colour: &str, h_colour: &str, style: &str) -> String {
       <w:tblPr>
         <w:tblW w:w="6000" w:type="dxa"/>
         <w:tblBorders>
-          <w:insideV w:val="{style}" w:sz="{SZ}" w:space="0" w:color="{v_colour}"/>
-          <w:insideH w:val="{style}" w:sz="{SZ}" w:space="0" w:color="{h_colour}"/>
+          <w:insideV w:val="{style}" w:sz="{v_sz}" w:space="0" w:color="{v_colour}"/>
+          <w:insideH w:val="{style}" w:sz="{h_sz}" w:space="0" w:color="{h_colour}"/>
         </w:tblBorders>
         <w:tblLayout w:type="fixed"/>
       </w:tblPr>
@@ -229,7 +240,7 @@ fn centre(b: ((f32, f32), (f32, f32))) -> (f32, f32) {
 /// than an observation: either one alone is consistent with two of the three
 /// readings in the module doc, and only the pair names one.
 #[test]
-fn the_square_where_two_borders_cross_takes_the_horizontals_colour() {
+fn at_equal_weight_the_square_takes_the_horizontals_colour() {
     let v_dark = layout(&junction_table("000000", "BFBFBF", "single"));
     let h_dark = layout(&junction_table("BFBFBF", "000000", "single"));
 
@@ -264,6 +275,48 @@ fn the_square_where_two_borders_cross_takes_the_horizontals_colour() {
             Some(BLACK),
             "and dark once the colours are exchanged, at {at:?}"
         );
+    }
+}
+
+/// …but weight comes first: **the heavier of the two takes the crossing**,
+/// and the horizontal only wins when they tie.
+///
+/// Word's answer to the probe's fifth table, which pairs a 12pt vertical with a
+/// 3pt horizontal — the case tables 1 and 2 are silent about, since they tie the
+/// two axes on weight on purpose. Word draws the vertical through it.
+///
+/// Asserted as a pair, one table each way round, and that is what makes it about
+/// **weight** rather than about the axis: heavy-vertical gives the vertical's
+/// colour and heavy-horizontal the horizontal's, so no single-axis rule and no
+/// colour rule survives both. Together with the equal-weight case above, the
+/// whole order is: heavier wins, ties go to the horizontal, colour never
+/// decides — which is [MS-OI29500] §17.4.66's weight step with the horizontal
+/// standing in for the style and colour steps that follow it there.
+#[test]
+fn the_heavier_of_the_two_borders_takes_the_square() {
+    // 12pt against 3pt. Both black-vs-pale, so the crossing's colour names the
+    // axis that won it whichever way round the weights are.
+    let heavy_v = layout(&weighted_table("000000", "BFBFBF", "single", SZ, "24"));
+    let heavy_h = layout(&weighted_table("BFBFBF", "000000", "single", "24", SZ));
+
+    for (pages, want, which) in [
+        (&heavy_v, BLACK, "the vertical is the heavy line here"),
+        (
+            &heavy_h,
+            BLACK,
+            "and the horizontal is, once they are exchanged",
+        ),
+    ] {
+        let nodes = crossings(pages);
+        assert_eq!(nodes.len(), 4, "{which}: crossings {nodes:?}");
+        for node in nodes {
+            let at = centre(node);
+            assert_eq!(
+                ink_at(pages, at),
+                Some(want),
+                "{which}, so the crossing at {at:?} should be its colour"
+            );
+        }
     }
 }
 

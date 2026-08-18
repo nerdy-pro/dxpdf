@@ -1024,15 +1024,20 @@ pub(super) fn rasterize_border_grid(
     //
     //    Held rather than emitted because two things need them. A segment is
     //    what the junctions it runs into leave of its interval, so they must all
-    //    be known before any segment is cut. And every junction is emitted
-    //    *among the horizontals*, whose colour it takes — see `junction_axes`
-    //    and the passes below.
+    //    be known before any segment is cut. And each one is emitted *among the
+    //    segments of the axis whose colour it took*, so that
+    //    `coalesce_abutting_rects` can fuse the pair — see `junction_axes` and
+    //    the passes below.
     struct Junction {
         node: (usize, usize),
         x: (Pt, Pt),
         y: (Pt, Pt),
         color: RgbColor,
-        /// §17.18.2: how the **vertical** meeting here divides across x.
+        /// Whether the **vertical** is the line that won this square, which is
+        /// only about its colour and which pass emits it. The geometry below is
+        /// the product of both axes either way.
+        along_vertical: bool,
+        /// §17.18.2: how the vertical meeting here divides across x.
         v_style: TableBorderStyle,
         /// … and the horizontal across y. The square is the product of the two,
         /// so a `double` on either axis runs its gap through the crossing.
@@ -1053,11 +1058,19 @@ pub(super) fn rasterize_border_grid(
                 inside(gx, vw, box_size.width),
                 inside(*y, hw, box_size.height),
             );
+            // §17.4.66's weight step, which is `drawn_width`: the heavier line
+            // takes the square, and the horizontal wins only a tie.
+            let along_vertical = drawn_width(&vertical) > drawn_width(&horizontal);
             junctions.push(Junction {
                 node: (b, c),
                 x: (jx, jx + vw),
                 y: (jy, jy + hw),
-                color: horizontal.color,
+                color: if along_vertical {
+                    vertical.color
+                } else {
+                    horizontal.color
+                },
+                along_vertical,
                 v_style: vertical.style,
                 h_style: horizontal.style,
             });
@@ -1073,8 +1086,11 @@ pub(super) fn rasterize_border_grid(
             }
         }
     };
-    let junction_at =
-        |b: usize, c: usize| -> Option<&Junction> { junctions.iter().find(|j| j.node == (b, c)) };
+    let junction_at = |b: usize, c: usize, vertical: bool| -> Option<&Junction> {
+        junctions
+            .iter()
+            .find(|j| j.node == (b, c) && j.along_vertical == vertical)
+    };
 
     // 2 and 3. The segments: each one's interval **minus every junction whose
     //    square it runs into**.
@@ -1106,20 +1122,18 @@ pub(super) fn rasterize_border_grid(
             .collect()
     };
 
-    // The horizontal pass walks its boundary **in order**, emitting each
-    // junction just before the segment that abuts it. The order is not
-    // cosmetic: a junction takes the horizontal's colour, so it and the segment
-    // beside it are the same colour and always share an edge, and
+    // Each pass walks its own axis **in order**, emitting each junction it won
+    // just before the segment that abuts it. The order is not cosmetic: a
+    // junction has the colour of the line that won it, so it and that line's
+    // segment beside it are the same colour and always share an edge, and
     // `coalesce_abutting_rects` fuses such a pair only when the two are
     // *consecutive* commands. Emitted apart they never are, and each one reaches
     // the page as a seam under a rasterizer that anti-aliases every fill on its
     // own — `tests/table_shading_seams.rs` is that defect's audit and caught
     // exactly this.
-    //
-    // The vertical pass emits no junctions: they all belong to the horizontals.
     for (b, (y, lines)) in boundaries.iter().enumerate() {
         for (c, edge) in lines.iter().enumerate() {
-            if let Some(j) = junction_at(b, c) {
+            if let Some(j) = junction_at(b, c, false) {
                 emit_junction(commands, j);
             }
             let Some(line) = edge.line() else { continue };
@@ -1135,13 +1149,16 @@ pub(super) fn rasterize_border_grid(
                 );
             }
         }
-        if let Some(j) = junction_at(b, lines.len()) {
+        if let Some(j) = junction_at(b, lines.len(), false) {
             emit_junction(commands, j);
         }
     }
 
     for (c, &gx) in x.iter().enumerate() {
-        for row in placed {
+        for (b, row) in placed.iter().enumerate() {
+            if let Some(j) = junction_at(b, c, true) {
+                emit_junction(commands, j);
+            }
             let Some(line) = plan.vertical(c, row.plan_row).line() else {
                 continue;
             };
@@ -1156,6 +1173,9 @@ pub(super) fn rasterize_border_grid(
                     false,
                 );
             }
+        }
+        if let Some(j) = junction_at(placed.len(), c, true) {
+            emit_junction(commands, j);
         }
     }
 }
@@ -1197,47 +1217,41 @@ fn subtract(a: Pt, b: Pt, cuts: &[(Pt, Pt)]) -> Vec<(Pt, Pt)> {
 /// are correct and all four want the square.
 ///
 /// So the rule is this engine's, and it is now **measured** rather than guessed.
-/// `test-files/border-junction-colour.docx` is the probe: its first two tables
-/// carry 12pt `insideV` and `insideH` of equal weight and style and swap which
-/// axis is darker, so precedence (darker wins), always-vertical and
-/// always-horizontal each predict a different pair of crossing colours. Word
-/// draws the pale one in the first table and the dark one in the second —
-/// **the horizontal takes the square**, whichever axis carries the darker line.
-/// That refuted what stood here before, which was `border_precedence`'s winner
-/// with a tie broken toward the vertical.
+/// `test-files/border-junction-colour.docx` is the probe, and its tables answer
+/// in two halves. Tables 1 and 2 carry 12pt `insideV` and `insideH` of equal
+/// weight and style and swap which axis is darker; Word draws the pale crossing
+/// then the dark one, so **at equal weight the horizontal takes the square** and
+/// colour never decides. Table 5 pairs a 12pt vertical with a 3pt horizontal —
+/// the case those two are silent about — and Word draws the vertical through it,
+/// so **the heavier line wins** and the horizontal only breaks a tie.
 ///
-/// The vertical is still returned, because the square is not one colour's rect:
-/// §17.18.2 splits each axis across its own short side, and the square is the
-/// **product** of the two splits. Word's third table crosses two 12pt `double`s
-/// and draws a 2 × 2 lattice of ink with both gaps running through — reported as
-/// "the borders are negative space, so it looks like every cell has its own
-/// border", which is what a lattice looks like and what neither a single square
-/// nor a pair of rungs can be. So each axis contributes its own [`sub_rules`],
-/// and a `single` contributing one full band is the same rule, not a case.
+/// Which is §17.4.66's own weight step, and nothing after it: weight is
+/// [`drawn_width`], and the style and colour steps that follow there are
+/// replaced by "the horizontal". Both of the engine's earlier rules — the full
+/// `border_precedence` order, and a tie broken toward the vertical — are
+/// refuted, the first by tables 1 and 2 and the second by them as well.
+///
+/// The caller picks the colour; **both** lines are returned because the square
+/// is not one colour's rect. §17.18.2 splits each axis across its own short
+/// side, and the square is the **product** of the two splits, whichever won it.
+/// Word's third table crosses two 12pt `double`s and draws a 2 × 2 lattice of
+/// ink with both gaps running through — reported as "the borders are negative
+/// space, so it looks like every cell has its own border", which is what a
+/// lattice looks like and what neither a single square nor a pair of rungs can
+/// be. So each axis contributes its own [`sub_rules`], and a `single`
+/// contributing one full band is the same rule, not a case.
 ///
 /// Within each axis the two facing lines are ranked by **declared width first**
 /// and [`border_precedence`] only to break a tie. Width first because the square
 /// is as wide as the widest line reaching it (`v_at_node`/`h_at_node`), so
 /// dividing it by any other line's rules would put the crossing out of step with
-/// the segment it continues. `border_precedence` alone would not do: its first
-/// key is §17.4.66's *weight*, which scales a `double` threefold, so a 1pt
-/// double outranks a 2pt single there while the square is 2pt across.
+/// the segment it continues.
 ///
-/// **Word reference render needed** for two shapes the measured tables do not
-/// carry, both now added to the probe and both still open.
-///
-/// A `single` crossing a `double`, where the product punches the double's gap
+/// **Word reference render needed** for the one shape the probe does not settle:
+/// a `single` crossing a `double`, where the product punches the double's gap
 /// through the solid line; the rival reading runs the solid line through
-/// unbroken and interrupts only the double.
-///
-/// And a crossing whose two lines differ in **weight**. Tables 1 and 2 tie them
-/// on purpose — that is what makes them a test of colour — so "the horizontal
-/// wins" is measured only where the two are equally heavy. Taking it as
-/// unconditional is inference: the simplest rule that produces those two renders
-/// is a paint order, horizontals over verticals, and a paint order has no weight
-/// term. It is also visible, so it is worth knowing what it costs — it is what
-/// puts a 1pt grey square on the 3pt red and green verticals of
-/// `test-files/grid-gap-borders.docx` at every row boundary they cross.
+/// unbroken and interrupts only the double. That is the probe's fourth table,
+/// and it is still open.
 fn junction_axes(
     plan: &BorderPlan,
     placed: &[PlacedRow],

@@ -97,9 +97,10 @@ equal weight and style, so precedence falls through to §17.4.66's colour rule
     vertical always     table 1 black, table 2 light grey
     horizontal always   table 1 light grey, table 2 black   <- Word
 
-Word draws pale then dark: **the horizontal takes the square**, whichever axis
-carries the darker line. Both of the engine's rules died in one render. (What it
-does when the two differ in *weight* is table 5, below, and is still open.)
+Word draws pale then dark: **at equal weight the horizontal takes the square**,
+whichever axis carries the darker line, so colour never decides. Both of the
+engine's rules died in one render. What happens when the two differ in weight is
+table 5, and it is measured too — see below.
 
 Table 3 was the known limit rather than a discrimination, and Word settled it
 too. Both axes are 12pt `double`, so each is two 4pt rules with a 4pt gap; Word
@@ -112,29 +113,24 @@ So a crossing is the **product** of its two axes' §17.18.2 rules, coloured by t
 horizontal, and a `single` contributing one full band is that same rule rather
 than a case of its own.
 
-Tables 4 and 5 are what those two answers newly put at stake, and both are
-**open**.
-
-Table 4 asks about the product: a 12pt `single` horizontal crossing a 12pt
-`double` vertical. The product punches the double's 4pt gap through the solid
-line; the rival reading is that a solid line runs through unbroken and only the
-double is interrupted.
-
-Table 5 asks how far "the horizontal wins" reaches. Tables 1 and 2 tie the two
-axes on weight *on purpose* — that is what makes them a test of colour — so they
-say nothing about a crossing whose two lines differ in weight. A 12pt black
-vertical against a 3pt pale horizontal separates the two readings:
+Table 5 asks how far "the horizontal wins" reaches, and is **MEASURED**. Tables
+1 and 2 tie the two axes on weight *on purpose* — that is what makes them a test
+of colour — so they say nothing about a crossing whose two lines differ in it. A
+12pt black vertical against a 3pt pale horizontal separates the two readings:
 
     horizontal always   the thick black vertical is interrupted at every
                         crossing by a 12pt wide, 3pt tall pale band
     heavier wins        the crossing is black and the pale horizontal is the
-                        one interrupted
+                        one interrupted                              <- Word
 
-The engine takes the first, because the rule that explains tables 1 and 2 most
-simply is a paint order — horizontals over verticals — and a paint order has no
-weight term in it. That is inference, not measurement, and it is visible: it is
-what changed 27 crossings in `grid-gap-borders.docx`, whose 3pt red and green
-verticals now carry a 1pt grey square wherever a row boundary crosses them.
+Word draws the vertical through it. So the order is **§17.4.66's weight step and
+nothing after it**: the heavier line takes the square, the horizontal breaks a
+tie, and neither style nor colour is ever consulted.
+
+Table 4 is the one still **open**, and it asks about the product: a 12pt `single`
+horizontal crossing a 12pt `double` vertical. The product punches the double's
+gap through the solid line; the rival reading is that a solid line runs through
+unbroken and only the double is interrupted.
 
 ---------------------------------------------------------------------------
 
@@ -514,8 +510,9 @@ def junction_probe() -> str:
                 "  - pale in table 1, dark in table 2      -> the horizontal always wins"
             ),
             para(
-                "MEASURED: Word draws pale in table 1 and dark in table 2. The "
-                "horizontal takes the square, whichever axis carries the darker line."
+                "MEASURED: Word draws pale in table 1 and dark in table 2. At equal "
+                "weight the horizontal takes the square, whichever axis is darker - so "
+                "colour never decides. Table 5 adds the weight half."
             ),
             heading("Table 1 - vertical dark, horizontal pale."),
             table(black, grey, "single", "abc"),
@@ -547,14 +544,14 @@ def junction_probe() -> str:
             mixed_table(black, black, "efg"),
             para(""),
             heading(
-                "Table 5 - a 12pt black vertical crossing a 3pt pale horizontal. OPEN."
+                "Table 5 - a 12pt black vertical crossing a 3pt pale horizontal. MEASURED."
             ),
             para(
                 "Tables 1 and 2 tie the two axes on weight, which is what makes them a "
-                "test of colour and also what keeps them silent about weight. Read the "
-                "crossings: a pale 3pt band interrupting the thick black vertical means "
-                "the horizontal wins whatever its weight, and a black crossing that "
-                "interrupts the pale line instead means the heavier line wins."
+                "test of colour and also what keeps them silent about weight. Word draws "
+                "the vertical through these crossings, so the heavier line wins and the "
+                "horizontal only breaks a tie - which is the 17.4.66 weight step and "
+                "nothing after it."
             ),
             uneven_table(black, grey, "hij"),
         ]
