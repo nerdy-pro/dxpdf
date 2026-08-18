@@ -38,6 +38,7 @@ use super::types::{
     TableRowInput, VerticalMergeState,
 };
 use crate::render::layout::draw_command::DrawCommand;
+use crate::render::resolve::color::RgbColor;
 
 /// One cell edge during and after §17.4.38 resolution.
 ///
@@ -825,7 +826,36 @@ pub(super) struct PlacedRow {
 
 /// The width a resolved edge paints, zero where it paints nothing.
 fn edge_width(e: CellEdge) -> Pt {
-    e.line().map(|l| l.width).unwrap_or(Pt::ZERO)
+    e.line().map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO)
+}
+
+/// How much of the page a border of this style and `w:sz` actually occupies.
+///
+/// **§17.18.2's `w:sz` is the width of one rule, not of the whole border.** A
+/// `single` is that one rule; a `double` is two of them with a gap of the same
+/// `w:sz` between, so it is **three times as wide** as a `single` of equal
+/// `w:sz`. Every geometric question about a border — how much of a cell it
+/// insets, how wide the §17.4.38 strip between two rows is, how big a junction
+/// square is, where the rules themselves fall — is about this width and not
+/// about `w:sz`.
+///
+/// **Measured in Word**, off `test-files/border-junction-colour.docx`: its
+/// fourth table crosses a 12pt `single` with a 12pt `double`, and Word draws the
+/// double as *cell, 12pt rule, gap, 12pt rule, cell*.
+///
+/// This is the same fact as [`border_weight`], which is why they share a body.
+/// [MS-OI29500] §17.4.66 ranks a `double` above a `single` of equal `w:sz`
+/// threefold, and the reason is simply that it is three times as wide — one
+/// fact, not two rules that happen to agree. The engine used to hold them apart:
+/// it weighed a double at 3x while drawing it inside a single's band, dividing
+/// `w:sz` into thirds, and `tests/table_geometry_paint.rs` cited the weight rule
+/// as the justification with the inference running backwards.
+pub(super) fn drawn_width(b: &TableBorderLine) -> Pt {
+    b.width
+        * match b.style {
+            TableBorderStyle::Single => 1.0,
+            TableBorderStyle::Double => 3.0,
+        }
 }
 
 /// §17.4.66: paint one page slice's share of a table's border grid.
@@ -994,14 +1024,19 @@ pub(super) fn rasterize_border_grid(
     //
     //    Held rather than emitted because two things need them. A segment is
     //    what the junctions it runs into leave of its interval, so they must all
-    //    be known before any segment is cut. And a junction is emitted *among*
-    //    the segments of the axis that won it — see the passes below.
+    //    be known before any segment is cut. And every junction is emitted
+    //    *among the horizontals*, whose colour it takes — see `junction_axes`
+    //    and the passes below.
     struct Junction {
         node: (usize, usize),
         x: (Pt, Pt),
         y: (Pt, Pt),
-        line: TableBorderLine,
-        along_vertical: bool,
+        color: RgbColor,
+        /// §17.18.2: how the **vertical** meeting here divides across x.
+        v_style: TableBorderStyle,
+        /// … and the horizontal across y. The square is the product of the two,
+        /// so a `double` on either axis runs its gap through the crossing.
+        h_style: TableBorderStyle,
     }
     let mut junctions: Vec<Junction> = Vec::new();
     for (b, (y, _)) in boundaries.iter().enumerate() {
@@ -1010,7 +1045,7 @@ pub(super) fn rasterize_border_grid(
             if vw <= Pt::ZERO || hw <= Pt::ZERO {
                 continue;
             }
-            let Some((line, along_vertical)) = junction_line(plan, placed, &boundaries, b, c)
+            let (Some(horizontal), Some(vertical)) = junction_axes(plan, placed, &boundaries, b, c)
             else {
                 continue;
             };
@@ -1022,24 +1057,24 @@ pub(super) fn rasterize_border_grid(
                 node: (b, c),
                 x: (jx, jx + vw),
                 y: (jy, jy + hw),
-                line,
-                along_vertical,
+                color: horizontal.color,
+                v_style: vertical.style,
+                h_style: horizontal.style,
             });
         }
     }
     let emit_junction = |commands: &mut Vec<DrawCommand>, j: &Junction| {
-        emit_border_rect(
-            commands,
-            &j.line,
-            PtRect::from_xywh(j.x.0, j.y.0, j.x.1 - j.x.0, j.y.1 - j.y.0),
-            !j.along_vertical,
-        );
+        for (x0, w) in sub_rules(j.v_style, j.x.0, j.x.1 - j.x.0) {
+            for (y0, h) in sub_rules(j.h_style, j.y.0, j.y.1 - j.y.0) {
+                commands.push(DrawCommand::Rect {
+                    rect: PtRect::from_xywh(x0, y0, w, h),
+                    color: j.color,
+                });
+            }
+        }
     };
-    let junction_at = |b: usize, c: usize, vertical: bool| -> Option<&Junction> {
-        junctions
-            .iter()
-            .find(|j| j.node == (b, c) && j.along_vertical == vertical)
-    };
+    let junction_at =
+        |b: usize, c: usize| -> Option<&Junction> { junctions.iter().find(|j| j.node == (b, c)) };
 
     // 2 and 3. The segments: each one's interval **minus every junction whose
     //    square it runs into**.
@@ -1071,58 +1106,56 @@ pub(super) fn rasterize_border_grid(
             .collect()
     };
 
-    // Each pass walks its own axis **in order**, emitting each junction it owns
-    // just before the segment that abuts it. The order is not cosmetic: a
-    // junction and the segment beside it are usually the same colour and always
-    // share an edge, and `coalesce_abutting_rects` fuses such a pair only when
-    // the two are *consecutive* commands. Emitted in two separate passes they
-    // never are, and every one of them reaches the page as a seam under a
-    // rasterizer that anti-aliases each fill on its own —
-    // `tests/table_shading_seams.rs` is that defect's audit and caught exactly
-    // this.
+    // The horizontal pass walks its boundary **in order**, emitting each
+    // junction just before the segment that abuts it. The order is not
+    // cosmetic: a junction takes the horizontal's colour, so it and the segment
+    // beside it are the same colour and always share an edge, and
+    // `coalesce_abutting_rects` fuses such a pair only when the two are
+    // *consecutive* commands. Emitted apart they never are, and each one reaches
+    // the page as a seam under a rasterizer that anti-aliases every fill on its
+    // own — `tests/table_shading_seams.rs` is that defect's audit and caught
+    // exactly this.
+    //
+    // The vertical pass emits no junctions: they all belong to the horizontals.
     for (b, (y, lines)) in boundaries.iter().enumerate() {
         for (c, edge) in lines.iter().enumerate() {
-            if let Some(j) = junction_at(b, c, false) {
+            if let Some(j) = junction_at(b, c) {
                 emit_junction(commands, j);
             }
             let Some(line) = edge.line() else { continue };
-            let y0 = inside(*y, line.width, box_size.height);
-            let band = (y0, y0 + line.width);
+            let w = drawn_width(&line);
+            let y0 = inside(*y, w, box_size.height);
+            let band = (y0, y0 + w);
             for (x0, x1) in subtract(x[c], x[c + 1], &cuts_across(band, false)) {
                 emit_border_rect(
                     commands,
                     &line,
-                    PtRect::from_xywh(x0, band.0, x1 - x0, line.width),
+                    PtRect::from_xywh(x0, band.0, x1 - x0, w),
                     true,
                 );
             }
         }
-        if let Some(j) = junction_at(b, lines.len(), false) {
+        if let Some(j) = junction_at(b, lines.len()) {
             emit_junction(commands, j);
         }
     }
 
     for (c, &gx) in x.iter().enumerate() {
-        for (b, row) in placed.iter().enumerate() {
-            if let Some(j) = junction_at(b, c, true) {
-                emit_junction(commands, j);
-            }
+        for row in placed {
             let Some(line) = plan.vertical(c, row.plan_row).line() else {
                 continue;
             };
-            let x0 = inside(gx, line.width, box_size.width);
-            let band = (x0, x0 + line.width);
+            let w = drawn_width(&line);
+            let x0 = inside(gx, w, box_size.width);
+            let band = (x0, x0 + w);
             for (y0, y1) in subtract(row.top, row.bottom, &cuts_across(band, true)) {
                 emit_border_rect(
                     commands,
                     &line,
-                    PtRect::from_xywh(band.0, y0, line.width, y1 - y0),
+                    PtRect::from_xywh(band.0, y0, w, y1 - y0),
                     false,
                 );
             }
-        }
-        if let Some(j) = junction_at(placed.len(), c, true) {
-            emit_junction(commands, j);
         }
     }
 }
@@ -1155,60 +1188,103 @@ fn subtract(a: Pt, b: Pt, cuts: &[(Pt, Pt)]) -> Vec<(Pt, Pt)> {
     runs
 }
 
-/// Which of the (up to four) borders meeting at a node paints its square.
+/// The two lines that make the square at a node: `(horizontal, vertical)`.
 ///
-/// **ECMA-376 does not settle this, and neither does [MS-OI29500].** The
-/// standard specifies no stroke geometry at all, and §17.4.66's precedence
-/// list is about *conflicting* declarations on one edge — a junction is not a
-/// conflict, since all four segments meeting there are correct and all four
-/// want the square.
+/// **ECMA-376 does not settle what happens where two table borders cross**, and
+/// neither does [MS-OI29500]. The standard specifies no stroke geometry at all,
+/// and §17.4.66's precedence list is about *conflicting* declarations on one
+/// edge — a junction is not a conflict, since all four segments meeting there
+/// are correct and all four want the square.
 ///
-/// So the rule is this engine's, and it is chosen to be the one ordering the
-/// spec does supply rather than an invented one: the square goes to the
-/// [`border_precedence`] winner among the segments that reach it. Heavier wins,
-/// then the earlier style, then the darker colour; identical lines are
-/// indistinguishable and the choice between them is not observable.
+/// So the rule is this engine's, and it is now **measured** rather than guessed.
+/// `test-files/border-junction-colour.docx` is the probe: its first two tables
+/// carry 12pt `insideV` and `insideH` of equal weight and style and swap which
+/// axis is darker, so precedence (darker wins), always-vertical and
+/// always-horizontal each predict a different pair of crossing colours. Word
+/// draws the pale one in the first table and the dark one in the second —
+/// **the horizontal takes the square**, whichever axis carries the darker line.
+/// That refuted what stood here before, which was `border_precedence`'s winner
+/// with a tie broken toward the vertical.
 ///
-/// **Word reference render needed** to confirm it: a crossing where a red
-/// vertical and a blue horizontal tie on weight, reading the square's colour off
-/// the page. `test-files/grid-gap-borders.docx` is one 3pt horizontal away from
-/// being that probe.
+/// The vertical is still returned, because the square is not one colour's rect:
+/// §17.18.2 splits each axis across its own short side, and the square is the
+/// **product** of the two splits. Word's third table crosses two 12pt `double`s
+/// and draws a 2 × 2 lattice of ink with both gaps running through — reported as
+/// "the borders are negative space, so it looks like every cell has its own
+/// border", which is what a lattice looks like and what neither a single square
+/// nor a pair of rungs can be. So each axis contributes its own [`sub_rules`],
+/// and a `single` contributing one full band is the same rule, not a case.
 ///
-/// The bool says which **axis** the square is drawn along, which matters only
-/// for §17.18.2 `double`: a double splits into two sub-lines across its own
-/// short side, so a square inherited from a vertical must split side by side and
-/// one from a horizontal must stack. At equal precedence the vertical takes it,
-/// which is a tie-break with no evidence behind it — and the case that exposes
-/// the limit is a double crossing a double, where the honest answer is neither
-/// axis but a 2 × 2 lattice of ink with the two gaps running through it. This
-/// engine draws two sub-lines there and not four squares.
-fn junction_line(
+/// Within each axis the two facing lines are ranked by **declared width first**
+/// and [`border_precedence`] only to break a tie. Width first because the square
+/// is as wide as the widest line reaching it (`v_at_node`/`h_at_node`), so
+/// dividing it by any other line's rules would put the crossing out of step with
+/// the segment it continues. `border_precedence` alone would not do: its first
+/// key is §17.4.66's *weight*, which scales a `double` threefold, so a 1pt
+/// double outranks a 2pt single there while the square is 2pt across.
+///
+/// **Word reference render needed** for two shapes the measured tables do not
+/// carry, both now added to the probe and both still open.
+///
+/// A `single` crossing a `double`, where the product punches the double's gap
+/// through the solid line; the rival reading runs the solid line through
+/// unbroken and interrupts only the double.
+///
+/// And a crossing whose two lines differ in **weight**. Tables 1 and 2 tie them
+/// on purpose — that is what makes them a test of colour — so "the horizontal
+/// wins" is measured only where the two are equally heavy. Taking it as
+/// unconditional is inference: the simplest rule that produces those two renders
+/// is a paint order, horizontals over verticals, and a paint order has no weight
+/// term. It is also visible, so it is worth knowing what it costs — it is what
+/// puts a 1pt grey square on the 3pt red and green verticals of
+/// `test-files/grid-gap-borders.docx` at every row boundary they cross.
+fn junction_axes(
     plan: &BorderPlan,
     placed: &[PlacedRow],
     boundaries: &[(Pt, Vec<CellEdge>)],
     b: usize,
     c: usize,
-) -> Option<(TableBorderLine, bool)> {
+) -> (Option<TableBorderLine>, Option<TableBorderLine>) {
+    let rank = |l: &TableBorderLine| (drawn_width(l), border_precedence(l));
+    let wider = |a: Option<TableBorderLine>, b: Option<TableBorderLine>| match (a, b) {
+        (Some(a), Some(b)) if rank(&b) > rank(&a) => Some(b),
+        (Some(a), _) => Some(a),
+        (None, b) => b,
+    };
     let lines = &boundaries[b].1;
-    let incident = [
-        (c.checked_sub(1).and_then(|i| lines[i].line()), false),
-        (lines.get(c).and_then(|e| e.line()), false),
-        (
-            b.checked_sub(1)
-                .and_then(|i| plan.vertical(c, placed[i].plan_row).line()),
-            true,
-        ),
-        (
-            placed
-                .get(b)
-                .and_then(|r| plan.vertical(c, r.plan_row).line()),
-            true,
-        ),
-    ];
-    incident
-        .into_iter()
-        .filter_map(|(l, vertical)| l.map(|l| (l, vertical)))
-        .max_by_key(|(l, vertical)| (border_precedence(l), *vertical))
+    let horizontal = wider(
+        c.checked_sub(1).and_then(|i| lines[i].line()),
+        lines.get(c).and_then(|e| e.line()),
+    );
+    let vertical = wider(
+        b.checked_sub(1)
+            .and_then(|i| plan.vertical(c, placed[i].plan_row).line()),
+        placed
+            .get(b)
+            .and_then(|r| plan.vertical(c, r.plan_row).line()),
+    );
+    (horizontal, vertical)
+}
+
+/// §17.18.2: how a border of width `w` starting at `start` divides across its
+/// own short axis, as the `(start, width)` of each rule it is actually made of.
+///
+/// A `single` is one rule filling the whole width; a `double` is two of a third
+/// it, a third apart. §17.4.38 fixes those thirds: `w:sz` is the pair's total,
+/// which is also why [MS-OI29500] §17.4.66 ranks a `double` above a `single` of
+/// equal `w:sz`.
+///
+/// One function for both the segments and the junction squares, which is what
+/// makes a crossing come out as the product of its two axes' rules rather than
+/// as a shape of its own.
+fn sub_rules(style: TableBorderStyle, start: Pt, w: Pt) -> impl Iterator<Item = (Pt, Pt)> {
+    let sub = w * (1.0 / 3.0);
+    match style {
+        TableBorderStyle::Single => [Some((start, w)), None],
+        TableBorderStyle::Double => [Some((start, sub)), Some((start + w - sub, sub))],
+    }
+    .into_iter()
+    .flatten()
 }
 
 /// §17.4.45: the four borders of one cell, drawn inside its own box.
@@ -1226,12 +1302,16 @@ fn junction_line(
 /// halves are load-bearing — painting a corner twice lets the second rect win it
 /// when the two edges differ in colour, and painting it not at all leaves a hole
 /// one border wide.
+///
+/// That the horizontal owns them was a decomposition convenience here and is now
+/// also what Word does at a *collapsed* crossing (`junction_axes`), so the two
+/// constructors agree on the one question ECMA leaves open to both.
 pub(super) fn emit_cell_frame(commands: &mut Vec<DrawCommand>, b: &CellBorders, cell: CellBox) {
     // Resolution is over by now, so `Suppressed` and `Absent` are the same
     // thing here: nothing to paint.
     let (top, bottom) = (b.top.line(), b.bottom.line());
-    let top_w = top.map(|l| l.width).unwrap_or(Pt::ZERO);
-    let bot_w = bottom.map(|l| l.width).unwrap_or(Pt::ZERO);
+    let top_w = top.map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO);
+    let bot_w = bottom.map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO);
 
     // A spaced row reserves no strip below it — the gap between rows *is* the
     // spacing — so a bottom border is always inset into the cell's own foot.
@@ -1260,11 +1340,13 @@ pub(super) fn emit_cell_frame(commands: &mut Vec<DrawCommand>, b: &CellBorders, 
         return;
     }
     if let Some(line) = b.left.line() {
-        let rect = PtRect::from_xywh(cell.x, v_top, line.width, v_height);
+        let w = drawn_width(&line);
+        let rect = PtRect::from_xywh(cell.x, v_top, w, v_height);
         emit_border_rect(commands, &line, rect, false);
     }
     if let Some(line) = b.right.line() {
-        let rect = PtRect::from_xywh(cell.x + cell.w - line.width, v_top, line.width, v_height);
+        let w = drawn_width(&line);
+        let rect = PtRect::from_xywh(cell.x + cell.w - w, v_top, w, v_height);
         emit_border_rect(commands, &line, rect, false);
     }
 }
@@ -1314,8 +1396,8 @@ pub(super) fn emit_table_outline(
     let (x, y) = (rect.origin.x, rect.origin.y);
     let (w, h) = (rect.size.width, rect.size.height);
 
-    let top_w = top.map(|b| b.width).unwrap_or(Pt::ZERO);
-    let bot_w = bottom.map(|b| b.width).unwrap_or(Pt::ZERO);
+    let top_w = top.map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO);
+    let bot_w = bottom.map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO);
 
     if let Some(ref border) = top {
         emit_border_rect(commands, border, PtRect::from_xywh(x, y, w, top_w), true);
@@ -1332,18 +1414,20 @@ pub(super) fn emit_table_outline(
     let v_height = h - top_w - bot_w;
     if v_height > Pt::ZERO {
         if let Some(ref border) = cfg.left {
+            let bw = drawn_width(border);
             emit_border_rect(
                 commands,
                 border,
-                PtRect::from_xywh(x, y + top_w, border.width, v_height),
+                PtRect::from_xywh(x, y + top_w, bw, v_height),
                 false,
             );
         }
         if let Some(ref border) = cfg.right {
+            let bw = drawn_width(border);
             emit_border_rect(
                 commands,
                 border,
-                PtRect::from_xywh(x + w - border.width, y + top_w, border.width, v_height),
+                PtRect::from_xywh(x + w - bw, y + top_w, bw, v_height),
                 false,
             );
         }
@@ -1352,23 +1436,24 @@ pub(super) fn emit_table_outline(
 
 /// [MS-OI29500] §17.4.66: border weight = width × style number, in points.
 ///
+/// Which is [`drawn_width`] — a border's weight in the conflict order *is* the
+/// space it takes on the page, and the two were only ever separate because the
+/// engine drew a `double` in a third of the room it weighed. See that function
+/// for the measurement that joined them.
+///
 /// The spec states the rule in eighths of a point (`w:sz`), but every use is a
 /// *comparison* between two weights, and converting both to eighths scales both
 /// by the same 8 — so the factor cancels. Keeping it in points avoids implying
 /// that a unit conversion is load-bearing here. `border_precedence` scales to
 /// eighths once, where rounding to an integer sort key does depend on the unit.
 fn border_weight(b: &TableBorderLine) -> f32 {
-    let style_number = match b.style {
-        TableBorderStyle::Single => 1.0,
-        TableBorderStyle::Double => 3.0,
-    };
-    b.width.raw() * style_number
+    drawn_width(b).raw()
 }
 
 /// Width of the line this edge paints, or zero when it paints none — which
 /// includes a suppressed edge, since suppression reserves no space.
 pub(super) fn border_width(b: CellEdge) -> Pt {
-    b.line().map(|b| b.width).unwrap_or(Pt::ZERO)
+    b.line().map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO)
 }
 
 fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
@@ -1380,56 +1465,32 @@ fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
     }
 }
 
-/// Emit a border as filled rectangle(s).
-/// `is_horizontal` controls double-border sub-rect orientation.
+/// Emit a border as the filled rectangle(s) of its §17.18.2 rules.
+///
+/// `is_horizontal` says which axis is the border's **short** one, since that is
+/// the axis a `double` divides across — the same division [`sub_rules`] gives a
+/// junction square, applied to one axis here because a segment has only one.
 fn emit_border_rect(
     commands: &mut Vec<DrawCommand>,
     b: &TableBorderLine,
     rect: PtRect,
     is_horizontal: bool,
 ) {
-    match b.style {
-        TableBorderStyle::Single => {
-            commands.push(DrawCommand::Rect {
-                rect,
-                color: b.color,
-            });
-        }
-        TableBorderStyle::Double => {
-            // §17.4.38: total = w:sz, each sub-line = sz/3, gap = sz/3.
-            let sub = b.width * (1.0 / 3.0);
-            if is_horizontal {
-                // Two horizontal sub-rects: top and bottom of the border area.
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, rect.size.width, sub),
-                    color: b.color,
-                });
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(
-                        rect.origin.x,
-                        rect.origin.y + rect.size.height - sub,
-                        rect.size.width,
-                        sub,
-                    ),
-                    color: b.color,
-                });
-            } else {
-                // Two vertical sub-rects: left and right of the border area.
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, sub, rect.size.height),
-                    color: b.color,
-                });
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(
-                        rect.origin.x + rect.size.width - sub,
-                        rect.origin.y,
-                        sub,
-                        rect.size.height,
-                    ),
-                    color: b.color,
-                });
-            }
-        }
+    let (start, extent) = if is_horizontal {
+        (rect.origin.y, rect.size.height)
+    } else {
+        (rect.origin.x, rect.size.width)
+    };
+    for (at, thickness) in sub_rules(b.style, start, extent) {
+        let rect = if is_horizontal {
+            PtRect::from_xywh(rect.origin.x, at, rect.size.width, thickness)
+        } else {
+            PtRect::from_xywh(at, rect.origin.y, thickness, rect.size.height)
+        };
+        commands.push(DrawCommand::Rect {
+            rect,
+            color: b.color,
+        });
     }
 }
 
@@ -1574,32 +1635,32 @@ mod tests {
         let (left, mid, right) = (0.0, 100.0 - h, 200.0 - w);
         let (top, bottom) = (0.0, 15.0 - w);
         // The order is asserted along with the geometry, and is not incidental:
-        // each junction is emitted **among the segments of the axis that won
-        // it**, immediately before the one it abuts, so `coalesce_abutting_rects`
-        // can fuse the pair. Every border here is identical, so every junction
-        // is a tie and every tie goes to the vertical — hence four horizontals
-        // first, then each grid line as junction / segment / junction.
+        // every junction is emitted **among the horizontals**, whose colour it
+        // takes (`junction_axes`), immediately before the segment it abuts, so
+        // `coalesce_abutting_rects` can fuse the pair. Hence each boundary walks
+        // junction / segment / junction / segment / junction, and the grid lines
+        // that follow are bare segments.
         assert_eq!(
             rects(&result.commands),
             vec![
-                // The two boundaries, one segment per column, each stopping
-                // where the junctions at its ends begin.
-                (left + w, top, mid - left - w, w),
-                (mid + w, top, right - mid - w, w),
-                (left + w, bottom, mid - left - w, w),
-                (mid + w, bottom, right - mid - w, w),
-                // Then the three grid lines, each with the junction at its head,
-                // its segment, and the junction at its foot. The one at x = 100
-                // is the shared edge, drawn once.
+                // The two boundaries, each as its three nodes and the two
+                // segments between them.
                 (left, top, w, w),
-                (left, top + w, w, bottom - top - w),
-                (left, bottom, w, w),
+                (left + w, top, mid - left - w, w),
                 (mid, top, w, w),
-                (mid, top + w, w, bottom - top - w),
-                (mid, bottom, w, w),
+                (mid + w, top, right - mid - w, w),
                 (right, top, w, w),
-                (right, top + w, w, bottom - top - w),
+                (left, bottom, w, w),
+                (left + w, bottom, mid - left - w, w),
+                (mid, bottom, w, w),
+                (mid + w, bottom, right - mid - w, w),
                 (right, bottom, w, w),
+                // Then the three grid lines, each what the junctions at its two
+                // ends have left of it. The one at x = 100 is the shared edge,
+                // drawn once.
+                (left, top + w, w, bottom - top - w),
+                (mid, top + w, w, bottom - top - w),
+                (right, top + w, w, bottom - top - w),
             ],
         );
     }
@@ -2014,7 +2075,7 @@ mod tests {
     /// asks exactly that question and does not care how many pieces the line
     /// arrived in.
     #[test]
-    fn a_double_border_paints_two_sub_lines_of_a_third_the_declared_width() {
+    fn a_double_border_paints_two_sub_lines_of_the_declared_width() {
         let d = double(3.0);
         let result = layout_table(
             &[sized_row(20.0, 1)],
@@ -2037,35 +2098,43 @@ mod tests {
         let down = |x: f32| ink_along(&result.commands, x, true);
         let across = |y: f32| ink_along(&result.commands, y, false);
 
-        // Down the middle of the cell: the two horizontals, each two 1pt lines a
-        // 1pt apart. These are the table's own boundaries, so each 3pt band goes
-        // inside — 0..3 at the top, 17..20 at the foot of a 20pt row.
+        // Down the middle of the cell: the two horizontals, each two 3pt rules a
+        // 3pt gap apart — `drawn_width`, so a `w:sz` of 3pt occupies 9. These
+        // are the table's own boundaries, so each band goes **inside** it,
+        // keeping its outer face: 0..9 at the top and 11..20 at the foot of a
+        // 20pt row.
         assert_eq!(
             down(50.0),
-            vec![(0.0, 1.0), (2.0, 3.0), (17.0, 18.0), (19.0, 20.0)],
+            vec![(0.0, 3.0), (6.0, 9.0), (11.0, 14.0), (17.0, 20.0)],
             "a horizontal double splits along its short axis — stacked, not side by side"
         );
         // Across the middle of the row: the two verticals, split the other way,
-        // in the bands 0..3 and 97..100.
+        // in the bands 0..9 and 91..100.
         assert_eq!(
             across(10.0),
-            vec![(0.0, 1.0), (2.0, 3.0), (97.0, 98.0), (99.0, 100.0)],
+            vec![(0.0, 3.0), (6.0, 9.0), (91.0, 94.0), (97.0, 100.0)],
             "a vertical double splits along *its* short axis"
         );
     }
 
-    /// The band a `double` occupies is the band `border_width` reserves for it,
-    /// so a double and a single of the same `w:sz` meet their neighbours
-    /// identically — only the interior of the band differs.
+    /// A `double` occupies **three times** the band a `single` of the same
+    /// `w:sz` does, and keeps the same outer face: two rules of `w:sz` with a
+    /// `w:sz` gap between them ([`drawn_width`]).
     ///
     /// Asserted against the single as a control rather than against literals:
     /// the claim is a relation between the two styles, and pinning the double's
-    /// coordinates alone could not tell "same band" from "same numbers I typed
-    /// twice". Two halves, and both are needed — the outer extent is equal, and
-    /// the double paints exactly two thirds of it, which is what says the gap is
-    /// `sz/3` and not merely that a gap exists.
+    /// coordinates alone could not tell "three times" from "numbers I typed".
+    /// Each run the single fills whole comes back as two runs of exactly that
+    /// width, one gap of it apart, growing **inward** from whichever face of the
+    /// control faces out — which says the rule width, the gap width and the
+    /// direction it grows in, all three.
+    ///
+    /// The rays cross the middle of an edge, never a corner, and that is
+    /// load-bearing: a corner is the *product* of its two axes' rules
+    /// (`junction_axes`), so summing ink over the whole table and expecting a
+    /// clean multiple of the control's would not hold there.
     #[test]
-    fn a_double_border_occupies_the_same_band_as_a_single_of_the_same_width() {
+    fn a_double_border_occupies_three_times_the_band_of_a_single_of_the_same_width() {
         let render = |style: TableBorderStyle| {
             let line = TableBorderLine {
                 width: Pt::new(3.0),
@@ -2094,28 +2163,30 @@ mod tests {
             render(TableBorderStyle::Single),
         );
 
-        // Same four bands: the outer extent of the ink a ray meets is identical,
-        // in both directions and at a point on every one of the four lines.
+        // A ray crossing the middle of every edge, in both directions. Each
+        // ray meets two edges: the near one, whose outer face is its start, and
+        // the far one, whose outer face is its end.
         for (probe, at) in [(true, 50.0_f32), (false, 10.0_f32)] {
-            let extent = |slice: &TableSlice| {
-                let runs = ink_along(&slice.commands, at, probe);
-                (runs.first().map(|r| r.0), runs.last().map(|r| r.1))
-            };
+            let runs = |slice: &TableSlice| ink_along(&slice.commands, at, probe);
+            let control = runs(&sgl);
+            assert_eq!(control.len(), 2, "two edges on this ray: {control:?}");
+            let (near, far) = (control[0], control[1]);
+            let w = near.1 - near.0;
+            assert_eq!(w, far.1 - far.0, "the control's two edges: {control:?}");
             assert_eq!(
-                extent(&dbl),
-                extent(&sgl),
-                "same band, probe vertical={probe}"
+                runs(&dbl),
+                vec![
+                    // The near edge grows inward from its own outer face…
+                    (near.0, near.0 + w),
+                    (near.0 + 2.0 * w, near.0 + 3.0 * w),
+                    // …and the far edge inward from its own.
+                    (far.1 - 3.0 * w, far.1 - 2.0 * w),
+                    (far.1 - w, far.1),
+                ],
+                "two rules of the declared width, one of it apart, growing \
+                 inward from the face that stays put — probe vertical={probe}"
             );
         }
-
-        // And two thirds of it is ink: `sz/3` line, `sz/3` gap, `sz/3` line.
-        let ink =
-            |slice: &TableSlice| -> f32 { rects(&slice.commands).iter().map(|r| r.2 * r.3).sum() };
-        let (a, b) = (ink(&dbl), ink(&sgl));
-        assert!(
-            (a - b * 2.0 / 3.0).abs() < 1e-3,
-            "a double paints two thirds of the band a single fills: {a} vs {b}"
-        );
     }
 
     // ── §17.4.66 at a vertical edge, across a `w:gridSpan` boundary ──────────

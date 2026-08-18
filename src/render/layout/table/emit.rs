@@ -1138,21 +1138,22 @@ mod tests {
         );
     }
 
-    /// §17.4.38: a `double` border crossing a band is still **two lines side by
-    /// side**, not two stacked.
+    /// §17.4.38 / §17.18.2: a `double` border crossing a band keeps its own
+    /// division — **two lines side by side**, never two stacked.
     ///
-    /// A band crossing is a piece of a vertical border, and `emit_border_rect`
-    /// splits a double one along the axis it is told: two sub-rects left and
-    /// right for a vertical, top and bottom for a horizontal. Told the wrong
-    /// axis, the crossing still fills its x — so continuity, the corner audit
-    /// and the overlap check all pass while the double border turns into a
-    /// pair of rungs across the gap.
+    /// A band crossing is a junction, and a junction is the *product* of its two
+    /// axes' rules (`borders::junction_axes`): the vertical divides it across x
+    /// and the horizontal across y. Divided on the wrong axis the crossing still
+    /// fills its x — so continuity, the corner audit and the overlap check all
+    /// pass while the double border turns into a pair of rungs across the gap.
     ///
     /// `spacer_table`'s two rows at 3pt double borders instead of 0.5pt single
-    /// ones: each row is 28pt as it is there, the band between them is 3pt (the
-    /// widest bottom border in row 0), and the spacer's right edge is the
-    /// vertical that crosses it — as two 1pt (`sz`/3) lines spanning the band's
-    /// full 3pt height.
+    /// ones. A 3pt double is **9pt** of page — two 3pt rules with a 3pt gap
+    /// (`borders::drawn_width`) — so the §17.4.38 strip between the two rows is
+    /// 9pt, y 28..37, and the spacer's right edge crosses it on grid line 2 at
+    /// x = 120, straddling it from 115.5 to 124.5. Both borders are double, so
+    /// the crossing is the 2 x 2 lattice Word draws: two 3pt columns of ink,
+    /// each broken by the horizontal's own 3pt gap.
     #[test]
     fn a_double_border_crosses_a_band_as_two_lines_side_by_side() {
         let rows = vec![
@@ -1185,19 +1186,23 @@ mod tests {
         // The boundary between the two rows is the middle of the 3pt strip they
         // reserve: 28pt of content, then half of 3. The junction square sits on
         // it, 3pt tall, and the crossing is at grid line 2 — x = 120.
-        let (band_top, band_bottom) = (28.0, 31.0);
-        let in_band: Vec<(f32, f32)> = border_rects(&table.commands)
+        let (band_top, band_bottom) = (28.0, 37.0);
+        let in_band: Vec<(f32, f32, f32, f32)> = border_rects(&table.commands)
             .into_iter()
             .filter(|(x0, x1, y0, y1)| {
-                *y0 >= band_top - 0.001 && *y1 <= band_bottom + 0.001 && *x0 > 118.0 && *x1 < 122.0
+                *y0 >= band_top - 0.001 && *y1 <= band_bottom + 0.001 && *x0 > 114.0 && *x1 < 126.0
             })
-            .map(|(x0, x1, ..)| (x0, x1))
             .collect();
         assert_eq!(
             in_band,
-            vec![(118.5, 119.5), (120.5, 121.5)],
+            vec![
+                (115.5, 118.5, 28.0, 31.0),
+                (115.5, 118.5, 34.0, 37.0),
+                (121.5, 124.5, 28.0, 31.0),
+                (121.5, 124.5, 34.0, 37.0),
+            ],
             "the spacer's right edge crosses the boundary as its own two \
-             sub-lines, each `sz`/3 wide and side by side — not as rungs across \
+             rules, each a whole `sz` wide and side by side — not as rungs across \
              the gap, which is what splitting on the wrong axis draws"
         );
     }

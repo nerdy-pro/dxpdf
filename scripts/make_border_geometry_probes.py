@@ -81,10 +81,9 @@ A junction is not a conflict: all four segments meeting at it are correct, and
 all four want the square. §17.4.66's precedence list is about two declarations on
 *one* edge and says nothing about this.
 
-This engine gives the square to the `border_precedence` winner among the
-segments that reach it — reusing the one total order the spec does supply rather
-than inventing a paint order — and breaks a tie toward the vertical, which is
-arbitrary and says so.
+**MEASURED.** This one has been rendered in Word, and the answer refuted what
+the engine did: it gave the square to the `border_precedence` winner among the
+segments reaching it, breaking a tie toward the vertical.
 
 Tables 1 and 2 are the discrimination. Both have 12pt `insideV` and `insideH` of
 equal weight and style, so precedence falls through to §17.4.66's colour rule
@@ -96,12 +95,46 @@ equal weight and style, so precedence falls through to §17.4.66's colour rule
     precedence          table 1's crossing is black, table 2's is black
                         (i.e. the *darker* line, whichever axis it is on)
     vertical always     table 1 black, table 2 light grey
-    horizontal always   table 1 light grey, table 2 black
+    horizontal always   table 1 light grey, table 2 black   <- Word
 
-Table 3 is the known limit rather than a discrimination. Both axes are 12pt
-`double`, so each is two 4pt rules with a 4pt gap, and the ideal crossing is a
-2 x 2 lattice of ink with both gaps running through it. A square drawn along one
-axis gives two rungs instead. What Word draws there is worth recording.
+Word draws pale then dark: **the horizontal takes the square**, whichever axis
+carries the darker line. Both of the engine's rules died in one render. (What it
+does when the two differ in *weight* is table 5, below, and is still open.)
+
+Table 3 was the known limit rather than a discrimination, and Word settled it
+too. Both axes are 12pt `double`, so each is two 4pt rules with a 4pt gap; Word
+draws the crossing as the 2 x 2 lattice of ink with **both gaps running through
+it**, reported as "the borders are negative space, so it looks like every cell
+has its own border" — which is what separated per-cell rectangles look like, and
+what a continuous double-ruled grid never does. The engine drew two rungs.
+
+So a crossing is the **product** of its two axes' §17.18.2 rules, coloured by the
+horizontal, and a `single` contributing one full band is that same rule rather
+than a case of its own.
+
+Tables 4 and 5 are what those two answers newly put at stake, and both are
+**open**.
+
+Table 4 asks about the product: a 12pt `single` horizontal crossing a 12pt
+`double` vertical. The product punches the double's 4pt gap through the solid
+line; the rival reading is that a solid line runs through unbroken and only the
+double is interrupted.
+
+Table 5 asks how far "the horizontal wins" reaches. Tables 1 and 2 tie the two
+axes on weight *on purpose* — that is what makes them a test of colour — so they
+say nothing about a crossing whose two lines differ in weight. A 12pt black
+vertical against a 3pt pale horizontal separates the two readings:
+
+    horizontal always   the thick black vertical is interrupted at every
+                        crossing by a 12pt wide, 3pt tall pale band
+    heavier wins        the crossing is black and the pale horizontal is the
+                        one interrupted
+
+The engine takes the first, because the rule that explains tables 1 and 2 most
+simply is a paint order — horizontals over verticals — and a paint order has no
+weight term in it. That is inference, not measurement, and it is visible: it is
+what changed 27 crossings in `grid-gap-borders.docx`, whose 3pt red and green
+verticals now carry a 1pt grey square wherever a row boundary crosses them.
 
 ---------------------------------------------------------------------------
 
@@ -415,6 +448,50 @@ def junction_probe() -> str:
             + "</w:tbl>"
         )
 
+    def mixed_table(v_colour: str, h_colour: str, label: str) -> str:
+        """`insideV` double against `insideH` single, both 12pt."""
+        cells = "".join(
+            '<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr>'
+            f'<w:p><w:r><w:t xml:space="preserve">{c}</w:t></w:r></w:p></w:tc>'
+            for c in label
+        )
+        row = f"<w:tr>{cells}</w:tr>"
+        return (
+            "<w:tbl><w:tblPr>"
+            '<w:tblW w:w="6000" w:type="dxa"/>'
+            "<w:tblBorders>"
+            f'<w:insideV w:val="double" w:sz="{MAX_SZ}" w:space="0" w:color="{v_colour}"/>'
+            f'<w:insideH w:val="single" w:sz="{MAX_SZ}" w:space="0" w:color="{h_colour}"/>'
+            "</w:tblBorders>"
+            '<w:tblLayout w:type="fixed"/>'
+            "</w:tblPr>"
+            '<w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>'
+            + row * 3
+            + "</w:tbl>"
+        )
+
+    def uneven_table(v_colour: str, h_colour: str, label: str) -> str:
+        """A 12pt vertical against a 3pt horizontal, both `single`."""
+        cells = "".join(
+            '<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr>'
+            f'<w:p><w:r><w:t xml:space="preserve">{c}</w:t></w:r></w:p></w:tc>'
+            for c in label
+        )
+        row = f"<w:tr>{cells}</w:tr>"
+        return (
+            "<w:tbl><w:tblPr>"
+            '<w:tblW w:w="6000" w:type="dxa"/>'
+            "<w:tblBorders>"
+            f'<w:insideV w:val="single" w:sz="{MAX_SZ}" w:space="0" w:color="{v_colour}"/>'
+            f'<w:insideH w:val="single" w:sz="24" w:space="0" w:color="{h_colour}"/>'
+            "</w:tblBorders>"
+            '<w:tblLayout w:type="fixed"/>'
+            "</w:tblPr>"
+            '<w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>'
+            + row * 3
+            + "</w:tbl>"
+        )
+
     black, grey = "000000", "BFBFBF"
     return "\n    ".join(
         [
@@ -436,22 +513,50 @@ def junction_probe() -> str:
             para(
                 "  - pale in table 1, dark in table 2      -> the horizontal always wins"
             ),
+            para(
+                "MEASURED: Word draws pale in table 1 and dark in table 2. The "
+                "horizontal takes the square, whichever axis carries the darker line."
+            ),
             heading("Table 1 - vertical dark, horizontal pale."),
             table(black, grey, "single", "abc"),
             para(""),
             heading("Table 2 - vertical pale, horizontal dark."),
             table(grey, black, "single", "def"),
             para(""),
-            heading(
-                "Table 3 - both axes 12pt double. Not a discrimination: a known limit."
-            ),
+            heading("Table 3 - both axes 12pt double. MEASURED."),
             para(
-                "A double is two rules with a gap, so the crossing should ideally be a "
-                "two-by-two lattice of ink with both gaps running through it. This engine "
-                "draws the square along one axis instead, which gives two rungs. What "
-                "Word draws here is worth recording."
+                "A double is two rules with a gap, so the crossing is ideally a "
+                "two-by-two lattice of ink with both gaps running through it, and that "
+                "is what Word draws: the borders read as negative space, so every cell "
+                "looks separately enclosed. The engine drew the square along one axis "
+                "instead, which gave two rungs."
             ),
             table(black, black, "double", "ghi"),
+            para(""),
+            heading(
+                "Table 4 - 12pt single horizontal crossing a 12pt double vertical. OPEN."
+            ),
+            para(
+                "Tables 1 to 3 settle a crossing into the product of its two axes: each "
+                "one divides the square across its own short side, and the horizontal "
+                "colours it. This is the shape that product makes a claim about with no "
+                "measurement behind it. Read whether the solid horizontal runs through "
+                "the crossing unbroken, or whether the vertical's 4pt gap is punched "
+                "through it, leaving the horizontal in two pieces at every crossing."
+            ),
+            mixed_table(black, black, "efg"),
+            para(""),
+            heading(
+                "Table 5 - a 12pt black vertical crossing a 3pt pale horizontal. OPEN."
+            ),
+            para(
+                "Tables 1 and 2 tie the two axes on weight, which is what makes them a "
+                "test of colour and also what keeps them silent about weight. Read the "
+                "crossings: a pale 3pt band interrupting the thick black vertical means "
+                "the horizontal wins whatever its weight, and a black crossing that "
+                "interrupts the pale line instead means the heavier line wins."
+            ),
+            uneven_table(black, grey, "hij"),
         ]
     )
 

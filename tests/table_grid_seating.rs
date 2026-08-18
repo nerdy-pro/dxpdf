@@ -132,13 +132,14 @@ pub fn layout(bytes: &[u8]) -> Vec<LayoutedPage> {
 
 /// Every cell's drawn `(x, width)` in the table's first row, in cell order.
 ///
-/// Read off the table's top edge, where the border network lays one horizontal
-/// line across the whole first row. The line arrives in pieces — the rasterizer
-/// splits it at every grid line, into a segment per column and a junction square
-/// on each line — so the columns are recovered rather than read off directly:
-/// the ink is continuous from the table's left edge to its right, and the grid
-/// lines are the two ends of that ink plus the middle of each gap between
-/// consecutive segments.
+/// Read off the **verticals** standing on the first row, one per grid line its
+/// cells reach. Not off the horizontal above them, which is what this used to
+/// do: a junction is emitted among the horizontals now (`borders::junction_axes`
+/// — Word gives the crossing to the horizontal), so `coalesce_abutting_rects`
+/// fuses each one into the line it abuts and the whole boundary arrives as a
+/// single unbroken rect with no gap in it to recover a grid line from. The
+/// verticals are the family the junctions have been cut *out* of, so each is one
+/// clean segment per row per grid line.
 ///
 /// Recovering rather than counting rects is the point. A rect count measures the
 /// decomposition; the geometry these tests are about is where the grid lines
@@ -159,46 +160,41 @@ pub fn first_row_cells(pages: &[LayoutedPage]) -> Vec<(f32, f32)> {
         })
         .collect();
 
-    // A horizontal segment: thin in y, and wider than it is tall.
-    let is_segment = |&(x0, x1, y0, y1): &(f32, f32, f32, f32)| y1 - y0 <= 1.0 && x1 - x0 > y1 - y0;
-    let top = rects
+    // A vertical segment: thin in x, and taller than it is wide.
+    let is_vertical =
+        |&(x0, x1, y0, y1): &(f32, f32, f32, f32)| x1 - x0 <= 1.0 && y1 - y0 > x1 - x0;
+    let first = rects
         .iter()
-        .filter(|r| is_segment(r))
-        .map(|(_, _, y0, _)| *y0)
+        .filter(|r| is_vertical(r))
+        .map(|r| r.2)
         .fold(f32::INFINITY, f32::min);
-    if !top.is_finite() {
+    if !first.is_finite() {
         return Vec::new();
     }
-    let mut segments: Vec<(f32, f32)> = rects
+    let mut bands: Vec<(f32, f32)> = rects
         .iter()
-        .filter(|r| is_segment(r) && (r.2 - top).abs() < 0.01)
+        .filter(|r| is_vertical(r) && (r.2 - first).abs() < 0.01)
         .map(|(x0, x1, ..)| (*x0, *x1))
         .collect();
-    segments.sort_by(|p, q| p.0.total_cmp(&q.0));
-    if segments.is_empty() {
+    bands.sort_by(|p, q| p.0.total_cmp(&q.0));
+    bands.dedup_by(|a, b| (a.0 - b.0).abs() < 0.01);
+    if bands.len() < 2 {
         return Vec::new();
     }
 
-    // The two outer grid lines are the ends of **all** ink crossing that
-    // boundary, verticals included — not only the segments'. Once
-    // `coalesce_abutting_rects` fuses the junction at each end with the vertical
-    // running down from it, the ink there arrives inside a tall rect, and a
-    // filter that looked only at thin-in-y rects would place the table's own
-    // edge half a border inside itself.
-    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-    for (x0, x1, ..) in rects
+    // §17.4.66: a border straddles a line two cells share and goes **inside** a
+    // line shared with nothing. So an interior grid line is its band's centre,
+    // while the table's own two edges are the outer faces of theirs.
+    let last = bands.len() - 1;
+    let lines: Vec<f32> = bands
         .iter()
-        .filter(|r| r.2 - 0.01 <= top && top <= r.3 + 0.01)
-    {
-        lo = lo.min(*x0);
-        hi = hi.max(*x1);
-    }
-
-    let mut lines = vec![lo];
-    for pair in segments.windows(2) {
-        lines.push((pair[0].1 + pair[1].0) * 0.5);
-    }
-    lines.push(hi);
+        .enumerate()
+        .map(|(i, &(x0, x1))| match i {
+            0 => x0,
+            i if i == last => x1,
+            _ => (x0 + x1) * 0.5,
+        })
+        .collect();
     lines.windows(2).map(|p| (p[0], p[1] - p[0])).collect()
 }
 
