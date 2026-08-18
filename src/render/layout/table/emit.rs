@@ -1187,12 +1187,18 @@ mod tests {
         // reserve: 28pt of content, then half of 3. The junction square sits on
         // it, 3pt tall, and the crossing is at grid line 2 — x = 120.
         let (band_top, band_bottom) = (28.0, 37.0);
-        let in_band: Vec<(f32, f32, f32, f32)> = border_rects(&table.commands)
+        // Sorted, because this test is about the crossing's *geometry* and the
+        // stream's order is a separate claim with its own owner: the rasterizer
+        // emits rule by rule so that each junction rule lands beside the segment
+        // it abuts and `coalesce_abutting_rects` can fuse the pair
+        // (`tests/table_shading_seams.rs`).
+        let mut in_band: Vec<(f32, f32, f32, f32)> = border_rects(&table.commands)
             .into_iter()
             .filter(|(x0, x1, y0, y1)| {
                 *y0 >= band_top - 0.001 && *y1 <= band_bottom + 0.001 && *x0 > 114.0 && *x1 < 126.0
             })
             .collect();
+        in_band.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.2.total_cmp(&b.2)));
         assert_eq!(
             in_band,
             vec![

@@ -1076,14 +1076,38 @@ pub(super) fn rasterize_border_grid(
             });
         }
     }
-    let emit_junction = |commands: &mut Vec<DrawCommand>, j: &Junction| {
-        for (x0, w) in sub_rules(j.v_style, j.x.0, j.x.1 - j.x.0) {
-            for (y0, h) in sub_rules(j.h_style, j.y.0, j.y.1 - j.y.0) {
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(x0, y0, w, h),
-                    color: j.color,
-                });
-            }
+    // One §17.18.2 rule of the junction, indexed **along the axis that owns
+    // it** — its `k`-th x-band in the vertical pass, its `k`-th y-band in the
+    // horizontal one. The passes below walk `k` outermost so that each rule of a
+    // junction lands next to the piece of segment it abuts; emitting a whole
+    // junction and then a whole segment interleaves them as `A₀ A₁ B₀ B₁`, where
+    // `A₀` meets `B₀` and `A₁` meets `B₁` and neither pair is adjacent, so
+    // `coalesce_abutting_rects` fuses nothing and every join reaches the page as
+    // a hairline.
+    let emit_junction_rule = |commands: &mut Vec<DrawCommand>, j: &Junction, k: usize| {
+        let (along, across) = if j.along_vertical {
+            (j.v_style, j.h_style)
+        } else {
+            (j.h_style, j.v_style)
+        };
+        let (a0, a1, c0, c1) = if j.along_vertical {
+            (j.x.0, j.x.1, j.y.0, j.y.1)
+        } else {
+            (j.y.0, j.y.1, j.x.0, j.x.1)
+        };
+        let Some((at, thickness)) = sub_rules(along, a0, a1 - a0).nth(k) else {
+            return;
+        };
+        for (other, extent) in sub_rules(across, c0, c1 - c0) {
+            let rect = if j.along_vertical {
+                PtRect::from_xywh(at, other, thickness, extent)
+            } else {
+                PtRect::from_xywh(other, at, extent, thickness)
+            };
+            commands.push(DrawCommand::Rect {
+                rect,
+                color: j.color,
+            });
         }
     };
     let junction_at = |b: usize, c: usize, vertical: bool| -> Option<&Junction> {
@@ -1132,50 +1156,56 @@ pub(super) fn rasterize_border_grid(
     // own — `tests/table_shading_seams.rs` is that defect's audit and caught
     // exactly this.
     for (b, (y, lines)) in boundaries.iter().enumerate() {
-        for (c, edge) in lines.iter().enumerate() {
-            if let Some(j) = junction_at(b, c, false) {
-                emit_junction(commands, j);
+        for k in 0..MAX_RULES {
+            for (c, edge) in lines.iter().enumerate() {
+                if let Some(j) = junction_at(b, c, false) {
+                    emit_junction_rule(commands, j, k);
+                }
+                let Some(line) = edge.line() else { continue };
+                let w = drawn_width(&line);
+                let y0 = inside(*y, w, box_size.height);
+                let band = (y0, y0 + w);
+                let Some((ry, rh)) = sub_rules(line.style, band.0, w).nth(k) else {
+                    continue;
+                };
+                for (x0, x1) in subtract(x[c], x[c + 1], &cuts_across(band, false)) {
+                    commands.push(DrawCommand::Rect {
+                        rect: PtRect::from_xywh(x0, ry, x1 - x0, rh),
+                        color: line.color,
+                    });
+                }
             }
-            let Some(line) = edge.line() else { continue };
-            let w = drawn_width(&line);
-            let y0 = inside(*y, w, box_size.height);
-            let band = (y0, y0 + w);
-            for (x0, x1) in subtract(x[c], x[c + 1], &cuts_across(band, false)) {
-                emit_border_rect(
-                    commands,
-                    &line,
-                    PtRect::from_xywh(x0, band.0, x1 - x0, w),
-                    true,
-                );
+            if let Some(j) = junction_at(b, lines.len(), false) {
+                emit_junction_rule(commands, j, k);
             }
-        }
-        if let Some(j) = junction_at(b, lines.len(), false) {
-            emit_junction(commands, j);
         }
     }
 
     for (c, &gx) in x.iter().enumerate() {
-        for (b, row) in placed.iter().enumerate() {
-            if let Some(j) = junction_at(b, c, true) {
-                emit_junction(commands, j);
+        for k in 0..MAX_RULES {
+            for (b, row) in placed.iter().enumerate() {
+                if let Some(j) = junction_at(b, c, true) {
+                    emit_junction_rule(commands, j, k);
+                }
+                let Some(line) = plan.vertical(c, row.plan_row).line() else {
+                    continue;
+                };
+                let w = drawn_width(&line);
+                let x0 = inside(gx, w, box_size.width);
+                let band = (x0, x0 + w);
+                let Some((rx, rw)) = sub_rules(line.style, band.0, w).nth(k) else {
+                    continue;
+                };
+                for (y0, y1) in subtract(row.top, row.bottom, &cuts_across(band, true)) {
+                    commands.push(DrawCommand::Rect {
+                        rect: PtRect::from_xywh(rx, y0, rw, y1 - y0),
+                        color: line.color,
+                    });
+                }
             }
-            let Some(line) = plan.vertical(c, row.plan_row).line() else {
-                continue;
-            };
-            let w = drawn_width(&line);
-            let x0 = inside(gx, w, box_size.width);
-            let band = (x0, x0 + w);
-            for (y0, y1) in subtract(row.top, row.bottom, &cuts_across(band, true)) {
-                emit_border_rect(
-                    commands,
-                    &line,
-                    PtRect::from_xywh(band.0, y0, w, y1 - y0),
-                    false,
-                );
+            if let Some(j) = junction_at(placed.len(), c, true) {
+                emit_junction_rule(commands, j, k);
             }
-        }
-        if let Some(j) = junction_at(placed.len(), c, true) {
-            emit_junction(commands, j);
         }
     }
 }
@@ -1291,6 +1321,9 @@ fn junction_axes(
 /// One function for both the segments and the junction squares, which is what
 /// makes a crossing come out as the product of its two axes' rules rather than
 /// as a shape of its own.
+/// The most rules any §17.18.2 style divides into — a `double`'s two.
+const MAX_RULES: usize = 2;
+
 fn sub_rules(style: TableBorderStyle, start: Pt, w: Pt) -> impl Iterator<Item = (Pt, Pt)> {
     let sub = w * (1.0 / 3.0);
     match style {

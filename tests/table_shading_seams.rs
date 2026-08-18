@@ -199,6 +199,115 @@ fn a_row_of_identically_shaded_cells_is_painted_as_one_rect() {
     assert_eq!(shaded[0].2, 240.0, "the survivor spans the whole row");
 }
 
+/// A `double` border's two rules reach the page **whole** — one rect each, the
+/// length of the grid line — not as a chain of segments and crossings that a
+/// rasterizer has to butt together itself.
+///
+/// The border network is emitted as junctions plus the segments between them
+/// (`borders::rasterize_border_grid`), so every grid line arrives in pieces by
+/// construction and it is `coalesce_abutting_rects` that has to put it back
+/// together. That only works on *consecutive* commands, so the pieces must be
+/// emitted in the order they meet in.
+///
+/// A `single` grid line already was. A `double` was not: §17.18.2 divides each
+/// piece into two rules, and emitting a whole junction and then a whole segment
+/// interleaves them as `A₀ A₁ B₀ B₁` — where `A₀` meets `B₀` and `A₁` meets
+/// `B₁`, and neither pair is adjacent. Every one of those joins reached the page
+/// as a pale hairline: reported as "a noticeable small gap between bold
+/// borders", and visible under CoreGraphics at eight places in
+/// `test-files/border-junction-colour.docx` while `pdftoppm` composited all
+/// eight cleanly.
+///
+/// One rect per rule is the strongest statement of the fix and the easiest to
+/// read: it says the pieces were emitted in an order that let every join fuse.
+#[test]
+fn a_double_borders_rules_are_each_one_rect_the_length_of_the_grid_line() {
+    let pages = layout(&crossed_table("double", "single"));
+    let f = fills(&pages[0]);
+
+    // The verticals: thin in x, and the only rects on this page that are.
+    let mut rules: Vec<&Fill> = f.iter().filter(|(_, _, w, h, _)| w < h).collect();
+    rules.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(
+        rules.len(),
+        4,
+        "two interior grid lines, two rules each, one rect per rule; got {rules:?}"
+    );
+
+    // Each spans the whole table: three rows and the two boundaries between
+    // them, which is what says the junctions fused into it rather than merely
+    // abutting it.
+    let tallest = rules.iter().map(|r| r.3).fold(0.0_f32, f32::max);
+    assert!(
+        rules.iter().all(|r| r.3 == tallest),
+        "every rule runs the full height; got {rules:?}"
+    );
+}
+
+/// The control, and the limit stated: **only the axis that owns the crossings
+/// can be whole**, and with both axes `single` and equal that is the horizontal.
+///
+/// A junction belongs to one axis (`borders::junction_axes` — the heavier line,
+/// the horizontal breaking a tie), so its rects can be adjacent to that axis'
+/// segments and not to the other's. The other axis stays in pieces, one per row,
+/// abutting a junction of possibly its own colour without fusing into it. No
+/// decomposition into **disjoint** rects can do better: one region cannot be
+/// adjacent to both of its neighbours in a linear command stream.
+///
+/// Without this the test above would also be satisfied by a merge that ignored
+/// where rects sit, and the limit would go unrecorded.
+#[test]
+fn only_the_axis_that_owns_the_crossings_is_whole() {
+    let pages = layout(&crossed_table("single", "single"));
+    let f = fills(&pages[0]);
+
+    // Equal weight, so the horizontal takes every crossing and is whole: one
+    // rect per interior row boundary, spanning the table.
+    let mut rows: Vec<&Fill> = f.iter().filter(|(_, _, w, h, _)| w >= h).collect();
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1));
+    assert_eq!(
+        rows.len(),
+        2,
+        "two interior boundaries, one rect each; got {rows:?}"
+    );
+
+    // The verticals are what is left: three pieces each, one per row.
+    let rules: Vec<&Fill> = f.iter().filter(|(_, _, w, h, _)| w < h).collect();
+    assert_eq!(
+        rules.len(),
+        6,
+        "two grid lines, cut by the two crossings each; got {rules:?}"
+    );
+}
+
+/// A 3 × 3 fixed-layout table carrying nothing but `insideV` and `insideH`, so
+/// the only rects on the page are the border network's — no outer edges, no
+/// shading, and `w:trHeight` keeps every row taller than any border.
+fn crossed_table(v_style: &str, h_style: &str) -> String {
+    let cells: String = (0..3)
+        .map(|_| {
+            r#"<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr><w:p/></w:tc>"#.to_string()
+        })
+        .collect();
+    let row = format!(
+        r#"<w:tr><w:trPr><w:trHeight w:val="1200" w:hRule="exact"/></w:trPr>{cells}</w:tr>"#
+    );
+    format!(
+        r#"<w:tbl>
+  <w:tblPr>
+    <w:tblW w:w="6000" w:type="dxa"/>
+    <w:tblBorders>
+      <w:insideV w:val="{v_style}" w:sz="24" w:space="0" w:color="000000"/>
+      <w:insideH w:val="{h_style}" w:sz="24" w:space="0" w:color="000000"/>
+    </w:tblBorders>
+    <w:tblLayout w:type="fixed"/>
+  </w:tblPr>
+  <w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>
+  {row}{row}{row}
+</w:tbl>"#
+    )
+}
+
 /// The control: cells that are *not* the same colour must stay separate rects.
 ///
 /// Without this, a "fix" that merged every rect in a row regardless of colour
