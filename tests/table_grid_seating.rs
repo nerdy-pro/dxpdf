@@ -182,36 +182,31 @@ pub fn first_row_cells(pages: &[LayoutedPage]) -> Vec<(f32, f32)> {
         return Vec::new();
     }
 
-    // §17.4.66: a border straddles a line two cells share and goes **inside** a
-    // line shared with nothing. So an interior grid line is its band's centre,
-    // while the table's own two edges are the outer faces of theirs.
-    let last = bands.len() - 1;
-    let lines: Vec<f32> = bands
-        .iter()
-        .enumerate()
-        .map(|(i, &(x0, x1))| match i {
-            0 => x0,
-            i if i == last => x1,
-            _ => (x0 + x1) * 0.5,
-        })
-        .collect();
+    // §17.4.66: a border straddles the line it stands on — every line, the
+    // table's own edges included (`test-files/border-outer-box.docx`, measured).
+    // So a grid line is its band's centre, with no case for the ends: this read
+    // the outer two as their bands' outer faces while the engine drew them
+    // inside, and both halves of that were wrong at once.
+    let lines: Vec<f32> = bands.iter().map(|&(x0, x1)| (x0 + x1) * 0.5).collect();
     lines.windows(2).map(|p| (p[0], p[1] - p[0])).collect()
 }
 
-/// How far a recovered column may sit from its grid line: **half a border**.
+/// How far a recovered column may sit from where this file states it: **half a
+/// border**.
 ///
-/// The interior grid lines come back exactly — they are the middle of the gap
-/// between two segments, which is the line whatever the borders do. The two
-/// **outer** ends do not: §17.4.66 puts a border wholly inside the table's own
-/// edge and straddling every other line, and a `gridBefore`/`gridAfter` row ends
-/// on an *interior* line, so the ink's outer end is the grid line in one case
-/// and half a border past it in the other. Nothing in the command stream says
-/// which without knowing the table's own extent, and adding that to
-/// `DrawCommand` for a test's benefit is not worth it.
+/// Every grid line comes back exactly now — it is its border band's centre —
+/// but the lines themselves are half a leading border to the left of where the
+/// expectations below put them. That is `build_table`'s doing and it is
+/// deliberate: §17.4.66 straddles the table's leading edge, so the table is
+/// shifted left by half of it to leave the first cell's *text* on the indent,
+/// which is what `w:tblInd` measures to (`test-files/border-outer-box.docx`,
+/// measured in Word). The expectations are written at the indent, because that
+/// is what a `<w:tblGrid>` is read against.
 ///
-/// So the tolerance is exactly that half-border, doubled for a width because a
-/// column has two ends. It costs these tests nothing: they are about columns
-/// tens of points wide, and where a border sits on its line is
+/// So the tolerance absorbs that half-border, doubled for a width because a
+/// column has two ends — though widths now land exactly, since both ends shift
+/// together. It costs these tests nothing: they are about columns tens of points
+/// wide, and where a border sits on its line is
 /// `tests/table_grid_gap_borders.rs`' subject, not this file's.
 const HALF_BORDER: f32 = 0.26;
 

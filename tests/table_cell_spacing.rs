@@ -155,7 +155,7 @@ impl Table {
     /// between the cells either side of them, and has no separate outline.
     fn cell_boxes(&self) -> Vec<(f32, f32)> {
         let n = self.verticals.len();
-        assert!(n >= 4 && n % 2 == 0, "{n} verticals");
+        assert!(n >= 4 && n.is_multiple_of(2), "{n} verticals");
         self.verticals[1..n - 1]
             .chunks(2)
             .map(|p| (p[0].0, p[1].1))

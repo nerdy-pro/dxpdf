@@ -941,8 +941,18 @@ pub(super) fn rasterize_border_grid(
     // This settles only the double-*paint*. Whether an empty row should separate
     // its neighbours at all — giving that boundary two lines a row apart rather
     // than one — is what `test-files/issue-157-empty-row-edge.docx` asks, and it
-    // is still **open**: the row has no height here, so the question does not
-    // arise geometrically.
+    // is **unanswerable by reference render**: Word refuses to open a document
+    // containing a cell-less `<w:tr/>` at all (measured 2026-08-19, isolated
+    // against a variant identical but for the row, which opens). `CT_Row` makes
+    // the cell group `minOccurs="0"`, so the element is schema-valid and Word's
+    // reader is stricter than the schema — the same class of rejection three
+    // `issue-165-*` fixtures hit over a `.rels` namespace.
+    //
+    // Which changes what this code is answerable to. A document containing such
+    // a row is one Word itself calls corrupt, so there is no fidelity target
+    // here and never will be: what remains is a robustness choice, and the one
+    // taken is to render the table rather than reject the package. The row has
+    // no height, so the question does not arise geometrically either.
     for b in 1..boundaries.len() {
         if boundaries[b].0 != boundaries[b - 1].0 {
             continue;

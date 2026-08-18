@@ -363,8 +363,8 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
         })
 }
 
-/// §17.4.66: a collapsed border **straddles its grid line**, and lies flush
-/// against the cell box on the table's own edges.
+/// §17.4.66: a collapsed border **straddles the line it stands on** — every
+/// line, the table's own outer edges included.
 ///
 /// A cell edge is a line, not a strip. Word draws a collapsed border straddling
 /// it — half the declared `w:sz` on each side — so a 1pt `insideV` on the grid
@@ -373,21 +373,24 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
 /// cell that owned it, which put those two on opposite sides of the line
 /// instead: 121..122 against 122..125.
 ///
-/// The table's own two vertical edges **also** straddle their line, which
-/// `test-files/border-outer-box.docx` measured in Word after this test was
-/// written: a 3pt `w:left` on the fixture's outer grid line comes out 69..72,
-/// not 72..75. What moved with it is the table — `build_table` shifts it left by
-/// half its leading border so the first cell's text still starts on the indent,
-/// which is what `w:tblInd` measures to. So the border ends flush against the
-/// cell box rather than beginning at it, and the assertion below reads the outer
-/// edges against **the cell box** rather than against the grid line: it is the
-/// one reference both conventions share, and it is what makes this an audit of
-/// the model instead of a transcription of one document's coordinates.
+/// The rule has **no exception for the table's own edges**, which is the half
+/// this test had backwards until `test-files/border-outer-box.docx` was measured
+/// in Word: a 3pt `w:left` on the fixture's outer line comes out 69..72, not
+/// 72..75, so half of it lies outside the table box entirely. The reasoning that
+/// produced the exception was that nothing shares an outer line, so there is
+/// nothing to straddle — plausible, and wrong. What keeps the first cell's text
+/// on the indent is not the border being drawn inside the box but `build_table`
+/// shifting the whole table half a leading border to the left, which is what
+/// `w:tblInd` measures to.
 ///
-/// Asserted as an audit over every vertical edge of every cell, because the
-/// claim is about the model rather than about one border.
+/// So one rule covers every vertical edge, and the audit below is a single
+/// branch. The counters remain because the fixture must actually contain both
+/// kinds of line for the audit to mean anything.
+///
+/// Asserted over every vertical edge of every cell, because the claim is about
+/// the model rather than about one border.
 #[test]
-fn every_vertical_border_straddles_a_shared_line_and_sits_flush_on_an_outer_one() {
+fn every_vertical_border_straddles_its_line() {
     let pages = layout();
     // The tables' own left and right, taken from the cells rather than written
     // down: whatever the fixture's grid is, these are its two ends.
@@ -400,8 +403,8 @@ fn every_vertical_border_straddles_a_shared_line_and_sits_flush_on_an_outer_one(
         }
     }
 
-    let mut straddled = 0;
-    let mut inset = 0;
+    let mut shared = 0;
+    let mut outer = 0;
     for fill in [A, B, C, D, E, F, G, H] {
         let (upper, lower) = cell(&pages, fill);
         for cell_box in [upper, lower] {
@@ -409,30 +412,23 @@ fn every_vertical_border_straddles_a_shared_line_and_sits_flush_on_an_outer_one(
                 let Some((_, (x0, x1))) = anything_at(&pages, x, cell_box) else {
                     continue;
                 };
-                let (want, what) = if (x - left).abs() < 0.05 {
-                    (x0, "sit flush inside the table's own left")
-                } else if (x - right).abs() < 0.05 {
-                    (x1, "sit flush inside the table's own right")
+                if (x - left).abs() < 0.05 || (x - right).abs() < 0.05 {
+                    outer += 1;
                 } else {
-                    ((x0 + x1) * 0.5, "be centred on its shared grid line")
-                };
-                if what.starts_with("be centred") {
-                    straddled += 1;
-                } else {
-                    inset += 1;
+                    shared += 1;
                 }
                 assert!(
-                    (want - x).abs() < 0.05,
-                    "{fill:?}: the border on the grid line at x={x} occupies \
-                     {x0}..{x1}, which does not {what}"
+                    ((x0 + x1) * 0.5 - x).abs() < 0.05,
+                    "{fill:?}: the border on the line at x={x} occupies {x0}..{x1}, \
+                     which is not centred on it"
                 );
             }
         }
     }
-    // Both halves of the rule must actually have been exercised, or the audit
-    // proves only the half the fixture happened to contain.
-    assert!(straddled >= 4, "only {straddled} shared lines seen");
-    assert!(inset >= 2, "only {inset} outer lines seen");
+    // Both kinds of line must actually have been exercised, or the audit proves
+    // only the kind the fixture happened to contain.
+    assert!(shared >= 4, "only {shared} shared lines seen");
+    assert!(outer >= 2, "only {outer} outer lines seen");
 }
 
 /// The reported pair, stated directly: two borders of **different weights** on

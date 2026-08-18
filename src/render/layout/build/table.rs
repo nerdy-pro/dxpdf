@@ -1005,6 +1005,25 @@ pub(super) fn build_table(
     // of the two is larger. They are combined only where that shift applies,
     // though — the corpus tuning it was drawn from is untouched by this
     // measurement, whose fixture declares no cell margins at all.
+    //
+    // # Only a *table-level* border shifts the table, and that is unmeasured
+    //
+    // The width read here is `border_config.left`, so a leading border declared
+    // by the first cell (§17.4.39 `w:tcBorders/w:left`) or by a row's §17.4.60
+    // `tblPrEx` override moves nothing: the rasterizer straddles whatever line
+    // wins the outer edge, so that border's outer half lands in the margin with
+    // no shift to answer it, while a table-level border of the same weight is
+    // compensated. `tests/table_bidi_visual.rs` renders both and pins the
+    // straddle in each; what it cannot say is whether Word shifts for them too.
+    //
+    // Not repaired here, because the fix and its refutation cost the same
+    // measurement and only one of them can be guessed at. `border-outer-box.docx`
+    // declares its borders at table level only, so nothing on record separates
+    // "the table shifts by whatever border stands on its leading edge" from "the
+    // table shifts by what `tblBorders` declares". **Word reference render
+    // needed**: that fixture's thick table again, with its `w:left` moved from
+    // `w:tblBorders` to the first cell's `w:tcBorders` — same edge, same weight,
+    // and the first cell's text either stays on the indent or moves 6pt right.
     let leading_border = border_config
         .as_ref()
         .and_then(|b| b.left.as_ref())

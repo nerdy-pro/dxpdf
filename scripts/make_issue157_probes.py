@@ -42,16 +42,35 @@ gets one.
 
 That may well be correct — the conflict genuinely has no subject — which is why
 this is a probe and not a fix. The document puts the two tables side by side
-with identical rows and borders, so a Word render answers it by measuring one
-boundary against the other:
+with identical rows and borders, so a Word render would answer it by measuring
+one boundary against the other:
 
   * equal thickness  -> Word treats the empty row as transparent to §17.4.66,
                         and the engine should resolve across it;
   * double thickness -> today's behaviour is right and the difference is the
                         author's, not a defect.
 
-`w:sz="24"` (3pt) rather than a hairline, so "one line or two" is visible at
-100% zoom instead of needing a loupe.
+`w:sz="24"` (3pt) rather than a hairline, so "one line or two" would be visible
+at 100% zoom instead of needing a loupe.
+
+MEASURED 2026-08-19, AND THE ANSWER IS THAT THERE IS NO ANSWER. **Word refuses
+to open this document.** Isolated against two variants differing from it in
+exactly one thing each: the same package with the `<w:tr/>` deleted opens, and
+the same document in a fuller package — `document.xml.rels` plus `styles.xml`,
+one relationship, no dangling target — does not. So it is the cell-less row, not
+the minimal three-part package the sibling probe also ships.
+
+`CT_Row` makes the cell group `minOccurs="0"`, so `<w:tr/>` is schema-valid and
+Word's reader is simply stricter than the schema — the same class of rejection
+the three `issue-165-*` fixtures hit over a `.rels` namespace, and the reason
+`scripts/verify_docx.py` cannot catch it either (the package is sound; the
+content is what Word declines).
+
+The probe is kept, because what it now documents is worth as much: a document
+containing such a row is one Word itself calls corrupt, so no fidelity target
+exists for it. dxpdf's tolerance is a robustness decision, not a match, and the
+sites that defer to this question — `table::borders` and `table::measure` — say
+so where they make it. Do not wait on a render that cannot be produced.
 
 ---------------------------------------------------------------------------
 

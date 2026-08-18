@@ -803,11 +803,30 @@ fn a_child_table_style_overrides_only_the_properties_it_restates() {
     );
     // The parent centers the 200 pt table in a 468 pt content area, which would
     // put its left edge at 206 pt; the child pulls it back to the left margin,
-    // where the parent's `tblInd` then applies. First text: 72 (margin) + 36
-    // (tblInd) + 7.2 (one cell spacing) + 6 (left cell margin).
+    // where the parent's `tblInd` then applies. First text:
+    //
+    //     72    margin
+    //   + 36    tblInd
+    //   −  1.5  half the parent's 3 pt leading border — `build_table` shifts the
+    //           table left by it so a *collapsed* table's first cell lands on
+    //           the indent (`test-files/border-outer-box.docx`, measured)
+    //   + 14.4  one cell spacing: §17.4.45's 144 twips is a **half**-gap, so the
+    //           gap is twice it (`issue-165-cellspacing-scale.docx`, measured)
+    //   +  6    left cell margin
+    //   ─────
+    //    126.9
+    //
+    // The 1.5 is a **known inconsistency, not a rule**, and this is the second
+    // place it surfaces. A §17.4.45-spaced table takes the shift from
+    // `build_table` — which is shared — while `emit_table_outline` still draws
+    // its borders inside the box rather than straddling, so nothing here answers
+    // the shift and the content ends up half a border left of the indent. The
+    // straddle was measured on a collapsed table; no render covers a spaced one.
+    // Recorded rather than corrected, because correcting it means choosing
+    // between two unmeasured readings — see the note in `build_table`.
     assert_eq!(
         text_xs(&derived).first().copied(),
-        Some(121.20),
+        Some(126.90),
         "the child's own jc wins over the parent's"
     );
     assert!(

@@ -378,7 +378,12 @@ fn a_cells_start_border_paints_on_its_visual_right() {
     };
 
     let (before, after) = gaps(false);
-    assert_eq!(before, 0.0, "without the flag, flush with the left edge");
+    // Negative because §17.4.66 straddles: half the border lies outside the cell
+    // box on the edge it stands on. Measured against `border-outer-box.docx`,
+    // where Word draws a 12pt outer border at 360–372 against a declared right
+    // edge of 372. It read 0.0 under the older "a border is drawn inside its
+    // box" convention, which that render refuted.
+    assert_eq!(before, -1.5, "without the flag, straddling the left edge");
     assert!(after > 0.0, "…and the rest of the cell is to its right");
     // With the flag the two gaps swap: the border is flush with the *right*
     // edge, and the same amount of cell is now to its left.
@@ -450,7 +455,10 @@ fn a_table_level_start_border_paints_on_the_visual_right() {
     };
 
     let (before, after) = side(false);
-    assert_eq!(before, 0.0, "the table's start edge is on the left");
+    // Straddling, so half the 3pt border is outside the cell box — see
+    // `a_cells_start_border_paints_on_its_visual_right` for the render that
+    // settled it.
+    assert_eq!(before, -1.5, "the table's start edge is on the left");
     assert!(after > 0.0);
     assert_eq!(
         side(true),
@@ -480,15 +488,20 @@ fn a_row_level_border_override_mirrors_too() {
         let rects = boxes(&layout(&table(bidi, "", &rows), None));
         let (cx, _, cw, _) = rects[&RED];
         let (bx, _, bw, _) = rects[&BLUE];
+        // The override belongs to the row that declares it, so it stands on one
+        // of that row's own vertical edges — straddling it, half in and half
+        // out, which is why this is a test of the border's *centre* and not of
+        // containment as it was before `border-outer-box.docx` was measured.
+        let centre = bx + bw / 2.0;
         assert!(
-            bx >= cx && bx + bw <= cx + cw,
-            "the override paints inside the row that declares it"
+            (centre - cx).abs() < 0.01 || (centre - (cx + cw)).abs() < 0.01,
+            "the override stands on an edge of the row that declares it"
         );
         (bx - cx, (cx + cw) - (bx + bw))
     };
 
     let (before, after) = side(false);
-    assert_eq!(before, 0.0);
+    assert_eq!(before, -1.5);
     assert!(after > 0.0);
     assert_eq!(side(true), (after, before));
 }

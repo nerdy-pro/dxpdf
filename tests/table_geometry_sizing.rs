@@ -69,18 +69,42 @@ fn layout(bytes: &[u8]) -> Vec<LayoutedPage> {
     dxpdf::render::resolve_and_layout(parsed).1
 }
 
-/// Every border and shading rectangle is drawn inside the table's own box, so
-/// the extremes of the rectangles are the table's drawn edges.
+/// The table's **box** — the span `w:tblW` sizes and `w:tblInd` places —
+/// recovered from the rectangles actually drawn.
+///
+/// The two are not the same span. §17.4.66 straddles a table's own edges
+/// (measured against `test-files/border-outer-box.docx`), so the ink runs half a
+/// border wider than the box at each end, and the box is recovered by taking
+/// that half back off both.
+///
+/// The half is taken from the render rather than written down: it is half the
+/// width of the *narrowest* rectangle beginning at the leftmost x, which is the
+/// left border itself. Narrowest and not simply leftmost, because the top and
+/// bottom borders start at that same x and run the width of the table.
+/// Self-deriving, so a case declaring a different `w:sz` needs nothing changed
+/// here, and every assertion below stays about width and placement.
 fn drawn_span(pages: &[LayoutedPage]) -> (f32, f32) {
-    let (mut left, mut right) = (f32::INFINITY, f32::NEG_INFINITY);
-    for c in pages.iter().flat_map(|p| &p.commands) {
-        if let DrawCommand::Rect { rect, .. } = c {
-            left = left.min(rect.origin.x.raw());
-            right = right.max((rect.origin.x + rect.size.width).raw());
-        }
-    }
-    assert!(left.is_finite(), "no table rectangles were drawn");
-    (left, right)
+    let rects: Vec<(f32, f32)> = pages
+        .iter()
+        .flat_map(|p| &p.commands)
+        .filter_map(|c| match c {
+            DrawCommand::Rect { rect, .. } => Some((rect.origin.x.raw(), rect.size.width.raw())),
+            _ => None,
+        })
+        .collect();
+    assert!(!rects.is_empty(), "no table rectangles were drawn");
+
+    let left = rects.iter().map(|r| r.0).fold(f32::INFINITY, f32::min);
+    let right = rects
+        .iter()
+        .map(|r| r.0 + r.1)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let border = rects
+        .iter()
+        .filter(|r| (r.0 - left).abs() < 0.01)
+        .map(|r| r.1)
+        .fold(f32::INFINITY, f32::min);
+    (left + border / 2.0, right - border / 2.0)
 }
 
 /// x of every text run, in draw order.
@@ -115,6 +139,24 @@ const ALL_BORDERS: &str = r#"<w:tblBorders>
     <w:insideH w:val="single" w:sz="4" w:color="000000"/>
     <w:insideV w:val="single" w:sz="4" w:color="000000"/>
   </w:tblBorders>"#;
+
+/// Half the 0.5 pt (`w:sz="4"`) border every table in this file declares.
+///
+/// A table's box begins this far to the **left** of its indent, and `build_table`
+/// does that deliberately: §17.4.66 straddles the leading edge, so half the
+/// border would otherwise be charged to the first cell and push its text right.
+/// The shift puts the text back on the indent — which is what `w:tblInd`
+/// measures to, per `test-files/border-outer-box.docx`. So a table "at the
+/// margin" has its box at `72.0 - LEADING_HALF` and its first cell's text at 72,
+/// and the assertions below say so rather than rounding it away.
+///
+/// Two cases below do not add it, and neither is an oversight. The full-width
+/// left-aligned table is already pulled left by `max(cell margin, half the
+/// leading border)`, and a 5.4 pt margin beats a 0.25 pt half outright. The
+/// **centred** table does not carry an indent at all — `w:jc` places the box as
+/// a unit within the width offered — so there is nothing for the shift to apply
+/// to and its box lands on the margin exactly.
+const LEADING_HALF: f32 = 0.25;
 
 /// A one-row two-column table. `tbl_pr` carries whatever the case declares
 /// beyond the borders; `grid` is the `<w:gridCol>` list verbatim.
@@ -159,7 +201,8 @@ fn a_dxa_table_width_scales_the_declared_grid_rather_than_truncating_it() {
 
     let (left, right) = drawn_span(&pages);
     assert!(
-        (left - 72.0).abs() < 0.01 && (right - 272.0).abs() < 0.01,
+        (left - (72.0 - LEADING_HALF)).abs() < 0.01
+            && (right - (272.0 - LEADING_HALF)).abs() < 0.01,
         "4000 twips is 200 pt from the 72 pt margin, got {left:.2}..{right:.2}"
     );
 
@@ -187,7 +230,7 @@ fn a_pct_table_width_is_that_fraction_of_the_offered_width() {
 
     let (left, right) = drawn_span(&pages);
     assert!(
-        (left - 72.0).abs() < 0.01,
+        (left - (72.0 - LEADING_HALF)).abs() < 0.01,
         "a table below full width starts at the margin, got {left:.2}"
     );
     assert!(
