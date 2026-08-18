@@ -128,8 +128,7 @@ fn tables() -> Vec<Table> {
                     _ => None,
                 })
                 .fold(f32::MAX, f32::min);
-            let mut verticals: Vec<(f32, f32)> =
-                band.iter().map(|r| (r.0, r.0 + r.2)).collect();
+            let mut verticals: Vec<(f32, f32)> = band.iter().map(|r| (r.0, r.0 + r.2)).collect();
             verticals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             out.push(Table {
                 verticals,
@@ -144,7 +143,10 @@ fn tables() -> Vec<Table> {
 impl Table {
     /// `(left, right)` of the table's own box: the outermost pair of verticals.
     fn table_box(&self) -> (f32, f32) {
-        (self.verticals[0].0, self.verticals[self.verticals.len() - 1].1)
+        (
+            self.verticals[0].0,
+            self.verticals[self.verticals.len() - 1].1,
+        )
     }
 
     /// `(left, right)` of each cell's box — the pairs inside the outline.
@@ -299,7 +301,8 @@ fn the_first_cells_text_moves_with_the_spacing() {
     let t = tables();
     // Declared 200 → 400 → 800 twips, so each step adds 10pt then 20pt to the
     // declaration and must add twice that to where the text starts.
-    for (from, to, step_pt, label) in [(1usize, 2usize, 10.0_f32, "T2→T3"), (2, 3, 20.0, "T3→T4")] {
+    for (from, to, step_pt, label) in [(1usize, 2usize, 10.0_f32, "T2→T3"), (2, 3, 20.0, "T3→T4")]
+    {
         let shift = t[to].first_cell_text_x - t[from].first_cell_text_x;
         assert!(
             close(shift, 2.0 * step_pt),

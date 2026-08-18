@@ -182,11 +182,7 @@ fn row_cell_spacing(row: &model::TableRow) -> Option<model::TableMeasure> {
 /// fixture that would settle it is a fifth table in
 /// `issue-165-cellspacing-scale.docx` carrying the row value on *one* row only;
 /// it does not have one yet.
-fn resolve_table_cell_spacing(
-    rows: &[model::TableRow],
-    table_level: Pt,
-    warned: &mut bool,
-) -> Pt {
+fn resolve_table_cell_spacing(rows: &[model::TableRow], table_level: Pt, warned: &mut bool) -> Pt {
     let mut effective = rows
         .iter()
         .map(|r| row_cell_spacing(r).map_or(table_level, |m| resolve_cell_spacing(Some(m))));
@@ -2851,8 +2847,7 @@ mod tests {
     /// zero.
     #[test]
     fn a_row_level_spacing_supersedes_and_only_disagreeing_rows_are_reported() {
-        let row = |spacing: Option<model::TableMeasure>,
-                   exception: Option<model::TableMeasure>| {
+        let row = |spacing: Option<model::TableMeasure>, exception: Option<model::TableMeasure>| {
             let mut r = model_row(0, &[1u32, 1u32]);
             r.properties.cell_spacing = model::Dup::from(spacing);
             if exception.is_some() {
@@ -2898,9 +2893,53 @@ mod tests {
             "a measure §17.4.45 ignores is not a declaration and supersedes nothing"
         );
         assert_eq!(
-            resolve(vec![row(Some(dxa(480)), None), row(None, None)], table_level),
+            resolve(
+                vec![row(Some(dxa(480)), None), row(None, None)],
+                table_level
+            ),
             (table_level, true),
             "rows asking for different gaps keep the table's value and are reported"
+        );
+    }
+
+    /// And `build_table` reads it — the pure function above is only half the
+    /// path. The value reaching layout is the row's, and it is a table whose
+    /// rows *disagree* that raises the flag on `BuildState`.
+    ///
+    /// Worth its own case because these two are wired separately: the geometry
+    /// comes from `BuiltTable::cell_spacing` and the diagnostic from
+    /// `BuildState`, and the old warning fired from inside the row loop, where
+    /// it could report a row the grid had never been built from.
+    #[test]
+    fn build_table_applies_the_row_spacing_and_reports_only_a_disagreement() {
+        let with_rows = |rows: Vec<Option<model::TableMeasure>>| {
+            let props = model::TableProperties {
+                width: measure(dxa(4000)),
+                cell_spacing: model::Dup::from(Some(dxa(240))),
+                ..Default::default()
+            };
+            let mut t = table_of(props, &[2000, 2000], 2);
+            t.rows = rows
+                .into_iter()
+                .map(|s| {
+                    let mut r = model_row(0, &[1u32, 1u32]);
+                    r.properties.cell_spacing = model::Dup::from(s);
+                    r
+                })
+                .collect();
+            let (built, state) = build_reporting(&t);
+            (built.cell_spacing, state.warned_row_cell_spacing)
+        };
+
+        assert_eq!(
+            with_rows(vec![Some(dxa(480)), Some(dxa(480))]),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "agreeing rows supersede the table's 240 and raise nothing"
+        );
+        assert_eq!(
+            with_rows(vec![Some(dxa(480)), None]),
+            (resolve_cell_spacing(Some(dxa(240))), true),
+            "one row out of step keeps the table's value and is reported"
         );
     }
 
