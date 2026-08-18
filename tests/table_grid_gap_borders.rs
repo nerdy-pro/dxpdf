@@ -363,8 +363,8 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
         })
 }
 
-/// §17.4.66: a collapsed border **straddles the line two cells share, and goes
-/// inside a line shared with nothing**.
+/// §17.4.66: a collapsed border **straddles its grid line**, and lies flush
+/// against the cell box on the table's own edges.
 ///
 /// A cell edge is a line, not a strip. Word draws a collapsed border straddling
 /// it — half the declared `w:sz` on each side — so a 1pt `insideV` on the grid
@@ -373,15 +373,21 @@ fn horizontal_band_on(pages: &[LayoutedPage], y: f32, x: f32) -> Option<Band> {
 /// cell that owned it, which put those two on opposite sides of the line
 /// instead: 121..122 against 122..125.
 ///
-/// The table's own two vertical edges are the exception, and are asserted here
-/// rather than skipped: nothing shares them, so there is nothing to straddle and
-/// the border goes inside — which is also what keeps a table's ink within the
-/// box it reports (`tests/table_auto_width.rs`).
+/// The table's own two vertical edges **also** straddle their line, which
+/// `test-files/border-outer-box.docx` measured in Word after this test was
+/// written: a 3pt `w:left` on the fixture's outer grid line comes out 69..72,
+/// not 72..75. What moved with it is the table — `build_table` shifts it left by
+/// half its leading border so the first cell's text still starts on the indent,
+/// which is what `w:tblInd` measures to. So the border ends flush against the
+/// cell box rather than beginning at it, and the assertion below reads the outer
+/// edges against **the cell box** rather than against the grid line: it is the
+/// one reference both conventions share, and it is what makes this an audit of
+/// the model instead of a transcription of one document's coordinates.
 ///
 /// Asserted as an audit over every vertical edge of every cell, because the
 /// claim is about the model rather than about one border.
 #[test]
-fn every_vertical_border_straddles_a_shared_line_and_goes_inside_an_outer_one() {
+fn every_vertical_border_straddles_a_shared_line_and_sits_flush_on_an_outer_one() {
     let pages = layout();
     // The tables' own left and right, taken from the cells rather than written
     // down: whatever the fixture's grid is, these are its two ends.
@@ -404,9 +410,9 @@ fn every_vertical_border_straddles_a_shared_line_and_goes_inside_an_outer_one() 
                     continue;
                 };
                 let (want, what) = if (x - left).abs() < 0.05 {
-                    (x0, "start at the table's own left")
+                    (x0, "sit flush inside the table's own left")
                 } else if (x - right).abs() < 0.05 {
-                    (x1, "end at the table's own right")
+                    (x1, "sit flush inside the table's own right")
                 } else {
                     ((x0 + x1) * 0.5, "be centred on its shared grid line")
                 };

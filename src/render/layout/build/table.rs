@@ -67,94 +67,143 @@ fn row_height_rule(
 /// for this element — only `dxa` carries a usable value. `nil` and an omitted
 /// element are zero, which is every table in the test corpora.
 ///
-/// # No factor: the declared value *is* the gap, everywhere
+/// # The declared value is a half-gap: Word draws twice it
 ///
-/// Word renders `test-files/issue-165-cellspacing.docx` with gaps about twice
-/// this width (issue #165), which twice prompted the obvious conclusion —
-/// double the value — and it is wrong. The spec states no factor: §17.4.45 and
-/// [MS-OI29500] describe the value only as "the minimum amount of space which
-/// shall be left between all cells in the table including the width of the table
-/// borders in the calculation".
+/// Neither §17.4.45 nor [MS-OI29500] states a factor — both describe the value
+/// only as "the minimum amount of space which shall be left between all cells in
+/// the table including the width of the table borders in the calculation" — so
+/// the factor had to be measured. `test-files/issue-165-cellspacing-scale.docx`
+/// was authored to measure it and **Word's render doubles the declaration**, at
+/// the table's own edges and between two cells alike. The reading is scale-free
+/// and so survives a screenshot: with `3w + 4g = 360pt`, the ratio of cell to
+/// gap is 1.58 where the unfactored value predicts 4.67.
 ///
-/// **ONLYOFFICE settles it**, being an independent implementation that both
-/// renders and targets Word compatibility. `sdkjs`, in
-/// `word/Editor/Table/TableRecalculate.js`, insets each cell within its grid
-/// slot: `+= CellSpacing` on the first cell's outer side and on the last cell's,
-/// `+= CellSpacing / 2` on every interior side. So an interior gap is two halves
-/// and an edge gap is one whole — **every gap is exactly the declared value**,
-/// which is what this function returns and always did. It also carves them out
-/// of the grid rather than growing the table, confirming `reserve_cell_spacing`
-/// below.
+/// So this function returns twice what it is given, and everything downstream
+/// keeps treating its result as *the gap*: `reserve_cell_spacing` carves one out
+/// of the grid and `measure_table_rows` insets every cell by one, which is what
+/// makes the gap uniform. Doubling here rather than at those two sites keeps one
+/// definition of the word "spacing" in this module.
 ///
-/// So where does Word's doubling come from? The probe is the suspect, not the
-/// factor: `issue-165-cellspacing.docx` declares `tblCellSpacing` **twice**, 400
-/// in `tblPr` and 400 again in `trPr`. If Word sums them the effective spacing is
-/// 800 twips — exactly the doubling observed, with no factor anywhere. §17.4.45
-/// says the row value *supersedes* the table one and ONLYOFFICE implements
-/// override (`RowPr.TableCellSpacing = TablePr.TablePr.TableCellSpacing`, then a
-/// merge), but the spec saying "supersede" is not evidence about what Word does
-/// — [MS-OI29500] exists because Word deviates. That probe cannot tell the two
-/// apart, which is why it must not be used to justify a factor.
+/// # What that refutes, and why it is written down
 ///
-/// **Word reference render needed** (issue #165):
-/// `test-files/issue-165-cellspacing-scale.docx` declares the spacing at table
-/// level *only* in two of its four tables, so it separates "Word applies a
-/// factor" from "Word sums the two declarations" — and its fourth table, with
-/// 400 at table level and 800 on the row, measures the sum directly.
+/// This function returned the declared value unfactored, on an argument from
+/// ONLYOFFICE — an independent implementation that both renders and targets Word
+/// compatibility. `sdkjs`, in `word/Editor/Table/TableRecalculate.js`, insets
+/// each cell within its grid slot by `CellSpacing` on the table's outer sides
+/// and `CellSpacing / 2` on every interior one, making every gap exactly the
+/// declared value. Word's doubled gaps were explained instead as Word *summing*
+/// a table-level and a row-level declaration, since the only fixture measured at
+/// the time (`issue-165-cellspacing.docx`) declares 400 in both places.
 ///
-/// # Why the row-level value is still not applied
+/// Tables 2 and 3 of the scale probe declare the spacing at **table level only**
+/// and Word doubles them anyway. There is nothing to sum, so the factor is real
+/// and the sum theory is dead. A cross-implementation argument lost to a render
+/// of the implementation being matched, which is the order those two rank in.
 ///
-/// Not because the precedence is unclear. The primary text gives it exactly:
-/// §17.4.45 (`tblPr`) is "superseded by a table-level exception (§17.4.44) or
-/// the row cell spacing value (§17.4.43) in that order", and §17.4.44
-/// (`tblPrEx`) is "superseded by the row cell spacing value (§17.4.43)". Row
-/// beats exception beats table, and §17.4.43 adds two sentences no other level
-/// has: row-level spacing is added *inside* the text margins where table-level
-/// is added *outside*, and "Row-level cell spacing shall not increase the width
-/// of the overall table."
+/// # Row level supersedes, and the same render proves it
 ///
-/// **The one Word render on record contradicts "supersede".**
-/// `issue-165-cellspacing.docx` declares 400 at table level *and* 400 on the
-/// row. Superseding gives 400; Word draws about 800. Summing gives 800.
-/// A factor is ruled out by ONLYOFFICE above, so of the two readings left it is
-/// the spec's own that the measurement disagrees with — which is what
-/// [MS-OI29500] exists to record. Implementing §17.4.43 as written would move
-/// that fixture from matching the only Word measurement available to missing it
-/// by half, on the strength of text already known not to bind Word here.
+/// The precedence was never in doubt in the text: §17.4.45 (`tblPr`) is
+/// "superseded by a table-level exception (§17.4.44) or the row cell spacing
+/// value (§17.4.43) in that order", and §17.4.44 is "superseded by the row cell
+/// spacing value". What was in doubt was whether Word obeys it, because the one
+/// render then on record was equally consistent with summing.
 ///
-/// **And a differing row is not a local change.** The gap is uniform because
-/// one spacing is carved out of the grid by `reserve_cell_spacing` and the same
-/// value insets every cell, so slots plus one spacing equal the table width. A
-/// row using a different value breaks that, and repairing it needs three
-/// answers nothing supplies:
+/// Table 4 of the scale probe separates them: 400 on the table, 800 on the row.
+/// Supersede predicts 80pt gaps and 13.3pt cells, table-wins predicts 40pt gaps
+/// and 66.7pt cells, and summing predicts 120pt gaps, which 360pt of table
+/// cannot hold. Word draws cells 13.5pt wide, narrow enough that their labels
+/// wrap to one glyph per line. Supersede it is, and the row value governs the
+/// table's own edge inset too — not merely the gaps between cells.
 ///
-/// * does the row re-carve the grid from its own spacing — misaligning its
-///   column boundaries with the rows above and below — or inset within the
-///   slots the table-level value produced, leaving the row short of the table
-///   edge? §17.4.43's "shall not increase the width of the overall table" rules
-///   out *growing* the table and does not choose between these.
+/// `resolve_table_cell_spacing` applies that, and states the one case still
+/// unmeasured: rows that disagree with each other.
+fn resolve_cell_spacing(m: Option<model::TableMeasure>) -> Pt {
+    match m {
+        // §17.4.45's value is half the gap — see above. Word's own UI shows the
+        // doubled number, which is the same fact from the other side.
+        Some(model::TableMeasure::Twips(tw)) => (Pt::from(tw) * 2.0).max(Pt::ZERO),
+        // Auto / Pct / Nil / absent.
+        _ => Pt::ZERO,
+    }
+}
+
+/// §17.4.43: the row's own `tblCellSpacing`, or its `tblPrEx` one (§17.4.44).
+fn row_cell_spacing(row: &model::TableRow) -> Option<model::TableMeasure> {
+    row.properties
+        .cell_spacing
+        .cloned()
+        .or_else(|| {
+            row.property_exceptions
+                .as_ref()
+                .and_then(|e| e.cell_spacing)
+        })
+        // §17.4.45 ignores every measure but `dxa` here, and `nil` is a declared
+        // zero rather than an ignored value. So a `pct` or `auto` row has
+        // declared *nothing*: it leaves the table's value standing instead of
+        // superseding it with the zero `resolve_cell_spacing` would return.
+        .filter(|m| matches!(m, model::TableMeasure::Twips(_) | model::TableMeasure::Nil))
+}
+
+/// §17.4.43/§17.4.44/§17.4.45: the one gap this table renders with.
+///
+/// Row beats table-level exception beats table, per the precedence quoted in
+/// `resolve_cell_spacing` and confirmed against Word by the scale probe's fourth
+/// table. A row declaring nothing falls back to the table's value, so a table
+/// whose rows all stay silent resolves exactly as it did before this existed.
+///
+/// # Why the answer is still table-wide
+///
+/// Because a row using a *different* spacing from its neighbours is not a local
+/// change, and nothing has measured what Word does with one. The gap is uniform
+/// only because one spacing is carved out of the grid by `reserve_cell_spacing`
+/// and the same value insets every cell; a row with its own value breaks that
+/// and raises three questions no render answers:
+///
+/// * does that row re-carve the grid from its own spacing — misaligning its
+///   column boundaries with the rows above and below — or inset within the slots
+///   the table-level value produced, leaving it short of the table edge?
+///   §17.4.43's "Row-level cell spacing shall not increase the width of the
+///   overall table" rules out growing the table and does not choose between
+///   these.
 /// * what is the table's reported width when rows disagree? It is
 ///   `sum(slots) + cell_spacing` today, and it drives pagination, floating-table
 ///   registration and `jc` placement — so a wrong answer moves the whole table,
 ///   not one row.
 /// * is border collapsing still table-wide? `collapse_borders` is
-///   `cell_spacing <= 0` for the entire table. With spacing on some rows only,
-///   a per-row answer would collapse one row's borders and not its neighbour's,
-///   and no section says whether Word does that.
+///   `cell_spacing <= 0` for the entire table, so a per-row answer would collapse
+///   one row's borders and not its neighbour's, and no section says whether Word
+///   does that.
 ///
-/// **What would settle it**: a Word render of
-/// `issue-165-cellspacing-scale.docx`. Its two table-level-only tables give the
-/// factor, and its fourth table — 400 on the table, 800 on every row —
-/// distinguishes supersede (gap 800), sum (gap 1200) and table-wins (gap 400)
-/// in a single measurement, because all three predict a different number. A
-/// fifth table with the row value on *one* row only would answer the alignment
-/// and border-collapse questions above; the fixture does not have one yet.
-fn resolve_cell_spacing(m: Option<model::TableMeasure>) -> Pt {
-    match m {
-        Some(model::TableMeasure::Twips(tw)) => Pt::from(tw).max(Pt::ZERO),
-        // Auto / Pct / Nil / absent.
-        _ => Pt::ZERO,
+/// So a table whose rows **agree** takes that value, and one that does not keeps
+/// the table-level value and says so. No corpus document is affected either way:
+/// `issue-165-cellspacing.docx` and `issue-165-cellspacing-scale.docx` are the
+/// only two that declare the element at all, and every table in both is a single
+/// row, which cannot disagree with anything. The
+/// fixture that would settle it is a fifth table in
+/// `issue-165-cellspacing-scale.docx` carrying the row value on *one* row only;
+/// it does not have one yet.
+fn resolve_table_cell_spacing(
+    rows: &[model::TableRow],
+    table_level: Pt,
+    warned: &mut bool,
+) -> Pt {
+    let mut effective = rows
+        .iter()
+        .map(|r| row_cell_spacing(r).map_or(table_level, |m| resolve_cell_spacing(Some(m))));
+    let Some(first) = effective.next() else {
+        return table_level;
+    };
+    if effective.all(|s| s == first) {
+        return first;
     }
+    if !*warned {
+        *warned = true;
+        log::warn!(
+            "§17.4.43/§17.4.44: rows declare different tblCellSpacing values; using the \
+             table-level value ({table_level:?}) for the whole table"
+        );
+    }
+    table_level
 }
 
 /// Carve one `cell_spacing` out of the grid so the slots plus one spacing add
@@ -720,12 +769,20 @@ pub(super) fn build_table(
     // be left between all cells", not extra width. Reserving one spacing here
     // and offsetting each cell by one in `measure_table_rows` yields exactly
     // `cell_spacing` between adjacent cells *and* at both table edges.
-    let cell_spacing = resolve_cell_spacing(
+    let table_cell_spacing = resolve_cell_spacing(
         t.properties
             .cell_spacing
             .get()
             .or_else(|| style_table.and_then(|tp| tp.cell_spacing.get()))
             .copied(),
+    );
+    // §17.4.43: a row's own value supersedes the table's, and Word obeys that —
+    // the scale probe's fourth table measures it. `resolve_table_cell_spacing`
+    // states what it does when rows disagree, which no render has settled.
+    let cell_spacing = resolve_table_cell_spacing(
+        &t.rows,
+        table_cell_spacing,
+        &mut state.warned_row_cell_spacing,
     );
     let col_widths = reserve_cell_spacing(col_widths, cell_spacing);
     let style_overrides = raw_table_style
@@ -825,41 +882,6 @@ pub(super) fn build_table(
             // empirical evidence motivating this pass.
             let mut cells = cells;
             normalize_row_uniform_vertical_insets(&mut cells);
-
-            // A row may override the table's `tblCellSpacing`, and the spec is
-            // unambiguous about the order. Verified against the primary text:
-            // §17.4.45 (`tblPr`) "shall be superseded by a table-level
-            // exception (§17.4.44) or the row cell spacing value (§17.4.43) in
-            // that order", and §17.4.44 (`tblPrEx`) "shall be superseded by
-            // the row cell spacing value (§17.4.43)". So trPr > tblPrEx > tblPr.
-            //
-            // It is still not applied, and the reason is not that the order is
-            // unclear. See `resolve_cell_spacing` for why: implementing it
-            // requires three answers the spec does not give and no render has
-            // measured, and the one Word render on record points *away* from
-            // "supersede". Report it rather than dropping it silently; the
-            // parsed value stays on the model, so nothing has to be reparsed
-            // when a render settles it.
-            //
-            // Note this fires only on *disagreement*. A row restating the
-            // table's own value resolves to the same gap either way, which is
-            // why `issue-165-cellspacing.docx` is silent here and
-            // `issue-165-cellspacing-scale.docx` — table 400, row 800 — is not.
-            let row_spacing = row.properties.cell_spacing.cloned().or_else(|| {
-                row.property_exceptions
-                    .as_ref()
-                    .and_then(|e| e.cell_spacing)
-            });
-            if let Some(rs) = row_spacing {
-                if resolve_cell_spacing(Some(rs)) != cell_spacing && !state.warned_row_cell_spacing
-                {
-                    state.warned_row_cell_spacing = true;
-                    log::warn!(
-                        "§17.4.43/§17.4.44: row-level tblCellSpacing overrides are not applied; \
-                         using the table-level value ({cell_spacing:?})"
-                    );
-                }
-            }
 
             TableRowInput {
                 cells,
@@ -1769,19 +1791,21 @@ mod tests {
         }
     }
 
-    /// §17.4.45: the declared value passes through unscaled — it *is* the gap.
+    /// §17.4.45: the declared value is **half** the gap — Word draws twice it.
     ///
-    /// Pinned because it was briefly changed to `2x` on the strength of a Word
-    /// render, and reverted when ONLYOFFICE's renderer turned out to apply no
-    /// factor at all. See `resolve_cell_spacing`'s doc comment for that evidence
-    /// and for what the doubling in that render is more likely to have been.
+    /// Measured off a Word render of `test-files/issue-165-cellspacing-scale.docx`
+    /// (2026-08-18). This assertion has been both ways: it read `2x` on the
+    /// strength of an earlier render, was reverted to unscaled when ONLYOFFICE
+    /// turned out to apply no factor, and is `2x` again now that a fixture
+    /// declaring the spacing at *table level only* has been rendered — which is
+    /// what removes the "Word sums two declarations" explanation the revert
+    /// rested on. `resolve_cell_spacing`'s doc comment holds the whole of it.
     #[test]
-    fn a_declared_spacing_is_the_whole_gap() {
-        use crate::model::dimension::Dimension;
+    fn a_declared_spacing_is_half_the_gap_word_draws() {
         assert_eq!(
-            resolve_cell_spacing(Some(model::TableMeasure::Twips(Dimension::new(240)))),
-            Pt::new(12.0),
-            "240 twips = 12pt declared and 12pt rendered"
+            resolve_cell_spacing(Some(dxa(240))),
+            Pt::new(24.0),
+            "240 twips = 12pt declared and 24pt rendered"
         );
     }
 
@@ -2808,65 +2832,75 @@ mod tests {
         );
     }
 
-    /// §17.4.43 / §17.4.44: a row-level `tblCellSpacing` is **not applied** —
-    /// `resolve_cell_spacing` sets out the three answers that would be needed
-    /// first — and it is *reported* rather than dropped in silence.
+    /// §17.4.43: a row's own `tblCellSpacing` supersedes the table's, and the
+    /// warning is now about rows disagreeing with *each other* — the one case
+    /// no render has measured and the only one still dropped.
     ///
-    /// What is reported is a disagreement, not the presence of a row-level
-    /// element. A row restating the table's own spacing resolves to the same
-    /// gap, so warning about it would report a difference that is not there:
-    /// that is why `issue-165-cellspacing.docx` (400 twips at both levels) is
-    /// silent while `issue-165-cellspacing-scale.docx` (400 and 800) is not.
-    /// The two are indistinguishable on the page — the geometry is the table's
-    /// value either way, which `tests/table_cell_spacing.rs` pins — so only
-    /// `BuildState` can tell them apart.
+    /// Word's render of `issue-165-cellspacing-scale.docx` settled the
+    /// precedence: its fourth table declares 400 on the table and 800 on the
+    /// row, and Word draws it as a plain 800 table. So a row value no longer
+    /// merely gets reported — it applies, which `tests/table_cell_spacing.rs`
+    /// pins on the page. What `BuildState` still records is a table whose rows
+    /// ask for different gaps, which cannot be honoured table-wide; see
+    /// `resolve_table_cell_spacing` for the three questions that would have to
+    /// be answered first.
     ///
-    /// The `pct` case is the same rule from the other end. §17.4.45 leaves
-    /// every measure but `dxa` without a usable value here, so a `pct` row
-    /// spacing against a table that declares none resolves to the same zero and
-    /// is not a disagreement either.
+    /// The `pct` case is §17.4.45 from the other end: every measure but `dxa`
+    /// and `nil` is ignored for this element, so such a row has declared nothing
+    /// and leaves the table's value standing rather than superseding it with a
+    /// zero.
     #[test]
-    fn a_row_cell_spacing_is_reported_only_when_it_resolves_to_a_different_gap() {
-        let warned = |table: Option<model::TableMeasure>,
-                      row: Option<model::TableMeasure>,
-                      exception: Option<model::TableMeasure>| {
-            let props = model::TableProperties {
-                width: measure(dxa(4000)),
-                cell_spacing: model::Dup::from(table),
-                ..Default::default()
-            };
-            let mut t = table_of(props, &[2000, 2000], 2);
-            t.rows[0].properties.cell_spacing = model::Dup::from(row);
+    fn a_row_level_spacing_supersedes_and_only_disagreeing_rows_are_reported() {
+        let row = |spacing: Option<model::TableMeasure>,
+                   exception: Option<model::TableMeasure>| {
+            let mut r = model_row(0, &[1u32, 1u32]);
+            r.properties.cell_spacing = model::Dup::from(spacing);
             if exception.is_some() {
-                t.rows[0].property_exceptions = Some(model::TableRowPropertyExceptions {
+                r.property_exceptions = Some(model::TableRowPropertyExceptions {
                     bidi_visual: None,
                     borders: None,
                     cell_spacing: exception,
                 });
             }
-            build_reporting(&t).1.warned_row_cell_spacing
+            r
         };
+        let resolve = |rows: Vec<model::TableRow>, table: Pt| {
+            let mut warned = false;
+            let got = resolve_table_cell_spacing(&rows, table, &mut warned);
+            (got, warned)
+        };
+        let table_level = resolve_cell_spacing(Some(dxa(240)));
 
-        assert!(
-            !warned(Some(dxa(240)), None, None),
-            "a row that says nothing is not a disagreement"
+        assert_eq!(
+            resolve(vec![row(None, None), row(None, None)], table_level),
+            (table_level, false),
+            "rows that say nothing take the table's value"
         );
-        assert!(
-            !warned(Some(dxa(240)), Some(dxa(240)), None),
-            "…nor is a row restating the table's own value"
+        assert_eq!(
+            resolve(
+                vec![row(Some(dxa(480)), None), row(Some(dxa(480)), None)],
+                table_level
+            ),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "rows that agree supersede the table, which is what Word draws"
         );
-        assert!(
-            !warned(None, Some(pct(2500)), None),
-            "…nor a row whose measure §17.4.45 leaves without a value, which \
-             resolves to the same zero the table has"
+        assert_eq!(
+            resolve(
+                vec![row(None, Some(dxa(480))), row(None, Some(dxa(480)))],
+                table_level
+            ),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "§17.4.44's `tblPrEx` is read when the `trPr` is silent"
         );
-        assert!(
-            warned(Some(dxa(240)), Some(dxa(480)), None),
-            "a row asking for a different gap must be reported"
+        assert_eq!(
+            resolve(vec![row(Some(pct(2500)), None)], table_level),
+            (table_level, false),
+            "a measure §17.4.45 ignores is not a declaration and supersedes nothing"
         );
-        assert!(
-            warned(Some(dxa(240)), None, Some(dxa(480))),
-            "and §17.4.44's `tblPrEx` is read when the `trPr` is silent"
+        assert_eq!(
+            resolve(vec![row(Some(dxa(480)), None), row(None, None)], table_level),
+            (table_level, true),
+            "rows asking for different gaps keep the table's value and are reported"
         );
     }
 
