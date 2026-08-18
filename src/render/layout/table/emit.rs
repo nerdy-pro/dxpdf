@@ -259,7 +259,7 @@ fn emit_one_row(
         let b_right = mr.borders[cell_ci].right;
         let b_bottom = mr.borders[cell_ci].bottom;
 
-        let dx = (border_width(b_left) - cell_input.margins.left).max(Pt::ZERO);
+        let dx = entry.content_dx;
         let dy_border = (border_width(cell_top) - cell_input.margins.top).max(Pt::ZERO);
         // The foot of the content box, mirroring `dy_border` at the head. A
         // bottom border only takes room from the content where it is drawn

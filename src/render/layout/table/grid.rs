@@ -598,6 +598,7 @@ mod tests {
             cell_x: Pt::ZERO,
             cell_w: Pt::new(100.0),
             grid_col,
+            content_dx: Pt::ZERO,
         }
     }
 

@@ -303,6 +303,10 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             cell_x: entry.cell_x,
             cell_w: entry.cell_w,
             grid_col: entry.grid_col,
+            // A split changes where a row's halves sit, never how far its
+            // content is inset from its own left edge — the shared vertical is
+            // the same line on both pages.
+            content_dx: entry.content_dx,
         });
         second_entries.push(CellLayoutEntry {
             layout: crate::render::layout::cell::CellLayout {
@@ -313,6 +317,10 @@ pub(super) fn split_row_at(mr: &MeasuredRow, cut: &SplitCut) -> SplitRow {
             cell_x: entry.cell_x,
             cell_w: entry.cell_w,
             grid_col: entry.grid_col,
+            // A split changes where a row's halves sit, never how far its
+            // content is inset from its own left edge — the shared vertical is
+            // the same line on both pages.
+            content_dx: entry.content_dx,
         });
     }
 
@@ -675,6 +683,7 @@ mod tests {
             cell_x: Pt::ZERO,
             cell_w: Pt::new(40.0),
             grid_col: 0,
+            content_dx: Pt::ZERO,
         };
         assert!(
             cut_for_cell(&entry, Pt::ZERO, Pt::ZERO, Pt::new(100.0)).is_none(),

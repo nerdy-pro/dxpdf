@@ -412,6 +412,12 @@ const ALL_FILES: &[&str] = &[
     "issue-165-floatv.docx",
     "hidden-text.docx",
     "grid-gap-borders.docx",
+    // The three §17.4.66 geometry probes. They assert nothing about
+    // borders — see `scripts/make_border_geometry_probes.py` — but they are
+    // ordinary packages and belong in the parse sweep like any other.
+    "border-content-charge.docx",
+    "border-outer-box.docx",
+    "border-junction-colour.docx",
 ];
 
 #[test]

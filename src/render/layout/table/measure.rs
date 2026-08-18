@@ -129,9 +129,67 @@ pub(super) fn measure_table_rows(
             // horizontal pair is what let a row whose top border was thicker
             // than its top cell margin overflow its own box by the difference,
             // straight into the strip where the bottom border paints.
+            //
+            // **How much of a border is "inside" depends on whether the edge is
+            // shared**, and it is the same rule `rasterize_border_grid` paints
+            // by: a collapsed border straddles a line two cells share, so each
+            // is charged half, and it goes wholly inside a line shared with
+            // nothing, so the table's own two edges are charged in full.
+            //
+            // **Measured**, against `test-files/border-content-charge.docx`: with
+            // zero cell margins and a shared border stepping 0.5 → 12pt, Word
+            // draws the following cell's glyph flush against the border's inner
+            // edge at every weight. Both other readings are refuted by that one
+            // render — charging it nothing puts the glyph on the grid line with
+            // the border painted through it, and charging it the whole width
+            // leaves a gap of half the border. `tests/table_cell_content_box.rs`
+            // holds the assertion.
+            //
+            // The charge comes from the **plan** and not from `resolved_borders`
+            // for the same reason: resolution hands a shared edge to one of the
+            // two cells and clears the other, so the loser's own `left` says
+            // `Absent` and would be charged nothing. Both cells stand on one
+            // line and both must see it.
             let b = &resolved_borders[row_idx][cell_ci];
-            let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);
-            let extra_right = (border_width(b.right) - cell.margins.right).max(Pt::ZERO);
+            let charge = |edge, outer: bool, margin: Pt| {
+                let w = border_width(edge);
+                ((if outer { w } else { w * 0.5 }) - margin).max(Pt::ZERO)
+            };
+            // §17.4.45: a spaced table has no shared edges at all — each cell
+            // keeps its four borders wholly inside itself, so each is charged in
+            // full, and the plan (which resolves as though collapsed) does not
+            // describe it.
+            let (extra_left, extra_right) = if cell_spacing > Pt::ZERO {
+                (
+                    (border_width(b.left) - cell.margins.left).max(Pt::ZERO),
+                    (border_width(b.right) - cell.margins.right).max(Pt::ZERO),
+                )
+            } else {
+                (
+                    charge(
+                        plan.vertical(grid_start, row_idx),
+                        grid_start == 0,
+                        cell.margins.left,
+                    ),
+                    charge(
+                        plan.vertical(grid_end, row_idx),
+                        grid_end == col_widths.len(),
+                        cell.margins.right,
+                    ),
+                )
+            };
+            // The horizontal twin needs no such split, and the asymmetry is
+            // worth stating rather than leaving to be rediscovered. §17.4.38
+            // reserves a strip *between* two rows' content boxes wide enough for
+            // the border on their shared boundary (`border_gap_below`), so an
+            // interior horizontal already takes its room from neither box —
+            // which is the half-each rule delivered by geometry instead of by a
+            // charge. `extra_top` therefore only ever sees the table's own top
+            // edge, where the whole border is inside and the full charge is
+            // right. The one shape that escapes this is a boundary the *lower*
+            // row owns (`can_own` prefers the upper, and only a `gridSpan`
+            // mismatch overrides it): there the strip is zero and the lower row
+            // is charged the full width. No render has measured that case.
             let extra_top = (border_width(b.top) - cell.margins.top).max(Pt::ZERO);
             let extra_bottom = if reserves_band_below {
                 Pt::ZERO
@@ -180,6 +238,7 @@ pub(super) fn measure_table_rows(
             }
 
             entries.push(CellLayoutEntry {
+                content_dx: extra_left,
                 layout,
                 cell_x,
                 cell_w,

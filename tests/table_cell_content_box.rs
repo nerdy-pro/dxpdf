@@ -391,3 +391,102 @@ fn a_thicker_left_border_narrows_the_content_box() {
          got {wide} unbordered vs {narrow} bordered"
     );
 }
+
+// ── a shared vertical: how much of it is inside each cell ───────────────────
+
+/// A one-row, two-cell table whose **only** border is the `insideV` the two
+/// cells share, at `sz` eighths of a point, with zero cell margins.
+///
+/// Zero margins because the inset is `max(border, margin)` per side, and Word's
+/// own `TableNormal` margin of 108 twips would mask any border under 5.4pt —
+/// which is most of the range this measures over. Every other edge is
+/// `w:val="nil"` for the reason `one_bordered_edge` gives: an omitted edge
+/// inherits, a `nil` one does not.
+fn one_shared_vertical(sz: u32) -> String {
+    let edges: String = ["top", "left", "bottom", "right", "insideH"]
+        .iter()
+        .map(|e| format!(r#"<w:{e} w:val="nil"/>"#))
+        .collect();
+    let cell = |label: &str| {
+        format!(
+            r#"<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr>
+    <w:p><w:r><w:t>{label}</w:t></w:r></w:p></w:tc>"#
+        )
+    };
+    format!(
+        r#"<w:tbl>
+  <w:tblPr>
+    <w:tblW w:w="4000" w:type="dxa"/>
+    <w:tblBorders>{edges}<w:insideV w:val="single" w:sz="{sz}" w:space="0" w:color="auto"/></w:tblBorders>
+    <w:tblCellMar>
+      <w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/>
+      <w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/>
+    </w:tblCellMar>
+    <w:tblLayout w:type="fixed"/>
+  </w:tblPr>
+  <w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>
+  <w:tr>{}{}</w:tr>
+</w:tbl>"#,
+        cell("LEFT"),
+        cell("RIGHT")
+    )
+}
+
+/// The x of the text command whose content is exactly `needle`.
+fn glyph_x(pages: &[LayoutedPage], needle: &str) -> f32 {
+    pages
+        .iter()
+        .flat_map(|p| &p.commands)
+        .find_map(|c| match c {
+            DrawCommand::Text { text, position, .. } if &**text == needle => Some(position.x.raw()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no text {needle:?} on the page"))
+}
+
+/// §17.4.66: a cell is charged **half** of the border it shares with its
+/// neighbour, not all of it and not none of it.
+///
+/// **Measured in Word** against `test-files/border-content-charge.docx`, which
+/// steps a shared border 0.5 → 12pt across four rows with zero cell margins and
+/// asks where the following cell's glyph lands. Word draws it flush against the
+/// border's inner edge at every weight — so half the line lies in each cell,
+/// which is the collapsed model and is what `rasterize_border_grid` already
+/// paints.
+///
+/// Two readings are refuted, and the engine held both of them at once. The
+/// second cell used to be charged **nothing**: §17.4.66 resolution handed the
+/// shared edge to the cell on its left and cleared the facing `left`, so the
+/// right-hand cell's content began on the grid line and a thick border was
+/// painted straight through its first glyph. That is the picture the probe was
+/// built to rule out, and Word does not draw it. Charging the full width to each
+/// side is refuted by the same render, from the other direction: it would leave
+/// a gap of half the border between the line and the glyph, and there is none.
+///
+/// Asserted as the difference between two renders of one document, so no glyph
+/// metric or page origin is pinned. The two borders differ by 5.5pt, and each
+/// cell should take half of that.
+#[test]
+fn a_shared_vertical_is_charged_half_to_each_of_the_cells_that_meet_on_it() {
+    let thin = layout(&one_shared_vertical(THIN));
+    let thick = layout(&one_shared_vertical(THICK));
+
+    // The right-hand cell begins after half the border. It used to begin after
+    // none of it — the defect.
+    assert_eq!(
+        glyph_x(&thick, "RIGHT") - glyph_x(&thin, "RIGHT"),
+        DIFFERENCE / 2.0,
+        "the following cell is charged half the shared border, not none of it"
+    );
+
+    // The control, and the half that says the charge is *shared*: the left-hand
+    // cell's content starts at the table's own edge, which no `insideV` touches,
+    // so its glyph must not move at all. A fix that charged the whole border to
+    // the right-hand cell would satisfy the first assertion by moving this one
+    // too, if the two were ever confused.
+    assert_eq!(
+        glyph_x(&thick, "LEFT"),
+        glyph_x(&thin, "LEFT"),
+        "the leading cell's content box does not start on the shared edge"
+    );
+}

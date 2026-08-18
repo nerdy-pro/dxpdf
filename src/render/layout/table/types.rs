@@ -202,4 +202,16 @@ pub(super) struct CellLayoutEntry {
     pub(super) cell_w: Pt,
     /// Starting grid column index (for vMerge neighbor lookup).
     pub(super) grid_col: usize,
+    /// §17.4.66/§17.4.42: how far this cell's content starts in from its own
+    /// left edge, beyond what `layout_cell` already applied for the margin.
+    ///
+    /// Carried rather than recomputed at emission, and that is the point. The
+    /// rule is `max(border, margin)` per side, but *how much* of a border counts
+    /// as inside the cell depends on whether the edge is shared — see
+    /// `measure_table_rows`, which is the one place that decides it. Emission
+    /// used to derive its own answer from `CellBorders`, which cannot see the
+    /// shared line at all: resolution clears the losing cell's edge, so the cell
+    /// on the right of every interior vertical was placed as though it had no
+    /// border beside it.
+    pub(super) content_dx: Pt,
 }
