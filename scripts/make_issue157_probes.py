@@ -61,6 +61,23 @@ each other:
             its own two 3pt borders**, so the rules must overlap whatever else
             happens.
 
+Table 4 asks the question the first three cannot, and it is the one that matters
+most: **what does `w:trHeight` measure?** Its middle row declares 40pt, comfortably
+more than its own 6pt of borders, so no floor and no collapse is involved and the
+two readings differ by a clean 6pt:
+
+  * the yellow row measures 40pt  -> the declared height is the row's *content
+                                     box* and the borders are added outside it,
+                                     which is what this engine does today;
+  * the yellow row measures 34pt  -> the declared height is the row *including*
+                                     its borders, and the content gets what is
+                                     left.
+
+The second reading is what tables 2 and 3 hint at — both come out looking alike
+in Word, which is what happens when a declared height smaller than the borders
+collapses onto them — but a hint measured near a floor is not a rule. Table 4 has
+no floor anywhere near it, so it answers plainly.
+
 Read the black band at the middle boundary against table 1's, which is one 3pt
 rule and the control for the other two:
 
@@ -228,7 +245,10 @@ def empty_row_probe() -> str:
         + "<w:p/>"
         + heading("3. The same, with a 2pt row between them - shorter than its own borders.")
         + table(short_row(40))
-        + heading("Measure the black band at each middle boundary against table 1's 3pt.")
+        + "<w:p/>"
+        + heading("4. The same, with a 40pt row - taller than its borders, so nothing is floored.")
+        + table(short_row(800))
+        + heading("Measure table 4's yellow row: 40pt means trHeight is the content box, 34 means it includes the borders.")
     )
 
 
