@@ -31,46 +31,58 @@ being the middle column — so look at `A` instead: 50pt under (A), 150pt under
 measurement, not a judgement.
 
 ---------------------------------------------------------------------------
-2. issue-157-empty-row-edge.docx — §17.4.66 across an empty `<w:tr/>`
+2. issue-157-empty-row-edge.docx — §17.4.66 across a row of no height
 ---------------------------------------------------------------------------
 
 §17.4.66 resolves a shared horizontal edge between two rows by picking one
-cell's border and clearing the facing one. A `<w:tr/>` with no `<w:tc>` has no
-cell to face, so today neither neighbour is resolved away and **both** paint:
-that boundary gets two 0.5pt lines where the same table without the empty row
-gets one.
+cell's border and clearing the facing one. A row of no height puts its top and
+its bottom boundary at the same y, so there are two edges where a table without
+it has one, and nothing in the section says whether they resolve into each other
+or both stand.
 
-That may well be correct — the conflict genuinely has no subject — which is why
-this is a probe and not a fix. The document puts the two tables side by side
-with identical rows and borders, so a Word render would answer it by measuring
-one boundary against the other:
+**This probe used to ask that with a cell-less `<w:tr/>`, and it cannot.**
+Measured 2026-08-19: **Word refuses to open any document containing one.**
+Isolated against two variants differing in exactly one thing each — the same
+package with the row deleted opens, and the same row in a fuller package
+(`document.xml.rels` plus `styles.xml`, one relationship, no dangling target)
+does not. `CT_Row` makes the cell group `minOccurs="0"`, so `<w:tr/>` is
+schema-valid and Word's reader is simply stricter than the schema, the same
+class of rejection the three `issue-165-*` fixtures hit over a `.rels`
+namespace. `verify_docx.py` cannot catch it either: the package is sound, and it
+is the content Word declines.
 
-  * equal thickness  -> Word treats the empty row as transparent to §17.4.66,
-                        and the engine should resolve across it;
-  * double thickness -> today's behaviour is right and the difference is the
-                        author's, not a defect.
+So the question is asked in the two spellings Word does accept, both of which a
+real producer can emit and both of which put two boundaries within a hair of
+each other:
 
-`w:sz="24"` (3pt) rather than a hairline, so "one line or two" would be visible
-at 100% zoom instead of needing a loupe.
+  Table 2 — a row of `hRule="exact" w:val="0"`, holding one empty cell. Its two
+            boundaries are at the same y exactly.
+  Table 3 — a row of `hRule="exact" w:val="40"`, which is 2pt: **shorter than
+            its own two 3pt borders**, so the rules must overlap whatever else
+            happens.
 
-MEASURED 2026-08-19, AND THE ANSWER IS THAT THERE IS NO ANSWER. **Word refuses
-to open this document.** Isolated against two variants differing from it in
-exactly one thing each: the same package with the `<w:tr/>` deleted opens, and
-the same document in a fuller package — `document.xml.rels` plus `styles.xml`,
-one relationship, no dangling target — does not. So it is the cell-less row, not
-the minimal three-part package the sibling probe also ships.
+Read the black band at the middle boundary against table 1's, which is one 3pt
+rule and the control for the other two:
 
-`CT_Row` makes the cell group `minOccurs="0"`, so `<w:tr/>` is schema-valid and
-Word's reader is simply stricter than the schema — the same class of rejection
-the three `issue-165-*` fixtures hit over a `.rels` namespace, and the reason
-`scripts/verify_docx.py` cannot catch it either (the package is sound; the
-content is what Word declines).
+  * 3pt in tables 2 and 3 -> Word resolves the coincident edges into one, and
+                             the engine should collapse them too;
+  * 6pt in table 2        -> both rules stand, and today's behaviour is right;
+  * a white gap in table 3 -> Word honours the 2pt height between the rules
+                             rather than letting them meet.
 
-The probe is kept, because what it now documents is worth as much: a document
-containing such a row is one Word itself calls corrupt, so no fidelity target
-exists for it. dxpdf's tolerance is a robustness decision, not a match, and the
-sites that defer to this question — `table::borders` and `table::measure` — say
-so where they make it. Do not wait on a render that cannot be produced.
+`w:sz="24"` (3pt) rather than a hairline, so the difference is visible at 100%
+zoom instead of needing a loupe. The fixture carries its own `styles.xml` for
+the reason `bidi-visual-table.docx` does: §17.7.2 leaves an absent
+`w:docDefaults` application-defined, so a package declaring no face or spacing
+is read one way here and another by Word, and the two renders have to be
+comparable to be compared.
+
+**What is not asked any more, and will not be.** Whether a *cell-less* row
+separates its neighbours has no fidelity answer: a document containing one is
+one Word itself calls corrupt, so dxpdf's tolerance there is a robustness
+decision rather than a match. `table::borders` (which merges the coincident
+boundaries) and `table::measure` (which pins the zero height) both say so at the
+point where they decide it. Do not wait on a render that cannot be produced.
 
 ---------------------------------------------------------------------------
 
@@ -180,10 +192,12 @@ GRID1 = '<w:gridCol w:w="4000"/>'
 
 
 def empty_row_probe() -> str:
-    def table(with_empty: bool) -> str:
+    #: An empty cell rather than no cell: `<w:tr/>` is what Word will not open.
+    EMPTY_CELL = '<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="FFF2CC"/></w:tcPr><w:p/></w:tc>'
+
+    def table(middle: str = "") -> str:
         rows = "<w:tr>" + cell("upper", "D9EAD3") + "</w:tr>"
-        if with_empty:
-            rows += "<w:tr/>"
+        rows += middle
         rows += "<w:tr>" + cell("lower", "CFE2F3") + "</w:tr>"
         return (
             "<w:tbl><w:tblPr>"
@@ -198,26 +212,91 @@ def empty_row_probe() -> str:
             f"<w:tblGrid>{GRID1}</w:tblGrid>{rows}</w:tbl>"
         )
 
+    def short_row(twips: int) -> str:
+        return (
+            "<w:tr><w:trPr>"
+            f'<w:trHeight w:val="{twips}" w:hRule="exact"/>'
+            "</w:trPr>" + EMPTY_CELL + "</w:tr>"
+        )
+
     return document(
-        heading("Control: two rows, one shared edge between them.")
-        + table(False)
+        heading("1. Control: two rows, one shared edge between them.")
+        + table()
         + "<w:p/>"
-        + heading("The same, with an empty w:tr element between the two rows.")
-        + table(True)
-        + heading("Compare the thickness of the middle line in each.")
+        + heading("2. The same, with a row of exactly zero height between them.")
+        + table(short_row(0))
+        + "<w:p/>"
+        + heading("3. The same, with a 2pt row between them - shorter than its own borders.")
+        + table(short_row(40))
+        + heading("Measure the black band at each middle boundary against table 1's 3pt.")
     )
 
 
-def write(name: str, body: str) -> None:
+STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault>
+      <w:rPr>
+        <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"
+                  w:eastAsia="Times New Roman" w:cs="Times New Roman"/>
+        <w:kern w:val="2"/>
+        <w:sz w:val="20"/>
+        <w:szCs w:val="20"/>
+      </w:rPr>
+    </w:rPrDefault>
+    <w:pPrDefault>
+      <w:pPr>
+        <w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>
+      </w:pPr>
+    </w:pPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+  </w:style>
+</w:styles>
+"""
+
+DOC_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>
+"""
+
+STYLES_OVERRIDE = (
+    '<Override PartName="/word/styles.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+)
+
+
+def write(name: str, body: str, with_styles: bool = False) -> None:
+    """Write one probe. `with_styles` adds a `styles.xml` stating the defaults.
+
+    §17.7.2 leaves an absent `w:docDefaults` application-defined, so a package
+    declaring no face, size or spacing is read one way by this engine (ECMA's
+    Times New Roman 10pt, zero spacing) and another by Word (its template's
+    Calibri 11pt with `after=160`, `line=259`). A fixture meant to be *measured
+    against a Word render* has to state them or the two renders are not
+    comparable — the same reason `bidi-visual-table.docx` carries one.
+    """
     target = OUT / name
+    parts = [
+        (
+            "[Content_Types].xml",
+            CONTENT_TYPES.replace("</Types>", STYLES_OVERRIDE + "</Types>")
+            if with_styles
+            else CONTENT_TYPES,
+        ),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", body),
+    ]
+    if with_styles:
+        parts.append(("word/_rels/document.xml.rels", DOC_RELS))
+        parts.append(("word/styles.xml", STYLES))
     # Fixed timestamps so regenerating an unchanged fixture produces identical
     # bytes and does not show up as a diff.
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
-        for part, data in (
-            ("[Content_Types].xml", CONTENT_TYPES),
-            ("_rels/.rels", ROOT_RELS),
-            ("word/document.xml", body),
-        ):
+        for part, data in parts:
             info = zipfile.ZipInfo(part, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, data)
@@ -227,7 +306,7 @@ def write(name: str, body: str) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     write("issue-157-tblprex-bidi.docx", tblprex_probe())
-    write("issue-157-empty-row-edge.docx", empty_row_probe())
+    write("issue-157-empty-row-edge.docx", empty_row_probe(), with_styles=True)
 
 
 if __name__ == "__main__":
