@@ -941,18 +941,23 @@ pub(super) fn rasterize_border_grid(
     // This settles only the double-*paint*. Whether an empty row should separate
     // its neighbours at all — giving that boundary two lines a row apart rather
     // than one — is what `test-files/issue-157-empty-row-edge.docx` asks, and it
-    // is **unanswerable by reference render**: Word refuses to open a document
-    // containing a cell-less `<w:tr/>` at all (measured 2026-08-19, isolated
-    // against a variant identical but for the row, which opens). `CT_Row` makes
-    // the cell group `minOccurs="0"`, so the element is schema-valid and Word's
-    // reader is stricter than the schema — the same class of rejection three
-    // `issue-165-*` fixtures hit over a `.rels` namespace.
+    // is **still open**, though not in the shape it was first asked.
     //
-    // Which changes what this code is answerable to. A document containing such
-    // a row is one Word itself calls corrupt, so there is no fidelity target
-    // here and never will be: what remains is a robustness choice, and the one
-    // taken is to render the table rather than reject the package. The row has
-    // no height, so the question does not arise geometrically either.
+    // For a cell-less `<w:tr/>` it is unanswerable: Word refuses to open such a
+    // document at all (measured 2026-08-19, isolated against a variant identical
+    // but for the row, which opens). `CT_Row` makes the cell group
+    // `minOccurs="0"`, so the element is schema-valid and Word's reader is
+    // stricter than the schema — the same class of rejection three `issue-165-*`
+    // fixtures hit over a `.rels` namespace. A document holding one is therefore
+    // one Word itself calls corrupt: no fidelity target exists, and rendering it
+    // rather than rejecting the package is a robustness choice, not a match.
+    //
+    // The probe was rebuilt around the two spellings Word does accept, both of
+    // which reach this merge: a row of `hRule="exact"` at 0, whose boundaries
+    // coincide exactly, and one at 2pt, which is shorter than its own two 3pt
+    // borders. Those *can* be measured, and the fixture's tables 2 and 3 are
+    // where. Today this engine draws a 6pt band at the first and 3pt/2pt/3pt at
+    // the second, against a 3pt control.
     for b in 1..boundaries.len() {
         if boundaries[b].0 != boundaries[b - 1].0 {
             continue;

@@ -1168,12 +1168,16 @@ mod tests {
     /// border-resolution one — asserted here as it stands so that changing it is
     /// a deliberate act.
     ///
-    /// No Word render will decide it: Word refuses to open a document holding a
-    /// cell-less `<w:tr/>`, which `test-files/issue-157-empty-row-edge.docx` was
-    /// built to be measured from (see `table::borders`, where the boundaries are
-    /// merged). So this assertion pins a robustness decision rather than a
-    /// fidelity one, and is free to change on a reasoned argument — there is no
-    /// measurement it can contradict.
+    /// No Word render will decide it **for a cell-less row**: Word refuses to
+    /// open a document holding a `<w:tr/>` at all (measured 2026-08-19). So this
+    /// assertion pins a robustness decision rather than a fidelity one, and is
+    /// free to change on a reasoned argument — there is no measurement it can
+    /// contradict.
+    ///
+    /// The neighbouring question *is* measurable, and
+    /// `test-files/issue-157-empty-row-edge.docx` was rebuilt to ask it: a row
+    /// of `hRule="exact"` height, which Word opens, puts two boundaries at one y
+    /// the same way. See `table::borders`, where they are merged.
     #[test]
     fn a_row_with_no_cells_is_zero_height_and_moves_nothing() {
         let slots = vec![Pt::new(50.0), Pt::new(50.0)];

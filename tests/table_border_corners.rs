@@ -153,9 +153,11 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 /// Two boundaries a hair apart, each carrying a border wider than the gap, cross
 /// whatever a renderer does with them — there is no decomposition that separates
 /// them, because the geometry the author asked for is impossible. `hRule="exact"`
-/// on a row shorter than its own borders is one way to write it (§17.4.80); an
-/// empty `<w:tr/>` between two rows is another (§17.4.66,
-/// `issue-157-empty-row-edge`).
+/// on a row shorter than its own borders is one way to write it (§17.4.80, and
+/// what `issue-157-empty-row-edge` now holds — two rows of that shape, at 0 and
+/// at 2pt); a cell-less `<w:tr/>` between two rows is another (§17.4.66), and no
+/// fixture carries one any more, because Word will not open a document that
+/// does.
 ///
 /// Recognised narrowly, and the narrowness is the whole of it. The two must run
 /// the same extent along **their long axis** and sit at different positions

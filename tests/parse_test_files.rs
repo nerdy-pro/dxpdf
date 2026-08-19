@@ -418,6 +418,12 @@ const ALL_FILES: &[&str] = &[
     "border-content-charge.docx",
     "border-outer-box.docx",
     "border-junction-colour.docx",
+    // §17.4.66 across a row of no height. It joins the sweep now that it can:
+    // it asked its question with a cell-less `<w:tr/>` until Word turned out to
+    // refuse such a document outright, and `table_rows_have_cells` below is the
+    // invariant that shape violated. The two spellings Word does accept — a row
+    // of `hRule="exact"` at 0 and at 2pt — both carry a cell.
+    "issue-157-empty-row-edge.docx",
 ];
 
 #[test]
