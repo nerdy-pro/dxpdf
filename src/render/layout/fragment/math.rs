@@ -25,14 +25,7 @@ pub(super) fn emit_math_fragments<F>(
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
 {
     let font = math_font(ctx.default_size);
-    emit_elements(
-        &math.content,
-        &font,
-        Pt::ZERO,
-        ctx,
-        measure_text,
-        fragments,
-    );
+    emit_elements(&math.content, &font, Pt::ZERO, ctx, measure_text, fragments);
 }
 
 /// The math face at a given size. Word renders math in Cambria Math; the
@@ -119,7 +112,6 @@ fn fraction_fragment<F>(
 where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
 {
-    let _ = ctx;
     let num_text = map_math_italic(&flatten_plain_text(num));
     let den_text = map_math_italic(&flatten_plain_text(den));
     let (num_width, num_metrics) = measure_text(&num_text, font);

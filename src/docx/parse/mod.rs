@@ -2,9 +2,9 @@
 
 pub mod body;
 pub mod body_schema;
-pub(crate) mod math;
 pub mod drawing;
 pub mod fonts;
+pub(crate) mod math;
 pub mod notes;
 pub mod numbering;
 pub mod primitives;
