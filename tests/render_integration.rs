@@ -926,3 +926,43 @@ fn a_break_only_paragraph_that_fits_does_not_add_a_page() {
     assert_eq!(text_pages(&docx, "after"), vec![2]);
     assert_eq!(page_count(&docx), 2);
 }
+
+/// §22.1: the OMML fixture must produce visible math — italicized variables
+/// in the math face, superscripts, and stacked fractions with their rules —
+/// where an earlier version dropped the whole `m:oMath` subtree silently.
+#[test]
+fn equations_render_math_glyphs_and_fraction_bars() {
+    use dxpdf::render::layout::draw_command::DrawCommand;
+
+    let doc = parse_docx("equations-omml.docx");
+    let (_, pages) = dxpdf::render::resolve_and_layout(doc);
+
+    let mut math_italic_x = false;
+    let mut fraction_bars = 0;
+    for page in &pages {
+        for command in &page.commands {
+            match command {
+                DrawCommand::Text {
+                    text, font_family, ..
+                } => {
+                    // 𝑥 — MATHEMATICAL ITALIC SMALL X, produced by the math
+                    // italic mapping; must render in the math face.
+                    if text.contains('\u{1D465}') {
+                        math_italic_x = true;
+                        assert_eq!(
+                            &**font_family, "Cambria Math",
+                            "math runs use the math face"
+                        );
+                    }
+                }
+                DrawCommand::Line { .. } => fraction_bars += 1,
+                _ => {}
+            }
+        }
+    }
+    assert!(math_italic_x, "x² must render an italic math x");
+    assert!(
+        fraction_bars >= 3,
+        "1/2 + 1/3 = 5/6 draws three fraction rules, got {fraction_bars}"
+    );
+}

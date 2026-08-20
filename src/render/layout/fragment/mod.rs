@@ -19,6 +19,7 @@ use crate::render::shape::RunDirection;
 mod bidi;
 mod collect;
 mod fallback;
+mod math;
 mod segment;
 mod shape;
 mod split;
@@ -45,6 +46,20 @@ pub(super) const SUPERSCRIPT_ASCENT_OFFSET_RATIO: f32 = 0.33;
 
 /// Subscript baseline shift: fraction of base character height to lower the text by.
 pub(super) const SUBSCRIPT_HEIGHT_OFFSET_RATIO: f32 = 0.08;
+
+// ── §22.1 Office Math fraction geometry, in fractions of the font size ──────
+// Typical OpenType MATH values of Cambria Math (axis height ≈ 0.25 em, rule
+// ≈ 0.05 em); recorded here rather than read from the font's MATH table —
+// a Word reference render of `1/2 + 1/3 = 5/6` is what would refine them.
+
+/// Center of the fraction rule above the baseline.
+pub(crate) const MATH_AXIS_RATIO: f32 = 0.25;
+/// Thickness of the fraction rule.
+pub(crate) const FRACTION_RULE_RATIO: f32 = 0.05;
+/// Vertical clearance between the rule and each row.
+pub(crate) const FRACTION_GAP_RATIO: f32 = 0.08;
+/// Horizontal padding on each side of the wider row.
+pub(crate) const FRACTION_SIDE_PAD_RATIO: f32 = 0.12;
 
 /// §17.11.12: baseline shift for a footnote/endnote reference mark, and for
 /// the matching number prefixed to the note body — as a fraction of the base
@@ -122,6 +137,16 @@ impl TextMetrics {
     pub fn line_height(&self) -> Pt {
         self.ascent + self.descent + self.leading
     }
+}
+
+/// One pre-measured row (numerator or denominator) of a
+/// [`Fragment::MathFraction`] stack.
+#[derive(Clone, Debug)]
+pub struct MathRow {
+    pub text: Rc<str>,
+    pub font: Rc<FontProps>,
+    pub width: Pt,
+    pub metrics: TextMetrics,
 }
 
 /// §17.3.2.4: run-level border for rendering.
@@ -258,6 +283,20 @@ pub enum Fragment {
         /// §20.1.10.48 `a:srcRect` — fractional source crop in `[0, 1]`.
         src_rect: Option<PtRect>,
     },
+    /// §22.1 `m:f` — a numerator / rule / denominator stack, pre-measured so
+    /// line fitting sees one atom. `metrics` is synthesized: the ascent
+    /// covers the numerator plus the rule's raised axis, the descent the
+    /// denominator below it (see the `MATH_*`/`FRACTION_*` ratios).
+    MathFraction {
+        num: MathRow,
+        den: MathRow,
+        color: RgbColor,
+        /// max(row widths) plus side padding.
+        width: Pt,
+        metrics: TextMetrics,
+        baseline_offset: Pt,
+        break_after: BreakAfter,
+    },
     /// One emoji grapheme cluster (UAX #29) classified as an emoji sequence
     /// (UTS #51), to be rasterized at paint time via Skia's raster backend
     /// and embedded as an inline PDF image, because Skia's PDF backend strips
@@ -344,7 +383,7 @@ pub enum Fragment {
 impl Fragment {
     pub fn width(&self) -> Pt {
         match self {
-            Fragment::Text { width, .. } => *width,
+            Fragment::Text { width, .. } | Fragment::MathFraction { width, .. } => *width,
             Fragment::Image { size, .. } => size.width,
             Fragment::Emoji { advance, .. } => *advance,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
@@ -366,7 +405,9 @@ impl Fragment {
 
     pub fn height(&self) -> Pt {
         match self {
-            Fragment::Text { metrics, .. } => metrics.height(),
+            Fragment::Text { metrics, .. } | Fragment::MathFraction { metrics, .. } => {
+                metrics.height()
+            }
             Fragment::Image { size, .. } => size.height,
             Fragment::Emoji { line_metrics, .. } => line_metrics.height(),
             Fragment::Tab { line_height, .. }
@@ -425,7 +466,8 @@ impl Fragment {
             | Fragment::Emoji { .. }
             | Fragment::Tab { .. }
             | Fragment::PTab { .. }
-            | Fragment::LineBreak { .. } => true,
+            | Fragment::LineBreak { .. }
+            | Fragment::MathFraction { .. } => true,
         }
     }
 
