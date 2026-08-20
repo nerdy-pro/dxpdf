@@ -154,6 +154,12 @@ pub(crate) enum ParaChildXml {
     /// enum still has to handle it if it appears in `$value` ordering.
     #[serde(rename = "pPr")]
     PPr(Box<PPrXml>),
+    /// §22.1 `<m:oMath>` — inline math content.
+    #[serde(rename = "oMath")]
+    OMath(crate::docx::parse::math::OMathXml),
+    /// §22.1 `<m:oMathPara>` — display math wrapping one or more `m:oMath`.
+    #[serde(rename = "oMathPara")]
+    OMathPara(crate::docx::parse::math::OMathParaXml),
     #[serde(other)]
     Other,
 }

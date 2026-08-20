@@ -385,7 +385,7 @@ fn distribution_unit_count(fragment: &Fragment, terminal: bool) -> usize {
             let text = if terminal { text.trim_end() } else { text };
             crate::render::spacing::unit_count(text)
         }
-        Fragment::Image { .. } | Fragment::Emoji { .. } => 1,
+        Fragment::Image { .. } | Fragment::Emoji { .. } | Fragment::MathFraction { .. } => 1,
         _ => 0,
     }
 }
@@ -743,6 +743,58 @@ pub(super) fn emit_line_commands(
                         });
                     }
                     x += size.width
+                        + distribution_extra
+                            * distribution_gap_count_after(fragments, &order, pos) as f32;
+                }
+                // §22.1 m:f — numerator and denominator centered over each
+                // other around the fraction rule, whose center sits on the
+                // math axis above the baseline.
+                Fragment::MathFraction {
+                    num,
+                    den,
+                    color,
+                    width,
+                    metrics: _,
+                    baseline_offset,
+                    break_after: _,
+                } => {
+                    use crate::render::layout::fragment::{
+                        FRACTION_GAP_RATIO, FRACTION_RULE_RATIO, FRACTION_SIDE_PAD_RATIO,
+                        MATH_AXIS_RATIO,
+                    };
+                    let baseline = *cursor_y + line.ascent + *baseline_offset;
+                    let size = num.font.size;
+                    let rule = size * FRACTION_RULE_RATIO;
+                    let gap = size * FRACTION_GAP_RATIO;
+                    let pad = size * FRACTION_SIDE_PAD_RATIO;
+                    let bar_y = baseline - size * MATH_AXIS_RATIO;
+
+                    let num_baseline = bar_y - rule * 0.5 - gap - num.metrics.descent;
+                    let den_baseline = bar_y + rule * 0.5 + gap + den.metrics.ascent;
+                    for (row, row_baseline) in [(num, num_baseline), (den, den_baseline)] {
+                        commands.push(DrawCommand::Text {
+                            position: PtOffset::new(x + (*width - row.width) * 0.5, row_baseline),
+                            text: row.text.clone(),
+                            font_family: row.font.family.clone(),
+                            char_spacing: row.font.char_spacing,
+                            font_size: row.font.size,
+                            bold: row.font.bold,
+                            italic: row.font.italic,
+                            color: *color,
+                            text_scale: row.font.text_scale,
+                            shaped: None,
+                        });
+                    }
+                    commands.push(DrawCommand::Line {
+                        line: crate::render::geometry::PtLineSegment::new(
+                            PtOffset::new(x + pad, bar_y),
+                            PtOffset::new(x + *width - pad, bar_y),
+                        ),
+                        color: *color,
+                        width: rule,
+                    });
+
+                    x += *width
                         + distribution_extra
                             * distribution_gap_count_after(fragments, &order, pos) as f32;
                 }

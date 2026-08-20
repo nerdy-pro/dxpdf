@@ -67,6 +67,8 @@ pub enum Inline {
     Pict(Pict),
     /// MCE §M.2.1: markup compatibility alternate content.
     AlternateContent(AlternateContent),
+    /// Office Math §22.1: one `m:oMath` inline equation.
+    Math(super::math::MathBlock),
 }
 
 /// §17.16.18: complex field character marker.

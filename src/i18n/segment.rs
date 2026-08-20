@@ -103,7 +103,44 @@ pub fn break_offsets(text: &str) -> Vec<usize> {
     if text.is_empty() {
         return Vec::new();
     }
-    SEGMENTER.with(|segmenter| segmenter.as_borrowed().segment_str(text).skip(1).collect())
+    let mut offsets: Vec<usize> =
+        SEGMENTER.with(|segmenter| segmenter.as_borrowed().segment_str(text).skip(1).collect());
+    tailor_hyphen_digit_breaks(text, &mut offsets);
+    offsets
+}
+
+/// UAX #14's untailored LB25 glues a hyphen to a following digit
+/// unconditionally (`HY × NU`), making `TOKEN-1234567890` one unbreakable
+/// unit. TR14 explicitly marks LB25 as tailorable (its Example 7 is this
+/// tailoring), and the reference engines this renderer is measured against —
+/// Word and Chrome — both use the tailored form: a hyphen only glues to
+/// digits where it could plausibly be a leading minus sign (start of text,
+/// after a space or an opening bracket). After a letter or digit the hyphen
+/// keeps its ordinary LB21 break opportunity, so `TOKEN-` / `1234567890` is
+/// how they wrap. ICU4X 2.x exposes no option for this
+/// ([`LineBreakOptions`] covers strictness and word mode only), hence this
+/// post-pass; if a future ICU4X grows a numeric-tailoring option, prefer it.
+///
+/// [`LineBreakOptions`]: icu_segmenter::options::LineBreakOptions
+fn tailor_hyphen_digit_breaks(text: &str, offsets: &mut Vec<usize>) {
+    let mut prev: Option<char> = None;
+    let mut added = false;
+    let mut iter = text.char_indices().peekable();
+    while let Some((i, c)) = iter.next() {
+        if c == '-'
+            && prev.is_some_and(|p| p.is_alphanumeric())
+            && iter.peek().is_some_and(|&(_, next)| next.is_ascii_digit())
+        {
+            // '-' is one byte; `i + 1` is the boundary right after it.
+            offsets.push(i + 1);
+            added = true;
+        }
+        prev = Some(c);
+    }
+    if added {
+        offsets.sort_unstable();
+        offsets.dedup();
+    }
 }
 
 #[cfg(test)]
@@ -199,18 +236,39 @@ mod tests {
         assert_eq!(pieces("Datei_name.txt"), ["Datei_name.txt"]);
     }
 
-    /// [LB25]: a hyphen followed by digits is inside a number, not between two
-    /// words. The old rule broke `ID-001` after the hyphen; UAX #14 does not,
-    /// which is the change most likely to show up in a pixel-diff of the
-    /// German corpus (part numbers, `DIN VDE 0100-600`).
+    /// [LB25], tailored: a hyphen glues to a following digit only where it
+    /// could be a leading minus sign. After a letter or digit it keeps its
+    /// ordinary LB21 break opportunity — `ID-` / `001` — which is how both
+    /// reference engines (Word, Chrome) wrap alphanumeric part numbers and
+    /// long tokens. TR14 marks LB25 as explicitly tailorable (Example 7);
+    /// see `tailor_hyphen_digit_breaks`.
     ///
     /// [LB25]: https://www.unicode.org/reports/tr14/#LB25
     #[test]
-    fn a_hyphen_before_digits_is_not_a_break() {
-        assert_eq!(pieces("ID-001"), ["ID-001"]);
-        assert_eq!(pieces("DIN VDE 0100-600"), ["DIN ", "VDE ", "0100-600"]);
-        // …but between words it still is, exactly as before.
+    fn a_hyphen_after_alphanumerics_breaks_before_digits() {
+        assert_eq!(pieces("ID-001"), ["ID-", "001"]);
+        assert_eq!(pieces("DIN VDE 0100-600"), ["DIN ", "VDE ", "0100-", "600"]);
+        assert_eq!(
+            pieces("TOKEN-1234567890"),
+            ["TOKEN-", "1234567890"],
+            "letter-hyphen-digit tokens wrap after the hyphen"
+        );
+        assert_eq!(
+            pieces("ТОКЕН-1234567890-АБВГДЕЖЗ"),
+            ["ТОКЕН-", "1234567890-", "АБВГДЕЖЗ"],
+            "non-ASCII letters count as letters"
+        );
+        // …and between words it is a break, exactly as before.
         assert_eq!(pieces("Anlagen-freigabe"), ["Anlagen-", "freigabe"]);
+    }
+
+    /// The guard on the LB25 tailoring: where the hyphen can be a leading
+    /// minus sign — start of text, after a space — it still glues to the
+    /// digits.
+    #[test]
+    fn a_minus_sign_still_glues_to_its_digits() {
+        assert_eq!(pieces("-42"), ["-42"]);
+        assert_eq!(pieces("t -42"), ["t ", "-42"]);
     }
 
     /// U+2011 NON-BREAKING HYPHEN (class GL) must hold a token together —

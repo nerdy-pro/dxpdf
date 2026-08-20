@@ -329,6 +329,13 @@ fn append_para_children(
             // Delete-side revision wrappers: content is deleted — drop it.
             ParaChildXml::Del(_) | ParaChildXml::MoveFrom(_) => {}
             ParaChildXml::PPr(_) => {} // already captured on the parent
+            // §22.1: math keeps its place in the inline flow.
+            ParaChildXml::OMath(m) => content.push(Inline::Math(m.into())),
+            ParaChildXml::OMathPara(mp) => {
+                for m in mp.math {
+                    content.push(Inline::Math(m.into()));
+                }
+            }
             ParaChildXml::Other => {}
         }
     }
@@ -1006,5 +1013,69 @@ mod tests {
         "#;
         let tbl: TableXml = quick_xml::de::from_str(xml).expect("table must parse");
         assert_eq!(collect_table_rows(tbl.children).len(), 2);
+    }
+
+    // ── §22.1 Office Math ────────────────────────────────────────────────
+
+    /// `m:oMath` as a direct child of `w:p`: the superscript and run
+    /// structure must survive into `Inline::Math`, in flow order.
+    #[test]
+    fn omath_inline_parses_to_math_block() {
+        let xml = r#"<w:p xmlns:w="x" xmlns:m="mm">
+              <m:oMath>
+                <m:sSup>
+                  <m:e><m:r><m:t>x</m:t></m:r></m:e>
+                  <m:sup><m:r><m:t>2</m:t></m:r></m:sup>
+                </m:sSup>
+                <m:r><m:t>+</m:t></m:r>
+              </m:oMath>
+            </w:p>"#;
+        let p: ParaXml = quick_xml::de::from_str(xml).unwrap();
+        let mut ctx = ConvertCtx::new();
+        let content = convert_para_children(p.content, &mut ctx);
+
+        let [Inline::Math(math)] = content.as_slice() else {
+            panic!("expected one Inline::Math, got {content:?}");
+        };
+        let [MathElement::Superscript { base, sup }, MathElement::Run(plus)] =
+            math.content.as_slice()
+        else {
+            panic!("expected sSup then run, got {:?}", math.content);
+        };
+        assert_eq!(base, &[MathElement::Run(MathRun { text: "x".into() })]);
+        assert_eq!(sup, &[MathElement::Run(MathRun { text: "2".into() })]);
+        assert_eq!(plus.text, "+");
+    }
+
+    /// `m:f` keeps numerator and denominator; `m:oMathPara` flattens to its
+    /// `m:oMath` children; an unknown construct is dropped without taking
+    /// the rest of the equation with it.
+    #[test]
+    fn omath_fraction_math_para_and_unknown_construct() {
+        let xml = r#"<w:p xmlns:w="x" xmlns:m="mm">
+              <m:oMathPara>
+                <m:oMathParaPr/>
+                <m:oMath>
+                  <m:rad><m:e><m:r><m:t>y</m:t></m:r></m:e></m:rad>
+                  <m:f>
+                    <m:num><m:r><m:t>1</m:t></m:r></m:num>
+                    <m:den><m:r><m:t>2</m:t></m:r></m:den>
+                  </m:f>
+                </m:oMath>
+              </m:oMathPara>
+            </w:p>"#;
+        let p: ParaXml = quick_xml::de::from_str(xml).unwrap();
+        let mut ctx = ConvertCtx::new();
+        let content = convert_para_children(p.content, &mut ctx);
+
+        let [Inline::Math(math)] = content.as_slice() else {
+            panic!("expected one Inline::Math, got {content:?}");
+        };
+        // The unsupported m:rad is skipped; the fraction survives.
+        let [MathElement::Fraction { num, den }] = math.content.as_slice() else {
+            panic!("expected one fraction, got {:?}", math.content);
+        };
+        assert_eq!(num, &[MathElement::Run(MathRun { text: "1".into() })]);
+        assert_eq!(den, &[MathElement::Run(MathRun { text: "2".into() })]);
     }
 }

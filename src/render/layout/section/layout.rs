@@ -88,6 +88,12 @@ struct PageLayoutState<'doc> {
     /// as much room as anywhere else. See
     /// [`at_full_height_column_top`](PageLayoutState::at_full_height_column_top).
     inherited_short_columns: bool,
+    /// §17.6.4: the lowest y any *left* column of the current page reached —
+    /// the flow bottom of the columned content so far. `cursor_y` alone loses
+    /// this the moment the flow moves to the next column, but a §17.6.22
+    /// continuation that follows this section on the shared page must start
+    /// below the deepest column, not below the last (usually shortest) one.
+    deepest_column_bottom: Pt,
     /// Effective bottom boundary — reduced as footnotes are reserved.
     bottom: Pt,
     /// Footnotes accumulated for the current page.
@@ -167,6 +173,7 @@ impl<'doc> PageLayoutState<'doc> {
                 // landing exactly on the page top inherits a full-height column
                 // and needs no exception.
                 inherited_short_columns: c.cursor_y > bounds.top,
+                deepest_column_bottom: c.cursor_y,
                 bottom: c.bottom,
                 page_footnotes: Vec::new(),
                 carried_footnotes: c.page_footnotes,
@@ -194,6 +201,7 @@ impl<'doc> PageLayoutState<'doc> {
                 page_top: bounds.top,
                 current_col: 0,
                 inherited_short_columns: false,
+                deepest_column_bottom: bounds.top,
                 bottom: bounds.bottom,
                 page_footnotes: Vec::new(),
                 carried_footnotes: Vec::new(),
@@ -236,6 +244,18 @@ impl<'doc> PageLayoutState<'doc> {
     /// clear and the ordinary guard applies again.
     fn at_full_height_column_top(&self) -> bool {
         self.cursor_y <= self.column_top && !self.inherited_short_columns
+    }
+
+    /// Move the flow to the top of the next column, remembering how deep the
+    /// column being left was filled — the §17.6.22 handoff in [`finalize`]
+    /// needs the deepest column of the shared page, and `cursor_y` alone
+    /// forgets it here.
+    ///
+    /// [`finalize`]: PageLayoutState::finalize
+    fn advance_to_next_column(&mut self) {
+        self.deepest_column_bottom = self.deepest_column_bottom.max(self.cursor_y);
+        self.current_col += 1;
+        self.cursor_y = self.column_top;
     }
 
     /// Render accumulated footnotes onto the current page and clear the list.
@@ -293,6 +313,7 @@ impl<'doc> PageLayoutState<'doc> {
         // §17.6.22: whatever page we came from, this one starts at its own top,
         // so the inherited short column set is behind us.
         self.inherited_short_columns = false;
+        self.deepest_column_bottom = bounds.top;
         self.bottom = bounds.bottom;
         self.page_start_block = block_idx;
         self.abs_floats_dirty = true;
@@ -333,7 +354,11 @@ impl<'doc> PageLayoutState<'doc> {
                     pages: self.pages,
                     tail: SectionTail::SharedWithNext(ContinuationState {
                         page: self.current_page,
-                        cursor_y: self.cursor_y,
+                        // §17.6.22: the flow position on a multi-column page is
+                        // the bottom of its *deepest* column — resuming from the
+                        // raw cursor (the last, often shortest column) lays the
+                        // next section's content over the columns to its left.
+                        cursor_y: self.cursor_y.max(self.deepest_column_bottom),
                         bottom: self.bottom,
                         page_footnotes: carried.into_iter().chain(own).collect(),
                         page_floats: self.page_floats,
@@ -480,6 +505,7 @@ struct PageReplayCheckpoint<'doc> {
     /// Saved with `column_top`, which it qualifies: restoring one without the
     /// other would describe a column set that never existed.
     inherited_short_columns: bool,
+    deepest_column_bottom: Pt,
     bottom: Pt,
     page_footnotes: Vec<(
         &'doc [super::super::fragment::Fragment],
@@ -508,6 +534,7 @@ impl<'doc> PageReplayCheckpoint<'doc> {
             current_col: state.current_col,
             column_top: state.column_top,
             inherited_short_columns: state.inherited_short_columns,
+            deepest_column_bottom: state.deepest_column_bottom,
             bottom: state.bottom,
             page_footnotes: state.page_footnotes.clone(),
             first_on_section_page: state.first_on_section_page,
@@ -532,6 +559,7 @@ impl<'doc> PageReplayCheckpoint<'doc> {
         state.current_col = self.current_col;
         state.column_top = self.column_top;
         state.inherited_short_columns = self.inherited_short_columns;
+        state.deepest_column_bottom = self.deepest_column_bottom;
         state.bottom = self.bottom;
         state.page_footnotes.clone_from(&self.page_footnotes);
         state.first_on_section_page = self.first_on_section_page;
@@ -1189,8 +1217,7 @@ fn advance_column_or_page(
     para_start_y: &mut Pt,
 ) {
     if state.current_col + 1 < num_cols {
-        state.current_col += 1;
-        state.cursor_y = state.column_top;
+        state.advance_to_next_column();
     } else {
         state.push_new_page(block_idx, ctx);
     }
@@ -1939,7 +1966,7 @@ pub(crate) fn layout_section_with_clearance(
                                 float_checkpoint.restore(&mut state);
                             }
                             if !starts_new_page {
-                                state.current_col += 1;
+                                state.advance_to_next_column();
                             } else {
                                 // All columns full — new page, reset to column 0.
                                 state.push_new_page(block_idx, &ctx);
@@ -2067,8 +2094,7 @@ pub(crate) fn layout_section_with_clearance(
                                     float_checkpoint.restore(&mut state);
                                 }
                                 if state.current_col + 1 < num_cols {
-                                    state.current_col += 1;
-                                    state.cursor_y = state.column_top;
+                                    state.advance_to_next_column();
                                 } else {
                                     state.push_new_page(block_idx, &ctx);
                                 }

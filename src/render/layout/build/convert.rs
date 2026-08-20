@@ -766,30 +766,40 @@ fn symbol_pua_to_unicode(code: u32) -> Option<char> {
         0xF0C1 => '\u{2111}', // BLACK-LETTER CAPITAL I
         0xF0C2 => '\u{211C}', // BLACK-LETTER CAPITAL R
         0xF0C3 => '\u{2118}', // SCRIPT CAPITAL P
-        0xF0C5 => '\u{2297}', // CIRCLED TIMES
-        0xF0C6 => '\u{2295}', // CIRCLED PLUS
-        0xF0C7 => '\u{2205}', // EMPTY SET
-        0xF0C8 => '\u{2229}', // INTERSECTION
-        0xF0C9 => '\u{222A}', // UNION
-        0xF0CB => '\u{2283}', // SUPERSET OF
-        0xF0CC => '\u{2287}', // SUPERSET OF OR EQUAL TO
-        0xF0CD => '\u{2284}', // NOT A SUBSET OF
-        0xF0CE => '\u{2282}', // SUBSET OF
-        0xF0CF => '\u{2286}', // SUBSET OF OR EQUAL TO
-        0xF0D0 => '\u{2208}', // ELEMENT OF
-        0xF0D1 => '\u{2209}', // NOT AN ELEMENT OF
+        // 0xC4–0xD1 follow Adobe's symbol.txt one-to-one. An earlier version
+        // of this block was shifted by one slot (each code carried its left
+        // neighbour's glyph) and dropped 0xC4/0xCA entirely.
+        0xF0C4 => '\u{2297}', // CIRCLED TIMES
+        0xF0C5 => '\u{2295}', // CIRCLED PLUS
+        0xF0C6 => '\u{2205}', // EMPTY SET
+        0xF0C7 => '\u{2229}', // INTERSECTION
+        0xF0C8 => '\u{222A}', // UNION
+        0xF0C9 => '\u{2283}', // SUPERSET OF
+        0xF0CA => '\u{2287}', // SUPERSET OF OR EQUAL TO
+        0xF0CB => '\u{2284}', // NOT A SUBSET OF
+        0xF0CC => '\u{2282}', // SUBSET OF
+        0xF0CD => '\u{2286}', // SUBSET OF OR EQUAL TO
+        0xF0CE => '\u{2208}', // ELEMENT OF
+        0xF0CF => '\u{2209}', // NOT AN ELEMENT OF
+        0xF0D0 => '\u{2220}', // ANGLE
+        0xF0D1 => '\u{2207}', // NABLA
         0xF0D5 => '\u{220F}', // N-ARY PRODUCT
         0xF0D6 => '\u{221A}', // SQUARE ROOT
         0xF0D7 => '\u{22C5}', // DOT OPERATOR
         0xF0D8 => '\u{00AC}', // NOT SIGN
         0xF0D9 => '\u{2227}', // LOGICAL AND
         0xF0DA => '\u{2228}', // LOGICAL OR
-        0xF0E0 => '\u{21D0}', // LEFTWARDS DOUBLE ARROW
-        0xF0E1 => '\u{21D1}', // UPWARDS DOUBLE ARROW
-        0xF0E2 => '\u{21D2}', // RIGHTWARDS DOUBLE ARROW
-        0xF0E3 => '\u{21D3}', // DOWNWARDS DOUBLE ARROW
-        0xF0E4 => '\u{21D4}', // LEFT RIGHT DOUBLE ARROW
-        0xF0E5 => '\u{2329}', // LEFT-POINTING ANGLE BRACKET
+        // Double arrows live at 0xDB–0xDF in Symbol; 0xE0 is the lozenge and
+        // 0xE1/0xF1 the angle brackets. An earlier version parked the arrows
+        // at 0xE0–0xE4, leaving 0xDB–0xDF unmapped (PUA survived → tofu).
+        0xF0DB => '\u{21D4}', // LEFT RIGHT DOUBLE ARROW
+        0xF0DC => '\u{21D0}', // LEFTWARDS DOUBLE ARROW
+        0xF0DD => '\u{21D1}', // UPWARDS DOUBLE ARROW
+        0xF0DE => '\u{21D2}', // RIGHTWARDS DOUBLE ARROW
+        0xF0DF => '\u{21D3}', // DOWNWARDS DOUBLE ARROW
+        0xF0E0 => '\u{25CA}', // LOZENGE
+        0xF0E1 => '\u{2329}', // LEFT-POINTING ANGLE BRACKET
+        0xF0E5 => '\u{2211}', // N-ARY SUMMATION
         0xF0F1 => '\u{232A}', // RIGHT-POINTING ANGLE BRACKET
         0xF0F2 => '\u{222B}', // INTEGRAL
         _ => return None,
@@ -1117,6 +1127,34 @@ mod tests {
     fn unmapped_pua_is_none() {
         assert_eq!(symbol_pua_to_unicode(0xF0FF), None);
         assert_eq!(wingdings_pua_to_unicode(0xF0FF), None);
+    }
+
+    /// The Symbol slots that were historically wrong: 0xC4–0xD1 (set
+    /// operators — the block was shifted one slot left) and 0xDB–0xE5
+    /// (double arrows sat at 0xE0–0xE4 instead of 0xDB–0xDF). Values are
+    /// Adobe's symbol.txt.
+    #[test]
+    fn symbol_set_operators_and_double_arrows_map_per_adobe() {
+        for (pua, expected) in [
+            (0xF0C4, '\u{2297}'), // ⊗
+            (0xF0C5, '\u{2295}'), // ⊕ (was ⊗)
+            (0xF0C6, '\u{2205}'), // ∅ (was ⊕)
+            (0xF0CA, '\u{2287}'), // ⊇ (was unmapped)
+            (0xF0D0, '\u{2220}'), // ∠ (was ∈)
+            (0xF0D1, '\u{2207}'), // ∇ (was ∉)
+            (0xF0DB, '\u{21D4}'), // ⇔ (was unmapped)
+            (0xF0DE, '\u{21D2}'), // ⇒ (was unmapped)
+            (0xF0E0, '\u{25CA}'), // ◊ (was ⇐)
+            (0xF0E1, '\u{2329}'), // 〈 (was ⇑)
+            (0xF0E5, '\u{2211}'), // ∑ (was 〈)
+        ] {
+            assert_eq!(
+                symbol_pua_to_unicode(pua),
+                Some(expected),
+                "Symbol 0x{:02X}",
+                pua & 0xFF
+            );
+        }
     }
 
     /// When every PUA character maps, the text is standard Unicode and must

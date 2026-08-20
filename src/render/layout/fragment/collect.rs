@@ -979,6 +979,11 @@ where
                         field_instr.push_str(text);
                     }
                 }
+                // §22.1: one m:oMath — runs, superscripts and fraction
+                // stacks in the math face.
+                Inline::Math(math) => {
+                    super::math::emit_math_fragments(math, ctx, measure_text, &mut fragments);
+                }
                 Inline::AlternateContent(ac) => {
                     use crate::render::layout::{live_mc_branch, McBranch};
                     // §M.1.2 / §17.17.1: only the live branch contributes, and

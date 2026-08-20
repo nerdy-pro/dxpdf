@@ -260,7 +260,7 @@ pub fn fit_lines_with_first(
         // §17.3.1.33: text_height is the Auto line spacing base — use
         // line_height() (includes leading) for text, glyph height for tabs.
         match frag {
-            Fragment::Text { metrics, .. } => {
+            Fragment::Text { metrics, .. } | Fragment::MathFraction { metrics, .. } => {
                 line_text_height = line_text_height.max(metrics.line_height());
                 line_ascent = line_ascent.max(metrics.ascent);
             }
@@ -322,7 +322,7 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasu
         m.width += frag.width();
         m.height = m.height.max(frag.height());
         match frag {
-            Fragment::Text { metrics, .. } => {
+            Fragment::Text { metrics, .. } | Fragment::MathFraction { metrics, .. } => {
                 m.text_height = m.text_height.max(metrics.line_height());
                 m.ascent = m.ascent.max(metrics.ascent);
             }

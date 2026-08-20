@@ -90,7 +90,8 @@ fn rewrite_in_inlines(inlines: &mut [Inline], remap: &HashMap<RelId, RelId>) {
                     rewrite_in_inlines(fb, remap);
                 }
             }
-            Inline::TextRun(_)
+            Inline::Math(_)
+            | Inline::TextRun(_)
             | Inline::FootnoteRef(_)
             | Inline::EndnoteRef(_)
             | Inline::BookmarkStart { .. }

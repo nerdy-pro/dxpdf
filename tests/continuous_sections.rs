@@ -845,6 +845,54 @@ fn continuous_break_can_decrease_the_column_count() {
     );
 }
 
+/// §17.6.22: the shared-page handoff resumes below the **deepest** column of
+/// the multi-column section, not below the last one. Column 0 fills to the
+/// page bottom while column 1 holds only the overflow tail, so the raw cursor
+/// at the end of the section sits high up in column 1 — resuming there paints
+/// the next section's full-width content straight over column 0's tail (the
+/// `013_columns` regression: "Back to one column" drawn over column
+/// paragraphs).
+#[test]
+fn a_continuous_break_resumes_below_the_deepest_column() {
+    use dxpdf::render::layout::draw_command::DrawCommand;
+
+    let filler: String = (0..60).map(|i| para(&format!("FILL{i}"))).collect();
+    let pages = layout(&format!(
+        "{filler}<w:p><w:pPr>{}</w:pPr></w:p>{}{}",
+        sect_pr_cols("rIdH1", false, 2),
+        para("AFTERBREAK"),
+        sect_pr_cols("rIdH1", true, 1),
+    ));
+
+    let mut after: Option<(usize, f32)> = None;
+    for (page_idx, page) in pages.iter().enumerate() {
+        for command in &page.commands {
+            if let DrawCommand::Text { text, position, .. } = command {
+                if text.contains("AFTERBREAK") {
+                    after = Some((page_idx, position.y.raw()));
+                }
+            }
+        }
+    }
+    let (after_page, after_y) = after.expect("AFTERBREAK was drawn");
+
+    // Every column paragraph on the shared page sits above the continued
+    // section — nothing may remain below it, or the two are overlapping.
+    for command in &pages[after_page].commands {
+        if let DrawCommand::Text { text, position, .. } = command {
+            if text.starts_with("FILL") {
+                assert!(
+                    position.y.raw() < after_y,
+                    "column text {text:?} at y={} lies below the continued \
+                     section at y={after_y} — the continuation resumed above \
+                     the deepest column",
+                    position.y.raw(),
+                );
+            }
+        }
+    }
+}
+
 // ── §17.6.22 the break changes nothing when the sections agree (issue #83) ──
 
 /// Every drawn primitive as `page kind position [text]`.

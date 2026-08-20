@@ -174,6 +174,11 @@ fn collect_from_inlines(set: &mut HashSet<String>, inlines: &[Inline]) {
             Inline::Field(f) => {
                 collect_from_inlines(set, &f.content);
             }
+            // §22.1: math renders in the math face; make sure the registry
+            // loads it exactly for documents that contain formulas.
+            Inline::Math(_) => {
+                set.insert(crate::model::DEFAULT_MATH_FONT.to_string());
+            }
             Inline::AlternateContent(ac) => {
                 for choice in &ac.choices {
                     collect_from_inlines(set, &choice.content);
