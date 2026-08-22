@@ -242,7 +242,7 @@ impl VisualOrder {
     }
 }
 
-/// Resolve a line's fragments into the order they are painted in.
+/// Resolve a line's fragments into the order the emission pen walks them in.
 ///
 /// Reordering happens here, per line, and not earlier, because UAX #9 says so:
 /// levels are resolved over a paragraph in logical order and reordered per line
@@ -250,16 +250,24 @@ impl VisualOrder {
 /// first half and split every fragment a level boundary fell inside, so this is
 /// a permutation and nothing here has to look at a character.
 ///
-/// **A tab segments the line, and the segments keep their logical order.** That
-/// is the deliberate boundary of §17.3.1.37 support under `w:bidi` — see
-/// [`emit_line_commands`]'s note on it. UAX #9 rule L1 resets a class-S
-/// character (which is what a tab is) to the paragraph level, so a tab is never
-/// *inside* a reordered run in the algorithm either; what this does not do is
-/// mirror the stop positions the pen then jumps to.
+/// **A tab segments the line, and the segments keep their logical order** —
+/// UAX #9 rule L1 resets a class-S character (which is what a tab is) to the
+/// paragraph level, so a tab is never *inside* a reordered run either. Which
+/// physical direction that logical order runs in is the base direction's call:
+///
+/// - Not `mirrored` (every left-to-right paragraph): the pen walks left to
+///   right, so the order is the visual one — each segment's rule-L2
+///   permutation, leftmost first.
+/// - `mirrored` (§17.3.1.37 under `w:bidi` — a right-to-left paragraph whose
+///   line carries tabs): the pen walks **right to left**, jumping stops
+///   measured from the right margin, so segments come in logical order with
+///   each segment's permutation *reversed* — the pen meets its rightmost
+///   fragment first. See [`emit_line_commands`]'s mirror note.
 fn visual_order(
     fragments: &[Fragment],
     line: &super::super::line::FittedLine,
     base: crate::i18n::bidi::BaseDirection,
+    mirrored: bool,
 ) -> VisualOrder {
     let logical = VisualOrder::Logical {
         start: line.start,
@@ -272,8 +280,10 @@ fn visual_order(
         .collect();
     // Rule L2 reverses from the highest level down to the lowest *odd* one, so
     // a line with no odd level anywhere reorders to itself — including one
-    // holding an even-level run such as Western digits inside Arabic.
-    if levels.iter().all(|l| l.is_ltr()) {
+    // holding an even-level run such as Western digits inside Arabic. A
+    // mirrored line never takes this out: its all-LTR segments still need
+    // reversing for the right-to-left pen.
+    if !mirrored && levels.iter().all(|l| l.is_ltr()) {
         return logical;
     }
 
@@ -281,7 +291,10 @@ fn visual_order(
     let mut segment_start = 0;
     let flush = |order: &mut Vec<usize>, from: usize, to: usize| {
         if from < to {
-            let permutation = crate::i18n::bidi::reorder(&levels[from..to]);
+            let mut permutation = crate::i18n::bidi::reorder(&levels[from..to]);
+            if mirrored {
+                permutation.reverse();
+            }
             order.extend(permutation.into_iter().map(|p| line.start + from + p));
         }
     };
@@ -294,6 +307,40 @@ fn visual_order(
     }
     flush(&mut order, segment_start, levels.len());
     VisualOrder::Reordered(order)
+}
+
+/// The running pen of one line's emission.
+///
+/// A left-to-right line walks a physical left cursor rightward. A *mirrored*
+/// line — §17.3.1.37 under `w:bidi` — walks a start-relative cursor measured
+/// in from the right column edge, which is the frame tab-stop positions are
+/// defined in there, so [`find_next_tab_stop`] serves both directions with
+/// the same numbers. Fragments always hand `place` their full advance and
+/// draw at the returned physical **left** x, whichever way the pen walks.
+struct LinePen {
+    /// `None`: `cursor` is the physical left x. `Some(right_edge)`: `cursor`
+    /// is the distance in from that edge (the mirrored frame).
+    mirror_edge: Option<Pt>,
+    cursor: Pt,
+}
+
+impl LinePen {
+    fn place(&mut self, advance: Pt) -> Pt {
+        let x = match self.mirror_edge {
+            None => self.cursor,
+            Some(right) => right - self.cursor - advance,
+        };
+        self.cursor += advance;
+        x
+    }
+
+    /// The pen's physical position, for zero-width marks and leader spans.
+    fn position(&self) -> Pt {
+        match self.mirror_edge {
+            None => self.cursor,
+            Some(right) => right - self.cursor,
+        }
+    }
 }
 
 /// §17.3.1.13: whether the gap after the fragment at visual position `pos`
@@ -548,11 +595,22 @@ pub(super) fn emit_line_commands(
         } else {
             align_offset(style, remaining)
         };
+        // §17.3.1.37 under `w:bidi` (issue #156): a right-to-left paragraph
+        // measures its tab stops from the *right* margin — §17.3.1.38's `pos`
+        // is "from the leading margin", and the leading margin of an RTL
+        // paragraph is the right one. Such a line is emitted **mirrored**: the
+        // pen starts at the line's right content edge and walks leftward,
+        // segments in logical order, jumping to stops measured in from
+        // `params.max_width`. Only lines that *have* tab placement mirror —
+        // a tabless RTL line is already placed by `align_offset` above, and
+        // §17.3.1.37 suppresses that exactly when a tab is present.
+        let mirrored =
+            style.base_direction == crate::i18n::bidi::BaseDirection::Rtl && line_has_tab_placement;
         // UAX #9 rule L2, per line — see [`visual_order`]. Everything below
         // that walks the line walks it in this order, which is what makes the
         // reorder carry run shading, run borders, underlines and hyperlink
         // rects with it: each is positioned from the same running pen.
-        let order = visual_order(fragments, line, style.base_direction);
+        let order = visual_order(fragments, line, style.base_direction, mirrored);
         let extra_per_gap = justification_extra_after(
             fragments,
             &order,
@@ -569,15 +627,40 @@ pub(super) fn emit_line_commands(
             remaining,
         );
 
-        let x_start = indent + align_offset;
-
         // Before the content, so text wins wherever a rule and a glyph overlap.
+        // A `bar` names a fixed column of the paragraph, so it mirrors with the
+        // paragraph's direction — not with any one line's tab placement.
         if has_bar_stop {
-            emit_bar_rules(commands, &style.tabs, bar_color, *cursor_y, line_height);
+            let bar_mirror_edge = (style.base_direction == crate::i18n::bidi::BaseDirection::Rtl)
+                .then_some(params.max_width);
+            emit_bar_rules(
+                commands,
+                &style.tabs,
+                bar_color,
+                *cursor_y,
+                line_height,
+                bar_mirror_edge,
+            );
         }
 
-        // Emit text commands for this line
-        let mut x = x_start;
+        // Emit text commands for this line.
+        let mut pen = if mirrored {
+            LinePen {
+                mirror_edge: Some(params.max_width),
+                // The line's right content edge, in the mirrored frame: its
+                // physical box is [indent, indent + line_available], so the
+                // start (right) edge sits this far in from the column edge.
+                // The first-line indent is already inside `line_available` —
+                // §17.3.1.12 applies it at the start edge, which is why
+                // `physical_left_inset` does not add it under Rtl.
+                cursor: (params.max_width - indent - line_available).max(Pt::ZERO),
+            }
+        } else {
+            LinePen {
+                mirror_edge: None,
+                cursor: indent + align_offset,
+            }
+        };
         for pos in 0..order.len() {
             let frag_idx = order.at(pos);
             let frag = &fragments[frag_idx];
@@ -604,6 +687,7 @@ pub(super) fn emit_line_commands(
                     let distributed_width = distribution_extra
                         * distribution_gap_count_after(fragments, &order, pos) as f32;
                     let rendered_width = *width + extra_after + distributed_width;
+                    let x = pen.place(rendered_width);
 
                     // §17.3.2.32: render run-level shading behind text.
                     // Uses text bounds (ascent+descent), not full line height.
@@ -721,8 +805,6 @@ pub(super) fn emit_line_commands(
                             width: stroke_width,
                         });
                     }
-
-                    x += rendered_width;
                 }
                 Fragment::Image {
                     size,
@@ -730,6 +812,10 @@ pub(super) fn emit_line_commands(
                     src_rect,
                     ..
                 } => {
+                    let advance = size.width
+                        + distribution_extra
+                            * distribution_gap_count_after(fragments, &order, pos) as f32;
+                    let x = pen.place(advance);
                     if let Some(data) = image_data {
                         commands.push(DrawCommand::Image {
                             rect: crate::render::geometry::PtRect::from_xywh(
@@ -742,9 +828,6 @@ pub(super) fn emit_line_commands(
                             src_rect: *src_rect,
                         });
                     }
-                    x += size.width
-                        + distribution_extra
-                            * distribution_gap_count_after(fragments, &order, pos) as f32;
                 }
                 Fragment::Emoji {
                     text,
@@ -757,6 +840,10 @@ pub(super) fn emit_line_commands(
                     line_metrics: _,
                     baseline_offset,
                 } => {
+                    let pen_advance = *advance
+                        + distribution_extra
+                            * distribution_gap_count_after(fragments, &order, pos) as f32;
+                    let x = pen.place(pen_advance);
                     // Place the cluster's box so its top sits at the line
                     // baseline minus the typeface ascent, matching where text
                     // glyphs at the same baseline would sit.
@@ -775,44 +862,56 @@ pub(super) fn emit_line_commands(
                         presentation: *presentation,
                         structure: *structure,
                     });
-                    x += *advance
-                        + distribution_extra
-                            * distribution_gap_count_after(fragments, &order, pos) as f32;
                 }
                 Fragment::Tab {
                     font: tab_font,
                     color: tab_color,
                     ..
                 } => {
-                    // §17.3.1.37: resolve to the next tab stop.
-                    // Tab stop positions are absolute from the paragraph's
-                    // left edge, not relative to the text indent.
-                    let (tab_pos, tab_stop) =
-                        find_next_tab_stop(x, &style.tabs, line_available, style.default_tab_stop);
+                    // §17.3.1.37: resolve to the next tab stop. Stop positions
+                    // are absolute from the paragraph's *leading* margin, not
+                    // relative to the text indent — which is the left column
+                    // edge on an ordinary line and the right one on a mirrored
+                    // line, and exactly what the pen's cursor frame measures,
+                    // so the same lookup serves both directions.
+                    let (tab_pos, tab_stop) = find_next_tab_stop(
+                        pen.cursor,
+                        &style.tabs,
+                        line_available,
+                        style.default_tab_stop,
+                    );
 
-                    let new_x = if let Some(ts) = tab_stop {
+                    let new_cursor = if let Some(ts) = tab_stop {
                         // §17.3.1.37: this tab's *zone* is the content from
                         // here to the next tab (regular or position) or the
                         // line end, whichever comes first. §17.18.85 decides
                         // which point of that zone lands on the stop.
                         let end = zone_end(fragments, frag_idx, line.end);
                         let zone = &fragments[frag_idx + 1..end];
-                        let offset = resolve_zone_anchor(
+                        let anchor = resolve_zone_anchor(
                             ts.alignment,
                             zone,
                             measure_text,
                             style.decimal_separator,
-                        )
-                        .offset(|| zone_width(fragments, frag_idx + 1, end));
+                        );
+                        let offset = if mirrored {
+                            anchor.offset_mirrored(|| zone_width(fragments, frag_idx + 1, end))
+                        } else {
+                            anchor.offset(|| zone_width(fragments, frag_idx + 1, end))
+                        };
                         // Never move the pen backwards: a zone wider than the
-                        // space before its stop overflows to the right rather
+                        // space before its stop overflows past the stop rather
                         // than overprinting what precedes it.
-                        (tab_pos - offset).max(x)
+                        (tab_pos - offset).max(pen.cursor)
                     } else {
                         tab_pos
                     };
 
-                    // Emit leader characters between tab start and tab position.
+                    // Emit leader characters over the span the tab jumped —
+                    // physical, left of right, whichever way the pen walks.
+                    let from = pen.position();
+                    pen.cursor = new_cursor;
+                    let to = pen.position();
                     if let Some(ts) = tab_stop {
                         emit_tab_leader(
                             commands,
@@ -821,14 +920,12 @@ pub(super) fn emit_line_commands(
                                 font: tab_font,
                                 color: *tab_color,
                             },
-                            x,
-                            new_x,
+                            from.min(to),
+                            from.max(to),
                             *cursor_y + line.ascent,
                             measure_text,
                         );
                     }
-
-                    x = new_x;
                 }
                 Fragment::PTab {
                     align,
@@ -842,41 +939,59 @@ pub(super) fn emit_line_commands(
                     // stop; its anchor is derived from `relative_to` and the
                     // width of the zone it positions (this tab to the next tab
                     // or the line end).
+                    //
+                    // On a mirrored line the same resolution runs in the
+                    // start-relative frame: `indent_left` is already the
+                    // *logical* start inset, so a `Left` anchor lands at the
+                    // start (right) edge — the logical reading this engine
+                    // gives every left/right pair under `w:bidi` — and the
+                    // float insets swap sides to stay physical. Word's own
+                    // ptab placement in an RTL paragraph is unverified; a
+                    // **Word reference render** of one would settle it.
                     let end = zone_end(fragments, frag_idx, line.end);
+                    let (geo_float_left, geo_float_right) = if mirrored {
+                        (lp.float_right, lp.float_left)
+                    } else {
+                        (lp.float_left, lp.float_right)
+                    };
                     let geometry = PTabGeometry {
                         max_width: params.max_width,
                         indent_left: style.indent_left,
                         indent_first_line: style.indent_first_line,
                         content_width,
-                        float_left: lp.float_left,
-                        float_right: lp.float_right,
+                        float_left: geo_float_left,
+                        float_right: geo_float_right,
                     };
-                    let new_x = match resolve_ptab(*align, *relative_to, geometry, x, || {
-                        zone_width(fragments, frag_idx + 1, end)
-                    }) {
-                        PTabPlacement::Placed(at) => at,
-                        PTabPlacement::AdvancesToNextLine { anchor_x } => {
-                            if frag_idx == line.start {
-                                // Fitting breaks the line before any tab whose
-                                // anchor is behind the pen, so reaching here
-                                // means the tab is already first on its line.
-                                // Nothing has been drawn yet, so honouring the
-                                // anchor cannot overprint — including when it
-                                // sits left of `indent_left`, which is exactly
-                                // what `relativeTo="margin"` asks for. The
-                                // floor is the line's own left edge: a zone
-                                // wider than its anchor has nowhere better to
-                                // go, and advancing again would not move it.
-                                anchor_x.max(Pt::ZERO)
-                            } else {
-                                // Defensive: fitting should have broken before
-                                // this tab. If it did not, refusing to move
-                                // backwards is the only safe answer.
-                                anchor_x.max(x)
+                    let new_cursor =
+                        match resolve_ptab(*align, *relative_to, geometry, pen.cursor, || {
+                            zone_width(fragments, frag_idx + 1, end)
+                        }) {
+                            PTabPlacement::Placed(at) => at,
+                            PTabPlacement::AdvancesToNextLine { anchor_x } => {
+                                if frag_idx == line.start {
+                                    // Fitting breaks the line before any tab whose
+                                    // anchor is behind the pen, so reaching here
+                                    // means the tab is already first on its line.
+                                    // Nothing has been drawn yet, so honouring the
+                                    // anchor cannot overprint — including when it
+                                    // sits before `indent_left`, which is exactly
+                                    // what `relativeTo="margin"` asks for. The
+                                    // floor is the line's own leading edge: a zone
+                                    // wider than its anchor has nowhere better to
+                                    // go, and advancing again would not move it.
+                                    anchor_x.max(Pt::ZERO)
+                                } else {
+                                    // Defensive: fitting should have broken before
+                                    // this tab. If it did not, refusing to move
+                                    // backwards is the only safe answer.
+                                    anchor_x.max(pen.cursor)
+                                }
                             }
-                        }
-                    };
+                        };
 
+                    let from = pen.position();
+                    pen.cursor = new_cursor;
+                    let to = pen.position();
                     emit_tab_leader(
                         commands,
                         LeaderStyle {
@@ -884,19 +999,17 @@ pub(super) fn emit_line_commands(
                             font: tab_font,
                             color: *tab_color,
                         },
-                        x,
-                        new_x,
+                        from.min(to),
+                        from.max(to),
                         *cursor_y + line.ascent,
                         measure_text,
                     );
-
-                    x = new_x;
                 }
                 Fragment::LineBreak { .. } | Fragment::ColumnBreak | Fragment::PageBreak { .. } => {
                 }
                 Fragment::Bookmark { name } => {
                     commands.push(DrawCommand::NamedDestination {
-                        position: PtOffset::new(x, *cursor_y),
+                        position: PtOffset::new(pen.position(), *cursor_y),
                         name: name.clone(),
                     });
                 }
@@ -1097,6 +1210,25 @@ impl ZoneAnchor {
             ZoneAnchor::At(offset) => offset,
         }
     }
+
+    /// [`ZoneAnchor::offset`] for a mirrored line: the distance from the
+    /// zone's *start-relative* start — its right edge — to the anchor point.
+    ///
+    /// `Start`, `End` and `Middle` are logical, so they read identically in
+    /// either frame: a `start` stop anchors the zone's first-read edge and a
+    /// mirrored zone is read from the right. `At` is the one physical case —
+    /// [`decimal_anchor`] measures to the separator from the zone's *left*
+    /// edge, and the separator does not move when the zone is walked from
+    /// the other end, hence the complement. This is also why `Start` still
+    /// never pays for the zone-width sum.
+    fn offset_mirrored(self, zone_width: impl FnOnce() -> Pt) -> Pt {
+        match self {
+            ZoneAnchor::Start => Pt::ZERO,
+            ZoneAnchor::End => zone_width(),
+            ZoneAnchor::Middle => zone_width() * 0.5,
+            ZoneAnchor::At(offset) => zone_width() - offset,
+        }
+    }
 }
 
 /// §17.18.85: the two exclusive roles an entry in `w:tabs` can have.
@@ -1175,21 +1307,31 @@ fn paragraph_bar_color(fragments: &[Fragment]) -> crate::render::resolve::color:
 /// content, its alignment offset, or its float indent — because a bar names a
 /// fixed column of the paragraph. Successive lines' bands abut, so the
 /// per-line segments read as one continuous rule.
+///
+/// `mirror_edge`: like every §17.3.1.38 position, a bar's is measured from
+/// the leading margin, so a `w:bidi` paragraph's rules draw that far in from
+/// the *right* column edge — on every line, tabs present or not, since a bar
+/// is a paragraph decoration.
 fn emit_bar_rules(
     commands: &mut Vec<DrawCommand>,
     tabs: &[TabStopDef],
     color: crate::render::resolve::color::RgbColor,
     line_top: Pt,
     line_height: Pt,
+    mirror_edge: Option<Pt>,
 ) {
     for ts in tabs
         .iter()
         .filter(|ts| TabStopRole::of(ts.alignment) == TabStopRole::DrawsRule)
     {
+        let x = match mirror_edge {
+            Some(right) => right - ts.position,
+            None => ts.position,
+        };
         commands.push(DrawCommand::Line {
             line: crate::render::geometry::PtLineSegment::new(
-                PtOffset::new(ts.position, line_top),
-                PtOffset::new(ts.position, line_top + line_height),
+                PtOffset::new(x, line_top),
+                PtOffset::new(x, line_top + line_height),
             ),
             color,
             width: BAR_RULE_WIDTH,
@@ -1532,6 +1674,23 @@ mod tests {
         assert_eq!(ZoneAnchor::At(Pt::new(12.5)).offset(width).raw(), 12.5);
     }
 
+    /// §17.3.1.37 under `w:bidi`: the mirrored offsets. `Start`, `End` and
+    /// `Middle` are logical and read identically in either frame; only
+    /// `At` — the decimal separator — complements, because it names a
+    /// physical point of the zone that stays put when the zone is walked
+    /// from the other end.
+    #[test]
+    fn mirrored_zone_anchor_offsets_complement_only_the_decimal() {
+        let width = || Pt::new(80.0);
+        assert_eq!(ZoneAnchor::Start.offset_mirrored(width), Pt::ZERO);
+        assert_eq!(ZoneAnchor::End.offset_mirrored(width).raw(), 80.0);
+        assert_eq!(ZoneAnchor::Middle.offset_mirrored(width).raw(), 40.0);
+        assert_eq!(
+            ZoneAnchor::At(Pt::new(12.5)).offset_mirrored(width).raw(),
+            67.5
+        );
+    }
+
     #[test]
     fn a_decimal_zone_with_no_separator_anchors_at_its_end() {
         let zone = [text_fragment("1234", 40.0)];
@@ -1653,7 +1812,12 @@ mod tests {
         }
 
         fn order(frags: &[Fragment], base: BaseDirection) -> Vec<usize> {
-            let o = visual_order(frags, &line(frags.len()), base);
+            let o = visual_order(frags, &line(frags.len()), base, false);
+            (0..o.len()).map(|p| o.at(p)).collect()
+        }
+
+        fn mirrored_order(frags: &[Fragment], base: BaseDirection) -> Vec<usize> {
+            let o = visual_order(frags, &line(frags.len()), base, true);
             (0..o.len()).map(|p| o.at(p)).collect()
         }
 
@@ -1662,7 +1826,7 @@ mod tests {
         #[test]
         fn a_line_with_no_rtl_level_is_not_reordered_and_allocates_nothing() {
             let frags = [at(0, "one "), at(0, "two "), at(0, "three")];
-            let resolved = visual_order(&frags, &line(3), BaseDirection::Ltr);
+            let resolved = visual_order(&frags, &line(3), BaseDirection::Ltr, false);
             assert!(
                 matches!(resolved, VisualOrder::Logical { .. }),
                 "an all-LTR line must take the no-allocation path",
@@ -1676,7 +1840,7 @@ mod tests {
         fn an_even_level_line_is_not_reordered_either() {
             let frags = [at(0, "a "), at(2, "12"), at(0, " b")];
             assert!(matches!(
-                visual_order(&frags, &line(3), BaseDirection::Ltr),
+                visual_order(&frags, &line(3), BaseDirection::Ltr, false),
                 VisualOrder::Logical { .. }
             ));
         }
@@ -1696,13 +1860,8 @@ mod tests {
             assert_eq!(order(&frags, BaseDirection::Rtl), [4, 2, 3, 1, 0]);
         }
 
-        /// §17.3.1.37 under `w:bidi`, decided in the plan and enforced here:
-        /// a tab splits the line into segments that each reorder on their own,
-        /// and the segments themselves stay in logical order because the tab
-        /// geometry they land in has not been mirrored.
-        #[test]
-        fn a_tab_segments_the_line_and_the_segments_keep_their_order() {
-            let tab = Fragment::Tab {
+        fn tab() -> Fragment {
+            Fragment::Tab {
                 line_height: Pt::new(12.0),
                 font: match &text_fragment("x", 1.0) {
                     Fragment::Text { font, .. } => font.clone(),
@@ -1710,12 +1869,50 @@ mod tests {
                 },
                 color: crate::render::resolve::color::RgbColor::BLACK,
                 fitting_width: None,
-            };
-            let frags = [at(1, "א"), at(1, "ב"), tab, at(1, "ג"), at(1, "ד")];
+            }
+        }
+
+        /// A tab splits the line into segments that each reorder on their
+        /// own, and the segments keep their logical order — UAX #9 rule L1
+        /// resets a tab to the paragraph level, so it is never inside a run.
+        /// Unmirrored, this is the left-to-right pen's walk.
+        #[test]
+        fn a_tab_segments_the_line_and_the_segments_keep_their_order() {
+            let frags = [at(1, "א"), at(1, "ב"), tab(), at(1, "ג"), at(1, "ד")];
             assert_eq!(
                 order(&frags, BaseDirection::Rtl),
                 [1, 0, 2, 4, 3],
                 "each side of the tab reverses; the tab and the sides' order do not",
+            );
+        }
+
+        /// §17.3.1.37 under `w:bidi` (issue #156): the mirrored walk meets
+        /// each segment's *rightmost* fragment first, so a pure right-to-left
+        /// segment comes back in logical order — its first word is its
+        /// rightmost — while an embedded LTR island inside it is reached from
+        /// its right end.
+        #[test]
+        fn a_mirrored_line_walks_each_segment_from_its_right() {
+            // Segment [א(1), up(2)]: left-to-right paint order is [up, א],
+            // so the right-to-left pen meets א then up.
+            let frags = [at(1, "א"), at(2, "up"), tab(), at(1, "ג"), at(1, "ד")];
+            assert_eq!(
+                mirrored_order(&frags, BaseDirection::Rtl),
+                [0, 1, 2, 3, 4],
+                "rightmost-first within each segment, segments in logical order",
+            );
+        }
+
+        /// An all-LTR line under a mirrored walk must not take the
+        /// no-allocation fast path: its segments still need reversing for
+        /// the right-to-left pen.
+        #[test]
+        fn a_mirrored_all_ltr_line_still_reverses_its_segments() {
+            let frags = [at(0, "a"), at(0, "b"), tab(), at(0, "c")];
+            assert_eq!(
+                mirrored_order(&frags, BaseDirection::Rtl),
+                [1, 0, 2, 3],
+                "the pen meets b (rightmost of its segment) before a",
             );
         }
 
