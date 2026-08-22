@@ -707,11 +707,18 @@ impl From<StYAlign> for TableYAlign {
 
 // ── StTabJc (§17.18.85 tab alignment) ─────────────────────────────────────
 
+/// ISO/IEC 29500 Strict spells the directional values `start`/`end`; the
+/// Transitional→Strict migration maps `left`↔`start` and `right`↔`end`
+/// losslessly, the same aliasing [`StJc`] carries — and losing it here was
+/// worse than a wrong stop: an unknown variant fails deserialization, so one
+/// Strict `w:tab` made the whole document unreadable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StTabJc {
+    #[serde(alias = "start")]
     Left,
     Center,
+    #[serde(alias = "end")]
     Right,
     Decimal,
     Bar,

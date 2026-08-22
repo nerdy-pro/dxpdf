@@ -19,13 +19,14 @@
 //! the line like any other text — in a right-to-left paragraph it ends up at
 //! the right, which is where it belongs.
 //!
-//! With the default separator, which is a **tab**, it does not, and that is the
-//! same boundary §17.3.1.37 has everywhere else in this engine rather than a
-//! second gap: `line_emit::visual_order` segments a line at every tab and does
-//! not mirror the stop positions the pen jumps to, so a label before a tab
-//! stays at the physical left. Closing it means mirroring tab geometry under
-//! `w:bidi` — the stops, the pen, and the alignment-suppression rule together
-//! — and there is no reference corpus here to check that against.
+//! With the default separator, which is a **tab**, the same follows from
+//! §17.3.1.37's mirrored tab geometry (issue #156): the label is the line's
+//! first logical segment, so `line_emit`'s mirrored pen starts it against the
+//! right margin — one hanging-width in from the body indent — and the suffix
+//! tab jumps leftward to the implicit stop this module installs. That stop's
+//! position is `w:ind@start`, which is *logical* in this model, so it means
+//! "in from the right margin" on such a line without translation. Nothing
+//! here is direction-aware; the geometry all lives in the emitter.
 
 use crate::model::Dup;
 use std::rc::Rc;
