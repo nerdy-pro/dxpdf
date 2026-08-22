@@ -75,8 +75,10 @@ pub struct TableCellInput {
     pub margins: PtEdgeInsets,
     /// Number of grid columns this cell spans (gridSpan, default 1).
     pub grid_span: u32,
-    /// Background color for cell shading.
-    pub shading: Option<RgbColor>,
+    /// §17.18.78: resolved cell shading — a flat colour, or a geometric
+    /// pattern with its two colours. `None` when the cell shades nothing
+    /// (no `w:shd` at any §17.7.6 level, or an explicit `nil`).
+    pub shading: Option<crate::render::resolve::shading::ResolvedShading>,
     /// §17.7.6: per-cell resolved borders from conditional formatting.
     pub cell_borders: Option<CellBorderConfig>,
     /// §17.4.84: vertical merge state.

@@ -7,7 +7,6 @@ use crate::render::layout::section::LayoutBlock;
 use crate::render::layout::table::{
     compute_column_widths, CellBorderConfig, CellBorderOverride, TableCellInput, TableRowInput,
 };
-use crate::render::resolve::color::{resolve_color, ColorContext};
 use crate::render::resolve::conditional::{
     resolve_cell_conditional, CellConditionalFormatting, CellGridPosition,
 };
@@ -1177,17 +1176,20 @@ fn build_table_cell(
     );
 
     // §17.7.6: resolve cell shading.  Priority: direct → conditional → none.
+    // The *element* is picked by level first and resolved after, so a direct
+    // §17.18.78 `nil` — which resolves to nothing — suppresses the
+    // conditional layer's shading rather than exposing it, which is the
+    // reason the value exists.
     let shading = cell
         .properties
         .shading
         .get()
-        .map(|s| resolve_color(s.fill, ColorContext::Background))
         .or_else(|| {
             cond.cell_properties
                 .as_ref()
                 .and_then(|tcp| tcp.shading.get())
-                .map(|s| resolve_color(s.fill, ColorContext::Background))
-        });
+        })
+        .and_then(crate::render::resolve::shading::resolve_shading);
 
     // §17.4.66: cell borders cascade — direct cell borders (highest priority)
     // → conditional formatting → table-level borders (resolved in layout).
@@ -2810,7 +2812,11 @@ mod tests {
             )],
         );
         let cells = &built.rows[0].cells;
-        let rgb = |r, g, b| Some(crate::render::resolve::color::RgbColor { r, g, b });
+        let rgb = |r, g, b| {
+            Some(crate::render::resolve::shading::ResolvedShading::Flat(
+                crate::render::resolve::color::RgbColor { r, g, b },
+            ))
+        };
         assert_eq!(cells[0].shading, rgb(255, 0, 0), "the cell's own fill wins");
         assert_eq!(
             cells[1].shading,
