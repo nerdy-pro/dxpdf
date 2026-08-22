@@ -64,6 +64,10 @@ pub(crate) struct TblPrXml {
     tblp_pr: Vec<TblpPrXml>,
     #[serde(rename = "tblOverlap", default)]
     tbl_overlap: Vec<ValAttr<StTblOverlap>>,
+    /// §17.4.1: columns display right to left. `Vec<OnOff>` (not `Option`)
+    /// tolerates duplicated toggles per §17.7.2 last-wins — see `TrPrXml`.
+    #[serde(rename = "bidiVisual", default)]
+    bidi_visual: Vec<OnOff>,
     /// Children this schema does not name — recorded so an unimplemented
     /// table property is visible under `RUST_LOG=warn` instead of vanishing.
     /// See [`UnknownChildren`].
@@ -249,6 +253,7 @@ impl TblPrXml {
             positioning: Dup::from(self.tblp_pr).map(Into::into),
             overlap: Dup::from(self.tbl_overlap)
                 .map(|v| crate::docx::model::TableOverlap::from(v.val)),
+            bidi_visual: Dup::from(self.bidi_visual).map(|OnOff(b)| b),
         };
         (props, style_id)
     }
@@ -1086,21 +1091,41 @@ mod tests {
     // ── unmodelled children are reported, not dropped ──
     //
     // A plain-struct property bag silently discards an element it does not
-    // name, which is why `w:hMerge` and `w:bidiVisual` were invisible at
-    // runtime rather than merely unimplemented. These pin both directions:
-    // an unnamed child is captured by name, and a named one never is.
+    // name, which is why `w:hMerge` and (until issue #157) `w:bidiVisual`
+    // were invisible at runtime rather than merely unimplemented. These pin
+    // both directions: an unnamed child is captured by name, and a named one
+    // never is.
 
     #[test]
     fn tbl_pr_records_an_unmodelled_child() {
-        let x: TblPrXml =
-            quick_xml::de::from_str(r#"<tblPr><tblStyle val="Grid"/><bidiVisual/></tblPr>"#)
-                .unwrap();
-        assert_eq!(x.unknown.names(), ["bidiVisual"]);
+        let x: TblPrXml = quick_xml::de::from_str(
+            r#"<tblPr><tblStyle val="Grid"/><tblCaption val="c"/></tblPr>"#,
+        )
+        .unwrap();
+        assert_eq!(x.unknown.names(), ["tblCaption"]);
         // The modelled sibling is unaffected by the catch-all.
         assert_eq!(
             x.split().1.map(|s| s.as_str().to_string()),
             Some("Grid".into())
         );
+    }
+
+    /// §17.4.1: `<w:bidiVisual/>` is a toggle — bare presence is *on*, and
+    /// `w:val` can turn it back off. The `val="0"` arm is what separates a
+    /// toggle read from a presence read, which a bare-element test alone
+    /// cannot.
+    #[test]
+    fn tbl_pr_reads_bidi_visual_as_a_toggle() {
+        let toggle = |xml: &str| {
+            let x: TblPrXml = quick_xml::de::from_str(xml).unwrap();
+            x.split().0.bidi_visual.get().copied()
+        };
+        assert_eq!(toggle(r#"<tblPr><bidiVisual/></tblPr>"#), Some(true));
+        assert_eq!(
+            toggle(r#"<tblPr><bidiVisual val="0"/></tblPr>"#),
+            Some(false)
+        );
+        assert_eq!(toggle(r#"<tblPr/>"#), None, "absent stays absent");
     }
 
     #[test]

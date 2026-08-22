@@ -182,6 +182,7 @@ pub fn merge_table_properties(
         style_col_band_size,
         positioning,
         overlap,
+        bidi_visual,
     );
 }
 
@@ -318,6 +319,7 @@ pub fn overlay_table_properties(
     );
     take(&mut out.positioning, overlay.positioning.clone());
     take(&mut out.overlap, overlay.overlap.clone());
+    take(&mut out.bidi_visual, overlay.bidi_visual.clone());
     out
 }
 
@@ -887,6 +889,7 @@ mod tests {
                 y: None,
             })),
             overlap: Dup::from(Some(TableOverlap::Never)),
+            bidi_visual: Dup::from(Some(true)),
         }
     }
 
@@ -915,6 +918,7 @@ mod tests {
         assert_eq!(out.style_col_band_size, base.style_col_band_size);
         assert_eq!(out.positioning, base.positioning);
         assert_eq!(out.overlap, base.overlap);
+        assert_eq!(out.bidi_visual, base.bidi_visual);
         // The one deliberate exclusion: `basedOn` is the inheritance edge, and
         // a `tblStyle` inside a style's own `tblPr` must not become a second.
         assert_eq!(
@@ -978,6 +982,7 @@ mod tests {
         assert_eq!(out.style_col_band_size, overlay.style_col_band_size);
         assert_eq!(out.positioning, overlay.positioning);
         assert_eq!(out.overlap, overlay.overlap);
+        assert_eq!(out.bidi_visual, overlay.bidi_visual);
         // The one deliberate exclusion: a conditional layer must not re-point
         // the style at another style.
         assert_eq!(
