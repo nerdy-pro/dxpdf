@@ -39,6 +39,17 @@ pub struct TableProperties {
     pub positioning: Dup<TablePositioning>,
     /// §17.4.56: whether this floating table can overlap other floating tables.
     pub overlap: Dup<TableOverlap>,
+    /// §17.4.1 `w:bidiVisual`: the table's columns display right to left —
+    /// the row's first cell is the rightmost one.
+    ///
+    /// Applied from the `<w:tbl>`'s own `<w:tblPr>` only, like `tblW` and
+    /// `tblLook`: [MS-OI29500] §2.1.250(a)/§2.1.249(a) list it among the
+    /// elements Word does not read from a style's `tblPr` — see the cascade
+    /// note in `render::layout::build::table::build_table`. The style merge
+    /// still folds it through `basedOn` with every other field, because
+    /// §17.7.4.3 style-to-style inheritance is a different question; a value
+    /// both levels carry and no one applies is inert.
+    pub bidi_visual: Dup<bool>,
 }
 
 /// §17.4.57: floating table positioning.

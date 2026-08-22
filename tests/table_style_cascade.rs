@@ -663,6 +663,17 @@ fn a_table_style_cannot_forbid_float_overlap() {
     );
 }
 
+/// §17.4.1 `bidiVisual` — also on the list. Written on the `<w:tbl>` it
+/// mirrors the column order (issue #157), which the fixture's A|B row makes
+/// observable as the two texts trading x positions; written in the style it
+/// must mirror nothing. Until #157 this test would have been vacuous — an
+/// element nothing read could not discriminate, which is why the file's
+/// coverage table listed it while no test carried it.
+#[test]
+fn a_table_style_cannot_mirror_the_columns() {
+    assert_style_does_not_reach_the_table(r#"<w:bidiVisual/>"#, "", "bidiVisual");
+}
+
 // ── §17.7.4.3: `basedOn` inheritance of the style's own `<w:tblPr>` ─────────
 
 /// A `<w:tblPr>` carrying one of every table property that reaches layout
