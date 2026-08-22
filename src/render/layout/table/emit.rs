@@ -201,11 +201,12 @@ fn emit_one_row(
         // which owns that rule for every producer rather than each producer
         // half-owning it.
         if cell_input.vertical_merge != Some(VerticalMergeState::Continue) {
-            if let Some(color) = cell_input.shading {
-                bufs.commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(entry.cell_x, row_top, entry.cell_w, effective_h),
-                    color,
-                });
+            if let Some(shading) = &cell_input.shading {
+                super::shading::emit_cell_shading(
+                    bufs.commands,
+                    PtRect::from_xywh(entry.cell_x, row_top, entry.cell_w, effective_h),
+                    shading,
+                );
             }
         }
 
@@ -397,6 +398,7 @@ mod tests {
         vmerge: Option<VerticalMergeState>,
         shading: Option<RgbColor>,
     ) -> TableCellInput {
+        let shading = shading.map(crate::render::resolve::shading::ResolvedShading::Flat);
         TableCellInput {
             blocks: (0..n_lines)
                 .map(|i| LayoutBlock::Paragraph {

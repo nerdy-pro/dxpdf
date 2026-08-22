@@ -326,8 +326,8 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Table borders (per-cell, per-table) | ✅ incl. §17.4.66 conflict resolution |
 | Border styles (single, double) | ✅ §17.4.38 double drawn as two sub-rules |
 | Border styles (the other 24) | ⚠️ approximated by a solid line of the declared width and colour; warned once per style |
-| Cell shading (solid) | ✅ |
-| Cell shading (patterns) | ❌ parsed, fill colour only |
+| Cell shading (solid) | ✅ §17.18.78 `solid` is the *pattern* colour, `auto` colours are ink-over-paper, `nil` and `clear`-over-`auto` paint nothing |
+| Cell shading (patterns) | ✅ §17.18.78 the 23 percentage tints blend flat (`pct12` = 12.5%), the 12 stripe/cross values draw Word 97's 3 pt-pitch stripe geometry |
 | Table styles, conditional formatting | ✅ §17.7.6 wholeTable, row/column bands, first/last row and column |
 | Floating tables (`tblpPr`) | ✅ §17.4.58 anchors, spillover, `tblOverlap` |
 | Vertical alignment (top / center / bottom) | ✅ incl. vMerge-aware bottom alignment |

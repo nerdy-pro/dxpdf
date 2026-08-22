@@ -10,6 +10,7 @@ pub mod locale;
 pub mod numbering;
 pub mod properties;
 pub mod sections;
+pub mod shading;
 pub mod shape_geometry;
 pub mod shape_visuals;
 pub mod spellout;
