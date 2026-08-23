@@ -366,6 +366,7 @@ fn build_note_blocks(
                 // §17.8.3.2 / §17.3.2.14: fall back to the document-level spec
                 // defaults rather than restating a font name here.
                 let font = frags[0].font_props().cloned().unwrap_or_else(|| FontProps {
+                    effects: Default::default(),
                     rtl: crate::render::fonts::Toggle::Absent,
                     family: std::rc::Rc::from(super::SPEC_FALLBACK_FONT),
                     size: super::SPEC_DEFAULT_FONT_SIZE,
@@ -380,6 +381,7 @@ fn build_note_blocks(
                 let ref_size =
                     font.size * crate::render::layout::fragment::SUPERSCRIPT_FONT_SIZE_RATIO;
                 let ref_font = FontProps {
+                    effects: Default::default(),
                     size: ref_size,
                     ..font
                 };

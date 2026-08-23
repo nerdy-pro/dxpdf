@@ -304,6 +304,7 @@ mod tests {
 
     fn font(rtl: Toggle) -> Rc<FontProps> {
         Rc::new(FontProps {
+            effects: Default::default(),
             family: Rc::from("Test"),
             size: Pt::new(12.0),
             bold: Toggle::Absent,

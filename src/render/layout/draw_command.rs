@@ -90,6 +90,12 @@ pub enum DrawCommand {
         /// output of every existing document — exactly as it was. See
         /// [`crate::render::shape::needs_shaping`] for what earns a `Some`.
         shaped: Option<crate::render::shape::RunDirection>,
+        /// §17.3.2.23 `w:outline` (issue #148): stroke the glyph contours
+        /// instead of filling them —
+        /// [`TextEffects::OUTLINE_STROKE_WIDTH`](crate::render::layout::fragment::TextEffects)
+        /// wide. The one effect that needs the painter: shadow and relief
+        /// are extra `Text` commands the emitter lays underneath.
+        outline: bool,
     },
     Underline {
         line: PtLineSegment,
@@ -500,6 +506,7 @@ mod tests {
     #[test]
     fn shift_y_moves_text() {
         let mut cmd = DrawCommand::Text {
+            outline: false,
             shaped: None,
             position: PtOffset::new(Pt::new(10.0), Pt::new(20.0)),
             text: "hi".into(),
@@ -643,6 +650,7 @@ mod tests {
             (
                 "Text",
                 DrawCommand::Text {
+                    outline: false,
                     shaped: None,
                     position: at(10.0, 20.0),
                     text: "hi".into(),
@@ -771,6 +779,7 @@ mod tests {
     #[test]
     fn a_text_span_straddles_its_baseline() {
         let cmd = DrawCommand::Text {
+            outline: false,
             shaped: None,
             position: PtOffset::new(Pt::new(10.0), Pt::new(20.0)),
             text: Rc::from("x"),

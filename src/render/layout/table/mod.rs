@@ -576,6 +576,7 @@ mod tests {
             text: text.into(),
             break_after: crate::render::layout::fragment::fixture_break_after(text),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),

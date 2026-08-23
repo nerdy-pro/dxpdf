@@ -547,6 +547,7 @@ mod tests {
 
     fn text_frag(s: &str) -> Fragment {
         let font = FontProps {
+            effects: Default::default(),
             rtl: crate::render::fonts::Toggle::Absent,
             family: Rc::from("Test"),
             size: Pt::new(12.0),
@@ -602,6 +603,7 @@ mod tests {
             Pt::new(792.0),
         ))];
         pages[0].commands.push(DrawCommand::Text {
+            outline: false,
             shaped: None,
             text: "body".into(),
             position: PtOffset::new(Pt::ZERO, Pt::ZERO),
@@ -649,6 +651,7 @@ mod tests {
             Pt::new(792.0),
         ))];
         pages[0].commands.push(DrawCommand::Text {
+            outline: false,
             shaped: None,
             text: "body".into(),
             position: PtOffset::new(Pt::ZERO, Pt::ZERO),

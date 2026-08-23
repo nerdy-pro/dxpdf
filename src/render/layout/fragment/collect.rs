@@ -403,6 +403,7 @@ fn emit_field_substitution<F>(
         ),
         _ => (
             FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from(default_family),
                 size: auto_fit.scale_font(default_size),
@@ -450,6 +451,7 @@ where
     F: Fn(&str, &FontProps) -> (Pt, TextMetrics),
 {
     let font = FontProps {
+        effects: Default::default(),
         rtl: crate::render::fonts::Toggle::Absent,
         family: Rc::from(default_family),
         size: default_size,
@@ -1013,6 +1015,7 @@ where
                 }
                 Inline::Symbol(sym) => {
                     let font = FontProps {
+                        effects: Default::default(),
                         rtl: crate::render::fonts::Toggle::Absent,
                         family: Rc::from(sym.font.as_str()),
                         size: default_size,
@@ -1065,6 +1068,7 @@ where
                     // §17.11.12: footnote reference uses superscript sizing.
                     let ref_size = default_size * super::SUPERSCRIPT_FONT_SIZE_RATIO;
                     let ref_font = FontProps {
+                        effects: Default::default(),
                         rtl: crate::render::fonts::Toggle::Absent,
                         family: std::rc::Rc::from(default_family),
                         size: ref_size,
@@ -1107,6 +1111,7 @@ where
                     let num_text = to_roman_lower(*endnote_counter);
                     let ref_size = default_size * super::SUPERSCRIPT_FONT_SIZE_RATIO;
                     let ref_font = FontProps {
+                        effects: Default::default(),
                         rtl: crate::render::fonts::Toggle::Absent,
                         family: std::rc::Rc::from(default_family),
                         size: ref_size,

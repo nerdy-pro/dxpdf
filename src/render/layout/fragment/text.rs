@@ -491,6 +491,7 @@ mod tests {
 
     fn font(family: &str, size: f32) -> FontProps {
         FontProps {
+            effects: Default::default(),
             rtl: crate::render::fonts::Toggle::Absent,
             family: Rc::from(family),
             size: Pt::new(size),

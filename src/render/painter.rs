@@ -317,6 +317,7 @@ fn render_page(
                 color,
                 text_scale,
                 shaped,
+                outline,
             } => {
                 let (slot, base_font) =
                     font_cache.get_indexed(registry, font_family, *font_size, *bold, *italic);
@@ -346,6 +347,20 @@ fn render_page(
                     text_scale,
                 );
                 text_paint.set_color4f(to_color4f(*color), None);
+                // §17.3.2.23 `w:outline` (issue #148): stroke the contours
+                // instead of filling them — the spec's "one pixel wide
+                // border around the inside and outside borders", a 96 dpi
+                // pixel centred on the contour. Reset on every command: the
+                // paint is shared, and a stroke left switched on would
+                // hollow every glyph after the outlined run.
+                if *outline {
+                    text_paint.set_style(skia_safe::PaintStyle::Stroke);
+                    text_paint.set_stroke_width(
+                        crate::render::layout::fragment::TextEffects::OUTLINE_STROKE_WIDTH.raw(),
+                    );
+                } else {
+                    text_paint.set_style(skia_safe::PaintStyle::Fill);
+                }
 
                 if let Some(direction) = shaped {
                     // Issue #131: a joining script. `draw_str` and
@@ -1070,6 +1085,7 @@ mod tests {
         let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: "Hello world".into(),
@@ -1095,6 +1111,7 @@ mod tests {
         let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: "Spaced".into(),
@@ -1124,6 +1141,7 @@ mod tests {
         let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: "e\u{301}cole\u{301}".into(),
@@ -1193,6 +1211,7 @@ mod tests {
         let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: Rc::from(""),
@@ -1317,6 +1336,7 @@ mod tests {
         let registry = test_registry();
         let page = LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: "Ärzte für Ökologie — 日本語".into(),
