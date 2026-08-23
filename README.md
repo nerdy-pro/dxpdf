@@ -280,7 +280,7 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Strikethrough | ⚠️ parsed, not yet rendered |
 | Highlighting | ✅ full ST_HighlightColor palette |
 | Caps, smallCaps | ⚠️ parsed, not applied at layout |
-| Shadow, outline, emboss, imprint | ❌ |
+| Shadow, outline, emboss, imprint | ✅ §17.3.2.31/.23/.13/.18 shadow as a hard offset copy (light gray under dark text, black otherwise), outline as stroked glyphs, emboss/imprint as a diagonal relief copy with black text lifted to white; shadow+outline — the one combination the spec permits — composes |
 | Hidden text (`w:vanish`) | ⚠️ a hidden run is removed before layout — its text, tabs and breaks take no space and the text either side closes up — resolved through the §17.7.2 cascade, so a character style can hide and `w:val="0"` can un-hide. Two gaps: a `w:sym`, `w:drawing` or `w:pict` in a hidden run still draws, and a hidden paragraph **mark** does not merge its paragraph into the next |
 | Run borders (`w:bdr`) | ✅ |
 

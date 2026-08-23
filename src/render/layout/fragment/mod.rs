@@ -56,9 +56,153 @@ pub(super) const SUBSCRIPT_HEIGHT_OFFSET_RATIO: f32 = 0.08;
 /// number line up without a measurement round-trip.
 pub(crate) const NOTE_REF_BASELINE_OFFSET_RATIO: f32 = 0.4;
 
+/// The four legacy §17.7.3 toggle effects of a run, resolved (issue #148):
+/// `w:shadow` §17.3.2.31, `w:outline` §17.3.2.23, `w:emboss` §17.3.2.13,
+/// `w:imprint` §17.3.2.18.
+///
+/// The spec forbids every combination except shadow + outline: emboss and
+/// imprint each "shall not be present with either the \[other\] or outline",
+/// shadow "shall not be present with either the emboss or imprint", and
+/// [MS-OI29500] §17.3.2.13/.18 adds that "Word also prevents [emboss/
+/// imprint] from being present with the shadow element". [MS-OE376]
+/// §2.3.2.21 records that Word 2007 nevertheless *saved* forbidden pairs
+/// "under limited conditions", so [`TextEffects::from_run`] resolves them
+/// by precedence rather than failing: a relief wins over outline and
+/// shadow, emboss over imprint. What Word renders for such a file is
+/// undocumented; a **Word reference render** of one would settle it.
+///
+/// The rendering constants on this type follow LibreOffice's VCL emulation
+/// (`OutputDevice::ImplDrawSpecialText`), written for WW8/DOCX
+/// compatibility and the one citable Word-compatible implementation of
+/// these effects — ONLYOFFICE preserves but does not render them. Word's
+/// own constants are not documented anywhere; each is a **Word reference
+/// render** candidate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextEffects {
+    /// §17.3.2.31: a hard copy "beneath the text and to its right".
+    pub shadow: bool,
+    /// §17.3.2.23: "a one pixel wide border around the inside and outside
+    /// borders of each character glyph".
+    pub outline: bool,
+    /// §17.3.2.13/§17.3.2.18: raised or sunken relief.
+    pub relief: Option<Relief>,
+}
+
+/// §17.3.2.13 emboss (raised) / §17.3.2.18 imprint ("engrave", sunken).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Relief {
+    Emboss,
+    Imprint,
+}
+
+impl TextEffects {
+    /// Nothing on — every run outside this issue's four toggles.
+    pub const NONE: Self = Self {
+        shadow: false,
+        outline: false,
+        relief: None,
+    };
+
+    /// The relief copy's diagonal offset: LibreOffice's `1 + DPI/300`
+    /// device pixels is one pixel at screen resolution, and a PDF has no
+    /// device grid — so the screen pixel, 1/96 in = 0.75 pt.
+    pub const RELIEF_OFFSET: Pt = Pt::new(0.75);
+
+    /// The stroke width of an outlined glyph: §17.3.2.23's "one pixel wide
+    /// border", again at 96 dpi. Centred on the contour, so half falls
+    /// inside and half outside — the "inside and outside borders" of the
+    /// spec's sentence.
+    pub const OUTLINE_STROKE_WIDTH: Pt = Pt::new(0.75);
+
+    /// Resolve the model's four cascade-resolved toggles, applying the
+    /// exclusivity precedence documented on the type.
+    pub fn from_run(rp: &crate::model::RunProperties) -> Self {
+        let relief = if rp.emboss == Some(true) {
+            Some(Relief::Emboss)
+        } else if rp.imprint == Some(true) {
+            Some(Relief::Imprint)
+        } else {
+            None
+        };
+        if relief.is_some() {
+            return Self {
+                shadow: false,
+                outline: false,
+                relief,
+            };
+        }
+        Self {
+            shadow: rp.shadow == Some(true),
+            outline: rp.outline == Some(true),
+            relief: None,
+        }
+    }
+
+    /// The shadow copy's diagonal offset for a run of this line height —
+    /// LibreOffice's `1 + (lineHeight_px − 24)/24` device pixels, read
+    /// smoothly in points: about a twenty-fourth of the line height, never
+    /// under one 96 dpi pixel, plus one more pixel when the glyphs are also
+    /// outlined (the stroke widens them by half a pixel each side).
+    pub fn shadow_offset(self, line_height: Pt) -> Pt {
+        let base = (line_height / 24.0).max(Pt::new(0.75));
+        if self.outline {
+            base + Pt::new(0.75)
+        } else {
+            base
+        }
+    }
+
+    /// The shadow copy's colour: light gray under dark text, black under
+    /// everything else — LibreOffice's rule (`GetLuminance() < 8`), which
+    /// is what keeps a black run's shadow visible *as* a shadow.
+    pub fn shadow_color(text: RgbColor) -> RgbColor {
+        // ITU-R BT.601 luma, the same weights VCL's GetLuminance uses.
+        let luminance =
+            (76 * u32::from(text.r) + 151 * u32::from(text.g) + 29 * u32::from(text.b)) >> 8;
+        if luminance < 8 {
+            LIGHT_GRAY
+        } else {
+            RgbColor::BLACK
+        }
+    }
+
+    /// The relief pair for a run of this text colour: `(copy, main)`.
+    ///
+    /// Black text lifts to white — VCL: "we don't have an automatic color,
+    /// so black is always drawn on white" — which is the classic look of
+    /// relief on paper; white text keeps itself and darkens the copy to
+    /// black instead; any other colour keeps itself over the gray copy.
+    /// The paper-white assumption is LibreOffice's too: over a non-white
+    /// shading the glyph still lifts to white.
+    pub fn relief_colors(text: RgbColor) -> (RgbColor, RgbColor) {
+        let main = if text == RgbColor::BLACK {
+            RgbColor::WHITE
+        } else {
+            text
+        };
+        let copy = if text == RgbColor::WHITE {
+            RgbColor::BLACK
+        } else {
+            LIGHT_GRAY
+        };
+        (copy, main)
+    }
+}
+
+/// VCL's `COL_LIGHTGRAY` — the relief copy and the dark-text shadow.
+const LIGHT_GRAY: RgbColor = RgbColor {
+    r: 192,
+    g: 192,
+    b: 192,
+};
+
 /// Font properties needed for rendering a text fragment.
 #[derive(Clone, Debug)]
 pub struct FontProps {
+    /// §17.3.2.13/.18/.23/.31 (issue #148): the run's resolved legacy text
+    /// effects. On `FontProps` for the same reason `underline` is — per-run
+    /// resolved presentation every text fragment shares by `Rc`.
+    pub effects: TextEffects,
     pub family: Rc<str>,
     pub size: Pt,
     /// §17.3.2.1 `w:b` as the §17.7.2 cascade left it — absent, explicitly off,
@@ -526,6 +670,9 @@ pub fn font_props_from_run(
     let text_scale = rp.text_scale.cloned().map_or(1.0, |s| s.as_factor());
 
     FontProps {
+        // §17.3.2.13/.18/.23/.31 (issue #148): the four legacy effects,
+        // resolved with their exclusivity precedence.
+        effects: TextEffects::from_run(rp),
         family: Rc::from(family),
         size,
         // The model already carries all three §17.7.2 states; this used to be
@@ -863,5 +1010,134 @@ mod tests {
             crate::render::layout::ShapeAutoFit::NONE,
         );
         assert!(fp.underline);
+    }
+}
+
+#[cfg(test)]
+mod effects_tests {
+    use super::*;
+    use crate::model::RunProperties;
+
+    fn run(f: impl FnOnce(&mut RunProperties)) -> RunProperties {
+        let mut rp = RunProperties::default();
+        f(&mut rp);
+        rp
+    }
+
+    /// The default: nothing on, and `from_run` of an untouched run says so.
+    #[test]
+    fn a_plain_run_has_no_effects() {
+        assert_eq!(
+            TextEffects::from_run(&RunProperties::default()),
+            TextEffects::NONE
+        );
+    }
+
+    /// Shadow + outline is the one pair §17.3.2.31 permits, and it resolves
+    /// as itself.
+    #[test]
+    fn shadow_and_outline_compose() {
+        let rp = run(|rp| {
+            rp.shadow = Some(true);
+            rp.outline = Some(true);
+        });
+        assert_eq!(
+            TextEffects::from_run(&rp),
+            TextEffects {
+                shadow: true,
+                outline: true,
+                relief: None
+            }
+        );
+    }
+
+    /// The exclusivity precedence for the pairs [MS-OE376] says Word 2007
+    /// saved anyway: a relief silences outline and shadow, and emboss beats
+    /// imprint.
+    #[test]
+    fn forbidden_combinations_resolve_by_precedence() {
+        let rp = run(|rp| {
+            rp.emboss = Some(true);
+            rp.imprint = Some(true);
+            rp.outline = Some(true);
+            rp.shadow = Some(true);
+        });
+        assert_eq!(
+            TextEffects::from_run(&rp),
+            TextEffects {
+                shadow: false,
+                outline: false,
+                relief: Some(Relief::Emboss)
+            }
+        );
+        let rp = run(|rp| {
+            rp.imprint = Some(true);
+            rp.shadow = Some(true);
+        });
+        assert_eq!(TextEffects::from_run(&rp).relief, Some(Relief::Imprint));
+    }
+
+    /// An explicit `w:val="0"` is off, not on — the cascade's tri-state
+    /// reaches this resolution intact.
+    #[test]
+    fn an_explicitly_off_toggle_is_off() {
+        let rp = run(|rp| rp.shadow = Some(false));
+        assert_eq!(TextEffects::from_run(&rp), TextEffects::NONE);
+    }
+
+    /// The luminance keying: black and near-black text takes the light-gray
+    /// shadow; anything brighter — red included, at luma 76/256 — takes
+    /// black. The boundary is VCL's `GetLuminance() < 8`.
+    #[test]
+    fn shadow_color_is_keyed_on_luminance() {
+        let rgb = |r, g, b| RgbColor { r, g, b };
+        assert_eq!(
+            TextEffects::shadow_color(RgbColor::BLACK),
+            rgb(192, 192, 192)
+        );
+        // The BT.601 weights sum to 256, so an (n, n, n) gray's luma is n:
+        // 7 is the last light-gray shadow, 8 the first black one.
+        assert_eq!(TextEffects::shadow_color(rgb(7, 7, 7)), rgb(192, 192, 192));
+        assert_eq!(TextEffects::shadow_color(rgb(8, 8, 8)), RgbColor::BLACK);
+        assert_eq!(TextEffects::shadow_color(rgb(255, 0, 0)), RgbColor::BLACK);
+        assert_eq!(TextEffects::shadow_color(RgbColor::WHITE), RgbColor::BLACK);
+    }
+
+    /// The shadow offset: a twenty-fourth of the line height, floored at one
+    /// 96 dpi pixel, plus one more pixel when outlined.
+    #[test]
+    fn shadow_offset_scales_with_line_height() {
+        let plain = TextEffects {
+            shadow: true,
+            ..TextEffects::NONE
+        };
+        assert_eq!(plain.shadow_offset(Pt::new(12.0)), Pt::new(0.75), "floored");
+        assert_eq!(plain.shadow_offset(Pt::new(48.0)), Pt::new(2.0));
+        let outlined = TextEffects {
+            outline: true,
+            ..plain
+        };
+        assert_eq!(outlined.shadow_offset(Pt::new(12.0)), Pt::new(1.5));
+    }
+
+    /// The relief pair: black lifts to white over a gray copy; white keeps
+    /// itself over a black copy; any other colour keeps itself over gray.
+    #[test]
+    fn relief_colors_lift_black_and_darken_under_white() {
+        let gray = RgbColor {
+            r: 192,
+            g: 192,
+            b: 192,
+        };
+        assert_eq!(
+            TextEffects::relief_colors(RgbColor::BLACK),
+            (gray, RgbColor::WHITE)
+        );
+        assert_eq!(
+            TextEffects::relief_colors(RgbColor::WHITE),
+            (RgbColor::BLACK, RgbColor::WHITE)
+        );
+        let red = RgbColor { r: 200, g: 0, b: 0 };
+        assert_eq!(TextEffects::relief_colors(red), (gray, red));
     }
 }

@@ -116,6 +116,7 @@ mod tests {
             level,
             text: Rc::from(text),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),
                 bold: Toggle::Absent,

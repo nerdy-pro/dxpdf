@@ -373,6 +373,8 @@ impl PlacedParagraph<'_> {
                 } = frag
                 {
                     commands.push(DrawCommand::Text {
+                        // §17.3.2.23: drop caps do not carry the run effects.
+                        outline: false,
                         shaped: None,
                         position: PtOffset::new(dc_x, baseline_y),
                         text: text.clone(),
@@ -548,6 +550,7 @@ mod tests {
             text: text.into(),
             break_after: crate::render::layout::fragment::fixture_break_after(text),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),
@@ -2319,6 +2322,7 @@ mod tests {
     /// inherits it cannot pass by coincidence.
     fn leader_font(family: &str, size: f32) -> Rc<FontProps> {
         Rc::new(FontProps {
+            effects: Default::default(),
             rtl: crate::render::fonts::Toggle::Absent,
             family: Rc::from(family),
             size: Pt::new(size),

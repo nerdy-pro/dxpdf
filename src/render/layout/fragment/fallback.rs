@@ -433,6 +433,7 @@ fn split_at_coverage_boundaries<F>(
         let piece = &text[start..end];
         let piece_font = match family {
             Some(name) => Rc::new(FontProps {
+                effects: Default::default(),
                 family: name,
                 ..(*font).clone()
             }),
@@ -514,6 +515,7 @@ mod tests {
 
     fn font(family: &str) -> Rc<FontProps> {
         Rc::new(FontProps {
+            effects: Default::default(),
             family: Rc::from(family),
             size: Pt::new(12.0),
             bold: Toggle::Absent,

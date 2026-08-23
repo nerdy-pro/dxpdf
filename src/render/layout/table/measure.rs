@@ -321,6 +321,7 @@ mod tests {
         use std::rc::Rc;
 
         let font = Rc::new(FontProps {
+            effects: Default::default(),
             rtl: Toggle::Absent,
             family: Rc::from("Test"),
             size: Pt::new(12.0),

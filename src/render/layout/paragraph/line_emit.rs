@@ -668,6 +668,55 @@ pub(super) fn emit_line_commands(
                     }
 
                     let y = *cursor_y + line.ascent + *baseline_offset;
+
+                    // §17.3.2.13/.18/.31 (issue #148): shadow and relief are
+                    // extra `Text` commands laid *under* the main glyphs —
+                    // same font, offset diagonally, in the effect colour —
+                    // so the painter needs nothing for them and a test can
+                    // read the whole effect off the command stream. Relief
+                    // also substitutes the main colour (black lifts to
+                    // white); the substituted colour is what the underline
+                    // below inherits, since an underline is drawn in the
+                    // text's colour. Outline is the one painter-side flag.
+                    let effects = font.effects;
+                    let mut paint_color = *color;
+                    let effect_copy = if let Some(relief) = effects.relief {
+                        let (copy_color, main_color) =
+                            crate::render::layout::fragment::TextEffects::relief_colors(*color);
+                        paint_color = main_color;
+                        let off =
+                            match relief {
+                                crate::render::layout::fragment::Relief::Emboss => {
+                                    crate::render::layout::fragment::TextEffects::RELIEF_OFFSET
+                                }
+                                crate::render::layout::fragment::Relief::Imprint => Pt::ZERO
+                                    - crate::render::layout::fragment::TextEffects::RELIEF_OFFSET,
+                            };
+                        Some((off, copy_color))
+                    } else if effects.shadow {
+                        Some((
+                            effects.shadow_offset(metrics.line_height()),
+                            crate::render::layout::fragment::TextEffects::shadow_color(*color),
+                        ))
+                    } else {
+                        None
+                    };
+                    if let Some((off, copy_color)) = effect_copy {
+                        commands.push(DrawCommand::Text {
+                            position: PtOffset::new(x + *text_offset + off, y + off),
+                            text: text.clone(),
+                            font_family: font.family.clone(),
+                            char_spacing: font.char_spacing + distribution_extra,
+                            font_size: font.size,
+                            bold: font.bold,
+                            italic: font.italic,
+                            color: copy_color,
+                            text_scale: font.text_scale,
+                            shaped: *shaped,
+                            outline: effects.outline,
+                        });
+                    }
+
                     commands.push(DrawCommand::Text {
                         position: PtOffset::new(x + *text_offset, y),
                         text: text.clone(),
@@ -676,9 +725,10 @@ pub(super) fn emit_line_commands(
                         font_size: font.size,
                         bold: font.bold,
                         italic: font.italic,
-                        color: *color,
+                        color: paint_color,
                         text_scale: font.text_scale,
                         shaped: *shaped,
+                        outline: effects.outline,
                     });
 
                     if let Some(link) = hyperlink_url {
@@ -717,7 +767,9 @@ pub(super) fn emit_line_commands(
                                 PtOffset::new(x, underline_y),
                                 PtOffset::new(x + rendered_width, underline_y),
                             ),
-                            color: *color,
+                            // The relief-substituted colour: a white glyph
+                            // with a black underline would undo the lift.
+                            color: paint_color,
                             width: stroke_width,
                         });
                     }
@@ -1315,6 +1367,7 @@ pub(super) fn emit_tab_leader(
     // scaling are run-level effects on *text*, not on a fill pattern, so the
     // measurement font drops them while keeping family/size/style.
     let leader_font = super::super::fragment::FontProps {
+        effects: Default::default(),
         char_spacing: Pt::ZERO,
         text_scale: 1.0,
         ..font.clone()
@@ -1352,6 +1405,9 @@ pub(super) fn emit_tab_leader(
         italic: leader_font.italic,
         color,
         text_scale: 1.0,
+        // §17.3.2.23: a leader is a decoration; the run's effects cover its
+        // glyphs, not the dots the tab fills with.
+        outline: false,
     });
 }
 
@@ -1467,6 +1523,7 @@ mod tests {
             text: text.into(),
             break_after: crate::render::layout::fragment::fixture_break_after(text),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),

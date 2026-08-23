@@ -132,6 +132,7 @@ mod tests {
     fn page_with_text(text: &str, family: &str, font_size: Pt, bold: Toggle) -> LayoutedPage {
         LayoutedPage {
             commands: vec![DrawCommand::Text {
+                outline: false,
                 shaped: None,
                 position: PtOffset::new(Pt::new(72.0), Pt::new(100.0)),
                 text: Rc::from(text),
