@@ -2200,6 +2200,7 @@ mod tests {
                 rotate_with_shape: None,
                 dpi: None,
                 blip: Some(Blip {
+                    svg_embed: None,
                     embed: Some(RelId::new("rId7")),
                     link: None,
                     compression: None,

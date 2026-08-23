@@ -116,6 +116,12 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 #   sample-4 189.0 -> 170.7 ms, sample1 56.2 -> 52.9 ms, sample4 424.1 ->
 #   418.6 ms. The binary also shrank 93,536 bytes.
 skia-safe = { version = "0.99", features = ["embed-freetype", "textlayout"] }
+# SVG rasterization (issue #150). Deliberately not skia-safe's own `svg`
+# feature: no prebuilt Skia binary pairs `svg` with `embed-freetype` (or
+# ships it without a GPU backend), so that feature turns every cold build
+# into a from-source Skia build. resvg with default features off is pure
+# Rust; `text` is left off — it would pull a second font stack beside Skia's.
+resvg = { version = "0.48", default-features = false, features = ["raster-images", "svgz"] }
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"

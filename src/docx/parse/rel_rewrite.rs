@@ -173,6 +173,17 @@ fn rewrite_blip(blip: &mut Blip, remap: &HashMap<RelId, RelId>) {
     if let Some(new) = blip.link.as_ref().and_then(|id| remap.get(id)).cloned() {
         blip.link = Some(new);
     }
+    // The svgBlip extension's relationship lives in the same part-local
+    // namespace as the blip's own — a header's SVG must follow its part's
+    // remap or it resolves against the body's rels.
+    if let Some(new) = blip
+        .svg_embed
+        .as_ref()
+        .and_then(|id| remap.get(id))
+        .cloned()
+    {
+        blip.svg_embed = Some(new);
+    }
 }
 
 /// Apply `remap` to every `RelId` inside a single VML `Pict`. Numbering
@@ -299,6 +310,7 @@ mod tests {
                     rotate_with_shape: None,
                     dpi: None,
                     blip: Some(Blip {
+                        svg_embed: None,
                         embed: Some(RelId::new(rel_id)),
                         link: None,
                         compression: None,
@@ -382,6 +394,7 @@ mod tests {
     #[test]
     fn rewrites_blip_link_too() {
         let mut blip = Blip {
+            svg_embed: None,
             embed: None,
             link: Some(RelId::new("rId7")),
             compression: None,
@@ -389,6 +402,23 @@ mod tests {
         let remap = remap_one("rId7", "linked");
         rewrite_blip(&mut blip, &remap);
         assert_eq!(blip.link.unwrap().as_str(), "linked");
+    }
+
+    /// The svgBlip extension's relationship is part-local like the blip's
+    /// own — a header's SVG that kept its raw id would resolve against the
+    /// body's rels (issue #150).
+    #[test]
+    fn rewrites_the_svg_blip_rel_id() {
+        let mut blip = Blip {
+            svg_embed: Some(RelId::new("rId9")),
+            embed: Some(RelId::new("rId8")),
+            link: None,
+            compression: None,
+        };
+        let remap = remap_one("rId9", "header::rId9");
+        rewrite_blip(&mut blip, &remap);
+        assert_eq!(blip.svg_embed.unwrap().as_str(), "header::rId9");
+        assert_eq!(blip.embed.unwrap().as_str(), "rId8", "untouched");
     }
 
     #[test]
@@ -524,6 +554,7 @@ mod tests {
                 rotate_with_shape: None,
                 dpi: None,
                 blip: Some(Blip {
+                    svg_embed: None,
                     embed: Some(RelId::new(rel_id)),
                     link: None,
                     compression: None,
@@ -580,6 +611,7 @@ mod tests {
                 rotate_with_shape: None,
                 dpi: None,
                 blip: Some(Blip {
+                    svg_embed: None,
                     embed: Some(RelId::new("rId7")),
                     link: None,
                     compression: None,
