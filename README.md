@@ -145,7 +145,7 @@ dxpdf handles the most common DOCX features found in real-world business documen
 | **Text formatting** | Bold, italic, underline, highlighting, font size/family/color, character spacing, character scaling, superscript/subscript, run shading, run borders |
 | **Paragraphs** | Alignment (left/center/right/justify/distribute), spacing (before/after/line with auto/exact/atLeast), indentation, tab stops (left/center/right/decimal/bar) incl. absolute-position tabs, paragraph borders, paragraph shading |
 | **Tables** | Column widths, cell margins (3-level cascade), merged cells (gridSpan + vMerge), row heights, borders (single and double), cell shading, table styles with conditional formatting, nested tables, floating tables, row splitting across pages |
-| **Images** | Inline images (PNG, JPEG, GIF, BMP, WebP, and single-bitmap EMF), floating/anchored images with alignment, wrapping, cropping and percentage-based positioning |
+| **Images** | Inline images (PNG, JPEG, GIF, BMP, WebP, SVG, and single-bitmap EMF/WMF), floating/anchored images with alignment, wrapping, cropping and percentage-based positioning |
 | **Styles** | Paragraph and character styles, `basedOn` inheritance, document defaults, theme fonts |
 | **Fonts** | Embedded DOCX fonts, metric-compatible substitution, and subsetting so only used glyphs are embedded |
 | **Text & emoji** | Grapheme-correct segmentation; full-color emoji including ZWJ, modifier, keycap and flag sequences, GSUB-shaped through Skia's HarfBuzz |
@@ -340,8 +340,9 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Feature | Status |
 |---|---|
 | Inline images | ✅ PNG, JPEG, GIF, BMP, WebP via Skia |
-| EMF images | ⚠️ single embedded bitmap (`EMR_STRETCHDIBITS`/`EMR_BITBLT`); full GDI record replay unsupported |
-| WMF, SVG images | ❌ detected, not decoded |
+| EMF images | ⚠️ single embedded bitmap (`EMR_STRETCHDIBITS`/`EMR_BITBLT`), incl. paletted and `BI_JPEG`/`BI_PNG` DIBs; full GDI record replay unsupported |
+| WMF images | ⚠️ single embedded bitmap (`META_DIBSTRETCHBLT`/`META_DIBBITBLT`/`META_STRETCHDIB`/`META_SETDIBTODEV`, placeable or bare), same DIB support as EMF; full GDI record replay unsupported |
+| SVG images | ✅ rasterized at the display target via resvg — both Word's `svgBlip`-plus-PNG-fallback pair (the SVG wins) and a direct `image/svg+xml` blip; `<text>` inside an SVG is not rendered |
 | Image cropping (`a:srcRect`) | ✅ §20.1.10.48 |
 | Floating images | ✅ offset, align, wp14:pctPos, page-parity mirroring |
 | Wrap modes (none, square, topAndBottom) | ✅ |

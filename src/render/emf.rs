@@ -12,7 +12,9 @@
 //! - MS-EMF §2.3.1.2: EMR_BITBLT record
 //! - MS-WMF §2.2.2.3: BITMAPINFOHEADER
 
-use skia_safe::{images, AlphaType, ColorType, Data, Image, ImageInfo};
+use skia_safe::Image;
+
+use super::dib::{self, read_u32, DibImage};
 
 /// EMF record type identifiers (MS-EMF §2.3).
 const EMR_HEADER: u32 = 0x00000001;
@@ -29,14 +31,6 @@ const DIB_RGB_COLORS: u32 = 0;
 /// Raster-operation code for a straight source copy (no blending).
 const SRCCOPY: u32 = 0x00CC0020;
 
-/// Fixed-size prefix of `BITMAPINFOHEADER` that we parse (40 bytes per spec).
-const BITMAPINFOHEADER_SIZE: u32 = 40;
-
-/// Compression: uncompressed RGB.
-const BI_RGB: u32 = 0;
-/// Compression: uncompressed BITFIELDS (masks stored after header).
-const BI_BITFIELDS: u32 = 3;
-
 /// Try to extract an embedded raster bitmap from an EMF file and return a
 /// decoded Skia image.
 ///
@@ -51,19 +45,7 @@ const BI_BITFIELDS: u32 = 3;
 /// - the DIB uses an unsupported bit-depth or compression.
 pub fn decode_emf_bitmap(emf_data: &[u8]) -> Option<Image> {
     validate_emf_header(emf_data)?;
-    let (width, height, rgba) = extract_bitmap(emf_data)?;
-    // `Opaque`, not `Premul`: every decoder below writes `0xFF` alpha, because
-    // no DIB format this module accepts carries an alpha channel (see
-    // `decode_32bpp`). Declaring `Premul` over straight DIB bytes was a lie
-    // that happened to be harmless only while alpha was uniformly `0xFF`.
-    // Adding a format that *does* carry alpha means revisiting this line.
-    let info = ImageInfo::new(
-        (width as i32, height as i32),
-        ColorType::RGBA8888,
-        AlphaType::Opaque,
-        None,
-    );
-    images::raster_from_data(&info, Data::new_copy(&rgba), width as usize * 4)
+    dib::to_image(extract_bitmap(emf_data)?)
 }
 
 // ── Header validation ────────────────────────────────────────────────────────
@@ -87,7 +69,7 @@ fn validate_emf_header(data: &[u8]) -> Option<()> {
 
 // ── Record scanning ──────────────────────────────────────────────────────────
 
-fn extract_bitmap(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+fn extract_bitmap(data: &[u8]) -> Option<DibImage> {
     let mut offset: usize = 0;
     while offset + 8 <= data.len() {
         let record_type = read_u32(data, offset)?;
@@ -139,11 +121,7 @@ fn extract_bitmap(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 ///  72       4   cxDest
 ///  76       4   cyDest
 /// ```
-fn parse_stretchdibits(
-    data: &[u8],
-    record_start: usize,
-    record_size: usize,
-) -> Option<(u32, u32, Vec<u8>)> {
+fn parse_stretchdibits(data: &[u8], record_start: usize, record_size: usize) -> Option<DibImage> {
     if record_size < 80 {
         return None;
     }
@@ -170,7 +148,7 @@ fn parse_stretchdibits(
         return None;
     }
 
-    decode_dib(
+    dib::decode_dib(
         &data[bmi_abs..bmi_abs + cb_bmi],
         &data[bits_abs..bits_abs + cb_bits],
     )
@@ -198,11 +176,7 @@ fn parse_stretchdibits(
 ///  84       4   offBitsSrc
 ///  88       4   cbBitsSrc
 /// ```
-fn parse_bitblt(
-    data: &[u8],
-    record_start: usize,
-    record_size: usize,
-) -> Option<(u32, u32, Vec<u8>)> {
+fn parse_bitblt(data: &[u8], record_start: usize, record_size: usize) -> Option<DibImage> {
     if record_size < 92 {
         return None;
     }
@@ -228,147 +202,10 @@ fn parse_bitblt(
         return None;
     }
 
-    decode_dib(
+    dib::decode_dib(
         &data[bmi_abs..bmi_abs + cb_bmi],
         &data[bits_abs..bits_abs + cb_bits],
     )
-}
-
-// ── DIB decoding ─────────────────────────────────────────────────────────────
-
-/// Decode a Device-Independent Bitmap to a top-down RGBA pixel buffer.
-///
-/// Supports 24-bpp (BGR) and 32-bpp (BGRA / BGRX) uncompressed DIBs.
-/// DIB rows are stored bottom-up (positive `biHeight`) per the Windows spec;
-/// we flip them so the output is top-down as expected by Skia.
-fn decode_dib(bmi: &[u8], bits: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
-    if bmi.len() < BITMAPINFOHEADER_SIZE as usize {
-        return None;
-    }
-
-    let bi_size = read_u32(bmi, 0)?;
-    if bi_size < BITMAPINFOHEADER_SIZE {
-        return None;
-    }
-
-    let bi_width = read_i32(bmi, 4)?;
-    let bi_height = read_i32(bmi, 8)?; // positive = bottom-up
-    let bi_bit_count = read_u16(bmi, 14)?;
-    let bi_compression = read_u32(bmi, 16)?;
-
-    if bi_width <= 0 {
-        return None;
-    }
-    // biHeight may be negative for top-down DIBs; use absolute value for sizing.
-    let width = bi_width as u32;
-    let height = bi_height.unsigned_abs();
-    let bottom_up = bi_height > 0;
-
-    if height == 0 || width == 0 {
-        return None;
-    }
-
-    match (bi_bit_count, bi_compression) {
-        (32, BI_RGB | BI_BITFIELDS) => decode_32bpp(bits, width, height, bottom_up),
-        (24, BI_RGB) => decode_24bpp(bits, width, height, bottom_up),
-        _ => None,
-    }
-}
-
-/// Decode a 32-bpp bottom-up-or-top-down DIB (BGRX) to top-down **opaque** RGBA.
-///
-/// The fourth byte of each pixel is *not* an alpha channel. For `BI_RGB` it is
-/// `rgbReserved`, which MS-WMF §2.2.2.3 requires to be zero and ignored; for
-/// `BI_BITFIELDS` the compression's masks cover red, green and blue only
-/// (MS-WMF §2.1.1.7 — no member of the Compression enumeration this decoder
-/// accepts declares an alpha mask). Copying that byte into alpha made every
-/// conformant 32-bpp bitmap fully transparent, i.e. invisible.
-fn decode_32bpp(
-    bits: &[u8],
-    width: u32,
-    height: u32,
-    bottom_up: bool,
-) -> Option<(u32, u32, Vec<u8>)> {
-    let row_bytes = width as usize * 4;
-    let total = row_bytes * height as usize;
-    if bits.len() < total {
-        return None;
-    }
-
-    let mut rgba = vec![0u8; total];
-    for y in 0..height as usize {
-        let src_row = if bottom_up {
-            height as usize - 1 - y
-        } else {
-            y
-        };
-        let src = &bits[src_row * row_bytes..(src_row + 1) * row_bytes];
-        let dst = &mut rgba[y * row_bytes..(y + 1) * row_bytes];
-        for x in 0..width as usize {
-            // BGRA → RGBA
-            dst[x * 4] = src[x * 4 + 2]; // R
-            dst[x * 4 + 1] = src[x * 4 + 1]; // G
-            dst[x * 4 + 2] = src[x * 4]; // B
-            dst[x * 4 + 3] = 0xFF; // reserved byte — not alpha; see above
-        }
-    }
-    Some((width, height, rgba))
-}
-
-/// Decode a 24-bpp bottom-up-or-top-down DIB (BGR, 4-byte row padding) to top-down RGBA.
-fn decode_24bpp(
-    bits: &[u8],
-    width: u32,
-    height: u32,
-    bottom_up: bool,
-) -> Option<(u32, u32, Vec<u8>)> {
-    // DIB rows are padded to a 4-byte boundary.
-    let src_row_bytes = ((width as usize * 3) + 3) & !3;
-    let dst_row_bytes = width as usize * 4;
-    let total_src = src_row_bytes * height as usize;
-    let total_dst = dst_row_bytes * height as usize;
-    if bits.len() < total_src {
-        return None;
-    }
-
-    let mut rgba = vec![0u8; total_dst];
-    for y in 0..height as usize {
-        let src_row = if bottom_up {
-            height as usize - 1 - y
-        } else {
-            y
-        };
-        let src = &bits[src_row * src_row_bytes..(src_row * src_row_bytes) + width as usize * 3];
-        let dst = &mut rgba[y * dst_row_bytes..(y + 1) * dst_row_bytes];
-        for x in 0..width as usize {
-            // BGR → RGBA (fully opaque)
-            dst[x * 4] = src[x * 3 + 2]; // R
-            dst[x * 4 + 1] = src[x * 3 + 1]; // G
-            dst[x * 4 + 2] = src[x * 3]; // B
-            dst[x * 4 + 3] = 0xFF; // A
-        }
-    }
-    Some((width, height, rgba))
-}
-
-// ── Byte reading helpers ─────────────────────────────────────────────────────
-
-#[inline]
-fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
-    data.get(offset..offset + 4)
-        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
-}
-
-#[inline]
-fn read_i32(data: &[u8], offset: usize) -> Option<i32> {
-    data.get(offset..offset + 4)
-        .map(|b| i32::from_le_bytes(b.try_into().unwrap()))
-}
-
-#[inline]
-fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
-    data.get(offset..offset + 2)
-        .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -376,6 +213,19 @@ fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::dib::BI_RGB;
+
+    /// Unwrap the raster arm — every fixture here decodes to raw pixels.
+    fn raster(dib: DibImage) -> (u32, u32, Vec<u8>) {
+        match dib {
+            DibImage::Raster {
+                width,
+                height,
+                rgba,
+            } => (width, height, rgba),
+            other => panic!("expected a raster, got {other:?}"),
+        }
+    }
 
     /// Parameters for a synthetic single-bitmap EMF.
     struct DibSpec {
@@ -483,7 +333,7 @@ mod tests {
     #[test]
     fn extracts_32bpp_bitmap() {
         let emf = make_test_emf_32bpp();
-        let (w, h, rgba) = extract_bitmap(&emf).expect("should extract bitmap");
+        let (w, h, rgba) = raster(extract_bitmap(&emf).expect("should extract bitmap"));
         assert_eq!(w, 2);
         assert_eq!(h, 2);
         assert_eq!(rgba.len(), 2 * 2 * 4);
@@ -524,7 +374,7 @@ mod tests {
     /// there — as both corpus EMFs and the old fixture did — looked fine.
     #[test]
     fn reserved_byte_is_forced_opaque_not_read_as_alpha() {
-        let (_, _, rgba) = extract_bitmap(&make_test_emf_32bpp()).expect("extract");
+        let (_, _, rgba) = raster(extract_bitmap(&make_test_emf_32bpp()).expect("extract"));
         assert!(
             rgba.chunks(4).all(|p| p[3] == 0xFF),
             "every pixel must be opaque; the source reserved bytes are all 0x00"
@@ -538,7 +388,7 @@ mod tests {
     #[test]
     fn decoded_image_declares_opaque_alpha() {
         let img = decode_emf_bitmap(&make_test_emf_32bpp()).expect("image");
-        assert_eq!(img.alpha_type(), AlphaType::Opaque);
+        assert_eq!(img.alpha_type(), skia_safe::AlphaType::Opaque);
     }
 
     /// A negative `biHeight` means the rows are already in visual order and
@@ -555,7 +405,7 @@ mod tests {
                 pixels: pixels_32bpp_2x2(),
             },
         );
-        let (w, h, rgba) = extract_bitmap(&emf).expect("extract");
+        let (w, h, rgba) = raster(extract_bitmap(&emf).expect("extract"));
         assert_eq!((w, h), (2, 2), "height is the absolute value");
         // Physical row 0 stays the top row, the opposite of the bottom-up case.
         assert_eq!(&rgba[0..4], &[0x30, 0x20, 0x10, 0xFF]);
@@ -603,7 +453,7 @@ mod tests {
                 pixels,
             },
         );
-        let (w, h, rgba) = extract_bitmap(&emf).expect("extract 24bpp");
+        let (w, h, rgba) = raster(extract_bitmap(&emf).expect("extract 24bpp"));
         assert_eq!((w, h), (3, 2));
         assert_eq!(rgba.len(), 3 * 2 * 4);
         // Top row = physical row 1, BGR → RGBA, always opaque.
@@ -614,10 +464,13 @@ mod tests {
         assert_eq!(&rgba[12..16], &[0x30, 0x20, 0x10, 0xFF]);
     }
 
-    /// Bit depths the module does not handle must decline rather than produce
-    /// garbage — 8-bpp is palette-indexed and needs the colour table.
+    /// A palette-indexed depth whose colour table is *missing* must decline
+    /// rather than produce garbage: `cbBmiSrc` here covers the bare 40-byte
+    /// header, so the 8-bpp indices have no table to resolve against. (With
+    /// the table present the shared decoder handles it — `render::dib`'s
+    /// tests pin that side.)
     #[test]
-    fn unsupported_bit_depth_is_declined() {
+    fn a_paletted_depth_without_its_table_is_declined() {
         let emf = make_emf(
             EMR_STRETCHDIBITS,
             &DibSpec {

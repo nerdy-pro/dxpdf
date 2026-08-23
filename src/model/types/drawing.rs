@@ -60,6 +60,11 @@ impl ImageFormat {
             return Self::Emf;
         }
         match data {
+            // WMF placeable header (MS-WMF §2.3.2.3): key 0x9AC6CDD7,
+            // little-endian on disk. Only the placeable form is
+            // magic-detectable — a bare META_HEADER starts with bytes too
+            // generic to sniff.
+            [0xD7, 0xCD, 0xC6, 0x9A, ..] => Self::Wmf,
             [0x89, b'P', b'N', b'G', ..] => Self::Png,
             [0xFF, 0xD8, 0xFF, ..] => Self::Jpeg,
             [b'G', b'I', b'F', b'8', ..] => Self::Gif,
@@ -393,6 +398,11 @@ pub struct Blip {
     pub link: Option<RelId>,
     /// §20.1.10.7: compression state.
     pub compression: Option<BlipCompression>,
+    /// [MS-ODRAWXML] `asvg:svgBlip` (issue #150): the SVG part behind the
+    /// main blip's rasterized fallback. Word always writes the pair — the
+    /// PNG in `embed` exists "for backward compatibility" with consumers
+    /// that cannot draw SVG; one that can reads this instead.
+    pub svg_embed: Option<RelId>,
 }
 
 /// §20.1.10.7 ST_BlipCompression.
