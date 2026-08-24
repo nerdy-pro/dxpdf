@@ -261,7 +261,7 @@ Type-safe dimensions flow through the entire pipeline: OOXML units (`Twips`, `Em
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 12 partial, 11 not yet supported.**
+Validated against ISO 29500 (Office Open XML). **77 entries fully implemented, 12 partial, 10 not yet supported.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
@@ -359,7 +359,8 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Section breaks (continuous) | ✅ continues on current page |
 | Section breaks (even, odd, nextColumn) | ⚠️ treated as nextPage |
 | Multi-column sections | ✅ incl. splitting across unequal-width columns |
-| Page borders, doc grid | ❌ doc grid parsed, not applied |
+| Page borders (`w:pgBorders`) | ✅ line styles (single/double, others approximated solid), `offsetFrom`, `display`, `zOrder`; art borders declined |
+| Document grid (`w:docGrid`) | ✅ line pitch for `lines`/`linesAndChars`/`snapToChars` — lines snap to whole grid slots, centered; `default`/absent type stays off; character pitch not applied |
 
 ### Headers & Footers
 

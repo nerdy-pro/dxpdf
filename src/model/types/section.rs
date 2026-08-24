@@ -1,9 +1,9 @@
 //! Section properties — page size, margins, columns, headers/footers.
 
-use crate::model::dimension::{Dimension, FractionPoints, Twips};
+use crate::model::dimension::{Dimension, FractionPoints, Points, Twips};
 use crate::model::Dup;
 
-use super::formatting::NumberFormat;
+use super::formatting::{Border, NumberFormat};
 use super::identifiers::{RelId, SectionRevisionIds};
 
 /// §17.6.18 `<w:sectPr>`.
@@ -20,18 +20,91 @@ pub struct SectionProperties {
     pub columns: Dup<Columns>,
     /// §17.6.5: document grid for East Asian typography and line pitch.
     pub doc_grid: Dup<DocGrid>,
-    /// §17.6.10: `<w:headerReference>`, one per `@w:type`. Genuinely
+    /// §17.6.10 `<w:pgBorders>`: borders around the page.
+    pub page_borders: Dup<PageBorders>,
+    /// `<w:headerReference>` (§17.10), one per `@w:type`. Genuinely
     /// repeatable — the spec expects up to three (default, first, even) — so
     /// this is a keyed set, not a [`Dup`]: repetition here is the schema
-    /// working, not a producer violating it.
+    /// working, not a producer violating it. (The §17.6.10 / §17.6.5 numbers
+    /// these two fields used to carry belong to `pgBorders` and `docGrid`;
+    /// per AGENTS.md, a disputed number is dropped rather than guessed.)
     pub header_refs: SectionHeaderFooterRefs,
-    /// §17.6.5: `<w:footerReference>`. See [`SectionProperties::header_refs`].
+    /// `<w:footerReference>` (§17.10). See [`SectionProperties::header_refs`].
     pub footer_refs: SectionHeaderFooterRefs,
     pub title_page: Option<bool>,
     pub section_type: Dup<SectionType>,
     /// §17.6.12: page numbering settings for this section.
     pub page_number_type: Dup<PageNumberType>,
     pub rsids: SectionRevisionIds,
+}
+
+/// §17.6.10 `<w:pgBorders>` — borders around each page of the section.
+///
+/// The attribute defaults are a Word matter, not a schema one: the strict
+/// schema gives none, and [MS-OE376] §2.6.10 records what Word assumes when
+/// they are absent — `offsetFrom="text"`, `zOrder="front"`, and the §17.6.10
+/// prose itself gives `display="allPages"`. The model keeps them optional and
+/// the renderer applies those defaults, so the document is mirrored as
+/// written.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PageBorders {
+    /// `@w:offsetFrom` — what `space` on each edge is measured from.
+    pub offset_from: Option<PageBorderOffset>,
+    /// `@w:display` — which pages of the section show the borders.
+    pub display: Option<PageBorderDisplay>,
+    /// `@w:zOrder` — paint the borders over or under intersecting content.
+    pub z_order: Option<PageBorderZOrder>,
+    pub top: Option<PageBorderEdge>,
+    pub left: Option<PageBorderEdge>,
+    pub bottom: Option<PageBorderEdge>,
+    pub right: Option<PageBorderEdge>,
+}
+
+/// One edge of `<w:pgBorders>`.
+///
+/// §17.18.2 `ST_Border` is two vocabularies in one type: the 27 line styles
+/// every border shares, and the ~165 art names (`apples`…`zigZagStitch`) that
+/// are meaningful only on page borders. A line edge reuses [`Border`]; an art
+/// edge keeps its name verbatim rather than growing the shared
+/// [`super::formatting::BorderStyle`] by 165 variants no other border can
+/// carry — and because art `sz` is measured in whole points (1–31), not the
+/// line styles' eighths, the two cannot share a width field either.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PageBorderEdge {
+    Line(Border),
+    /// An art border, carried losslessly; not rendered.
+    Art {
+        /// The `@w:val` art name, verbatim.
+        name: Box<str>,
+        /// `@w:sz` — for art borders, the width in points (1–31).
+        width: Option<Dimension<Points>>,
+        /// `@w:space` — offset in points, same as a line edge's.
+        space: Option<Dimension<Points>>,
+    },
+}
+
+/// §17.18.63 `ST_PageBorderOffset`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageBorderOffset {
+    /// `space` is the distance from the page edge, border drawn inward.
+    Page,
+    /// `space` is the distance from the text margin, border drawn outward.
+    Text,
+}
+
+/// §17.18.62 `ST_PageBorderDisplay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageBorderDisplay {
+    AllPages,
+    FirstPage,
+    NotFirstPage,
+}
+
+/// §17.18.64 `ST_PageBorderZOrder`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageBorderZOrder {
+    Front,
+    Back,
 }
 
 /// §17.6.12: page numbering settings.

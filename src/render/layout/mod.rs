@@ -11,6 +11,7 @@ pub mod header_footer;
 pub mod line;
 pub mod measurer;
 pub mod page;
+pub mod page_borders;
 pub mod paragraph;
 pub mod section;
 pub mod table;

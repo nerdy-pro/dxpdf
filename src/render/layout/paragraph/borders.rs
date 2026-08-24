@@ -2,7 +2,6 @@
 
 use super::super::draw_command::DrawCommand;
 use super::super::BoxConstraints;
-use super::line_emit::resolve_line_height;
 use super::types::ParagraphStyle;
 use crate::render::dimension::Pt;
 use crate::render::geometry::PtOffset;
@@ -187,14 +186,13 @@ pub(super) fn emit_segment_borders_and_shading(
         cursor_y = content_bottom + border_space_bottom + style.space_after;
     }
 
-    // If no lines, still consume default height + spacing (whole-paragraph path).
+    // If no lines, still consume default height + spacing (whole-paragraph
+    // path). Gridded like any other line (§17.6.5): an empty paragraph on a
+    // gridded page holds a slot open, exactly as Word's empty 行 does.
     if no_lines {
-        let line_h = resolve_line_height(
-            default_line_height,
-            default_line_height,
-            &style.line_spacing,
-            style.auto_fit,
-        );
+        let line_h =
+            super::line_emit::resolve_line_metrics(default_line_height, default_line_height, style)
+                .advance;
         cursor_y = style.space_before + line_h + style.space_after;
     }
 

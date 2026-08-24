@@ -411,6 +411,8 @@ const ALL_FILES: &[&str] = &[
     "issue-165-cellspacing-scale.docx",
     "issue-165-floatv.docx",
     "hidden-text.docx",
+    "page-borders.docx",
+    "doc-grid.docx",
 ];
 
 #[test]

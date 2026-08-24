@@ -56,6 +56,10 @@ pub struct ParagraphProperties {
     pub keep_next: Option<bool>,
     pub keep_lines: Option<bool>,
     pub widow_control: Option<bool>,
+    /// §17.3.1.32: use the section's document grid for inter-line spacing.
+    /// Absent everywhere in the style hierarchy means *on* — the paragraph
+    /// snaps whenever its section defines an applied grid.
+    pub snap_to_grid: Option<bool>,
     pub page_break_before: Option<bool>,
     pub suppress_auto_hyphens: Option<bool>,
     /// §17.3.1.9: suppress spacing when adjacent paragraph has same style.

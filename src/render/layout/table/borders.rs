@@ -881,7 +881,11 @@ fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
 
 /// Emit a border as filled rectangle(s).
 /// `is_horizontal` controls double-border sub-rect orientation.
-fn emit_border_rect(
+///
+/// `pub(crate)` because the §17.6.10 page-border painter
+/// (`layout::page_borders`) draws its edges through the same expansion, so a
+/// `double` page border and a `double` table border cannot drift apart.
+pub(crate) fn emit_border_rect(
     commands: &mut Vec<DrawCommand>,
     b: &TableBorderLine,
     rect: PtRect,

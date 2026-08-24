@@ -100,6 +100,7 @@ pub fn merge_paragraph_properties(target: &mut ParagraphProperties, base: &Parag
         keep_next,
         keep_lines,
         widow_control,
+        snap_to_grid,
         page_break_before,
         suppress_auto_hyphens,
         contextual_spacing,
@@ -612,6 +613,26 @@ mod tests {
 
     // ── ParagraphProperties merging ──────────────────────────────────────
 
+    /// §17.3.1.32: `snapToGrid` inherits through the style hierarchy like any
+    /// other pPr toggle — a paragraph's own `w:val="0"` beats the style's on.
+    #[test]
+    fn merge_para_snap_to_grid_cascades_and_direct_wins() {
+        let mut target = ParagraphProperties::default();
+        let base = ParagraphProperties {
+            snap_to_grid: Some(false),
+            ..Default::default()
+        };
+        merge_paragraph_properties(&mut target, &base);
+        assert_eq!(target.snap_to_grid, Some(false));
+
+        let mut target = ParagraphProperties {
+            snap_to_grid: Some(true),
+            ..Default::default()
+        };
+        merge_paragraph_properties(&mut target, &base);
+        assert_eq!(target.snap_to_grid, Some(true));
+    }
+
     #[test]
     fn merge_para_empty_target_takes_from_base() {
         let mut target = ParagraphProperties::default();
@@ -771,6 +792,7 @@ mod tests {
     #[test]
     fn merge_para_all_fields_covered() {
         let base = ParagraphProperties {
+            snap_to_grid: None,
             alignment: Dup::from(Some(Alignment::Start)),
             indentation: Dup::from(Some(Indentation::default())),
             spacing: Dup::from(Some(ParagraphSpacing::default())),

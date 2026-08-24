@@ -129,7 +129,7 @@ pub(super) fn compute_line_placements(
         } else {
             default_line_height
         };
-        let lh = resolve_line_height(natural, text_h, &style.line_spacing, style.auto_fit);
+        let lh = resolve_line_metrics(natural, text_h, style).advance;
 
         frag_idx = fitted_line.end;
         placements.push(LinePlacement {
@@ -523,12 +523,8 @@ pub(super) fn emit_line_commands(
         } else {
             default_line_height
         };
-        let line_height = resolve_line_height(
-            natural_height,
-            text_height,
-            &style.line_spacing,
-            style.auto_fit,
-        );
+        let line_metrics = resolve_line_metrics(natural_height, text_height, style);
+        let line_height = line_metrics.advance;
 
         // Alignment offset — computed relative to the line's available width.
         let float_reduction = lp.float_left + lp.float_right;
@@ -575,6 +571,16 @@ pub(super) fn emit_line_commands(
         if has_bar_stop {
             emit_bar_rules(commands, &style.tabs, bar_color, *cursor_y, line_height);
         }
+
+        // §17.6.5: center the line's natural box inside its grid slot(s) by
+        // walking the cursor down to the box top before anything of the line
+        // is emitted — every per-line y below (baseline, run shading and
+        // borders, underlines, images) derives from `cursor_y`, so one shift
+        // moves the whole box coherently. The advance at the loop's end pays
+        // the remainder, keeping the full slot consumed. Bar rules stay above:
+        // a §17.18.85 rule spans the line's whole vertical extent, not the
+        // centered box. Zero when no grid applies.
+        *cursor_y += line_metrics.baseline_shift;
 
         // Emit text commands for this line
         let mut x = x_start;
@@ -903,7 +909,7 @@ pub(super) fn emit_line_commands(
             }
         }
 
-        *cursor_y += line_height;
+        *cursor_y += line_height - line_metrics.baseline_shift;
     }
 
     if outline.is_some() {
@@ -1389,6 +1395,85 @@ pub(super) fn resolve_line_height(
     auto_fit.scale_line_height(resolved)
 }
 
+/// A line's resolved vertical footprint: how far the cursor advances past it,
+/// and where its natural box sits inside that advance.
+///
+/// `baseline_shift` is zero for every ungridded line, which is what keeps
+/// [`resolve_line_metrics`] a drop-in at the four agreeing sites.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct LineAdvance {
+    pub advance: Pt,
+    /// Distance from the top of the advance to the top of the line's natural
+    /// box — the §17.6.5 centering inside a grid slot.
+    pub baseline_shift: Pt,
+}
+
+/// §17.6.5 on top of §17.3.1.33: [`resolve_line_height`], then the section's
+/// document grid.
+///
+/// A gridded line consumes a whole number of grid slots — `ceil(h / pitch)`
+/// of them, so text taller than one pitch jumps to two, which is Word's
+/// signature "line spacing suddenly doubles" behavior — and its natural box
+/// is vertically centered in them (the visible half-gap above the first line
+/// of a Japanese page). Registration comes from the quantized *heights*
+/// alone: lines stack, so text stays in phase from the top margin, and
+/// nothing re-snaps to absolute grid coordinates after paragraph spacing.
+/// That makes the advance position-independent, which is what lets
+/// pagination sum precomputed heights and still agree with emission.
+///
+/// The spacing-rule interactions follow §17.6.5's own text where it speaks
+/// and Word's observed behavior (via LibreOffice's Word-conformed
+/// `SwTextFormatter::CalcRealHeight`, tdf#164871) where it does not:
+///
+/// - `lineRule="exact"` escapes the grid — the one override §17.6.5 names;
+/// - `lineRule="atLeast"` takes `max(slot, minimum)`, except a minimum of
+///   **zero**, which Word treats as "grid off" for the line rather than as a
+///   vacuous minimum;
+/// - `lineRule="auto"` applies its multiplier *on top of* the slotted height,
+///   clamped below at 1.0 — under a grid, "1.5 lines" means 1.5 grid slots.
+///
+/// The epsilon absorbs f32 division noise: a line exactly one pitch tall is
+/// one slot, not two. Word does this arithmetic in integer twips where the
+/// question cannot arise; the 1e-4 is subtracted from the *slot ratio*, so
+/// it forgives up to a ten-thousandth of a pitch — 1.8mpt on the default
+/// 18pt grid — which no real line height meaningfully occupies.
+pub(super) fn resolve_line_metrics(
+    natural: Pt,
+    text_height: Pt,
+    style: &ParagraphStyle,
+) -> LineAdvance {
+    let ungridded = || LineAdvance {
+        advance: resolve_line_height(natural, text_height, &style.line_spacing, style.auto_fit),
+        baseline_shift: Pt::ZERO,
+    };
+    let Some(pitch) = style.line_grid.filter(|p| p.raw() > 0.0) else {
+        return ungridded();
+    };
+    // The slot base is the *single-spaced* line height — `max(text, natural)`,
+    // exactly what `resolve_line_height` gives `Auto(1.0)` — so a grid over
+    // default spacing quantizes the very height the ungridded path would have
+    // advanced by, leading included, and the centering below is measured
+    // against the same box a control render draws.
+    let base = natural.max(text_height);
+    let slot = match style.line_spacing {
+        LineSpacingRule::Exact(_) => return ungridded(),
+        LineSpacingRule::AtLeast(min) if min == Pt::ZERO => return ungridded(),
+        _ => {
+            let slots = (base.raw() / pitch.raw() - 1e-4).ceil().max(1.0);
+            pitch * slots
+        }
+    };
+    let advance = match style.line_spacing {
+        LineSpacingRule::Auto(multiplier) => slot * multiplier.max(1.0),
+        LineSpacingRule::AtLeast(min) => slot.max(min),
+        LineSpacingRule::Exact(_) => unreachable!("exact escaped above"),
+    };
+    LineAdvance {
+        advance: style.auto_fit.scale_line_height(advance),
+        baseline_shift: (slot - base).max(Pt::ZERO) * 0.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1399,6 +1484,107 @@ mod tests {
     use crate::render::dimension::Pt;
     use crate::render::fonts::Toggle;
     use crate::render::layout::paragraph::TabStopDef;
+
+    // ── resolve_line_metrics: §17.6.5 document grid ──────────────────────────
+
+    use super::{resolve_line_metrics, LineSpacingRule};
+    use crate::render::layout::paragraph::ParagraphStyle;
+
+    fn gridded(pitch: f32, spacing: LineSpacingRule) -> ParagraphStyle {
+        ParagraphStyle {
+            line_grid: Some(Pt::new(pitch)),
+            line_spacing: spacing,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_grid_is_a_passthrough_with_zero_shift() {
+        let style = ParagraphStyle::default();
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(14.0));
+        assert_eq!(m.baseline_shift, Pt::ZERO);
+    }
+
+    /// The Japanese-Word default: 10.5pt text (~14pt natural) on an 18pt grid
+    /// takes one slot, centered — the visible half-gap above every line.
+    #[test]
+    fn grid_rounds_up_to_one_slot_and_centers() {
+        let style = gridded(18.0, LineSpacingRule::Auto(1.0));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(18.0));
+        assert_eq!(m.baseline_shift, Pt::new(2.0));
+    }
+
+    /// The slot base is the single-spaced height `max(text, natural)`, so a
+    /// face whose leading exceeds its glyph box grids the same height the
+    /// ungridded path would have advanced by.
+    #[test]
+    fn grid_slot_base_includes_the_text_leading() {
+        let style = gridded(18.0, LineSpacingRule::Auto(1.0));
+        let m = resolve_line_metrics(Pt::new(11.0), Pt::new(12.0), &style);
+        assert_eq!(m.advance, Pt::new(18.0));
+        assert_eq!(
+            m.baseline_shift,
+            Pt::new(3.0),
+            "centered against 12, not 11"
+        );
+    }
+
+    /// A line minutely taller than a slot takes two — Word's "spacing
+    /// suddenly doubles" jump — while one exactly a slot tall must not.
+    #[test]
+    fn grid_slot_boundary_rounds_exact_down_and_over_up() {
+        let style = gridded(18.0, LineSpacingRule::Auto(1.0));
+        let exact = resolve_line_metrics(Pt::new(18.0), Pt::new(18.0), &style);
+        assert_eq!(exact.advance, Pt::new(18.0), "one pitch = one slot");
+        assert_eq!(exact.baseline_shift, Pt::ZERO);
+        let over = resolve_line_metrics(Pt::new(18.2), Pt::new(18.2), &style);
+        assert_eq!(over.advance, Pt::new(36.0), "18.2pt takes two slots");
+        assert!((over.baseline_shift.raw() - 8.9).abs() < 1e-3);
+    }
+
+    /// §17.6.5's own override: `lineRule="exact"` escapes the grid.
+    #[test]
+    fn grid_exact_spacing_escapes() {
+        let style = gridded(18.0, LineSpacingRule::Exact(Pt::new(25.0)));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(25.0));
+        assert_eq!(m.baseline_shift, Pt::ZERO);
+    }
+
+    /// Word idiosyncrasy (LO tdf#164871): `atLeast` with a zero minimum
+    /// disables the grid's extra space rather than acting as a vacuous
+    /// minimum.
+    #[test]
+    fn grid_at_least_zero_disables_the_grid() {
+        let style = gridded(18.0, LineSpacingRule::AtLeast(Pt::ZERO));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(14.0));
+        assert_eq!(m.baseline_shift, Pt::ZERO);
+    }
+
+    #[test]
+    fn grid_at_least_takes_the_larger_of_slot_and_minimum() {
+        let style = gridded(18.0, LineSpacingRule::AtLeast(Pt::new(30.0)));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(30.0));
+        let style = gridded(18.0, LineSpacingRule::AtLeast(Pt::new(10.0)));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(18.0), "slot outweighs a small minimum");
+    }
+
+    /// Under a grid, a proportional multiplier scales *slots*: "1.5 lines" is
+    /// 1.5 grid pitches. Below 1.0 it clamps — the grid is the floor.
+    #[test]
+    fn grid_auto_multiplier_scales_the_slot_and_clamps_below_one() {
+        let style = gridded(18.0, LineSpacingRule::Auto(1.5));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(27.0));
+        let style = gridded(18.0, LineSpacingRule::Auto(0.8));
+        let m = resolve_line_metrics(Pt::new(14.0), Pt::new(14.0), &style);
+        assert_eq!(m.advance, Pt::new(18.0));
+    }
 
     // ── find_next_tab_stop ────────────────────────────────────────────────────
 

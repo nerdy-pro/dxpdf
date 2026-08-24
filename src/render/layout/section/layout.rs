@@ -878,6 +878,10 @@ fn measure_keep_next_group(
     constraints: &BoxConstraints,
     default_line_height: Pt,
     measure_text: super::super::paragraph::MeasureTextFn<'_>,
+    // §17.6.5: the section's applied grid pitch. The measurement must see the
+    // same per-line advances placement will, or a gridded keepNext chain is
+    // measured short and the fit decision holds it where it overflows.
+    line_grid: Option<Pt>,
 ) -> Option<KeepNextGroupMeasurement> {
     let mut measurement = KeepNextGroupMeasurement {
         body_height: Pt::ZERO,
@@ -900,7 +904,15 @@ fn measure_keep_next_group(
                 if index > start && *page_break_before {
                     return None;
                 }
-                let effective = style.clone_for_layout();
+                let mut effective = style.clone_for_layout();
+                // The same stamp the placement path applies (§17.3.1.32
+                // honoured); footnotes below stay unstamped, like the
+                // footnote area itself.
+                effective.line_grid = if effective.snap_to_grid {
+                    line_grid
+                } else {
+                    None
+                };
                 let collapsed = if effective.contextual_spacing
                     && effective.style_id.is_some()
                     && effective.style_id == previous_style_id
@@ -1684,6 +1696,7 @@ pub(crate) fn layout_section_with_clearance(
                         &constraints,
                         ctx.default_line_height,
                         ctx.measure_text,
+                        ctx.config.line_grid,
                     ) {
                         let current_group_height =
                             group.total_height(!state.page_footnotes.is_empty());
@@ -1768,6 +1781,16 @@ pub(crate) fn layout_section_with_clearance(
                 );
 
                 let mut effective_style = style.clone_for_layout();
+                // §17.6.5: the section's line grid reaches lines only through
+                // this stamp, and only here — the body page flow. Table cells,
+                // headers/footers and footnotes never pass this point, which
+                // *is* the spec's scoping (see `ParagraphStyle::line_grid`).
+                // §17.3.1.32: a paragraph that opted out stays unstamped.
+                effective_style.line_grid = if effective_style.snap_to_grid {
+                    ctx.config.line_grid
+                } else {
+                    None
+                };
 
                 // Log paragraph info.
                 let first_text = fragments

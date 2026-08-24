@@ -5,13 +5,16 @@
 
 use serde::Deserialize;
 
-use crate::docx::model::dimension::{Dimension, FractionPoints, Twips};
+use crate::docx::model::dimension::{Dimension, EighthPoints, FractionPoints, Points, Twips};
 use crate::docx::model::{
-    ChapterSeparator, ColumnDefinition, Columns, DocGrid, DocGridType, NumberFormat, PageMargins,
-    PageNumberType, PageSize, RelId, RevisionSaveId, SectionHeaderFooterRefs, SectionProperties,
-    SectionRevisionIds, SectionType,
+    Border, ChapterSeparator, Color, ColumnDefinition, Columns, DocGrid, DocGridType, NumberFormat,
+    PageBorderDisplay, PageBorderEdge, PageBorderOffset, PageBorderZOrder, PageBorders,
+    PageMargins, PageNumberType, PageSize, RelId, RevisionSaveId, SectionHeaderFooterRefs,
+    SectionProperties, SectionRevisionIds, SectionType,
 };
-use crate::docx::parse::primitives::st_enums::{StNumberFormat, StPageOrientation, StSectionMark};
+use crate::docx::parse::primitives::st_enums::{
+    StBorderType, StNumberFormat, StPageOrientation, StSectionMark,
+};
 use crate::docx::parse::primitives::units::deserialize_optional_nonnegative_dimension;
 use crate::docx::parse::primitives::OnOff;
 use crate::model::Dup;
@@ -45,6 +48,8 @@ pub(crate) enum SectChildXml {
     Cols(ColsXml),
     #[serde(rename = "docGrid")]
     DocGrid(DocGridXml),
+    #[serde(rename = "pgBorders")]
+    PgBorders(PgBordersXml),
     #[serde(rename = "headerReference")]
     HeaderRef(HfRefXml),
     #[serde(rename = "footerReference")]
@@ -150,6 +155,151 @@ pub(crate) struct ColXml {
         deserialize_with = "deserialize_optional_nonnegative_dimension"
     )]
     space: Option<Dimension<Twips>>,
+}
+
+/// `<w:pgBorders>` (§17.6.10). The schema is a fixed `top, left, bottom,
+/// right` sequence with no repeats, so named optional fields suffice — no
+/// `$value` catch-all needed.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct PgBordersXml {
+    #[serde(rename = "@offsetFrom", default)]
+    offset_from: Option<StPageBorderOffset>,
+    #[serde(rename = "@display", default)]
+    display: Option<StPageBorderDisplay>,
+    #[serde(rename = "@zOrder", default)]
+    z_order: Option<StPageBorderZOrder>,
+    #[serde(default)]
+    top: Option<PageBorderXml>,
+    #[serde(default)]
+    left: Option<PageBorderXml>,
+    #[serde(default)]
+    bottom: Option<PageBorderXml>,
+    #[serde(default)]
+    right: Option<PageBorderXml>,
+}
+
+/// One `<w:top>`/`<w:left>`/… inside `<w:pgBorders>` (`CT_PageBorder`).
+///
+/// Unlike every other border in the document, `@w:val` here spans the whole
+/// of §17.18.2 `ST_Border` — the 27 line styles *plus* the art names that are
+/// valid only on page borders — so it cannot deserialize straight into
+/// `StBorderType` (an art name would fail the whole `<w:sectPr>`). It lands
+/// as a string and is split in the `From` below. The `@r:id`/`@r:topLeft`/…
+/// custom-image relationships and `@shadow`/`@frame`/`@themeColor` are
+/// accepted-and-dropped, like `@themeColor` on `BorderXml`.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct PageBorderXml {
+    #[serde(rename = "@val")]
+    val: String,
+    /// Eighths of a point for a line `@val`; whole points for an art one.
+    /// Kept raw here; the unit is decided once the val is classified.
+    #[serde(
+        rename = "@sz",
+        default,
+        deserialize_with = "deserialize_optional_nonnegative_dimension"
+    )]
+    sz: Option<Dimension<EighthPoints>>,
+    #[serde(
+        rename = "@space",
+        default,
+        deserialize_with = "deserialize_optional_nonnegative_dimension"
+    )]
+    space: Option<Dimension<Points>>,
+    #[serde(rename = "@color", default)]
+    color: Option<crate::docx::parse::primitives::HexColor>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StPageBorderOffset {
+    Page,
+    Text,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StPageBorderDisplay {
+    AllPages,
+    FirstPage,
+    NotFirstPage,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StPageBorderZOrder {
+    Front,
+    Back,
+}
+
+impl From<StPageBorderOffset> for PageBorderOffset {
+    fn from(s: StPageBorderOffset) -> Self {
+        match s {
+            StPageBorderOffset::Page => Self::Page,
+            StPageBorderOffset::Text => Self::Text,
+        }
+    }
+}
+
+impl From<StPageBorderDisplay> for PageBorderDisplay {
+    fn from(s: StPageBorderDisplay) -> Self {
+        match s {
+            StPageBorderDisplay::AllPages => Self::AllPages,
+            StPageBorderDisplay::FirstPage => Self::FirstPage,
+            StPageBorderDisplay::NotFirstPage => Self::NotFirstPage,
+        }
+    }
+}
+
+impl From<StPageBorderZOrder> for PageBorderZOrder {
+    fn from(s: StPageBorderZOrder) -> Self {
+        match s {
+            StPageBorderZOrder::Front => Self::Front,
+            StPageBorderZOrder::Back => Self::Back,
+        }
+    }
+}
+
+impl From<PageBorderXml> for PageBorderEdge {
+    fn from(x: PageBorderXml) -> Self {
+        use serde::de::IntoDeserializer;
+        // A `@val` that names one of the 27 shared line styles is an ordinary
+        // border; anything else in §17.18.2's vocabulary is an art name
+        // (`apples`, `custom`, …). Word validates the attribute, so an
+        // unknown-to-both string only arrives from a hand-built file — art is
+        // the lossless bucket for it.
+        let known: Result<StBorderType, serde::de::value::Error> =
+            StBorderType::deserialize(x.val.as_str().into_deserializer());
+        match known {
+            Ok(style) => Self::Line(Border {
+                style: style.into(),
+                width: x.sz.unwrap_or_default(),
+                space: x.space.unwrap_or_default(),
+                color: x.color.map_or(Color::Auto, Into::into),
+            }),
+            // §17.18.2: an art border's `sz` is whole points (1–31), so the
+            // eighths wrapper the field deserialized into is only a raw-value
+            // carrier here.
+            Err(_) => Self::Art {
+                name: x.val.into_boxed_str(),
+                width: x.sz.map(|d| Dimension::<Points>::new(d.raw())),
+                space: x.space,
+            },
+        }
+    }
+}
+
+impl From<PgBordersXml> for PageBorders {
+    fn from(x: PgBordersXml) -> Self {
+        Self {
+            offset_from: x.offset_from.map(Into::into),
+            display: x.display.map(Into::into),
+            z_order: x.z_order.map(Into::into),
+            top: x.top.map(Into::into),
+            left: x.left.map(Into::into),
+            bottom: x.bottom.map(Into::into),
+            right: x.right.map(Into::into),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -314,6 +464,7 @@ impl From<SectPrXml> for SectionProperties {
         let mut page_margins: Vec<PgMarXml> = Vec::new();
         let mut cols: Vec<ColsXml> = Vec::new();
         let mut doc_grid: Vec<DocGridXml> = Vec::new();
+        let mut page_borders: Vec<PgBordersXml> = Vec::new();
         let mut header_refs = SectionHeaderFooterRefs::default();
         let mut footer_refs = SectionHeaderFooterRefs::default();
         let mut title_page: Option<bool> = None;
@@ -326,6 +477,7 @@ impl From<SectPrXml> for SectionProperties {
                 SectChildXml::PgMar(v) => page_margins.push(v),
                 SectChildXml::Cols(v) => cols.push(v),
                 SectChildXml::DocGrid(v) => doc_grid.push(v),
+                SectChildXml::PgBorders(v) => page_borders.push(v),
                 // §17.6.10 admits one reference per `@w:type`, so these keep
                 // overwriting: a second `first` header is a redefinition, not a
                 // duplicate of the element.
@@ -344,6 +496,7 @@ impl From<SectPrXml> for SectionProperties {
             page_margins: Dup::from(page_margins).map(Into::into),
             columns: Dup::from(cols).map(Into::into),
             doc_grid: Dup::from(doc_grid).map(Into::into),
+            page_borders: Dup::from(page_borders).map(Into::into),
             header_refs,
             footer_refs,
             title_page,
@@ -440,6 +593,76 @@ mod tests {
         let g = s.doc_grid.get().unwrap();
         assert_eq!(g.line_pitch.unwrap().raw(), -360);
         assert_eq!(g.char_space.unwrap().raw(), -12);
+    }
+
+    #[test]
+    fn pg_borders_all_four_sides_with_attributes() {
+        let s = parse(
+            r#"<sectPr><pgBorders offsetFrom="page" display="firstPage" zOrder="back">
+                <top val="single" sz="24" space="24" color="FF0000"/>
+                <left val="double" sz="12" space="4"/>
+                <bottom val="dashed" sz="8" space="1" color="auto"/>
+                <right val="single" sz="4" space="0"/>
+            </pgBorders></sectPr>"#,
+        );
+        let b = s.page_borders.get().unwrap();
+        assert_eq!(b.offset_from, Some(PageBorderOffset::Page));
+        assert_eq!(b.display, Some(PageBorderDisplay::FirstPage));
+        assert_eq!(b.z_order, Some(PageBorderZOrder::Back));
+        let Some(PageBorderEdge::Line(top)) = &b.top else {
+            panic!("top should be a line edge");
+        };
+        assert_eq!(top.style, crate::docx::model::BorderStyle::Single);
+        assert_eq!(top.width.raw(), 24);
+        assert_eq!(top.space.raw(), 24);
+        assert_eq!(top.color, Color::Rgb(0xFF0000));
+        let Some(PageBorderEdge::Line(left)) = &b.left else {
+            panic!();
+        };
+        assert_eq!(left.style, crate::docx::model::BorderStyle::Double);
+        assert_eq!(left.color, Color::Auto, "absent color reads as auto");
+        let Some(PageBorderEdge::Line(bottom)) = &b.bottom else {
+            panic!();
+        };
+        assert_eq!(bottom.color, Color::Auto);
+    }
+
+    /// §17.18.2: page borders accept the art vocabulary. An art name must not
+    /// fail the `<w:sectPr>` parse, and its `sz` reads as whole points, not
+    /// eighths.
+    #[test]
+    fn pg_borders_art_val_is_carried_not_fatal() {
+        let s = parse(
+            r#"<sectPr><pgBorders offsetFrom="page">
+                <top val="apples" sz="31" space="24"/>
+                <bottom val="single" sz="4"/>
+            </pgBorders><pgSz w="12240" h="15840"/></sectPr>"#,
+        );
+        let b = s.page_borders.get().unwrap();
+        let Some(PageBorderEdge::Art { name, width, space }) = &b.top else {
+            panic!("an art name should classify as an art edge");
+        };
+        assert_eq!(&**name, "apples");
+        assert_eq!(width.unwrap().raw(), 31, "art sz is points, raw preserved");
+        assert_eq!(space.unwrap().raw(), 24);
+        assert!(
+            matches!(b.bottom, Some(PageBorderEdge::Line(_))),
+            "a line edge beside an art one still parses as a line"
+        );
+        // The sibling child after pgBorders still parses — nothing was poisoned.
+        assert_eq!(s.page_size.get().unwrap().width.unwrap().raw(), 12240);
+    }
+
+    /// The attributes are optional and default at *render* time, not parse
+    /// time — an attribute Word omitted must be mirrored as absent.
+    #[test]
+    fn pg_borders_attributes_default_to_none() {
+        let s = parse(r#"<sectPr><pgBorders><top val="single" sz="4"/></pgBorders></sectPr>"#);
+        let b = s.page_borders.get().unwrap();
+        assert_eq!(b.offset_from, None);
+        assert_eq!(b.display, None);
+        assert_eq!(b.z_order, None);
+        assert!(b.left.is_none() && b.right.is_none() && b.bottom.is_none());
     }
 
     #[test]
