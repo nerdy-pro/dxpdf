@@ -86,6 +86,8 @@ pub(crate) struct PPrXml {
     keep_lines: Vec<OnOff>,
     #[serde(rename = "widowControl", default)]
     widow_control: Vec<OnOff>,
+    #[serde(rename = "snapToGrid", default)]
+    snap_to_grid: Vec<OnOff>,
     #[serde(rename = "pageBreakBefore", default)]
     page_break_before: Vec<OnOff>,
     #[serde(rename = "suppressAutoHyphens", default)]
@@ -324,6 +326,7 @@ impl PPrXml {
             keep_next: last_toggle(self.keep_next),
             keep_lines: last_toggle(self.keep_lines),
             widow_control: last_toggle(self.widow_control),
+            snap_to_grid: last_toggle(self.snap_to_grid),
             page_break_before: last_toggle(self.page_break_before),
             suppress_auto_hyphens: last_toggle(self.suppress_auto_hyphens),
             contextual_spacing: last_toggle(self.contextual_spacing),
@@ -528,6 +531,18 @@ mod tests {
         assert_eq!(p.word_wrap, Some(true));
         assert_eq!(p.auto_space_de, Some(true));
         assert_eq!(p.auto_space_dn, Some(true));
+    }
+
+    /// §17.3.1.32: the grid opt-out is `<w:snapToGrid w:val="0"/>`; a bare
+    /// element re-asserts the default (on).
+    #[test]
+    fn snap_to_grid_toggle() {
+        let r = parse(r#"<pPr><snapToGrid val="0"/></pPr>"#);
+        assert_eq!(r.properties.snap_to_grid, Some(false));
+        let r = parse(r#"<pPr><snapToGrid/></pPr>"#);
+        assert_eq!(r.properties.snap_to_grid, Some(true));
+        let r = parse(r#"<pPr/>"#);
+        assert_eq!(r.properties.snap_to_grid, None);
     }
 
     #[test]

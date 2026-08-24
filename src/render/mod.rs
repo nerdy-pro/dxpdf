@@ -467,6 +467,10 @@ pub fn layout_document(
         footers: &'a crate::render::resolve::header_footer::HeaderFooterSet<Vec<Block>>,
         title_pg: bool,
         logical_page_base: usize,
+        /// §17.6.10: drawn in phase 2 with the headers/footers, because
+        /// `@w:zOrder` is an ordering against them — see
+        /// `layout::page_borders`.
+        page_borders: Option<crate::model::PageBorders>,
     }
     let mut section_hf: Vec<SectionHfInfo> = Vec::new();
     // §17.6.12: logical PAGE numbering accumulates across sections,
@@ -631,6 +635,7 @@ pub fn layout_document(
             footers: &section.footers,
             title_pg: section.properties.title_page.unwrap_or(false),
             logical_page_base,
+            page_borders: section.properties.page_borders.get().cloned(),
         });
     }
 
@@ -660,6 +665,17 @@ pub fn layout_document(
                 total_pages,
             },
         );
+        // §17.6.10: after the headers/footers, so `@w:zOrder` has the page's
+        // full command list to order against.
+        if let Some(borders) = &info.page_borders {
+            layout::page_borders::render_page_borders(
+                &mut all_pages[info.page_range.clone()],
+                0,
+                &info.config,
+                borders,
+                &mut state,
+            );
+        }
     }
 
     // Render endnotes on a new page at the end of the document.
@@ -704,6 +720,21 @@ pub fn layout_document(
                 endnote_page.commands.push(cmd);
             }
             cursor_y += para.size.height;
+        }
+        // §17.11.2: the endnotes page continues the last section's flow, so
+        // it wears that section's page borders — at the section page index
+        // *after* the section's own pages, which keeps `display="firstPage"`
+        // from re-firing on it.
+        if let Some(info) = section_hf.last() {
+            if let Some(borders) = &info.page_borders {
+                layout::page_borders::render_page_borders(
+                    std::slice::from_mut(&mut endnote_page),
+                    info.page_range.len(),
+                    &info.config,
+                    borders,
+                    &mut state,
+                );
+            }
         }
         all_pages.push(endnote_page);
     }

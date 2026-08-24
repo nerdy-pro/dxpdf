@@ -401,6 +401,11 @@ pub(super) fn paragraph_style_from_props(
         keep_lines: props.keep_lines.unwrap_or(false),
         // §17.3.1.44: Word enables widow/orphan control by default.
         widow_control: props.widow_control.unwrap_or(true),
+        // §17.3.1.32: never specified in the hierarchy = snap. Whether a grid
+        // exists to snap to is the section's business — the body page layout
+        // stamps `line_grid` at placement time (see the field docs).
+        snap_to_grid: props.snap_to_grid.unwrap_or(true),
+        line_grid: None,
         contextual_spacing: props.contextual_spacing.unwrap_or(false),
         style_id: None, // set by caller when available
         page_floats: Vec::new(),
@@ -462,7 +467,7 @@ pub(super) fn resolve_paragraph_borders(
 /// bounded (position, thickness and colour are all preserved; only the stroke
 /// pattern is lost) but it is not free, so each distinct style is reported once
 /// per render via `state.warned_border_styles`.
-fn convert_model_border(b: &model::Border, state: &mut BuildState) -> TableBorderLine {
+pub(crate) fn convert_model_border(b: &model::Border, state: &mut BuildState) -> TableBorderLine {
     let style = match b.style {
         model::BorderStyle::Double => TableBorderStyle::Double,
         model::BorderStyle::Single => TableBorderStyle::Single,

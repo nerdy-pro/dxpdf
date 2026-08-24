@@ -94,6 +94,10 @@ pub struct BuildState {
     /// layout applies per *table*, not per row. Reported once per render for
     /// the same reason as `warned_border_styles`.
     pub warned_row_cell_spacing: bool,
+    /// §17.6.10: the section asked for an art page border, which is declined
+    /// (drawn as nothing, like LibreOffice). Once per render — a document
+    /// with an art border has it on up to four edges of every section.
+    pub warned_art_page_border: bool,
     /// §17.4.85: a `w:vMerge w:val="continue"` cell had no `restart` above it
     /// and was rendered as an ordinary cell. Malformed input, so it is worth a
     /// `RUST_LOG=warn` line — but once per render, not once per cell: a table
@@ -609,6 +613,7 @@ impl DocumentPosition {
             // `BuildState::speculatively` for why it is not rolled back.
             warned_border_styles: _,
             warned_row_cell_spacing: _,
+            warned_art_page_border: _,
             warned_orphan_vmerge: _,
         } = state;
         Self {
