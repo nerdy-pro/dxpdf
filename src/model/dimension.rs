@@ -139,6 +139,16 @@ impl Unit for Points {
     const NAME: &'static str = "pt";
 }
 
+/// §20.1.10.68 ST_TextFontSize — hundredths of a point, DrawingML text's
+/// own size unit (`a:rPr/@sz`, 1100 = 11pt). A fourth point-fraction unit
+/// beside half/eighth/4096th because nothing but the type says which
+/// divisor a raw `sz` needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CentiPoints;
+impl Unit for CentiPoints {
+    const NAME: &'static str = "cpt";
+}
+
 /// Percentage in 1/1000th of a percent (OOXML ST_DecimalNumberOrPercent).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ThousandthPercent;

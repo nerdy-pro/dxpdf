@@ -1,6 +1,8 @@
 //! DrawingML types — images, pictures, shapes, anchoring, and preset geometry.
 
-use crate::model::dimension::{Dimension, Emu, SixtieThousandthDeg, ThousandthPercent};
+use crate::model::dimension::{
+    CentiPoints, Dimension, Emu, SixtieThousandthDeg, ThousandthPercent,
+};
 use crate::model::geometry::{EdgeInsets, Offset, Size};
 
 use super::content::Block;
@@ -134,6 +136,71 @@ pub enum GraphicContent {
     Picture(Picture),
     /// §14.5 wps:wsp: Word Processing Shape.
     WordProcessingShape(WordProcessingShape),
+    /// §21.4 `dgm:relIds` — a SmartArt diagram, carried as the relationship
+    /// id of its *data* part. The renderable payload (the pre-laid-out
+    /// `dsp:` drawing, [MS-ODRAWXML]) is keyed by this same id in
+    /// `Document::diagrams` — see `docx::parse`'s diagram phase.
+    Diagram(DiagramReference),
+    /// §21.2 `<c:chart r:id>` — a DrawingML chart, carried as the chart
+    /// part's relationship id; the parsed part lives in `Document::charts`.
+    Chart(ChartReference),
+}
+
+/// §21.4: the `dgm:relIds` reference quad, reduced to the one part this
+/// engine reads. `@r:lo`/`@r:qs`/`@r:cs` (layout, quick style, colors) are
+/// deliberately not carried: Word bakes their effect into the drawing part
+/// (literal fills, resolved colors, fitted text sizes), so they contribute
+/// nothing to rendering it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagramReference {
+    /// `@r:dm` — the diagram *data* part.
+    pub data: super::identifiers::RelId,
+}
+
+/// §21.2: a chart part reference.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChartReference {
+    /// `@r:id` — the chart part.
+    pub part: super::identifiers::RelId,
+}
+
+/// [MS-ODRAWXML] §2.1.3: a diagram's last successful layout — the `dsp:`
+/// drawing part, flattened to leaf shapes.
+///
+/// `dsp:spTree` is a group-shape tree, but only the wrapper elements are
+/// `dsp:`; everything inside them is plain `a:` DrawingML, and Word writes
+/// the tree flat with an *empty* `dsp:grpSpPr` — every shape's `a:xfrm`
+/// is absolute EMU in a canvas the size of the hosting drawing's
+/// `wp:extent`. Nested `dsp:grpSp` levels are folded into their leaves at
+/// parse (offsets composed), so the render side sees one flat list it can
+/// place shape by shape.
+#[derive(Clone, Debug, Default)]
+pub struct DiagramDrawing {
+    pub shapes: Vec<DiagramShape>,
+}
+
+/// One `dsp:sp` — structurally a [`WordProcessingShape`] whose position is
+/// its own (`spPr/a:xfrm`, absolute in the diagram canvas) and whose text
+/// carries a separate rectangle.
+#[derive(Clone, Debug, Default)]
+pub struct DiagramShape {
+    /// `dsp:spPr` (a:CT_ShapeProperties) — geometry, literal fill/line, and
+    /// the absolute transform.
+    pub shape_properties: Option<ShapeProperties>,
+    /// `dsp:style/a:lnRef`.
+    pub style_line_ref: Option<StyleMatrixRef>,
+    /// `dsp:style/a:fillRef`.
+    pub style_fill_ref: Option<StyleMatrixRef>,
+    /// `dsp:style/a:effectRef`.
+    pub style_effect_ref: Option<StyleMatrixRef>,
+    /// `dsp:style/a:fontRef` — the text's theme family and default color.
+    pub style_font_ref: Option<FontReference>,
+    /// `dsp:txBody` — literal laid-out DrawingML text.
+    pub text_body: Option<DrawingTextBody>,
+    /// `dsp:txXfrm` — the text rectangle, in the same absolute canvas EMU
+    /// as the shape transform. SmartArt uses it to keep labels upright
+    /// inside rotated shapes; absent means "use the geometry's text box".
+    pub text_transform: Option<Transform2D>,
 }
 
 /// §14.5 wps:wsp — a Word Processing Shape.
@@ -164,6 +231,57 @@ pub struct WordProcessingShape {
     pub body_pr: Option<BodyProperties>,
     /// §17.17.1: text content inside the shape.
     pub txbx_content: Vec<Block>,
+}
+
+/// §21.1.2.1 `a:txBody`-shaped DrawingML text (CT_TextBody), as SmartArt
+/// node labels and chart titles carry it — literal laid-out runs, not
+/// WordprocessingML. Kept as its own small model rather than converted to
+/// [`crate::model::Block`]s at parse: a run's colour may be a scheme
+/// reference with transforms, which only the render layer's theme
+/// resolution can turn into RGB.
+#[derive(Clone, Debug, Default)]
+pub struct DrawingTextBody {
+    /// §20.1.2.1.1 `a:bodyPr` — insets, anchor, autofit.
+    pub body_pr: Option<BodyProperties>,
+    pub paragraphs: Vec<DrawingTextParagraph>,
+}
+
+/// §21.1.2.2.6 `a:p` inside a DrawingML text body.
+#[derive(Clone, Debug, Default)]
+pub struct DrawingTextParagraph {
+    /// §21.1.2.2.7 `a:pPr/@algn`, mapped onto the shared alignment enum
+    /// (`l`/`ctr`/`r`/`just` — the DrawingML-only distribute values fold
+    /// into justify).
+    pub alignment: Option<super::formatting::Alignment>,
+    /// §21.1.2.3.2 `a:pPr/a:defRPr` — the paragraph's default run
+    /// properties, which chart text relies on (runs there often carry no
+    /// `a:rPr` at all).
+    pub default_run: Option<DrawingRunProps>,
+    pub runs: Vec<DrawingTextRun>,
+}
+
+/// One `a:r` (or `a:fld`, whose cached text reads the same) — plus `a:br`.
+#[derive(Clone, Debug)]
+pub enum DrawingTextRun {
+    Text {
+        text: String,
+        props: DrawingRunProps,
+    },
+    /// §21.1.2.2.1 `a:br`.
+    Break,
+}
+
+/// §21.1.2.3.9 `a:rPr` — the subset a label needs.
+#[derive(Clone, Debug, Default)]
+pub struct DrawingRunProps {
+    /// §20.1.10.68 `@sz` in hundredths of a point.
+    pub size: Option<Dimension<CentiPoints>>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    /// `a:solidFill` — the text colour, possibly a scheme reference.
+    pub color: Option<DrawingColor>,
+    /// `a:latin/@typeface`.
+    pub family: Option<String>,
 }
 
 /// §20.1.4.1.17 CT_FontReference — `wps:style/fontRef`: selects the theme font

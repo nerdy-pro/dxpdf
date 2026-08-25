@@ -120,6 +120,19 @@ fn rewrite_in_image(image: &mut Image, remap: &HashMap<RelId, RelId>) {
             GraphicContent::WordProcessingShape(wsp) => {
                 rewrite_in_word_processing_shape(wsp, remap);
             }
+            // Issue #155: the payloads these reference live in document-level
+            // maps keyed by the (possibly synthesized) rel id, so the id on
+            // the element must follow the same remap the media keys do.
+            GraphicContent::Diagram(d) => {
+                if let Some(new) = remap.get(&d.data) {
+                    d.data = new.clone();
+                }
+            }
+            GraphicContent::Chart(c) => {
+                if let Some(new) = remap.get(&c.part) {
+                    c.part = new.clone();
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Complete DOCX document model — all types are fully resolved ADTs.
 //! No unparsed strings, no style indirection, no invalid states.
 
+mod chart;
 mod color;
 mod content;
 mod document;
@@ -18,6 +19,7 @@ mod table;
 mod theme;
 mod vml;
 
+pub use chart::*;
 pub use color::*;
 pub use content::*;
 pub use document::*;

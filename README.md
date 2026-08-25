@@ -149,7 +149,7 @@ dxpdf handles the most common DOCX features found in real-world business documen
 | **Styles** | Paragraph and character styles, `basedOn` inheritance, document defaults, theme fonts |
 | **Fonts** | Embedded DOCX fonts, metric-compatible substitution, and subsetting so only used glyphs are embedded |
 | **Text & emoji** | Grapheme-correct segmentation; full-color emoji including ZWJ, modifier, keycap and flag sequences, GSUB-shaped through Skia's HarfBuzz |
-| **Shapes & text boxes** | DrawingML and VML shapes, shape text bodies with insets, anchoring and autofit, custom geometry with guide formulas |
+| **Shapes & text boxes** | DrawingML and VML shapes, shape text bodies with insets, anchoring and autofit, custom geometry with guide formulas, SmartArt (via the baked drawing part) and 2D charts drawn from their cached data |
 | **Headers & footers** | Text, images, page numbers via PAGE/NUMPAGES field codes |
 | **Lists** | Multi-level numbering — bullets, decimal, lower/upper letter, lower/upper roman, ordinal and spelled-out text — with counter tracking and picture bullets |
 | **Navigation** | Clickable PDF link annotations with URL resolution, bookmarks and internal cross-references as named destinations, and a PDF outline built from heading levels |
@@ -261,7 +261,7 @@ Type-safe dimensions flow through the entire pipeline: OOXML units (`Twips`, `Em
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 12 partial, 11 not yet supported.**
+Validated against ISO 29500 (Office Open XML). **76 entries fully implemented, 13 partial, 10 not yet supported.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
@@ -403,9 +403,10 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Per-glyph font fallback | ⚠️ a codepoint the resolved face cannot draw is drawn from a host face that can, chosen per UAX #29 grapheme cluster and carried through subsetting, so `ASCII ① ア` renders in full. Which face the host offers is its choice, so output is host-dependent (as color emoji already is), and no `w:lang` hint is passed yet — Han text may be given a face for the wrong language's glyph shapes. A codepoint no host face covers still draws nothing |
 | Comments, tracked changes | ❌ |
 | DrawingML fills, strokes, outer shadow | ⚠️ solid fills, strokes incl. dash patterns, and outer shadow; gradient and blip fills, blur, glow, reflection and soft edge are not rendered |
-| DrawingML preset geometry | ⚠️ `line` and `rect`; `custGeom` fully evaluated incl. guide formulas |
+| DrawingML preset geometry | ⚠️ `line`, `rect`, `roundRect`, `ellipse`, the four block arrows, `chevron`, `homePlate`, `diamond`, `triangle`; `custGeom` fully evaluated incl. guide formulas |
 | Text boxes (shape text bodies) | ✅ insets, vertical anchoring, `vertOverflow` clipping, `normAutofit` shrink |
-| SmartArt, charts | ❌ |
+| SmartArt | ✅ the pre-laid-out `dsp:` drawing part Word ≥2007 SP2 writes — literal shapes, baked fills, fitted text; the §21.4 layout algorithm itself is not run, so a diagram without that part (pre-SP2/third-party) draws nothing |
+| Charts | ⚠️ 2D bar/column (clustered/stacked/percentStacked), line, pie/doughnut, area, scatter from the part's cached data, with axes, gridlines, legend and title; 3D kinds flatten to their 2D twins; radar/surface/bubble/stock are declined |
 | Bookmarks and internal cross-references | ✅ `w:bookmarkStart` → PDF named destinations; internal hyperlinks → GoTo link annotations |
 | PDF outline sidebar (`/Outlines`) | ✅ §17.3.1.19 `w:outlineLvl` → structure-element headers; levels 7–9 clamp to `H6` (ISO 32000-1 stops there) and headings in headers, footers and notes are excluded |
 | Line breaking | ✅ UAX #14 via ICU4X, per paragraph rather than per run, so a token split across `<w:r>` boundaries still breaks where the algorithm says. The four scripts UAX #14 hands to "complex context analysis" (Thai, Lao, Khmer, Burmese) get LSTM word boundaries; a token no rule may break is cut at the container edge rather than overflowing it |
@@ -454,7 +455,7 @@ Yes. In Rust, add `dxpdf` as a dependency and call `dxpdf::convert(&docx_bytes)`
 
 dxpdf supports text formatting, paragraphs, tables (including nested, merged and floating tables with conditional formatting), inline and floating images, shapes and text boxes, styles with inheritance, headers/footers, multi-level lists, hyperlinks and a navigable PDF outline, footnotes and endnotes, section breaks, and automatic pagination. See the full [feature matrix](#ooxml-feature-coverage) above.
 
-Notable gaps: Indic reordering, mirrored tab stops under `w:bidi`, automatic hyphenation, tracked changes and comments, and SmartArt and charts.
+Notable gaps: Indic reordering, mirrored tab stops under `w:bidi`, automatic hyphenation, and tracked changes and comments.
 
 ### How fast is dxpdf?
 

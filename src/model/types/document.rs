@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::chart::ChartSpace;
 use super::content::Block;
-use super::drawing::ImageFormat;
+use super::drawing::{DiagramDrawing, ImageFormat};
 use super::identifiers::{NoteId, RelId};
 use super::numbering::NumberingDefinitions;
 use super::section::SectionProperties;
@@ -41,6 +42,14 @@ pub struct Document {
     /// on another; the refcount is touched once per image placement, which is
     /// nowhere near hot enough for the atomic to matter.
     pub media: HashMap<RelId, (Arc<[u8]>, ImageFormat)>,
+    /// SmartArt drawings (issue #155): the pre-laid-out `dsp:` part per
+    /// diagram, keyed by the `dgm:relIds/@r:dm` id a
+    /// `GraphicContent::Diagram` carries (with the `<part>::<rId>` key
+    /// synthesis for headers/footers, like `media`).
+    pub diagrams: HashMap<RelId, DiagramDrawing>,
+    /// Chart parts (issue #155), keyed by the `<c:chart r:id>` id a
+    /// `GraphicContent::Chart` carries.
+    pub charts: HashMap<RelId, ChartSpace>,
     /// §17.8.3: embedded fonts — de-obfuscated font data.
     pub embedded_fonts: Vec<EmbeddedFont>,
 }

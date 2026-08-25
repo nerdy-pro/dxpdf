@@ -264,7 +264,8 @@ pub fn fit_lines_with_first(
                 line_text_height = line_text_height.max(metrics.line_height());
                 line_ascent = line_ascent.max(metrics.ascent);
             }
-            Fragment::Image { .. } => {} // images don't contribute to text_height
+            // Images and scenes size the line box, not the Auto base.
+            Fragment::Image { .. } | Fragment::Scene { .. } => {}
             _ => {
                 line_text_height = line_text_height.max(frag.height());
             }
@@ -326,7 +327,7 @@ fn measure_range(fragments: &[Fragment], start: usize, end: usize) -> RangeMeasu
                 m.text_height = m.text_height.max(metrics.line_height());
                 m.ascent = m.ascent.max(metrics.ascent);
             }
-            Fragment::Image { .. } => {}
+            Fragment::Image { .. } | Fragment::Scene { .. } => {}
             _ => {
                 m.text_height = m.text_height.max(frag.height());
             }

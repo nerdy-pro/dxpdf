@@ -655,6 +655,8 @@ mod tests {
             numbering,
             font_families: Vec::new(),
             media: HashMap::new(),
+            diagrams: Default::default(),
+            charts: Default::default(),
             embedded_fonts: Vec::new(),
             pic_bullets: HashMap::new(),
             theme: None,

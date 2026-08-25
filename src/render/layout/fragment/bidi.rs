@@ -149,7 +149,9 @@ fn build_analysis(fragments: &[Fragment]) -> (String, Vec<Option<std::ops::Range
                 // image in the middle of a `w:rtl` run belongs to that run.
                 match other {
                     Fragment::Tab { .. } | Fragment::PTab { .. } => text.push('\t'),
-                    Fragment::Image { .. } | Fragment::Emoji { .. } => text.push(OBJECT),
+                    Fragment::Image { .. } | Fragment::Scene { .. } | Fragment::Emoji { .. } => {
+                        text.push(OBJECT)
+                    }
                     Fragment::LineBreak { .. }
                     | Fragment::PageBreak { .. }
                     | Fragment::ColumnBreak => text.push('\n'),
