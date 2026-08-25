@@ -389,6 +389,46 @@ fn sample4_image_extents() {
     check(&doc.body);
 }
 
+#[test]
+fn custgeom_arc_shapes_parse() {
+    // §20.1.9.3/§20.1.9.8 — four anchored custGeom shapes whose paths bend
+    // through arcTo (the crescent chains two). Built by
+    // scripts/make_custgeom_arc_fixture.py; the painter's arc conversion is
+    // pinned by the §20.1.9.3 unit tests in `render/painter.rs`.
+    let doc = load("custgeom-arc.docx");
+    let mut shapes = 0usize;
+    let mut arcs = 0usize;
+    for block in &doc.body {
+        let Block::Paragraph(p) = block else { continue };
+        for inline in &p.content {
+            let Inline::Image(img) = inline else { continue };
+            let Some(GraphicContent::WordProcessingShape(wsp)) = img.graphic.as_ref() else {
+                continue;
+            };
+            let Some(geometry) = wsp
+                .shape_properties
+                .as_ref()
+                .and_then(|p| p.geometry.as_ref())
+            else {
+                continue;
+            };
+            let ShapeGeometry::Custom(geom) = geometry else {
+                continue;
+            };
+            shapes += 1;
+            for path in &geom.paths {
+                arcs += path
+                    .commands
+                    .iter()
+                    .filter(|c| matches!(c, PathCommand::ArcTo { .. }))
+                    .count();
+            }
+        }
+    }
+    assert_eq!(shapes, 4, "four custGeom shapes");
+    assert_eq!(arcs, 5, "five arcTo commands across the four shapes");
+}
+
 // ── Cross-cutting tests ──────────────────────────────────────────────────────
 
 const ALL_FILES: &[&str] = &[
@@ -413,6 +453,7 @@ const ALL_FILES: &[&str] = &[
     "hidden-text.docx",
     "smartart.docx",
     "charts.docx",
+    "custgeom-arc.docx",
 ];
 
 #[test]
