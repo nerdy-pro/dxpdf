@@ -574,6 +574,55 @@ pub(super) fn populate_image_data(
     }
 }
 
+/// Issue #155: render each collected [`Fragment::Scene`]'s commands. Runs
+/// beside `populate_image_data`, and for the same reason media population
+/// does: the payload (here the resolved theme and measurer, there the media
+/// map) is not available during fragment collection.
+pub(super) fn populate_scenes(
+    fragments: &mut [Fragment],
+    ctx: &super::BuildContext,
+    state: &super::BuildState,
+) {
+    for frag in fragments.iter_mut() {
+        if let Fragment::Scene {
+            size,
+            source,
+            commands,
+        } = frag
+        {
+            if !commands.is_empty() {
+                continue;
+            }
+            let extent = *size;
+            let built = match source {
+                crate::render::layout::fragment::SceneSource::Diagram(id) => {
+                    match ctx.resolved.diagrams.get(id) {
+                        Some(d) => super::graphic_scene::build_diagram_scene(d, extent, ctx, state),
+                        None => {
+                            log::warn!(
+                                "[build] diagram payload {id:?} missing from Document::diagrams"
+                            );
+                            continue;
+                        }
+                    }
+                }
+                crate::render::layout::fragment::SceneSource::Chart(id) => {
+                    match ctx.resolved.charts.get(id) {
+                        Some(c) => super::chart_scene::build_chart_scene(c, extent, ctx, state),
+                        None => {
+                            log::warn!(
+                                "[build] chart payload {id:?} missing from Document::charts"
+                            );
+                            continue;
+                        }
+                    }
+                }
+            };
+            *commands = std::rc::Rc::new(built);
+        }
+    }
+}
+
 /// Remap PUA codepoints (0xF0xx) from legacy Symbol/Wingdings encoding
 /// to standard Unicode, and return a portable font to render them with.
 ///
@@ -926,6 +975,8 @@ mod tests {
             numbering: HashMap::new(),
             font_families: Vec::new(),
             media: HashMap::new(),
+            diagrams: Default::default(),
+            charts: Default::default(),
             embedded_fonts: Vec::new(),
             pic_bullets: HashMap::new(),
             theme: None,

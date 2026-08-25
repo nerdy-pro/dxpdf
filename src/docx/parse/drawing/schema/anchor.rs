@@ -146,6 +146,27 @@ pub(crate) struct GraphicDataXml {
     pub(crate) pic: Vec<PictureXml>,
     #[serde(rename = "wsp", default)]
     pub(crate) wsp: Vec<WspXml>,
+    /// §21.4 `dgm:relIds` — a SmartArt reference (issue #155).
+    #[serde(rename = "relIds", default)]
+    pub(crate) diagram_rel_ids: Vec<DgmRelIdsXml>,
+    /// §21.2 `<c:chart r:id>` (issue #155).
+    #[serde(rename = "chart", default)]
+    pub(crate) chart: Vec<ChartRefXml>,
+}
+
+/// §21.4.2.2.1 `dgm:relIds` — the four diagram parts. Only `@r:dm` is
+/// carried; see `model::DiagramReference` for why the other three are not.
+#[derive(Deserialize)]
+pub(crate) struct DgmRelIdsXml {
+    #[serde(rename = "@dm")]
+    pub(crate) dm: String,
+}
+
+/// §21.2.2.27 `c:chart` as a graphicData child — a bare part reference.
+#[derive(Deserialize)]
+pub(crate) struct ChartRefXml {
+    #[serde(rename = "@id")]
+    pub(crate) id: String,
 }
 
 impl GraphicXml {
@@ -155,12 +176,24 @@ impl GraphicXml {
     ) -> Option<GraphicContent> {
         let data = Dup::from(self.data).into_value()?;
         if let Some(pic) = Dup::from(data.pic).into_value() {
-            Some(GraphicContent::Picture(pic.into()))
-        } else {
-            Dup::from(data.wsp)
-                .into_value()
-                .map(|w| GraphicContent::WordProcessingShape(w.into_model(ctx)))
+            return Some(GraphicContent::Picture(pic.into()));
         }
+        if let Some(w) = Dup::from(data.wsp).into_value() {
+            return Some(GraphicContent::WordProcessingShape(w.into_model(ctx)));
+        }
+        if let Some(d) = Dup::from(data.diagram_rel_ids).into_value() {
+            return Some(GraphicContent::Diagram(
+                crate::docx::model::DiagramReference {
+                    data: crate::docx::model::RelId::new(d.dm),
+                },
+            ));
+        }
+        if let Some(c) = Dup::from(data.chart).into_value() {
+            return Some(GraphicContent::Chart(crate::docx::model::ChartReference {
+                part: crate::docx::model::RelId::new(c.id),
+            }));
+        }
+        None
     }
 }
 

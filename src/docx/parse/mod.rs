@@ -2,6 +2,8 @@
 
 pub mod body;
 pub mod body_schema;
+pub mod chart;
+pub mod diagram;
 pub mod drawing;
 pub mod fonts;
 pub mod notes;
@@ -150,6 +152,22 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         }
     }
 
+    // Phase 2b': Diagram and chart parts (issue #155), mirroring the media
+    // pass: every rel of the type is loaded, keyed by its rel id. SmartArt
+    // needs a second hop — the data part's `dsp:dataModelExt/@relId` names
+    // the pre-laid-out drawing part, and that id resolves against the *same*
+    // host rels (the data part has none of its own).
+    let mut diagrams = HashMap::new();
+    let mut charts = HashMap::new();
+    load_graphic_parts(
+        &doc_rels,
+        doc_dir,
+        &package,
+        None,
+        &mut diagrams,
+        &mut charts,
+    );
+
     // Phase 2c: Parse embedded fonts from fontTable
     let embedded_fonts = if let Some(ft_rel) = doc_rels.find_by_type(&RelationshipType::FontTable) {
         let ft_path = zip::resolve_target(doc_dir, &ft_rel.target);
@@ -184,7 +202,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.get_part(&path) {
             let mut blocks = body::parse_blocks(data)?;
-            let remap = load_part_rel_remap(&path, &mut package, &mut media)?;
+            let remap =
+                load_part_rel_remap(&path, &mut package, &mut media, &mut diagrams, &mut charts)?;
             rel_rewrite::rewrite_part_rels_in_blocks(&mut blocks, &remap);
             headers.insert(rel.id.clone(), blocks);
         }
@@ -194,7 +213,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &rel.target);
         if let Some(data) = package.get_part(&path) {
             let mut blocks = body::parse_blocks(data)?;
-            let remap = load_part_rel_remap(&path, &mut package, &mut media)?;
+            let remap =
+                load_part_rel_remap(&path, &mut package, &mut media, &mut diagrams, &mut charts)?;
             rel_rewrite::rewrite_part_rels_in_blocks(&mut blocks, &remap);
             footers.insert(rel.id.clone(), blocks);
         }
@@ -208,7 +228,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &fn_rel.target);
         if let Some(data) = package.get_part(&path) {
             footnotes = notes::parse_notes(data)?;
-            let remap = load_part_rel_remap(&path, &mut package, &mut media)?;
+            let remap =
+                load_part_rel_remap(&path, &mut package, &mut media, &mut diagrams, &mut charts)?;
             for blocks in footnotes.values_mut() {
                 rel_rewrite::rewrite_part_rels_in_blocks(blocks, &remap);
             }
@@ -220,7 +241,8 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         let path = zip::resolve_target(doc_dir, &en_rel.target);
         if let Some(data) = package.get_part(&path) {
             endnotes = notes::parse_notes(data)?;
-            let remap = load_part_rel_remap(&path, &mut package, &mut media)?;
+            let remap =
+                load_part_rel_remap(&path, &mut package, &mut media, &mut diagrams, &mut charts)?;
             for blocks in endnotes.values_mut() {
                 rel_rewrite::rewrite_part_rels_in_blocks(blocks, &remap);
             }
@@ -246,8 +268,85 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         footnotes,
         endnotes,
         media,
+        diagrams,
+        charts,
         embedded_fonts,
     })
+}
+
+/// Load the SmartArt drawing and chart parts a set of relationships names,
+/// inserting them under `prefix`-synthesized keys (`None` for the body's own
+/// rels, `Some(part_path)` for a header/footer part — the same collision
+/// rule the media map uses).
+///
+/// Failures are per-part and non-fatal: a diagram whose data part is missing
+/// or whose drawing extension is absent (Word 2007 RTM, non-Office
+/// producers) warns and renders nothing, rather than failing the document.
+fn load_graphic_parts(
+    rels: &Relationships,
+    part_dir: &str,
+    package: &PackageContents,
+    prefix: Option<&str>,
+    diagrams: &mut HashMap<RelId, crate::model::DiagramDrawing>,
+    charts: &mut HashMap<RelId, crate::model::ChartSpace>,
+) {
+    let key = |id: &str| match prefix {
+        Some(p) => RelId::new(format!("{p}::{id}")),
+        None => RelId::new(id),
+    };
+
+    for rel in rels.filter_by_type(&RelationshipType::DiagramData) {
+        let data_path = zip::resolve_target(part_dir, &rel.target);
+        let Some(data) = package.get_part(&data_path) else {
+            log::warn!("[parse] diagram data part {data_path} is missing");
+            continue;
+        };
+        let drawing_rel = match diagram::drawing_rel_id(data) {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                log::warn!(
+                    "[parse] diagram {data_path} has no dsp:dataModelExt drawing part \
+                     (pre-SP2 Word 2007 or a non-Office producer); the diagram is \
+                     not rendered — this engine draws the baked layout, not the \
+                     §21.4 layout algorithm"
+                );
+                continue;
+            }
+            Err(e) => {
+                log::warn!("[parse] diagram data part {data_path} failed to parse: {e}");
+                continue;
+            }
+        };
+        let Some(drawing_target) = rels.find_by_id(&drawing_rel) else {
+            log::warn!("[parse] diagram drawing rel {drawing_rel} not in host rels");
+            continue;
+        };
+        let drawing_path = zip::resolve_target(part_dir, &drawing_target.target);
+        let Some(drawing_data) = package.get_part(&drawing_path) else {
+            log::warn!("[parse] diagram drawing part {drawing_path} is missing");
+            continue;
+        };
+        match diagram::parse_diagram_drawing(drawing_data) {
+            Ok(d) => {
+                diagrams.insert(key(rel.id.as_str()), d);
+            }
+            Err(e) => log::warn!("[parse] diagram drawing {drawing_path} failed to parse: {e}"),
+        }
+    }
+
+    for rel in rels.filter_by_type(&RelationshipType::Chart) {
+        let path = zip::resolve_target(part_dir, &rel.target);
+        let Some(data) = package.get_part(&path) else {
+            log::warn!("[parse] chart part {path} is missing");
+            continue;
+        };
+        match chart::parse_chart(data) {
+            Ok(c) => {
+                charts.insert(key(rel.id.as_str()), c);
+            }
+            Err(e) => log::warn!("[parse] chart part {path} failed to parse: {e}"),
+        }
+    }
 }
 
 /// Process the rels of a single subordinate XML part — a header,
@@ -277,6 +376,8 @@ fn load_part_rel_remap(
     part_path: &str,
     package: &mut PackageContents,
     media: &mut HashMap<RelId, (Arc<[u8]>, ImageFormat)>,
+    diagrams: &mut HashMap<RelId, crate::model::DiagramDrawing>,
+    charts: &mut HashMap<RelId, crate::model::ChartSpace>,
 ) -> Result<HashMap<RelId, RelId>> {
     let mut remap: HashMap<RelId, RelId> = HashMap::new();
     let rels_path = zip::rels_path_for(part_path);
@@ -284,6 +385,28 @@ fn load_part_rel_remap(
         return Ok(remap);
     };
     let rels = Relationships::parse(rels_data)?;
+
+    // Issue #155: a header/footer can host SmartArt or a chart; its parts
+    // load under `<part>::<rId>` keys, and the remap points the block tree's
+    // references at them (rewritten by `rel_rewrite::rewrite_in_image`).
+    load_graphic_parts(
+        &rels,
+        zip::part_directory(part_path),
+        package,
+        Some(part_path),
+        diagrams,
+        charts,
+    );
+    for rel in rels
+        .filter_by_type(&RelationshipType::DiagramData)
+        .into_iter()
+        .chain(rels.filter_by_type(&RelationshipType::Chart))
+    {
+        remap.insert(
+            rel.id.clone(),
+            RelId::new(format!("{}::{}", part_path, rel.id.as_str())),
+        );
+    }
 
     // Image rels — synthesize unique ids and load bytes into `media`.
     for img_rel in rels.filter_by_type(&RelationshipType::Image) {

@@ -11,3 +11,4 @@ pub mod geometry;
 pub mod picture;
 pub mod shape;
 pub mod stroke;
+pub mod text_body;

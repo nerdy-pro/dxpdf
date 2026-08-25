@@ -61,6 +61,20 @@ pub enum RelationshipType {
     StylesWithEffects,
     /// §11.3.8: glossary/building blocks document.
     GlossaryDocument,
+    /// §14.2.1 (chart part, §21.2): a DrawingML chart referenced from
+    /// `<c:chart r:id>`.
+    Chart,
+    /// §14.2.5 diagram data — the `dgm:relIds/@r:dm` target, whose extension
+    /// list names the pre-laid-out drawing part.
+    DiagramData,
+    /// [MS-ODRAWXML] §2.1.3: the `dsp:` drawing part holding a diagram's
+    /// last successful layout (`.../2007/relationships/diagramDrawing`).
+    DiagramDrawing,
+    /// §14.2.6/§14.2.8/§14.2.4: the three sibling diagram parts this engine
+    /// reads nothing from (layout definition, quick style, colors) — Word
+    /// bakes their effect into the drawing part. Classified so they do not
+    /// warn as unknown on every SmartArt document.
+    DiagramSupport,
     /// Any relationship type not listed above.
     Unknown(String),
 }
@@ -110,6 +124,17 @@ impl RelationshipType {
             Self::StylesWithEffects
         } else if uri.ends_with("/glossaryDocument") {
             Self::GlossaryDocument
+        } else if uri.ends_with("/chart") {
+            Self::Chart
+        } else if uri.ends_with("/diagramData") {
+            Self::DiagramData
+        } else if uri.ends_with("/diagramDrawing") {
+            Self::DiagramDrawing
+        } else if uri.ends_with("/diagramLayout")
+            || uri.ends_with("/diagramQuickStyle")
+            || uri.ends_with("/diagramColors")
+        {
+            Self::DiagramSupport
         } else {
             warn!("unknown relationship type: {}", uri);
             Self::Unknown(uri.to_string())

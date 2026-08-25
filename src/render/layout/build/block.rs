@@ -587,6 +587,7 @@ pub(super) fn build_fragments(
         state.field_ctx,
     );
     populate_image_data(&mut fragments, ctx.media());
+    super::convert::populate_scenes(&mut fragments, ctx, state);
     populate_underline_metrics(&mut fragments, ctx.measurer);
 
     (fragments, merged_props)
@@ -609,6 +610,8 @@ mod tests {
             numbering: HashMap::new(),
             font_families: Vec::new(),
             media: HashMap::new(),
+            diagrams: Default::default(),
+            charts: Default::default(),
             embedded_fonts: Vec::new(),
             pic_bullets: HashMap::new(),
             theme: None,

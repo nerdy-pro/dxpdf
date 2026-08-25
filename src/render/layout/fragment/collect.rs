@@ -850,16 +850,27 @@ where
                     // Only render INLINE images as fragments.
                     // Anchor (floating) images are handled separately in build.rs.
                     if matches!(img.placement, crate::model::ImagePlacement::Inline { .. }) {
+                        let size =
+                            PtSize::new(Pt::from(img.extent.width), Pt::from(img.extent.height));
                         if let Some(rel_id) =
                             crate::render::resolve::images::extract_image_rel_id(img)
                         {
-                            let w = Pt::from(img.extent.width);
-                            let h = Pt::from(img.extent.height);
                             fragments.push(Fragment::Image {
-                                size: PtSize::new(w, h),
+                                size,
                                 rel_id: rel_id.as_str().to_string(),
                                 image_data: None,
                                 src_rect: crate::render::resolve::images::extract_src_rect(img),
+                            });
+                        } else if let Some(source) = scene_source(img) {
+                            // Issue #155: an inline SmartArt/chart occupies
+                            // its extent as a vector scene; the commands are
+                            // rendered by `build::convert::populate_scenes`,
+                            // which has the theme and measurer this pass
+                            // does not.
+                            fragments.push(Fragment::Scene {
+                                size,
+                                source,
+                                commands: std::rc::Rc::new(Vec::new()),
                             });
                         }
                     }
@@ -1192,6 +1203,17 @@ where
     }
 
     fragments
+}
+
+/// Issue #155: the scene payload an inline drawing renders, if any.
+fn scene_source(img: &crate::model::Image) -> Option<super::SceneSource> {
+    match img.graphic.as_ref()? {
+        crate::model::GraphicContent::Diagram(d) => {
+            Some(super::SceneSource::Diagram(d.data.clone()))
+        }
+        crate::model::GraphicContent::Chart(c) => Some(super::SceneSource::Chart(c.part.clone())),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

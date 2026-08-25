@@ -5,8 +5,10 @@
 //! content, which may contain nested tables.
 
 pub(super) mod block;
+pub(super) mod chart_scene;
 pub(super) mod convert;
 pub(super) mod floating;
+pub(super) mod graphic_scene;
 pub(super) mod list_label;
 pub(super) mod table;
 
@@ -370,6 +372,8 @@ mod tests {
             numbering: HashMap::new(),
             font_families: Vec::new(),
             media: HashMap::new(),
+            diagrams: Default::default(),
+            charts: Default::default(),
             embedded_fonts: Vec::new(),
             pic_bullets: HashMap::new(),
             theme: None,

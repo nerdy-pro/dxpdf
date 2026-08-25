@@ -56,9 +56,12 @@ pub enum PathVerb {
     CubicTo(PtOffset, PtOffset, PtOffset),
     /// Elliptical arc. `radii` are horizontal/vertical radii; angles follow
     /// OOXML convention (60000ths of a degree; 0° points to the right,
-    /// positive swing is clockwise). The start point of the arc is implicit
-    /// (the prior path cursor); the arc does not implicitly line-to its
-    /// start.
+    /// positive swing is clockwise). §20.1.9.3: they are *ray* angles
+    /// measured at the ellipse center — on a non-circular ellipse the
+    /// painter skews them onto Skia's parametric convention. The start
+    /// point of the arc is implicit (the prior path cursor, which lies on
+    /// the ellipse at `start_angle`); the arc does not implicitly line-to
+    /// its start.
     ArcTo {
         radii: PtSize,
         start_angle: Dimension<SixtieThousandthDeg>,
