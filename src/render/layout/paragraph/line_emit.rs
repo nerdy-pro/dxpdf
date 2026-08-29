@@ -373,17 +373,31 @@ fn justification_extra_after(
 ///
 /// The unit is a grapheme cluster, shared with the painter and with `w:spacing`
 /// measurement — see [`crate::render::spacing`], which explains why it is a
-/// cluster and not a scalar (nor, yet, a shaped cluster). Counting scalars
-/// would allocate a gap between a letter and its own combining mark.
+/// cluster and not a scalar. Counting scalars would allocate a gap between a
+/// letter and its own combining mark.
+///
+/// For a **shaped** fragment the unit is the shaped cluster (issue #153),
+/// read from the count `layout::fragment::shape` measured and stored — this
+/// function has fragments, not a measurer. A terminal fragment's trailing
+/// whitespace is subtracted per grapheme cluster, which for whitespace is the
+/// same count the shaper would report: a space neither joins nor merges into
+/// a neighbouring shaped cluster.
 ///
 /// An image or emoji cluster is one indivisible unit; everything else — tabs,
 /// breaks, bookmarks — contributes none, so a line of them has nothing to
 /// distribute between.
 fn distribution_unit_count(fragment: &Fragment, terminal: bool) -> usize {
     match fragment {
-        Fragment::Text { text, .. } => {
-            let text = if terminal { text.trim_end() } else { text };
-            crate::render::spacing::unit_count(text)
+        Fragment::Text { text, shaped, .. } => {
+            let counted = if terminal { text.trim_end() } else { text };
+            match shaped {
+                Some(s) => {
+                    let trailing_ws = &text[counted.len()..];
+                    s.unit_count
+                        .saturating_sub(crate::render::spacing::unit_count(trailing_ws))
+                }
+                None => crate::render::spacing::unit_count(counted),
+            }
         }
         Fragment::Image { .. } | Fragment::Emoji { .. } => 1,
         _ => 0,
@@ -678,7 +692,7 @@ pub(super) fn emit_line_commands(
                         italic: font.italic,
                         color: *color,
                         text_scale: font.text_scale,
-                        shaped: *shaped,
+                        shaped: shaped.map(|s| s.direction),
                     });
 
                     if let Some(link) = hyperlink_url {
@@ -1244,7 +1258,7 @@ fn decimal_anchor(
             if let Some(byte_idx) = text.find(separator) {
                 let prefix = &text[..byte_idx];
                 let prefix_width = match measure_text {
-                    Some(measure) => measure(prefix, font).0,
+                    Some(measure) => measure.measure(prefix, font).0,
                     // No measurer (fitting-only paths): apportion the
                     // fragment's known width by character share. Approximate
                     // for proportional faces, but the alternative is ignoring
@@ -1321,7 +1335,7 @@ pub(super) fn emit_tab_leader(
     };
 
     let char_width = if let Some(m) = measure_text {
-        m(leader_char, &leader_font).0
+        m.measure(leader_char, &leader_font).0
     } else {
         LEADER_CHAR_WIDTH_FALLBACK
     };
@@ -1392,8 +1406,8 @@ pub(super) fn resolve_line_height(
 #[cfg(test)]
 mod tests {
     use super::{
-        find_next_tab_stop, resolve_ptab, resolve_zone_anchor, Fragment, PTabGeometry,
-        PTabPlacement, ZoneAnchor,
+        distribution_unit_count, find_next_tab_stop, resolve_ptab, resolve_zone_anchor, Fragment,
+        PTabGeometry, PTabPlacement, ZoneAnchor,
     };
     use crate::model;
     use crate::render::dimension::Pt;
@@ -1493,6 +1507,50 @@ mod tests {
             text_offset: Pt::ZERO,
             is_footnote_ref: false,
         }
+    }
+
+    // ── §17.3.1.13 distribution units on shaped runs (issue #153) ─────────
+
+    /// A shaped fragment contributes the shaped-cluster count the shaping pass
+    /// stored, not a grapheme count of its text — the two differ exactly when
+    /// shaping merged clusters, which is the case the unit exists for.
+    #[test]
+    fn a_shaped_fragment_contributes_its_stored_unit_count() {
+        let mut frag = text_fragment("क्षमता", 40.0);
+        assert_eq!(
+            crate::render::spacing::unit_count("क्षमता"),
+            3,
+            "premise: counting this text's graphemes would give 3"
+        );
+        if let Fragment::Text { shaped, .. } = &mut frag {
+            *shaped = Some(crate::render::layout::fragment::Shaping {
+                direction: crate::render::shape::RunDirection::LeftToRight,
+                // Deliberately not the grapheme count: what shaping stored
+                // must win over anything re-derived from the text.
+                unit_count: 2,
+            });
+        }
+        assert_eq!(distribution_unit_count(&frag, false), 2);
+    }
+
+    /// A terminal shaped fragment sheds its trailing whitespace per grapheme
+    /// cluster — the same count the shaper reports for whitespace, since a
+    /// space never merges into a neighbouring shaped cluster.
+    #[test]
+    fn a_terminal_shaped_fragment_sheds_trailing_whitespace_units() {
+        let mut frag = text_fragment("मत  ", 40.0);
+        if let Fragment::Text { shaped, .. } = &mut frag {
+            *shaped = Some(crate::render::layout::fragment::Shaping {
+                direction: crate::render::shape::RunDirection::LeftToRight,
+                unit_count: 4,
+            });
+        }
+        assert_eq!(distribution_unit_count(&frag, false), 4);
+        assert_eq!(
+            distribution_unit_count(&frag, true),
+            2,
+            "two trailing spaces are two of the four stored units"
+        );
     }
 
     #[test]
