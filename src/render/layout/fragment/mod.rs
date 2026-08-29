@@ -30,7 +30,7 @@ pub use collect::{
 };
 pub use fallback::{apply_font_fallback, FallbackLookup, RegistryFallback};
 pub use shape::shape_complex_scripts;
-pub use split::split_oversized_fragments;
+pub use split::{split_oversized_fragments, MeasureWith, SplitMeasure};
 
 // ── Superscript / subscript rendering constants ───────────────────────────────
 // §17.3.2.42: these ratios are "application-defined" per the spec; the values
@@ -181,6 +181,21 @@ pub enum BreakAfter {
     Prohibited,
 }
 
+/// How a shaped run is laid out and painted: which way HarfBuzz orders its
+/// glyphs, and how many shaped clusters it holds.
+///
+/// `unit_count` is the §17.3.2.35 / §17.3.1.13 spacing unit count for a
+/// shaped run — the shaped-cluster counterpart of
+/// [`crate::render::spacing::unit_count`] (issue #153; that module's doc owns
+/// the story). It is measured once, by the same HarfBuzz pass that re-measures
+/// the fragment's width, and carried here because the caller that needs it —
+/// `line_emit`'s distribution counting — has fragments and no measurer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shaping {
+    pub direction: RunDirection,
+    pub unit_count: usize,
+}
+
 /// A measured fragment — the atomic unit for line fitting.
 #[derive(Clone, Debug)]
 pub enum Fragment {
@@ -217,10 +232,11 @@ pub enum Fragment {
         /// bidirectional text, which is what lets the reorder be skipped
         /// outright there.
         level: BidiLevel,
-        /// Whether this run must be shaped to be legible, and which way round
-        /// — `None` for every run in a script that a cmap lookup renders
-        /// correctly, which is all of Latin, Cyrillic, Greek, CJK, Hebrew and
-        /// Thai.
+        /// Whether this run must be shaped to be legible — `None` for every
+        /// run that both a cmap lookup renders correctly (all of Latin,
+        /// Cyrillic, Greek, CJK, Hebrew and Thai) and that sits at a
+        /// left-to-right level (ordinary Hebrew does not, and is shaped for
+        /// glyph order).
         ///
         /// Set by `layout::fragment::shape`, which is also what re-measures
         /// the fragment against the shaped advance, so `width` below and what
@@ -228,7 +244,7 @@ pub enum Fragment {
         /// at paint from the text, because a second copy of
         /// [`needs_shaping`](crate::render::shape::needs_shaping) is the kind
         /// of duplicate rule issue #130 was spent removing.
-        shaped: Option<RunDirection>,
+        shaped: Option<Shaping>,
         /// Full width including trailing whitespace (used for positioning).
         width: Pt,
         /// Width excluding trailing whitespace (used for line-break overflow checking).

@@ -1337,11 +1337,8 @@ fn build_cell_blocks(
                     } = lb
                     {
                         // Keep the owned vector when no split is needed.
-                        let measure = |t: &str, f: &crate::render::layout::fragment::FontProps| {
-                            ctx.measurer.measure(t, f)
-                        };
                         let fragments =
-                            split_oversized_fragments(&fragments, inner_width, Some(&measure))
+                            split_oversized_fragments(&fragments, inner_width, Some(ctx.measurer))
                                 .unwrap_or(fragments);
                         LayoutBlock::Paragraph {
                             fragments,

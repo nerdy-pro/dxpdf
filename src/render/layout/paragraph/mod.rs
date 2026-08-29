@@ -2240,7 +2240,8 @@ mod tests {
     /// Lay out `a<tab>zone` against a decimal stop at 100 and return the x of
     /// the zone's text.
     fn decimal_zone_x(zone: &str) -> f32 {
-        let measurer: &dyn Fn(&str, &FontProps) -> (Pt, TextMetrics) = &ten_pt_per_char;
+        let measurer = crate::render::layout::fragment::MeasureWith(ten_pt_per_char);
+        let measurer: &dyn crate::render::layout::fragment::SplitMeasure = &measurer;
         let frags = vec![
             text_frag("a", 10.0),
             Fragment::Tab {

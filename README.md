@@ -261,7 +261,7 @@ Type-safe dimensions flow through the entire pipeline: OOXML units (`Twips`, `Em
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 12 partial, 11 not yet supported.**
+Validated against ISO 29500 (Office Open XML). **76 entries fully implemented, 12 partial, 10 not yet supported.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
@@ -274,7 +274,7 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Underline | ✅ font-proportional stroke width |
 | Font size, family, color | ✅ |
 | Superscript/subscript | ✅ |
-| Character spacing | ✅ §17.3.2.35 applied per UAX #29 grapheme cluster, so a combining mark is never separated from its base |
+| Character spacing | ✅ §17.3.2.35 applied per UAX #29 grapheme cluster — per *shaped* cluster on a shaped run — so spacing never lands inside a cluster: not between a mark and its base, nor inside a conjunct or ligature |
 | Character scaling (`w:w` horizontal compression/expansion) | ✅ |
 | Run shading | ✅ |
 | Strikethrough | ⚠️ parsed, not yet rendered |
@@ -290,7 +290,7 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 |---|---|
 | Alignment (left, center, right) | ✅ |
 | Alignment (justify) | ✅ |
-| Alignment (distribute) | ✅ §17.3.1.13 spare width shared between UAX #29 grapheme clusters, never inside one; not applied to a run that is shaped (see *Complex-script shaping*) |
+| Alignment (distribute) | ✅ §17.3.1.13 spare width shared between clusters — grapheme clusters on the cmap path, shaped clusters on a shaped run — never inside one |
 | Spacing before/after, line spacing | ✅ auto/exact/atLeast |
 | Indentation (left, right, first-line, hanging) | ✅ |
 | Tab stops (left) | ✅ |
@@ -396,8 +396,8 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | Footnotes | ✅ §17.11.23 separator, per-page reservation, split-aware |
 | Endnotes | ✅ §17.11.2 roman superscript marks, collected at document end |
 | Color emoji (ZWJ, modifier, keycap, flag sequences) | ✅ host-resolved color typeface, cross-run cluster reassembly, GSUB-shaped via Skia's HarfBuzz |
-| Complex-script shaping — cursive joining | ✅ §17.3.2.30 a run whose script has positional forms (Unicode `Joining_Type` — Arabic, Syriac, N'Ko, Mongolian, Adlam …) is shaped through Skia's HarfBuzz; everything else keeps the cmap path unchanged |
-| Complex-script shaping — Indic reordering | ❌ needs the spacing unit to become the shaped cluster, not just a new call site |
+| Complex-script shaping — cursive joining | ✅ §17.3.2.30 a run whose script has positional forms (Unicode `Joining_Type` — Arabic, Syriac, N'Ko, Mongolian, Adlam …) is shaped through Skia's HarfBuzz, as is any run at a right-to-left level (Hebrew included — its glyph order needs it); Latin, Cyrillic, Greek, CJK and Thai keep the cmap path unchanged |
+| Complex-script shaping — Indic reordering | ✅ Brahmic scripts (Devanagari, Bengali, Tamil, Sinhala, Khmer, Myanmar …) shape through the same path, and the spacing unit for a shaped run is the shaped cluster — a prebase matra reorders, and neither `w:spacing` nor `distribute` can open a conjunct |
 | Language (`w:lang`) | ⚠️ §17.3.2.20 drives the decimal-tab separator, the DATE/TIME picture names and the picture-less date and time defaults (all from CLDR, region-aware — `de-CH` and `de-DE` disagree correctly) and number-word spelling (English, German, French, Spanish; every other language gets digits) |
 | Font subsetting | ✅ codepoint-driven, with shapeability validation |
 | Per-glyph font fallback | ⚠️ a codepoint the resolved face cannot draw is drawn from a host face that can, chosen per UAX #29 grapheme cluster and carried through subsetting, so `ASCII ① ア` renders in full. Which face the host offers is its choice, so output is host-dependent (as color emoji already is), and no `w:lang` hint is passed yet — Han text may be given a face for the wrong language's glyph shapes. A codepoint no host face covers still draws nothing |
@@ -425,7 +425,7 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | [`skia-safe`](https://crates.io/crates/skia-safe) | PDF rendering, text measurement, link annotations, and HarfBuzz emoji shaping via the `textlayout` feature |
 | [`unicode-segmentation`](https://crates.io/crates/unicode-segmentation), [`unicode-properties`](https://crates.io/crates/unicode-properties), [`unicode-normalization`](https://crates.io/crates/unicode-normalization) | Grapheme clusters, emoji properties, NFC normalization |
 | [`unicode-bidi`](https://crates.io/crates/unicode-bidi) + [`unicode-bidi-mirroring`](https://crates.io/crates/unicode-bidi-mirroring) | UAX #9 embedding levels and rule L4 mirroring. Their Unicode tables are compiled in, so they add no locale data |
-| [`unicode-joining-type`](https://crates.io/crates/unicode-joining-type) | Which scripts need shaping to be legible at all — the predicate that keeps HarfBuzz off Latin |
+| [`unicode-joining-type`](https://crates.io/crates/unicode-joining-type) + [`unicode-script`](https://crates.io/crates/unicode-script) | Which runs need shaping to be legible at all — positional forms per `Joining_Type`, glyph reordering per Script — the two-property predicate that keeps HarfBuzz off Latin |
 | `icu_*` ([`icu_segmenter`](https://crates.io/crates/icu_segmenter), [`icu_decimal`](https://crates.io/crates/icu_decimal), [`icu_datetime`](https://crates.io/crates/icu_datetime), [`icu_calendar`](https://crates.io/crates/icu_calendar), …) | ICU4X: UAX #14 line breaking, region-aware decimal separators, and localized date/time picture names. Locale data ships as one trimmed blob loaded through [`icu_provider_blob`](https://crates.io/crates/icu_provider_blob), not as each crate's built-in `compiled_data` |
 | [`fontcull`](https://crates.io/crates/fontcull) (optional) | Font subsetting — `subset-fonts` feature, on by default |
 | `fontcull-skrifa`, `fontcull-write-fonts`, `fontcull-read-fonts` + [`kurbo`](https://crates.io/crates/kurbo) | OpenType table reading and writing — baking a variable-font instance's coordinates into the bytes the PDF embeds |
@@ -454,7 +454,7 @@ Yes. In Rust, add `dxpdf` as a dependency and call `dxpdf::convert(&docx_bytes)`
 
 dxpdf supports text formatting, paragraphs, tables (including nested, merged and floating tables with conditional formatting), inline and floating images, shapes and text boxes, styles with inheritance, headers/footers, multi-level lists, hyperlinks and a navigable PDF outline, footnotes and endnotes, section breaks, and automatic pagination. See the full [feature matrix](#ooxml-feature-coverage) above.
 
-Notable gaps: Indic reordering, mirrored tab stops under `w:bidi`, automatic hyphenation, tracked changes and comments, and SmartArt and charts.
+Notable gaps: mirrored tab stops under `w:bidi`, automatic hyphenation, tracked changes and comments, and SmartArt and charts.
 
 ### How fast is dxpdf?
 

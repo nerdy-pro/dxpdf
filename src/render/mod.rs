@@ -510,11 +510,7 @@ pub fn layout_document(
         );
 
         let built = build_section_blocks(section, &config, &ctx, &mut state);
-        let measure_fn = |text: &str,
-                          font: &layout::fragment::FontProps|
-         -> (dimension::Pt, layout::fragment::TextMetrics) {
-            measurer.measure(text, font)
-        };
+        let measure_fn = &measurer;
 
         // §17.6.22: a Continuous section resumes on the page the preceding one
         // left behind; any other section starts on a fresh one.
@@ -552,7 +548,7 @@ pub fn layout_document(
             layout_section_with_clearance(
                 &built.blocks,
                 &config,
-                Some(&measure_fn),
+                Some(measure_fn),
                 separator_indent,
                 dlh,
                 layout::section::SectionStart {
@@ -576,7 +572,7 @@ pub fn layout_document(
                     even_and_odd,
                     default_line_height: dlh,
                     separator_indent,
-                    measure_text: Some(&measure_fn),
+                    measure_text: Some(measure_fn),
                 },
                 &ctx,
                 &mut state,
@@ -664,11 +660,7 @@ pub fn layout_document(
 
     // Render endnotes on a new page at the end of the document.
     if !all_endnotes.is_empty() {
-        let measure_fn = |text: &str,
-                          font: &layout::fragment::FontProps|
-         -> (dimension::Pt, layout::fragment::TextMetrics) {
-            measurer.measure(text, font)
-        };
+        let measure_fn = &measurer;
         let mut endnote_page = LayoutedPage::new(last_config.page_size);
         let content_width = last_config.content_width();
         let constraints =
@@ -696,7 +688,7 @@ pub fn layout_document(
                 &constraints,
                 style,
                 dlh,
-                Some(&measure_fn),
+                Some(measure_fn),
             );
             for mut cmd in para.commands {
                 cmd.shift_y(cursor_y);

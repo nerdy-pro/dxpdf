@@ -28,6 +28,15 @@ struct FontMeasureCache {
     widths: FxHashMap<Box<str>, f32>,
 }
 
+/// What [`TextMeasurer::shaped_measurement`] learns from one HarfBuzz pass:
+/// the run's advance (already `text_scale`-multiplied) and how many shaped
+/// clusters it holds — the spacing units `layout::fragment::shape` stores on
+/// the fragment so that distribution can count them without a measurer.
+pub struct ShapedMeasurement {
+    pub advance: Pt,
+    pub unit_count: usize,
+}
+
 /// Measures text using Skia fonts resolved through a [`FontRegistry`].
 /// Holds a per-instance `FontCache` for `Font` reuse across measurements.
 ///
@@ -153,8 +162,8 @@ impl<'r> TextMeasurer<'r> {
         (scaled_width + spacing_extra, text_metrics)
     }
 
-    /// The advance of `text` **shaped** through HarfBuzz, for a run in a
-    /// script that a cmap lookup renders wrongly.
+    /// The advance and spacing-unit count of `text` **shaped** through
+    /// HarfBuzz, for a run in a script that a cmap lookup renders wrongly.
     ///
     /// Separate from [`TextMeasurer::measure`] rather than a branch inside it,
     /// so that the hot path every Latin document takes keeps exactly the shape
@@ -167,14 +176,17 @@ impl<'r> TextMeasurer<'r> {
     /// is what the engine did before issue #131 and is wrong in the same way
     /// rather than in a new one.
     ///
-    /// §17.3.2.35 `w:spacing` is deliberately *not* added here, and
-    /// `layout::fragment::shape` states why at the call site.
-    pub fn shaped_advance(
+    /// `unit_count` is the run's shaped-cluster count — the §17.3.2.35 /
+    /// §17.3.1.13 spacing unit for a shaped run (issue #153; see
+    /// [`crate::render::spacing`] for the seam). §17.3.2.35 `w:spacing` itself
+    /// is deliberately *not* added to `advance` here: the caller owns the
+    /// spacing formula, and states it where it re-measures the fragment.
+    pub fn shaped_measurement(
         &self,
         text: &str,
         font_props: &FontProps,
         direction: crate::render::shape::RunDirection,
-    ) -> Option<Pt> {
+    ) -> Option<ShapedMeasurement> {
         let shaper = self.cluster_shaper.as_ref()?;
         let mut font_cache = self.font_cache.borrow_mut();
         let font = font_cache.get(
@@ -192,8 +204,11 @@ impl<'r> TextMeasurer<'r> {
                 direction,
             )
             .ok()?;
-        // §17.3.2.45 applies to glyph advances however they were obtained.
-        Some(run.total_advance * font_props.text_scale)
+        Some(ShapedMeasurement {
+            // §17.3.2.45 applies to glyph advances however they were obtained.
+            advance: run.total_advance * font_props.text_scale,
+            unit_count: run.unit_count(),
+        })
     }
 
     /// Query font metrics for underline positioning.
@@ -322,6 +337,25 @@ impl<'r> TextMeasurer<'r> {
                 attempted
             );
         }
+    }
+}
+
+/// The measuring capability the split path and the paragraph layer's tab
+/// machinery are handed — see `fragment::split::SplitMeasure` for why a
+/// piece of a shaped fragment needs the second operation.
+impl super::fragment::SplitMeasure for TextMeasurer<'_> {
+    fn measure(&self, text: &str, font: &FontProps) -> (Pt, TextMetrics) {
+        TextMeasurer::measure(self, text, font)
+    }
+
+    fn shaped_piece(
+        &self,
+        text: &str,
+        font: &FontProps,
+        direction: crate::render::shape::RunDirection,
+    ) -> Option<(Pt, usize)> {
+        self.shaped_measurement(text, font, direction)
+            .map(|m| (m.advance, m.unit_count))
     }
 }
 

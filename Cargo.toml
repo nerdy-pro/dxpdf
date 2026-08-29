@@ -178,6 +178,12 @@ unicode-bidi-mirroring = "0.4"
 # those scripts does not turn it on for Latin — see that module for why the
 # distinction is load-bearing rather than an optimization.
 unicode-joining-type = "1"
+# The second half of that predicate (issue #153): the Script property picks out
+# the Brahmic scripts whose shaping *reorders* — a Devanagari prebase matra is
+# stored after its consonant and drawn before it, which no per-character
+# property expresses. `render::shape::script_reorders` names the scripts and
+# cites the OpenType shaping specs the list is drawn from.
+unicode-script = "0.5.8"
 # FxHash: a fast, non-cryptographic hasher for the per-render measurement memo
 # (hot path, short keys). std's SipHash made an earlier width cache net-negative
 # on small docs; FxHash keeps the probe cheap enough to win across the doc mix.
