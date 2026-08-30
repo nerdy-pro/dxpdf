@@ -12,6 +12,11 @@ the whole point — the display decision lives in the document:
 5. "<strike>struck</strike> <dstrike>double</dstrike>" — plain §17.3.2.37
    formatting, NOT a revision: it must stay struck in BOTH views, which is
    what tells a revision mark apart from ordinary strike formatting.
+6. "Iota" / a wholly deleted paragraph / "Kappa": the middle one carries run
+   deletions AND the §17.13.5.15 paragraph-mark deletion (pPr/rPr/del) —
+   Word's spelling of a whole-paragraph delete. The markup view strikes it;
+   the final view must not leave a phantom blank line between Iota and
+   Kappa.
 
 tracked-changes.docx has no revisionView (spec default: markup shown) —
 deletions render struck through, insertions underlined, both in per-author
@@ -75,6 +80,9 @@ DOCUMENT = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:p><w:ins w:id="3" w:author="Bob" w:date="2026-01-02T00:00:00Z">{run("eta")}</w:ins></w:p>
     <w:p>{run("Theta")}</w:p>
     <w:p>{run("struck", "<w:rPr><w:strike/></w:rPr>")}{run(" ")}{run("double", "<w:rPr><w:dstrike/></w:rPr>")}</w:p>
+    <w:p>{run("Iota")}</w:p>
+    <w:p><w:pPr><w:rPr><w:del w:id="4" w:author="Ann" w:date="2026-01-01T00:00:00Z"/></w:rPr></w:pPr><w:del w:id="5" w:author="Ann" w:date="2026-01-01T00:00:00Z">{del_run("REMOVED")}</w:del></w:p>
+    <w:p>{run("Kappa")}</w:p>
     <w:sectPr>
       <w:pgSz w:w="12240" w:h="15840"/>
       <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>

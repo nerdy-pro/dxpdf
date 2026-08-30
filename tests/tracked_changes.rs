@@ -164,3 +164,30 @@ fn dstrike_draws_two_lines() {
         .count();
     assert_eq!(count, 2, "double strike is two lines");
 }
+
+/// §17.13.5.15: a wholly deleted paragraph — run deletions plus the
+/// paragraph-mark deletion — strikes through in the markup view and merges
+/// away in the final view: Kappa sits exactly one line below Iota, the same
+/// step Iota sits below the strike paragraph, with no phantom blank line.
+#[test]
+fn a_wholly_deleted_paragraph_merges_away_in_the_final_view() {
+    let markup = texts(&layout("tracked-changes.docx"));
+    let removed = find(&markup, "REMOVED");
+    assert_eq!(removed.1, REVISION_PALETTE[0], "struck in markup view");
+
+    let final_view = layout("tracked-changes-final.docx");
+    let texts = texts(&final_view);
+    assert!(
+        !texts.iter().any(|(t, ..)| t.contains("REMOVED")),
+        "the deleted paragraph's text must not paint"
+    );
+    let struck = find(&texts, "struck");
+    let iota = find(&texts, "Iota");
+    let kappa = find(&texts, "Kappa");
+    let step = iota.3 - struck.3;
+    assert!(
+        (kappa.3 - iota.3 - step).abs() < 0.5,
+        "Kappa must sit one ordinary line below Iota (step {step}, got {})",
+        kappa.3 - iota.3,
+    );
+}

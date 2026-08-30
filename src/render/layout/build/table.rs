@@ -2097,6 +2097,7 @@ mod tests {
             mark_run_properties: None,
             content,
             rsids: model::ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 

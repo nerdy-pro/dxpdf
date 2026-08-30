@@ -235,6 +235,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![text_run(font, "hello")],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 

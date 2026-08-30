@@ -81,6 +81,43 @@ pub fn register(author: &str, colors: &mut HashMap<String, RgbColor>) {
     }
 }
 
+/// Issue #154: drop comment stamps whose id has no comment behind it —
+/// orphaned `commentRangeStart` markers otherwise wash text that no balloon
+/// ever explains.
+pub fn clear_orphan_comment_stamps(
+    blocks: &mut [Block],
+    comments: &HashMap<crate::model::CommentId, crate::model::Comment>,
+) {
+    fn clear_inlines(
+        inlines: &mut [Inline],
+        comments: &HashMap<crate::model::CommentId, crate::model::Comment>,
+    ) {
+        for inline in inlines {
+            match inline {
+                Inline::TextRun(tr) if tr.comment.is_some_and(|id| !comments.contains_key(&id)) => {
+                    tr.comment = None;
+                }
+                Inline::Hyperlink(h) => clear_inlines(&mut h.content, comments),
+                Inline::Field(f) => clear_inlines(&mut f.content, comments),
+                _ => {}
+            }
+        }
+    }
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => clear_inlines(&mut p.content, comments),
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        clear_orphan_comment_stamps(&mut cell.content, comments);
+                    }
+                }
+            }
+            Block::SectionBreak(_) => {}
+        }
+    }
+}
+
 fn walk_blocks(blocks: &[Block], colors: &mut HashMap<String, RgbColor>) {
     for block in blocks {
         match block {
@@ -138,7 +175,55 @@ mod tests {
             mark_run_properties: None,
             content: inlines,
             rsids: Default::default(),
+            mark_deleted: false,
         }))
+    }
+
+    /// Issue #154: a stamp whose id has no comment behind it is cleared —
+    /// an orphaned range marker must not wash text no balloon explains.
+    #[test]
+    fn orphan_comment_stamps_are_cleared() {
+        use crate::model::CommentId;
+        let mut run = crate::model::TextRun {
+            style_id: None,
+            properties: crate::model::RunProperties::default(),
+            content: vec![crate::model::RunElement::Text("x".into())],
+            rsids: crate::model::RevisionIds::default(),
+            revision: None,
+            comment: Some(CommentId::new(7)),
+        };
+        let kept = crate::model::TextRun {
+            comment: Some(CommentId::new(1)),
+            ..run.clone()
+        };
+        run.comment = Some(CommentId::new(7));
+        let mut blocks = vec![para(vec![
+            Inline::TextRun(Box::new(run)),
+            Inline::TextRun(Box::new(kept)),
+        ])];
+        let mut comments = HashMap::new();
+        comments.insert(
+            CommentId::new(1),
+            crate::model::Comment {
+                author: "A".into(),
+                initials: String::new(),
+                content: vec![],
+            },
+        );
+        clear_orphan_comment_stamps(&mut blocks, &comments);
+        let Block::Paragraph(p) = &blocks[0] else {
+            unreachable!()
+        };
+        let stamps: Vec<_> = p
+            .content
+            .iter()
+            .filter_map(|i| match i {
+                Inline::TextRun(tr) => Some(tr.comment),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stamps[0], None, "orphan id 7 cleared");
+        assert_eq!(stamps[1].map(|c| c.value()), Some(1), "real id kept");
     }
 
     /// Authors are numbered by first appearance in document order, so the

@@ -115,12 +115,13 @@ pub(crate) struct ParaXml {
 ///
 /// OOXML wraps run content in revision-tracking (`ins`/`del`/`moveFrom`/
 /// `moveTo`) and structural (`smartTag`/`customXml`) elements. These are
-/// modelled so `convert_para_children` can flatten them: insert-side and
-/// structural wrappers are rendered, delete-side wrappers are dropped (an
-/// "accept all changes" / final view). Comment range markers are modelled so
-/// the runs between them can be stamped (issue #154). Remaining annotation
-/// elements (proofErr, permStart/End, sdt, ...) hit the `Other` catch-all
-/// and are discarded cleanly.
+/// modelled so `convert_para_children` can flatten them: `ins`/`del` stamp
+/// their runs (issue #154 — the renderer's `w:revisionView` decides how a
+/// stamped run paints), structural wrappers and `moveTo` are flattened
+/// plain, and `moveFrom` is dropped so moved text isn't duplicated. Comment
+/// range markers are modelled so the runs between them can be stamped.
+/// Remaining annotation elements (proofErr, permStart/End, sdt, ...) hit the
+/// `Other` catch-all and are discarded cleanly.
 #[derive(Deserialize)]
 pub(crate) enum ParaChildXml {
     #[serde(rename = "r")]
@@ -141,7 +142,9 @@ pub(crate) enum ParaChildXml {
     /// §17.13.5.18 `<w:ins>` — insert-side revision wrapper; content is kept.
     #[serde(rename = "ins")]
     Ins(RunTrackChangeXml),
-    /// §17.13.5.14 `<w:del>` — delete-side revision wrapper; content is dropped.
+    /// §17.13.5.14 `<w:del>` — delete-side revision wrapper; runs are kept
+    /// and stamped `Deleted` (unstampable children are dropped — see
+    /// `drop_unstampable_deleted`).
     #[serde(rename = "del")]
     Del(RunTrackChangeXml),
     /// §17.13.5.22 `<w:moveTo>` — destination side of a move; content is kept.
@@ -228,6 +231,10 @@ pub(crate) enum RunChildXml {
     Sym(SymXml),
     #[serde(rename = "instrText")]
     InstrText(TextXml),
+    /// §17.16.13 `<w:delInstrText>` — the field code of a complex field
+    /// deleted while tracking changes; same payload as `instrText`.
+    #[serde(rename = "delInstrText")]
+    DelInstrText(TextXml),
     #[serde(rename = "fldChar")]
     FldChar(FldCharXml),
     #[serde(rename = "footnoteReference")]
@@ -244,9 +251,8 @@ pub(crate) enum RunChildXml {
     ContinuationSeparator,
     #[serde(rename = "AlternateContent")]
     AlternateContent(AltContentXml),
-    /// `<w:commentReference>` — comment anchor inside a run. Comments are not
-    /// rendered (matching Word's default print output); parsed only so a
-    /// commented run doesn't fail the document. The range markers
+    /// `<w:commentReference>` — comment anchor inside a run: where the
+    /// balloon's connector attaches (issue #154). The range markers
     /// (`commentRangeStart/End`) are handled at the paragraph level above.
     #[serde(rename = "commentReference")]
     CommentReference(BookmarkEndXml),

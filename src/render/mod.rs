@@ -458,6 +458,11 @@ fn render_comment_balloons(
             layout::paragraph::ParagraphStyle,
         )>,
     >,
+    // One balloon per comment, document-wide: §17.4.49 repeated table header
+    // rows replay their commands — anchor included — on every continuation
+    // page, and only the first occurrence should balloon. Later anchors are
+    // consumed without drawing.
+    seen: &mut std::collections::HashSet<crate::model::CommentId>,
     default_line_height: dimension::Pt,
 ) {
     use crate::render::geometry::{PtLineSegment, PtOffset, PtRect};
@@ -474,6 +479,7 @@ fn render_comment_balloons(
     let band_w = config.margins.right - Pt::new(2.0 * EDGE_GAP);
     let band_usable = band_w >= Pt::new(24.0);
     let mut warned = false;
+    let mut warned_overflow = false;
 
     for page in pages {
         let mut anchors: Vec<(PtOffset, crate::model::CommentId)> = Vec::new();
@@ -513,6 +519,9 @@ fn render_comment_balloons(
         let mut prev_bottom = Pt::new(f32::NEG_INFINITY);
 
         for (anchor, id) in anchors {
+            if !seen.insert(id) {
+                continue;
+            }
             let Some(paras) = bodies.get(&id) else {
                 // An anchor whose comment the comments part never defined.
                 continue;
@@ -646,6 +655,17 @@ fn render_comment_balloons(
             });
 
             prev_bottom = balloon_y + balloon_h;
+            // Many or long comments can stack past the sheet — Word grows its
+            // markup area, which a fixed page cannot. The overflow is drawn
+            // (truthful, if clipped by the viewer) rather than silently
+            // dropped, and reported once.
+            if prev_bottom > config.page_size.height && !warned_overflow {
+                log::warn!(
+                    "comment balloons overflow the page bottom ({:.0}pt past)",
+                    f32::from(prev_bottom - config.page_size.height),
+                );
+                warned_overflow = true;
+            }
         }
     }
 }
@@ -888,12 +908,14 @@ pub fn layout_document(
     // Phase 2.5 (issue #154): comment balloons, after headers/footers so the
     // page set is final, before `coalesce_abutting_rects` below. Anchors are
     // consumed (removed) even when a page draws no balloon.
+    let mut ballooned = std::collections::HashSet::new();
     for info in &section_hf {
         render_comment_balloons(
             &mut all_pages[info.page_range.clone()],
             &info.config,
             &ctx,
             &comment_bodies,
+            &mut ballooned,
             dlh,
         );
     }
@@ -941,6 +963,17 @@ pub fn layout_document(
             }
             cursor_y += para.size.height;
         }
+        // Issue #154: the endnote page is born after the per-section balloon
+        // pass and belongs to no section range — a comment anchored in an
+        // endnote balloons here, and its anchor is consumed like the rest.
+        render_comment_balloons(
+            std::slice::from_mut(&mut endnote_page),
+            &last_config,
+            &ctx,
+            &comment_bodies,
+            &mut ballooned,
+            dlh,
+        );
         all_pages.push(endnote_page);
     }
 
@@ -1114,6 +1147,7 @@ mod tests {
                 comment: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 
@@ -1434,6 +1468,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::FootnoteRef(NoteId::new(2))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))]
     }
 

@@ -2027,6 +2027,7 @@ mod tests {
                     comment: None,
                 }))],
                 rsids: crate::model::ParagraphRevisionIds::default(),
+                mark_deleted: false,
             }))],
         }
     }

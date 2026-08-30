@@ -471,6 +471,11 @@ fn emit_field_substitution<F>(
 /// Not the complex-field path: a complex field's MERGEFORMAT substitution
 /// goes through [`emit_field_substitution`] instead, which prefers the
 /// field's own first result run over paragraph defaults.
+/// Known limit (issue #154): a substituted dynamic value built here wears no
+/// revision mark even when its field sits inside `<w:ins>` — the substitution
+/// takes paragraph defaults, not the stamped result run. The cached result
+/// path does wear the mark; a deleted field never reaches here at all (the
+/// parse drops it, see `drop_unstampable_deleted`).
 fn make_field_text_fragment<F>(
     text: Rc<str>,
     default_family: &str,

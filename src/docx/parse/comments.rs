@@ -3,9 +3,9 @@
 //! The shape of `notes.rs` with the attributes notes lack: each `<w:comment>`
 //! carries `@w:id`, `@w:author` and `@w:initials`, and holds ordinary block
 //! content converted through the body machinery. `<w:annotationRef>` inside
-//! the comment body — the reference mark Word renders there — hits the run
-//! catch-all and is dropped: the balloon labels itself with the author
-//! instead. Modern-comments sibling parts (`commentsExtended`, `people`) are
+//! the comment body — the reference mark Word renders there — has its own
+//! schema variant and is dropped at conversion: the balloon labels itself
+//! with the author instead. Modern-comments sibling parts (`commentsExtended`, `people`) are
 //! not read; the core part carries everything the balloon shows.
 
 use std::collections::HashMap;

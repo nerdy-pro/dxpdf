@@ -136,6 +136,7 @@ mod tests {
                 comment: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 

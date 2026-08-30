@@ -261,7 +261,7 @@ Type-safe dimensions flow through the entire pipeline: OOXML units (`Twips`, `Em
 
 ## OOXML Feature Coverage
 
-Validated against ISO 29500 (Office Open XML). **76 entries fully implemented, 12 partial, 10 not yet supported.**
+Validated against ISO 29500 (Office Open XML). **77 entries fully implemented, 11 partial, 10 not yet supported.**
 
 <details>
 <summary>Full feature matrix (click to expand)</summary>
@@ -277,7 +277,7 @@ Validated against ISO 29500 (Office Open XML). **76 entries fully implemented, 1
 | Character spacing | ✅ §17.3.2.35 applied per UAX #29 grapheme cluster, so a combining mark is never separated from its base |
 | Character scaling (`w:w` horizontal compression/expansion) | ✅ |
 | Run shading | ✅ |
-| Strikethrough | ⚠️ parsed, not yet rendered |
+| Strikethrough | ✅ §17.3.2.37 / §17.3.2.9 — single and double strike from font strikeout metrics, in the run's color |
 | Highlighting | ✅ full ST_HighlightColor palette |
 | Caps, smallCaps | ⚠️ parsed, not applied at layout |
 | Shadow, outline, emboss, imprint | ❌ |
@@ -401,7 +401,7 @@ Validated against ISO 29500 (Office Open XML). **76 entries fully implemented, 1
 | Language (`w:lang`) | ⚠️ §17.3.2.20 drives the decimal-tab separator, the DATE/TIME picture names and the picture-less date and time defaults (all from CLDR, region-aware — `de-CH` and `de-DE` disagree correctly) and number-word spelling (English, German, French, Spanish; every other language gets digits) |
 | Font subsetting | ✅ codepoint-driven, with shapeability validation |
 | Per-glyph font fallback | ⚠️ a codepoint the resolved face cannot draw is drawn from a host face that can, chosen per UAX #29 grapheme cluster and carried through subsetting, so `ASCII ① ア` renders in full. Which face the host offers is its choice, so output is host-dependent (as color emoji already is), and no `w:lang` hint is passed yet — Han text may be given a face for the wrong language's glyph shapes. A codepoint no host face covers still draws nothing |
-| Comments, tracked changes | ✅ tracked changes render per the document's own `w:revisionView`: struck-through deletions and underlined insertions in per-author colors, or the final text with deletions suppressed; comments render as a shaded range plus a margin balloon (author + text) with a connector line |
+| Comments, tracked changes | ✅ tracked changes render per the document's own `w:revisionView`: struck-through deletions and underlined insertions in per-author colors (authors collected from the body; a revision elsewhere gets the first palette color), or the final text with deletions suppressed. Run-level: a tracked row deletion always renders as final, and deleted content a run cannot express (pictures, fields, note references) stays dropped in both views. Comments render as a shaded range plus a margin balloon (author + text) with a connector line |
 | DrawingML fills, strokes, outer shadow | ⚠️ solid fills, strokes incl. dash patterns, and outer shadow; gradient and blip fills, blur, glow, reflection and soft edge are not rendered |
 | DrawingML preset geometry | ⚠️ `line` and `rect`; `custGeom` fully evaluated incl. guide formulas |
 | Text boxes (shape text bodies) | ✅ insets, vertical anchoring, `vertOverflow` clipping, `normAutofit` shrink |
