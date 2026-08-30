@@ -54,12 +54,16 @@ struct DocXml {
 /// inline. Kept as a type for future extensibility (e.g., if a later phase
 /// needs cross-node state during conversion).
 pub(crate) struct ConvertCtx {
-    _private: (),
+    /// §17.13.5.14/.18: the innermost `<w:ins>`/`<w:del>` wrapper the walk is
+    /// currently inside, stamped onto every run it reaches. Pushed and popped
+    /// by `append_revision_children`; a nested wrapper shadows the outer one,
+    /// so text inserted and then deleted carries the deletion.
+    revision: Option<RunRevision>,
 }
 
 impl ConvertCtx {
     pub(crate) fn new() -> Self {
-        Self { _private: () }
+        Self { revision: None }
     }
 }
 
@@ -174,6 +178,7 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
         .unwrap_or_default();
 
     let mut acc: Vec<RunElement> = Vec::new();
+    let revision = ctx.revision.clone();
     let flush = |acc: &mut Vec<RunElement>, out: &mut Vec<Inline>| {
         if !acc.is_empty() {
             out.push(Inline::TextRun(Box::new(TextRun {
@@ -181,6 +186,7 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
                 properties: props.clone(),
                 content: std::mem::take(acc),
                 rsids,
+                revision: revision.clone(),
             })));
         }
     };
@@ -288,12 +294,13 @@ fn run_break(br: BrXml) -> RunElement {
 /// content. Shared by `<w:p>`, `<w:hyperlink>`, and `<w:fldSimple>`, and used
 /// recursively to flatten revision/structural wrappers.
 ///
-/// Revision handling is the "accept all changes" (final) view: insert-side
-/// wrappers (`<w:ins>`, `<w:moveTo>`) and structural wrappers (`<w:smartTag>`,
-/// `<w:customXml>`) are flattened in place and rendered; delete-side wrappers
-/// (`<w:del>`, `<w:moveFrom>`) are dropped along with their content. Nested
-/// wrappers re-apply the same rules — e.g. a `<w:del>` inside a `<w:ins>` is
-/// still dropped.
+/// Tracked changes (issue #154): `<w:ins>`/`<w:del>` wrappers are flattened
+/// with their runs stamped [`RunRevision`], keeping unaccepted deletions in
+/// the model — the renderer's `w:revisionView` decision (marked, plain, or
+/// suppressed) needs them there. Structural wrappers (`<w:smartTag>`,
+/// `<w:customXml>`) and `<w:moveTo>` are flattened unmarked; `<w:moveFrom>`
+/// (the source copy of moved text) is dropped so the move isn't duplicated.
+/// Nested wrappers shadow: text inserted then deleted carries the deletion.
 fn convert_para_children(children: Vec<ParaChildXml>, ctx: &mut ConvertCtx) -> Vec<Inline> {
     let mut content = Vec::new();
     append_para_children(children, &mut content, ctx);
@@ -321,17 +328,72 @@ fn append_para_children(
             ParaChildXml::BookmarkEnd(b) => {
                 content.push(Inline::BookmarkEnd(BookmarkId::new(b.id)));
             }
-            // Insert-side revision + structural wrappers: flatten and render.
-            ParaChildXml::Ins(w)
-            | ParaChildXml::MoveTo(w)
-            | ParaChildXml::SmartTag(w)
-            | ParaChildXml::CustomXml(w) => append_para_children(w.content, content, ctx),
-            // Delete-side revision wrappers: content is deleted — drop it.
-            ParaChildXml::Del(_) | ParaChildXml::MoveFrom(_) => {}
+            // Tracked-change wrappers (issue #154): flattened, with each run
+            // inside stamped as inserted or deleted — which way a stamped run
+            // reaches the page (marked, plain, or suppressed) is the
+            // renderer's `w:revisionView` decision, not the parser's.
+            ParaChildXml::Ins(w) => {
+                append_revision_children(w, RevisionKind::Inserted, content, ctx)
+            }
+            ParaChildXml::Del(w) => {
+                append_revision_children(w, RevisionKind::Deleted, content, ctx)
+            }
+            // Structural wrappers: flatten and render. `<w:moveTo>` is the
+            // destination copy of moved text — part of the final document and
+            // not marked (Word's move marks are their own display family).
+            ParaChildXml::MoveTo(w) | ParaChildXml::SmartTag(w) | ParaChildXml::CustomXml(w) => {
+                append_para_children(w.content, content, ctx)
+            }
+            // The source copy of moved text: rendering both copies would
+            // duplicate it, so the source stays dropped in every view.
+            ParaChildXml::MoveFrom(_) => {}
             ParaChildXml::PPr(_) => {} // already captured on the parent
             ParaChildXml::Other => {}
         }
     }
+}
+
+/// Flatten one `<w:ins>`/`<w:del>` wrapper, stamping every run inside it.
+///
+/// Deleted content that cannot carry the stamp — an image or VML picture is
+/// its own `Inline`, not a run — is dropped in every view, exactly as the
+/// whole wrapper was before #154: a deleted picture never reaches the page,
+/// while deleted *text* now survives to be struck through or suppressed by
+/// the renderer. Hyperlinks and fields keep their frames (their runs carry
+/// the stamp) but shed unstampable children by the same rule.
+fn append_revision_children(
+    w: RunTrackChangeXml,
+    kind: RevisionKind,
+    content: &mut Vec<Inline>,
+    ctx: &mut ConvertCtx,
+) {
+    let outer = ctx.revision.take();
+    ctx.revision = Some(RunRevision {
+        kind,
+        author: w.author.unwrap_or_default(),
+    });
+    let mut inner = Vec::new();
+    append_para_children(w.content, &mut inner, ctx);
+    if kind == RevisionKind::Deleted {
+        drop_unstampable_deleted(&mut inner);
+    }
+    content.extend(inner);
+    ctx.revision = outer;
+}
+
+fn drop_unstampable_deleted(inlines: &mut Vec<Inline>) {
+    inlines.retain_mut(|inline| match inline {
+        Inline::Image(_) | Inline::Pict(_) => false,
+        Inline::Hyperlink(h) => {
+            drop_unstampable_deleted(&mut h.content);
+            true
+        }
+        Inline::Field(f) => {
+            drop_unstampable_deleted(&mut f.content);
+            true
+        }
+        _ => true,
+    });
 }
 
 fn convert_hyperlink(h: HyperlinkXml, ctx: &mut ConvertCtx) -> Hyperlink {
@@ -621,6 +683,13 @@ mod tests {
         s
     }
 
+    /// Parse a `<w:p>` and return the converted paragraph.
+    fn parse_para(xml: &str) -> Paragraph {
+        let p: ParaXml = quick_xml::de::from_str(xml).unwrap();
+        let mut ctx = ConvertCtx::new();
+        convert_paragraph(p, &mut ctx).0
+    }
+
     /// Parse a `<w:p>` and return the concatenated rendered text.
     fn para_text(xml: &str) -> String {
         let p: ParaXml = quick_xml::de::from_str(xml).unwrap();
@@ -645,40 +714,98 @@ mod tests {
 
     // ── Revision & structural wrappers (accept-all-changes / final view) ──
 
+    /// The revision stamp of each `TextRun` in a parsed paragraph, in order,
+    /// paired with its text — what the tracked-change tests below assert on.
+    fn para_revisions(xml: &str) -> Vec<(String, Option<RunRevision>)> {
+        parse_para(xml)
+            .content
+            .iter()
+            .filter_map(|i| match i {
+                Inline::TextRun(tr) => Some((
+                    tr.content
+                        .iter()
+                        .filter_map(|e| match e {
+                            RunElement::Text(t) => Some(t.as_str()),
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                    tr.revision.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
-    fn ins_content_is_rendered() {
-        // Tracked insertions are part of the final document — their runs must
-        // survive (previously `<w:ins>` hit the `Other` catch-all and vanished).
+    fn ins_content_is_kept_and_stamped_inserted() {
+        // Issue #154: the wrapper flattens, the runs carry the stamp — and
+        // the author, which revision marks are colored by.
+        let runs = para_revisions(
+            r#"<w:p xmlns:w="x"><w:ins w:author="Ann"><w:r><w:t>kept</w:t></w:r></w:ins></w:p>"#,
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "kept");
         assert_eq!(
-            para_text(r#"<w:p xmlns:w="x"><w:ins><w:r><w:t>kept</w:t></w:r></w:ins></w:p>"#),
-            "kept"
+            runs[0].1,
+            Some(RunRevision {
+                kind: RevisionKind::Inserted,
+                author: "Ann".into(),
+            })
         );
     }
 
     #[test]
-    fn del_content_is_dropped() {
-        // Tracked deletions are not in the final document — drop them.
+    fn del_content_is_kept_and_stamped_deleted() {
+        // Issue #154: an unaccepted deletion is document content — the
+        // renderer decides whether it paints struck through or not at all,
+        // so the parse must hand it over rather than pre-empt the decision.
+        let runs = para_revisions(
+            r#"<w:p xmlns:w="x"><w:del w:author="Ann"><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>"#,
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "gone");
         assert_eq!(
-            para_text(
-                r#"<w:p xmlns:w="x"><w:del><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>"#
-            ),
-            ""
+            runs[0].1.as_ref().map(|r| r.kind),
+            Some(RevisionKind::Deleted)
         );
     }
 
     #[test]
-    fn del_nested_in_ins_is_still_dropped() {
-        // Nested wrappers re-apply the rules: text inserted then deleted is
-        // deleted; the surrounding insertion is kept.
+    fn del_nested_in_ins_carries_the_deletion() {
+        // Nested wrappers shadow: text inserted then deleted is a deletion;
+        // the runs either side keep the insertion stamp.
+        let runs = para_revisions(
+            r#"<w:p xmlns:w="x"><w:ins w:author="Ann">
+                 <w:r><w:t>A</w:t></w:r>
+                 <w:del w:author="Ann"><w:r><w:delText>B</w:delText></w:r></w:del>
+                 <w:r><w:t>C</w:t></w:r>
+               </w:ins></w:p>"#,
+        );
+        let kinds: Vec<_> = runs
+            .iter()
+            .map(|(t, r)| (t.as_str(), r.as_ref().map(|r| r.kind)))
+            .collect();
         assert_eq!(
-            para_text(
-                r#"<w:p xmlns:w="x"><w:ins>
-                     <w:r><w:t>A</w:t></w:r>
-                     <w:del><w:r><w:delText>B</w:delText></w:r></w:del>
-                     <w:r><w:t>C</w:t></w:r>
-                   </w:ins></w:p>"#
-            ),
-            "AC"
+            kinds,
+            vec![
+                ("A", Some(RevisionKind::Inserted)),
+                ("B", Some(RevisionKind::Deleted)),
+                ("C", Some(RevisionKind::Inserted)),
+            ]
+        );
+    }
+
+    /// A deleted picture cannot carry the run stamp, so it stays out of the
+    /// model in every view — exactly the pre-#154 behavior for all deleted
+    /// content, now scoped to what a run cannot express.
+    #[test]
+    fn a_deleted_image_is_still_dropped() {
+        let para = parse_para(
+            r#"<w:p xmlns:w="x"><w:del w:author="Ann"><w:r><w:delText>t</w:delText></w:r><w:r><w:pict/></w:r></w:del></w:p>"#,
+        );
+        assert!(
+            !para.content.iter().any(|i| matches!(i, Inline::Pict(_))),
+            "no picture survives a deletion"
         );
     }
 

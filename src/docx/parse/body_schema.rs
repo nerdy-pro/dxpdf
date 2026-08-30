@@ -165,6 +165,11 @@ pub(crate) enum ParaChildXml {
 /// child is absorbed by `$value` and ignored via `ParaChildXml::Other`.
 #[derive(Deserialize, Default)]
 pub(crate) struct RunTrackChangeXml {
+    /// §17.13.5.14/.18 `@w:author` — who made the change; revision marks are
+    /// colored by it. `@w:id` and `@w:date` stay uncaptured: nothing renders
+    /// them, and the id numbers revisions within one save, not the document.
+    #[serde(rename = "@author")]
+    pub author: Option<String>,
     #[serde(rename = "$value", default)]
     pub content: Vec<ParaChildXml>,
 }

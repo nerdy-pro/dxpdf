@@ -36,6 +36,7 @@ fn run_with(elements: Vec<RunElement>) -> Inline {
         properties: RunProperties::default(),
         content: elements,
         rsids: RevisionIds::default(),
+        revision: None,
     }))
 }
 

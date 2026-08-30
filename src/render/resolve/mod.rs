@@ -9,6 +9,7 @@ pub mod images;
 pub mod locale;
 pub mod numbering;
 pub mod properties;
+pub mod revision;
 pub mod sections;
 pub mod shape_geometry;
 pub mod shape_visuals;
@@ -75,6 +76,15 @@ pub struct ResolvedDocument {
     /// §17.15.1.25: the document's default tab-stop interval (`w:defaultTabStop`,
     /// spec default 720 twips). Consumed by paragraph tab layout.
     pub default_tab_stop: Dimension<Twips>,
+    /// Issue #154: whether tracked-change marks are drawn (`w:revisionView`).
+    /// When false the final text renders — deletions suppressed, insertions
+    /// plain.
+    pub show_ins_del_marks: bool,
+    /// Issue #154: whether comment anchors and balloons are drawn.
+    pub show_comment_marks: bool,
+    /// Issue #154: revision-mark color per author, in first-appearance order
+    /// — see `resolve::revision`.
+    pub revision_colors: std::collections::HashMap<String, crate::render::resolve::color::RgbColor>,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -125,6 +135,11 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         embedded_fonts,
     } = doc;
 
+    // Before `resolve_sections` consumes the body: the palette walk needs it
+    // borrowed. Headers, footers and notes are not walked — a revision there
+    // still gets a mark, in the fallback color (see `resolve::revision`).
+    let revision_colors = revision::collect_revision_colors(&body);
+
     let resolved_styles = styles::resolve_styles(&styles, theme.as_ref());
     let resolved_numbering = numbering::resolve_numbering(&numbering);
     let sections = sections::resolve_sections(body, final_section, &headers, &footers);
@@ -149,6 +164,9 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         embedded_fonts,
         even_and_odd_headers: settings.even_and_odd_headers,
         default_tab_stop: settings.default_tab_stop,
+        show_ins_del_marks: settings.show_ins_del_marks,
+        show_comment_marks: settings.show_comment_marks,
+        revision_colors,
     }
 }
 
@@ -191,6 +209,7 @@ mod tests {
                 },
                 content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
+                revision: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
         }))

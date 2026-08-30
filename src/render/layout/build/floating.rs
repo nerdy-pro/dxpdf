@@ -1997,6 +1997,9 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            show_ins_del_marks: true,
+            show_comment_marks: true,
+            revision_colors: Default::default(),
         }
     }
 
@@ -2019,6 +2022,7 @@ mod tests {
                     properties: RunProperties::default(),
                     content: vec![RunElement::Text("hi".into())],
                     rsids: crate::model::RevisionIds::default(),
+                    revision: None,
                 }))],
                 rsids: crate::model::ParagraphRevisionIds::default(),
             }))],

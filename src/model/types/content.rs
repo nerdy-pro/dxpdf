@@ -97,6 +97,31 @@ pub struct TextRun {
     /// All share the run's properties.
     pub content: Vec<RunElement>,
     pub rsids: RevisionIds,
+    /// §17.13.5.14 / §17.13.5.18: the unaccepted tracked change this run sits
+    /// inside, when it does — the parse flattens the `<w:ins>`/`<w:del>`
+    /// wrapper and stamps each run it contained (issue #154). `None` for the
+    /// overwhelming majority of runs. Unlike `rsids` above — save-session
+    /// metadata nothing renders — this is document content: an unaccepted
+    /// deletion's text exists in the document *as a deletion*, and which way
+    /// it reaches the page (struck through, or suppressed) is the renderer's
+    /// `w:revisionView` decision, not the parser's.
+    pub revision: Option<RunRevision>,
+}
+
+/// The tracked change a [`TextRun`] belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunRevision {
+    pub kind: RevisionKind,
+    /// `@w:author` of the wrapper — what revision marks are colored by.
+    /// Empty when the document omits it.
+    pub author: String,
+}
+
+/// Which side of a tracked change: `<w:ins>` or `<w:del>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RevisionKind {
+    Inserted,
+    Deleted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

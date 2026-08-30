@@ -131,6 +131,7 @@ mod tests {
                 properties: RunProperties::default(),
                 content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
+                revision: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
         }))
