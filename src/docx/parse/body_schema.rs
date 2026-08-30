@@ -117,9 +117,10 @@ pub(crate) struct ParaXml {
 /// `moveTo`) and structural (`smartTag`/`customXml`) elements. These are
 /// modelled so `convert_para_children` can flatten them: insert-side and
 /// structural wrappers are rendered, delete-side wrappers are dropped (an
-/// "accept all changes" / final view). Remaining annotation elements
-/// (proofErr, permStart/End, commentRange*, sdt, ...) hit the `Other`
-/// catch-all and are discarded cleanly.
+/// "accept all changes" / final view). Comment range markers are modelled so
+/// the runs between them can be stamped (issue #154). Remaining annotation
+/// elements (proofErr, permStart/End, sdt, ...) hit the `Other` catch-all
+/// and are discarded cleanly.
 #[derive(Deserialize)]
 pub(crate) enum ParaChildXml {
     #[serde(rename = "r")]
@@ -132,6 +133,11 @@ pub(crate) enum ParaChildXml {
     BookmarkStart(BookmarkStartXml),
     #[serde(rename = "bookmarkEnd")]
     BookmarkEnd(BookmarkEndXml),
+    /// Issue #154: comment range markers — toggles for the run stamp.
+    #[serde(rename = "commentRangeStart")]
+    CommentRangeStart(BookmarkEndXml),
+    #[serde(rename = "commentRangeEnd")]
+    CommentRangeEnd(BookmarkEndXml),
     /// §17.13.5.18 `<w:ins>` — insert-side revision wrapper; content is kept.
     #[serde(rename = "ins")]
     Ins(RunTrackChangeXml),
@@ -244,6 +250,10 @@ pub(crate) enum RunChildXml {
     /// (`commentRangeStart/End`) are handled at the paragraph level above.
     #[serde(rename = "commentReference")]
     CommentReference(BookmarkEndXml),
+    /// `<w:annotationRef>` — the reference mark inside a comment's own body
+    /// (issue #154). Dropped: the balloon labels itself with the author.
+    #[serde(rename = "annotationRef")]
+    AnnotationRef(IgnoredXml),
     /// `<w:rPr>` captured separately; included here for serde ordering.
     #[serde(rename = "rPr")]
     RPr(Box<RPrXml>),

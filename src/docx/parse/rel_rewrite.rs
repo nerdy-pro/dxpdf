@@ -78,6 +78,7 @@ fn rewrite_in_inlines(inlines: &mut [Inline], remap: &HashMap<RelId, RelId>) {
                 rewrite_in_inlines(&mut h.content, remap);
             }
             Inline::Field(f) => rewrite_in_inlines(&mut f.content, remap),
+            Inline::CommentRef(_) => {}
             Inline::AlternateContent(ac) => {
                 // §M.2.2: the renderer prefers a supported `<mc:Choice>` over
                 // `<mc:Fallback>` (see `layout::live_mc_branch`), so rIds

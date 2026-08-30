@@ -153,7 +153,9 @@ fn build_analysis(fragments: &[Fragment]) -> (String, Vec<Option<std::ops::Range
                     Fragment::LineBreak { .. }
                     | Fragment::PageBreak { .. }
                     | Fragment::ColumnBreak => text.push('\n'),
-                    Fragment::Bookmark { .. } | Fragment::Text { .. } => {}
+                    Fragment::Bookmark { .. }
+                    | Fragment::CommentAnchor(_)
+                    | Fragment::Text { .. } => {}
                 }
                 ranges.push(None);
             }

@@ -25,6 +25,7 @@ fn empty_document() -> Document {
         footers: HashMap::new(),
         footnotes: HashMap::new(),
         endnotes: HashMap::new(),
+        comments: Default::default(),
         media: HashMap::new(),
         embedded_fonts: vec![],
     }
@@ -37,6 +38,7 @@ fn run_with(elements: Vec<RunElement>) -> Inline {
         content: elements,
         rsids: RevisionIds::default(),
         revision: None,
+        comment: None,
     }))
 }
 

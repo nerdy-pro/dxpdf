@@ -575,6 +575,8 @@ fn render_page(
                 let name_data = Data::new_copy(&name_bytes);
                 canvas.annotate_link_to_destination(to_rect(*rect), &name_data);
             }
+            // Issue #154: consumed by the balloon pass; inert at paint.
+            DrawCommand::CommentAnchor { .. } => {}
             DrawCommand::NamedDestination { position, name } => {
                 let mut name_bytes = name.as_bytes().to_vec();
                 name_bytes.push(0);

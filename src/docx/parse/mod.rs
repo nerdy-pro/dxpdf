@@ -2,6 +2,7 @@
 
 pub mod body;
 pub mod body_schema;
+pub mod comments;
 pub mod drawing;
 pub mod fonts;
 pub mod notes;
@@ -227,6 +228,19 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         }
     }
 
+    // Phase 4c (issue #154): the comments part — same wiring as the notes.
+    let mut comments = HashMap::new();
+    if let Some(c_rel) = doc_rels.find_by_type(&RelationshipType::Comments) {
+        let path = zip::resolve_target(doc_dir, &c_rel.target);
+        if let Some(data) = package.get_part(&path) {
+            comments = comments::parse_comments(data)?;
+            let remap = load_part_rel_remap(&path, &mut package, &mut media)?;
+            for comment in comments.values_mut() {
+                rel_rewrite::rewrite_part_rels_in_blocks(&mut comment.content, &remap);
+            }
+        }
+    }
+
     // Phase 5: Resolve body hyperlink RelIds to actual URLs.
     // Headers/footers/footnotes/endnotes already had both their image
     // and hyperlink rIds rewritten through `load_part_rel_remap` —
@@ -245,6 +259,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
         footers,
         footnotes,
         endnotes,
+        comments,
         media,
         embedded_fonts,
     })

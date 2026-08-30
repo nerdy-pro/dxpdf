@@ -85,6 +85,8 @@ pub struct ResolvedDocument {
     /// Issue #154: revision-mark color per author, in first-appearance order
     /// — see `resolve::revision`.
     pub revision_colors: std::collections::HashMap<String, crate::render::resolve::color::RgbColor>,
+    /// Issue #154: comment content keyed by comment ID, for the balloon pass.
+    pub comments: HashMap<crate::model::CommentId, crate::model::Comment>,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -131,6 +133,7 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         footers,
         footnotes,
         endnotes,
+        comments,
         media,
         embedded_fonts,
     } = doc;
@@ -138,7 +141,17 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
     // Before `resolve_sections` consumes the body: the palette walk needs it
     // borrowed. Headers, footers and notes are not walked — a revision there
     // still gets a mark, in the fallback color (see `resolve::revision`).
-    let revision_colors = revision::collect_revision_colors(&body);
+    // Comment authors join the same numbering, in id order (deterministic
+    // where map iteration is not), so a person who both edited and commented
+    // keeps one color.
+    let mut revision_colors = revision::collect_revision_colors(&body);
+    {
+        let mut ids: Vec<_> = comments.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            revision::register(&comments[&id].author, &mut revision_colors);
+        }
+    }
 
     let resolved_styles = styles::resolve_styles(&styles, theme.as_ref());
     let resolved_numbering = numbering::resolve_numbering(&numbering);
@@ -167,6 +180,7 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         show_ins_del_marks: settings.show_ins_del_marks,
         show_comment_marks: settings.show_comment_marks,
         revision_colors,
+        comments,
     }
 }
 
@@ -188,6 +202,7 @@ mod tests {
             footers: HashMap::new(),
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
+            comments: Default::default(),
             media: HashMap::new(),
             embedded_fonts: vec![],
         }
@@ -210,6 +225,7 @@ mod tests {
                 content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
                 revision: None,
+                comment: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
         }))

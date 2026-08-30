@@ -3,7 +3,7 @@
 use crate::field::FieldInstruction;
 
 use super::drawing::Image;
-use super::identifiers::{BookmarkId, NoteId, RevisionIds, StyleId};
+use super::identifiers::{BookmarkId, CommentId, NoteId, RevisionIds, StyleId};
 use super::paragraph::Paragraph;
 use super::run_properties::RunProperties;
 use super::section::SectionProperties;
@@ -67,6 +67,9 @@ pub enum Inline {
     Pict(Pict),
     /// MCE §M.2.1: markup compatibility alternate content.
     AlternateContent(AlternateContent),
+    /// `<w:commentReference>` (issue #154): the comment's anchor — where the
+    /// balloon's connector attaches. Zero-width, like a bookmark target.
+    CommentRef(CommentId),
 }
 
 /// §17.16.18: complex field character marker.
@@ -106,6 +109,11 @@ pub struct TextRun {
     /// it reaches the page (struck through, or suppressed) is the renderer's
     /// `w:revisionView` decision, not the parser's.
     pub revision: Option<RunRevision>,
+    /// Issue #154: the comment range this run sits inside, when it does —
+    /// the parse tracks `commentRangeStart`/`End` markers (which can span
+    /// paragraphs) and stamps the runs between them, the same shape as
+    /// `revision` above. The first-opened range wins when ranges overlap.
+    pub comment: Option<CommentId>,
 }
 
 /// The tracked change a [`TextRun`] belongs to.
@@ -122,6 +130,19 @@ pub struct RunRevision {
 pub enum RevisionKind {
     Inserted,
     Deleted,
+}
+
+/// One comment from the comments part (issue #154): who wrote it and its
+/// block content — the balloon body. The `@w:date` attribute stays
+/// uncaptured: the balloon shows author and text, and nothing else reads it.
+#[derive(Clone, Debug)]
+pub struct Comment {
+    /// `@w:author` — balloons are labeled and colored by it.
+    pub author: String,
+    /// `@w:initials`, when present — the compact label Word puts on the
+    /// anchor; empty when absent.
+    pub initials: String,
+    pub content: Vec<Block>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

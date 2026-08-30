@@ -205,6 +205,7 @@ mod tests {
             footers: HashMap::new(),
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
+            comments: Default::default(),
             media: HashMap::new(),
             embedded_fonts: vec![],
         }
@@ -223,6 +224,7 @@ mod tests {
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
             revision: None,
+            comment: None,
         }))
     }
 

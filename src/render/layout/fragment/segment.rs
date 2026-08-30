@@ -341,6 +341,7 @@ mod tests {
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
             revision: None,
+            comment: None,
         }))
     }
 
@@ -351,6 +352,7 @@ mod tests {
             content: elements,
             rsids: RevisionIds::default(),
             revision: None,
+            comment: None,
         }))
     }
 

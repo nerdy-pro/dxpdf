@@ -45,6 +45,18 @@ pub const REVISION_PALETTE: [RgbColor; 6] = [
     },
 ];
 
+/// Issue #154: the fill behind a commented range — one fixed pale tone
+/// rather than an author tint, so overlapping ranges and multi-author
+/// documents stay readable. Word's print view brackets the range instead of
+/// shading it; the shading is this engine's choice, made because a bracket
+/// needs glyph-height geometry the fragment layer doesn't expose while
+/// `Fragment::Text.shading` is already plumbed end to end.
+pub const COMMENT_RANGE_SHADING: RgbColor = RgbColor {
+    r: 255,
+    g: 235,
+    b: 156,
+};
+
 /// The color for an author no walk registered — a revision in a part the
 /// palette walk does not cover (a header, say) still gets a mark.
 pub const REVISION_FALLBACK_COLOR: RgbColor = REVISION_PALETTE[0];
@@ -115,6 +127,7 @@ mod tests {
                 kind: RevisionKind::Inserted,
                 author: author.into(),
             }),
+            comment: None,
         }))
     }
 

@@ -413,6 +413,8 @@ const ALL_FILES: &[&str] = &[
     "hidden-text.docx",
     "tracked-changes.docx",
     "tracked-changes-final.docx",
+    "comments.docx",
+    "comments-hidden.docx",
 ];
 
 #[test]

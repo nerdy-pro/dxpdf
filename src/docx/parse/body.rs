@@ -59,11 +59,29 @@ pub(crate) struct ConvertCtx {
     /// by `append_revision_children`; a nested wrapper shadows the outer one,
     /// so text inserted and then deleted carries the deletion.
     revision: Option<RunRevision>,
+    /// Issue #154: comment ranges open at this point of the walk, in opening
+    /// order — `commentRangeStart` pushes, `commentRangeEnd` removes. Runs
+    /// between the markers are stamped with the first-opened id. Lives on the
+    /// ctx because a range can span paragraphs (and, at block level, tables).
+    open_comments: Vec<CommentId>,
 }
 
 impl ConvertCtx {
     pub(crate) fn new() -> Self {
-        Self { revision: None }
+        Self {
+            revision: None,
+            open_comments: Vec::new(),
+        }
+    }
+
+    fn open_comment(&mut self, id: CommentId) {
+        if !self.open_comments.contains(&id) {
+            self.open_comments.push(id);
+        }
+    }
+
+    fn close_comment(&mut self, id: CommentId) {
+        self.open_comments.retain(|c| *c != id);
     }
 }
 
@@ -102,11 +120,14 @@ pub(crate) fn convert_container(
                     }
                 }
             }
+            // Issue #154: block-level comment range markers toggle the same
+            // stamp the paragraph-level ones do — a range can open between
+            // paragraphs and close inside one, or span a table.
+            BlockChildXml::CommentRangeStart(c) => ctx.open_comment(CommentId::new(c.id)),
+            BlockChildXml::CommentRangeEnd(c) => ctx.close_comment(CommentId::new(c.id)),
             // Block-level markers and ignored elements — renderer doesn't use them.
             BlockChildXml::BookmarkStart(_)
             | BlockChildXml::BookmarkEnd(_)
-            | BlockChildXml::CommentRangeStart(_)
-            | BlockChildXml::CommentRangeEnd(_)
             | BlockChildXml::ProofErr(_)
             | BlockChildXml::Other => {}
         }
@@ -179,6 +200,7 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
 
     let mut acc: Vec<RunElement> = Vec::new();
     let revision = ctx.revision.clone();
+    let comment = ctx.open_comments.first().copied();
     let flush = |acc: &mut Vec<RunElement>, out: &mut Vec<Inline>| {
         if !acc.is_empty() {
             out.push(Inline::TextRun(Box::new(TextRun {
@@ -187,6 +209,7 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
                 content: std::mem::take(acc),
                 rsids,
                 revision: revision.clone(),
+                comment,
             })));
         }
     };
@@ -268,7 +291,13 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
                 out.push(Inline::AlternateContent(convert_alt_content(ac, ctx)));
             }
             RunChildXml::RPr(_) => {} // already captured via r.r_pr
-            RunChildXml::CommentReference(_) => {} // comments are not rendered
+            RunChildXml::AnnotationRef(_) => {}
+            RunChildXml::CommentReference(c) => {
+                // Issue #154: the balloon's anchor. Emitted between text
+                // accumulations, like a bookmark.
+                flush(&mut acc, out);
+                out.push(Inline::CommentRef(CommentId::new(c.id)));
+            }
         }
     }
     flush(&mut acc, out);
@@ -328,6 +357,8 @@ fn append_para_children(
             ParaChildXml::BookmarkEnd(b) => {
                 content.push(Inline::BookmarkEnd(BookmarkId::new(b.id)));
             }
+            ParaChildXml::CommentRangeStart(c) => ctx.open_comment(CommentId::new(c.id)),
+            ParaChildXml::CommentRangeEnd(c) => ctx.close_comment(CommentId::new(c.id)),
             // Tracked-change wrappers (issue #154): flattened, with each run
             // inside stamped as inserted or deleted — which way a stamped run
             // reaches the page (marked, plain, or suppressed) is the
