@@ -376,6 +376,9 @@ fn build_note_blocks(
                     text_scale: 1.0,
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
+                    strike_lines: 0,
+                    strike_position: Pt::ZERO,
+                    strike_thickness: Pt::ZERO,
                 });
                 let ref_size =
                     font.size * crate::render::layout::fragment::SUPERSCRIPT_FONT_SIZE_RATIO;

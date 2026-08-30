@@ -839,17 +839,24 @@ fn wingdings_pua_to_unicode(code: u32) -> Option<char> {
     })
 }
 
-/// Populate underline position/thickness from Skia font metrics.
+/// Populate underline and strike position/thickness from Skia font metrics.
 pub(super) fn populate_underline_metrics(fragments: &mut [Fragment], measurer: &TextMeasurer) {
     for frag in fragments.iter_mut() {
         if let Fragment::Text { font, .. } = frag {
-            if font.underline {
-                // Underlined runs only; `make_mut` clones the shared font so
+            if font.underline || font.strike_lines > 0 {
+                // Decorated runs only; `make_mut` clones the shared font so
                 // the metrics can be written back.
                 let fp = std::rc::Rc::make_mut(font);
-                let (pos, thickness) = measurer.underline_metrics(fp);
-                fp.underline_position = pos;
-                fp.underline_thickness = thickness;
+                if fp.underline {
+                    let (pos, thickness) = measurer.underline_metrics(fp);
+                    fp.underline_position = pos;
+                    fp.underline_thickness = thickness;
+                }
+                if fp.strike_lines > 0 {
+                    let (pos, thickness) = measurer.strike_metrics(fp);
+                    fp.strike_position = pos;
+                    fp.strike_thickness = thickness;
+                }
             }
         }
     }

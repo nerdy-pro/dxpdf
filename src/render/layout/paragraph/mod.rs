@@ -558,6 +558,9 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             }),
             color: RgbColor::BLACK,
             width: Pt::new(width),
@@ -682,6 +685,72 @@ mod tests {
         );
         assert_eq!(result.size.height.raw(), 14.0, "default line height");
         assert!(result.commands.is_empty());
+    }
+
+    /// §17.3.2.37: a struck run emits one `DrawCommand::Line` through the
+    /// text — above the baseline by the font's strike position, spanning the
+    /// fragment, in the run's color — where an underline sits *below* it.
+    /// The helper's metrics put the baseline at ascent = 10pt.
+    #[test]
+    fn a_struck_run_emits_a_line_above_the_baseline() {
+        let mut frags = vec![text_frag("gone", 30.0)];
+        if let Fragment::Text { font, .. } = &mut frags[0] {
+            let fp = std::rc::Rc::make_mut(font);
+            fp.strike_lines = 1;
+            fp.strike_position = Pt::new(3.0);
+            fp.strike_thickness = Pt::new(1.5);
+        }
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &ParagraphStyle::default(),
+            Pt::new(14.0),
+            None,
+        );
+        let lines: Vec<_> = result
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Line { line, width, .. } => Some((line, *width)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 1, "one strike line for w:strike");
+        let (line, width) = lines[0];
+        assert_eq!(line.start.y.raw(), 7.0, "baseline 10 − strike position 3");
+        assert_eq!(line.end.y.raw(), 7.0);
+        assert_eq!(line.end.x.raw() - line.start.x.raw(), 30.0, "spans the run");
+        assert_eq!(width.raw(), 1.5, "stroke uses the strike thickness");
+    }
+
+    /// §17.3.2.9 `w:dstrike`: two lines straddling the single-strike position
+    /// one thickness apart.
+    #[test]
+    fn a_double_struck_run_emits_two_straddling_lines() {
+        let mut frags = vec![text_frag("gone", 30.0)];
+        if let Fragment::Text { font, .. } = &mut frags[0] {
+            let fp = std::rc::Rc::make_mut(font);
+            fp.strike_lines = 2;
+            fp.strike_position = Pt::new(3.0);
+            fp.strike_thickness = Pt::new(1.0);
+        }
+        let result = layout_paragraph(
+            &frags,
+            &body_constraints(400.0),
+            &ParagraphStyle::default(),
+            Pt::new(14.0),
+            None,
+        );
+        let mut ys: Vec<f32> = result
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Line { line, .. } => Some(line.start.y.raw()),
+                _ => None,
+            })
+            .collect();
+        ys.sort_by(f32::total_cmp);
+        assert_eq!(ys, vec![6.0, 8.0], "7 ± thickness");
     }
 
     #[test]
@@ -2329,6 +2398,9 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            strike_lines: 0,
+            strike_position: Pt::ZERO,
+            strike_thickness: Pt::ZERO,
         })
     }
 

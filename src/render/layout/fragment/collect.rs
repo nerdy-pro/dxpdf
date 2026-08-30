@@ -413,6 +413,9 @@ fn emit_field_substitution<F>(
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             },
             TextRunStyle {
                 color: default_color,
@@ -460,6 +463,9 @@ where
         text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        strike_lines: 0,
+        strike_position: Pt::ZERO,
+        strike_thickness: Pt::ZERO,
     };
     let (w, m) = measure_text(&text, &font);
     Fragment::Text {
@@ -1023,6 +1029,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let ch = char::from_u32(sym.char_code as u32).unwrap_or('\u{FFFD}');
                     let text = ch.to_string();
@@ -1075,6 +1084,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     // Raise the mark clear of the baseline (see the constant).
@@ -1117,6 +1129,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     let baseline_offset = -(default_size * super::NOTE_REF_BASELINE_OFFSET_RATIO);
