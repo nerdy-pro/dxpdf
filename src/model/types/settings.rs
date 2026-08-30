@@ -14,6 +14,14 @@ pub struct DocumentSettings {
     pub rsid_root: Option<RevisionSaveId>,
     /// All revision save IDs recorded in this document's history.
     pub rsids: Vec<RevisionSaveId>,
+    /// `w:revisionView` (issue #154): whether the document's saved view shows
+    /// insertion/deletion marks. `true` — the spec default when the element
+    /// or its attributes are absent — renders unaccepted deletions struck
+    /// through and insertions underlined; `false` renders the final text:
+    /// deletions suppressed, insertions plain.
+    pub show_ins_del_marks: bool,
+    /// `w:revisionView` likewise for comment anchors and balloons.
+    pub show_comment_marks: bool,
 }
 
 impl Default for DocumentSettings {
@@ -27,6 +35,9 @@ impl Default for DocumentSettings {
             even_and_odd_headers: false,
             rsid_root: None,
             rsids: Vec::new(),
+            // `w:revisionView` absent means nothing was hidden.
+            show_ins_del_marks: true,
+            show_comment_marks: true,
         }
     }
 }

@@ -149,6 +149,42 @@ pub fn build_document_endnotes(
     endnotes
 }
 
+/// Issue #154: build every comment's body once, for the balloon pass — the
+/// same shape as the endnote prebuild above. Keyed by comment id; paragraphs
+/// come back as (fragments, style) pairs ready for `layout_paragraph` at
+/// balloon width. Ids are processed in order so any shared build state stays
+/// deterministic.
+pub fn build_comment_bodies(
+    ctx: &BuildContext,
+    state: &mut BuildState,
+) -> std::collections::HashMap<crate::model::CommentId, Vec<(Vec<Fragment>, ParagraphStyle)>> {
+    let mut out = std::collections::HashMap::new();
+    let mut ids: Vec<_> = ctx.resolved.comments.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let comment = &ctx.resolved.comments[&id];
+        // The note builder lays out paragraphs only; a table in a comment
+        // body is dropped, like a table in a footnote. Say so rather than
+        // silently shrinking the balloon.
+        if comment
+            .content
+            .iter()
+            .any(|b| !matches!(b, crate::model::Block::Paragraph(_)))
+        {
+            log::warn!(
+                "comment {:?}: non-paragraph content (a table?) is not rendered in the balloon",
+                id
+            );
+        }
+        let paras = block::build_note_content("", &comment.content, ctx, state)
+            .into_iter()
+            .map(|(_, frags, style)| (frags, style))
+            .collect();
+        out.insert(id, paras);
+    }
+    out
+}
+
 /// Collected header/footer content with layout metadata.
 pub struct HeaderFooterContent {
     /// Layout blocks (paragraphs and tables) for stacking.
@@ -381,6 +417,10 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            show_ins_del_marks: true,
+            show_comment_marks: true,
+            revision_colors: Default::default(),
+            comments: Default::default(),
         }
     }
 
@@ -391,6 +431,7 @@ mod tests {
             mark_run_properties: None,
             content: Vec::new(),
             rsids: model::ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 

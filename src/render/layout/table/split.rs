@@ -419,9 +419,9 @@ fn partition_lines(lines: &[CellLine], cut: &CellCut) -> (Vec<CellLine>, Vec<Cel
 /// `Text` we use the baseline; for rect/line/image we use the top edge.
 fn command_primary_y(cmd: &DrawCommand) -> Pt {
     match cmd {
-        DrawCommand::Text { position, .. } | DrawCommand::NamedDestination { position, .. } => {
-            position.y
-        }
+        DrawCommand::Text { position, .. }
+        | DrawCommand::NamedDestination { position, .. }
+        | DrawCommand::CommentAnchor { position, .. } => position.y,
         DrawCommand::Underline { line, .. } | DrawCommand::Line { line, .. } => line.start.y,
         DrawCommand::Image { rect, .. }
         | DrawCommand::EmojiCluster { rect, .. }
@@ -467,6 +467,9 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             }),
             color: RgbColor::BLACK,
             width: Pt::new(30.0),

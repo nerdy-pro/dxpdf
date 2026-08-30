@@ -59,6 +59,27 @@ pub(super) fn build_block(
 /// Build a paragraph into a layout block.
 /// Handles drop cap detection (§17.3.1.11), list labels, floating images.
 /// For table cells, pass `table_style` and `cond` to apply table formatting cascade.
+/// Whether every visible inline of `p` is a deletion-stamped run — nothing
+/// would survive the final view's suppression filter. Invisible markers
+/// (bookmarks, comment anchors) don't count as survivors; anything else
+/// visible does, conservatively.
+fn paragraph_fully_deleted(p: &Paragraph) -> bool {
+    fn deleted(inlines: &[model::Inline]) -> bool {
+        inlines.iter().all(|i| match i {
+            model::Inline::TextRun(tr) => tr
+                .revision
+                .as_ref()
+                .is_some_and(|r| r.kind == model::RevisionKind::Deleted),
+            model::Inline::Hyperlink(h) => deleted(&h.content),
+            model::Inline::BookmarkStart { .. }
+            | model::Inline::BookmarkEnd(_)
+            | model::Inline::CommentRef(_) => true,
+            _ => false,
+        })
+    }
+    deleted(&p.content)
+}
+
 pub(super) fn build_paragraph_block(
     p: &Paragraph,
     ctx: &BuildContext,
@@ -67,6 +88,15 @@ pub(super) fn build_paragraph_block(
     table_style: Option<&ResolvedStyle>,
     cond: Option<&CellConditionalFormatting>,
 ) -> Option<LayoutBlock> {
+    // §17.13.5.15 (issue #154): in the final view, a paragraph whose mark is
+    // deleted and whose visible content is entirely deletion-stamped merges
+    // away — emitting it would leave a phantom blank line where Word shows
+    // nothing, shifting everything below by a line height. (True merging —
+    // surviving content joining the *next* paragraph when only the mark is
+    // deleted — is not modelled; such a paragraph keeps its line.)
+    if !ctx.resolved.show_ins_del_marks && p.mark_deleted && paragraph_fully_deleted(p) {
+        return None;
+    }
     let (mut fragments, mut merged_props) = build_fragments(p, ctx, state, table_style, cond);
     // Drain immediately: this paragraph owns exactly the references its own
     // fragment collection recorded. Draining before the drop-cap early return
@@ -360,8 +390,9 @@ fn build_note_blocks(
             // the paragraph that hosts this note.
             let _ = state.footnotes.take_pending();
 
-            // Prepend display number to the first paragraph.
-            if i == 0 && !frags.is_empty() {
+            // Prepend display number to the first paragraph. A comment body
+            // reuses this builder with an empty display and no prefix.
+            if i == 0 && !display_num.is_empty() && !frags.is_empty() {
                 let num_text = format!("{}  ", display_num);
                 // §17.8.3.2 / §17.3.2.14: fall back to the document-level spec
                 // defaults rather than restating a font name here.
@@ -376,6 +407,9 @@ fn build_note_blocks(
                     text_scale: 1.0,
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
+                    strike_lines: 0,
+                    strike_position: Pt::ZERO,
+                    strike_thickness: Pt::ZERO,
                 });
                 let ref_size =
                     font.size * crate::render::layout::fragment::SUPERSCRIPT_FONT_SIZE_RATIO;
@@ -576,6 +610,13 @@ pub(super) fn build_fragments(
         // because fragments are built before the paragraph's style is —
         // `paragraph_locale` runs later, off this same cascade.
         locale_tag: super::convert::resolve_lang_tag(para, ctx.resolved),
+        // Issue #154: `Some` renders revision marks; `None` is the
+        // `w:revisionView` final view.
+        revision_palette: ctx
+            .resolved
+            .show_ins_del_marks
+            .then_some(&ctx.resolved.revision_colors),
+        comment_marks: ctx.resolved.show_comment_marks,
     };
     let mut fragments = collect_fragments(
         &para.content,
@@ -620,6 +661,10 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            show_ins_del_marks: true,
+            show_comment_marks: true,
+            revision_colors: Default::default(),
+            comments: Default::default(),
         }
     }
 
@@ -630,6 +675,7 @@ mod tests {
             mark_run_properties: None,
             content,
             rsids: model::ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }
     }
 
@@ -640,6 +686,8 @@ mod tests {
             properties: model::RunProperties::default(),
             content: vec![model::RunElement::PageBreak],
             rsids: model::RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -649,6 +697,8 @@ mod tests {
             properties: model::RunProperties::default(),
             content: vec![model::RunElement::Text(s.to_string())],
             rsids: model::RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 

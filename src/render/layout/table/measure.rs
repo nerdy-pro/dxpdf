@@ -331,6 +331,9 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            strike_lines: 0,
+            strike_position: Pt::ZERO,
+            strike_thickness: Pt::ZERO,
         });
         crate::render::layout::section::LayoutBlock::Paragraph {
             fragments: words

@@ -340,6 +340,8 @@ mod tests {
             properties: RunProperties::default(),
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -349,6 +351,8 @@ mod tests {
             properties: RunProperties::default(),
             content: elements,
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 

@@ -28,6 +28,21 @@ impl NoteId {
     }
 }
 
+/// Identifier of a comment (`w:comment/@w:id`), the key that ties the three
+/// body anchors (`commentRangeStart`/`End`, `commentReference`) to the
+/// comment's content in the comments part.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CommentId(i64);
+
+impl CommentId {
+    pub fn new(v: i64) -> Self {
+        Self(v)
+    }
+    pub fn value(&self) -> i64 {
+        self.0
+    }
+}
+
 /// A bookmark ID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BookmarkId(i64);

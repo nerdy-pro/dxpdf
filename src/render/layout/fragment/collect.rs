@@ -129,6 +129,8 @@ fn resolve_run_styling<F>(
     paragraph_run_defaults: Option<&RunProperties>,
     theme: Option<&crate::model::Theme>,
     auto_fit: crate::render::layout::ShapeAutoFit,
+    revision_palette: Option<&std::collections::HashMap<String, RgbColor>>,
+    comment_marks: bool,
     measure_text: &F,
 ) -> (FontProps, TextRunStyle)
 where
@@ -204,12 +206,35 @@ where
     // §17.3.2.4: run-level border (filtered to drop the no-border styles).
     let border = run_border_to_fragment(effective_props.border.get());
 
-    let text_style = TextRunStyle {
+    let mut text_style = TextRunStyle {
         color,
         shading,
         border,
         baseline_offset,
     };
+
+    // Issue #154: a run inside an unaccepted tracked change wears the
+    // revision mark — author color on text and decorations alike (the same
+    // fragment color feeds the underline and strike), underline for an
+    // insertion, strike-through for a deletion. `None` palette is the
+    // `w:revisionView` final view; the *suppression* of deleted runs in that
+    // view happens before styling, in `collect_fragments`' hidden filter.
+    // Issue #154: the pale wash behind a commented range. A run's own
+    // shading (or highlight) wins — the wash is context, not formatting.
+    if comment_marks && tr.comment.is_some() && text_style.shading.is_none() {
+        text_style.shading = Some(crate::render::resolve::revision::COMMENT_RANGE_SHADING);
+    }
+
+    if let (Some(rev), Some(palette)) = (&tr.revision, revision_palette) {
+        text_style.color = palette
+            .get(&rev.author)
+            .copied()
+            .unwrap_or(crate::render::resolve::revision::REVISION_FALLBACK_COLOR);
+        match rev.kind {
+            crate::model::RevisionKind::Inserted => font.underline = true,
+            crate::model::RevisionKind::Deleted => font.strike_lines = font.strike_lines.max(1),
+        }
+    }
     (font, text_style)
 }
 
@@ -382,6 +407,8 @@ fn emit_field_substitution<F>(
     paragraph_run_defaults: Option<&RunProperties>,
     theme: Option<&crate::model::Theme>,
     auto_fit: crate::render::layout::ShapeAutoFit,
+    revision_palette: Option<&std::collections::HashMap<String, RgbColor>>,
+    comment_marks: bool,
     hyperlink_url: Option<&LinkTarget>,
     measure_text: &F,
     measurer: Option<&crate::render::layout::measurer::TextMeasurer<'_>>,
@@ -399,6 +426,8 @@ fn emit_field_substitution<F>(
             paragraph_run_defaults,
             theme,
             auto_fit,
+            revision_palette,
+            comment_marks,
             measure_text,
         ),
         _ => (
@@ -413,6 +442,9 @@ fn emit_field_substitution<F>(
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             },
             TextRunStyle {
                 color: default_color,
@@ -439,6 +471,11 @@ fn emit_field_substitution<F>(
 /// Not the complex-field path: a complex field's MERGEFORMAT substitution
 /// goes through [`emit_field_substitution`] instead, which prefers the
 /// field's own first result run over paragraph defaults.
+/// Known limit (issue #154): a substituted dynamic value built here wears no
+/// revision mark even when its field sits inside `<w:ins>` — the substitution
+/// takes paragraph defaults, not the stamped result run. The cached result
+/// path does wear the mark; a deleted field never reaches here at all (the
+/// parse drops it, see `drop_unstampable_deleted`).
 fn make_field_text_fragment<F>(
     text: Rc<str>,
     default_family: &str,
@@ -460,6 +497,9 @@ where
         text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        strike_lines: 0,
+        strike_position: Pt::ZERO,
+        strike_thickness: Pt::ZERO,
     };
     let (w, m) = measure_text(&text, &font);
     Fragment::Text {
@@ -514,6 +554,14 @@ pub struct FragmentCtx<'a> {
     /// than a `Locale` because its one consumer here — §17.16.4.2 date
     /// pictures — needs the region a `Locale` bucket discards.
     pub locale_tag: Option<&'a str>,
+    /// Issue #154: per-author revision-mark colors — `Some` in the markup
+    /// view, `None` in the `w:revisionView` final view, where inserted runs
+    /// render plain and deleted runs are filtered out before styling.
+    pub revision_palette:
+        Option<&'a std::collections::HashMap<String, crate::render::resolve::color::RgbColor>>,
+    /// Issue #154: whether comment marks render (`w:revisionView`). Gates
+    /// both the range shading and the anchors the balloon pass consumes.
+    pub comment_marks: bool,
 }
 
 /// §17.3.2 `w:vanish`: whether this run is hidden text, and so contributes
@@ -581,7 +629,19 @@ where
     // would avoid the clone in that minority too, at the price of threading a
     // borrow through `build_inline_units` and the field pre-pass — not worth it
     // for a path taken this rarely.
-    let hidden = |inline: &Inline| matches!(inline, Inline::TextRun(tr) if run_is_hidden(tr, ctx));
+    // A hidden run (§17.3.2 `w:vanish`) contributes nothing; in the
+    // `w:revisionView` final view (no palette), neither does a deleted one —
+    // that is the view's definition, and filtering here closes the text up
+    // exactly as the vanish filter does.
+    let suppressed = |tr: &TextRun| {
+        run_is_hidden(tr, ctx)
+            || (ctx.revision_palette.is_none()
+                && tr
+                    .revision
+                    .as_ref()
+                    .is_some_and(|r| r.kind == crate::model::RevisionKind::Deleted))
+    };
+    let hidden = |inline: &Inline| matches!(inline, Inline::TextRun(tr) if suppressed(tr));
     let visible: Option<Vec<Inline>> = inlines
         .iter()
         .any(hidden)
@@ -641,6 +701,8 @@ where
                         paragraph_run_defaults,
                         theme,
                         auto_fit,
+                        ctx.revision_palette,
+                        ctx.comment_marks,
                         measure_text,
                     );
                     field_sub_emitted = true;
@@ -689,6 +751,8 @@ where
                                         paragraph_run_defaults,
                                         theme,
                                         auto_fit,
+                                        ctx.revision_palette,
+                                        ctx.comment_marks,
                                         measure_text,
                                     );
                                     let (_, font, style) =
@@ -726,6 +790,8 @@ where
                                 paragraph_run_defaults,
                                 theme,
                                 auto_fit,
+                                ctx.revision_palette,
+                                ctx.comment_marks,
                                 measure_text,
                             );
                             if let Some(measurer) = ctx.measurer {
@@ -779,6 +845,8 @@ where
                         paragraph_run_defaults,
                         theme,
                         auto_fit,
+                        ctx.revision_palette,
+                        ctx.comment_marks,
                         measure_text,
                     );
 
@@ -962,6 +1030,8 @@ where
                                     paragraph_run_defaults,
                                     theme,
                                     auto_fit,
+                                    ctx.revision_palette,
+                                    ctx.comment_marks,
                                     hyperlink_url,
                                     measure_text,
                                     ctx.measurer,
@@ -1023,6 +1093,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let ch = char::from_u32(sym.char_code as u32).unwrap_or('\u{FFFD}');
                     let text = ch.to_string();
@@ -1053,6 +1126,14 @@ where
                 Inline::BookmarkStart { name, .. } => {
                     fragments.push(Fragment::Bookmark { name: name.clone() });
                 }
+                // Issue #154: the comment anchor — zero-width; the balloon
+                // pass reads its emitted position. Nothing to anchor when
+                // comment marks are hidden.
+                Inline::CommentRef(id) => {
+                    if ctx.comment_marks {
+                        fragments.push(Fragment::CommentAnchor(*id));
+                    }
+                }
                 // Non-visual inlines — skip
                 Inline::BookmarkEnd(_)
                 | Inline::Separator
@@ -1075,6 +1156,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     // Raise the mark clear of the baseline (see the constant).
@@ -1117,6 +1201,9 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        strike_lines: 0,
+                        strike_position: Pt::ZERO,
+                        strike_thickness: Pt::ZERO,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     let baseline_offset = -(default_size * super::NOTE_REF_BASELINE_OFFSET_RATIO);
@@ -1165,6 +1252,8 @@ where
                                         resolved_styles,
                                         paragraph_run_defaults: p.mark_run_properties.as_ref(),
                                         theme,
+                                        revision_palette: ctx.revision_palette,
+                                        comment_marks: ctx.comment_marks,
                                         measurer: ctx.measurer,
                                         auto_fit: ctx.auto_fit,
                                         // A VML text box carries no language
@@ -1218,6 +1307,8 @@ mod tests {
             default_family: "Default",
             default_size: Pt::new(size),
             default_color: RgbColor::BLACK,
+            revision_palette: None,
+            comment_marks: true,
             resolved_styles: None,
             paragraph_run_defaults: None,
             theme: None,
@@ -1258,6 +1349,8 @@ mod tests {
             },
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -1397,6 +1490,8 @@ mod tests {
                 RunElement::LineBreak(crate::model::BreakKind::TextWrapping),
             ],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))];
         assert!(
             collect(&inlines, &default_ctx(12.0)).is_empty(),
@@ -1495,6 +1590,8 @@ mod tests {
             properties: RunProperties::default(),
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -1511,6 +1608,8 @@ mod tests {
             },
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -1562,6 +1661,8 @@ mod tests {
             properties: RunProperties::default(),
             content: vec![RunElement::Tab],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))];
         let ctx = default_ctx(12.0);
         let frags = collect_fragments(
@@ -1590,6 +1691,8 @@ mod tests {
                 leader: PTabLeader::Dot,
             })],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))];
         let ctx = default_ctx(12.0);
         let frags = collect_fragments(
@@ -1621,6 +1724,8 @@ mod tests {
             properties: RunProperties::default(),
             content: vec![RunElement::LineBreak(BreakKind::TextWrapping)],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))];
         let ctx = default_ctx(12.0);
         let frags = collect_fragments(
@@ -1780,6 +1885,8 @@ mod tests {
             properties: RunProperties::default(),
             content: vec![RunElement::Text(String::new())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))];
         let ctx = default_ctx(12.0);
         let frags = collect_fragments(
@@ -1896,6 +2003,8 @@ mod tests {
             },
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 

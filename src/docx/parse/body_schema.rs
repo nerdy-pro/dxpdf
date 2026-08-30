@@ -115,11 +115,13 @@ pub(crate) struct ParaXml {
 ///
 /// OOXML wraps run content in revision-tracking (`ins`/`del`/`moveFrom`/
 /// `moveTo`) and structural (`smartTag`/`customXml`) elements. These are
-/// modelled so `convert_para_children` can flatten them: insert-side and
-/// structural wrappers are rendered, delete-side wrappers are dropped (an
-/// "accept all changes" / final view). Remaining annotation elements
-/// (proofErr, permStart/End, commentRange*, sdt, ...) hit the `Other`
-/// catch-all and are discarded cleanly.
+/// modelled so `convert_para_children` can flatten them: `ins`/`del` stamp
+/// their runs (issue #154 — the renderer's `w:revisionView` decides how a
+/// stamped run paints), structural wrappers and `moveTo` are flattened
+/// plain, and `moveFrom` is dropped so moved text isn't duplicated. Comment
+/// range markers are modelled so the runs between them can be stamped.
+/// Remaining annotation elements (proofErr, permStart/End, sdt, ...) hit the
+/// `Other` catch-all and are discarded cleanly.
 #[derive(Deserialize)]
 pub(crate) enum ParaChildXml {
     #[serde(rename = "r")]
@@ -132,10 +134,17 @@ pub(crate) enum ParaChildXml {
     BookmarkStart(BookmarkStartXml),
     #[serde(rename = "bookmarkEnd")]
     BookmarkEnd(BookmarkEndXml),
+    /// Issue #154: comment range markers — toggles for the run stamp.
+    #[serde(rename = "commentRangeStart")]
+    CommentRangeStart(BookmarkEndXml),
+    #[serde(rename = "commentRangeEnd")]
+    CommentRangeEnd(BookmarkEndXml),
     /// §17.13.5.18 `<w:ins>` — insert-side revision wrapper; content is kept.
     #[serde(rename = "ins")]
     Ins(RunTrackChangeXml),
-    /// §17.13.5.14 `<w:del>` — delete-side revision wrapper; content is dropped.
+    /// §17.13.5.14 `<w:del>` — delete-side revision wrapper; runs are kept
+    /// and stamped `Deleted` (unstampable children are dropped — see
+    /// `drop_unstampable_deleted`).
     #[serde(rename = "del")]
     Del(RunTrackChangeXml),
     /// §17.13.5.22 `<w:moveTo>` — destination side of a move; content is kept.
@@ -165,6 +174,11 @@ pub(crate) enum ParaChildXml {
 /// child is absorbed by `$value` and ignored via `ParaChildXml::Other`.
 #[derive(Deserialize, Default)]
 pub(crate) struct RunTrackChangeXml {
+    /// §17.13.5.14/.18 `@w:author` — who made the change; revision marks are
+    /// colored by it. `@w:id` and `@w:date` stay uncaptured: nothing renders
+    /// them, and the id numbers revisions within one save, not the document.
+    #[serde(rename = "@author")]
+    pub author: Option<String>,
     #[serde(rename = "$value", default)]
     pub content: Vec<ParaChildXml>,
 }
@@ -217,6 +231,10 @@ pub(crate) enum RunChildXml {
     Sym(SymXml),
     #[serde(rename = "instrText")]
     InstrText(TextXml),
+    /// §17.16.13 `<w:delInstrText>` — the field code of a complex field
+    /// deleted while tracking changes; same payload as `instrText`.
+    #[serde(rename = "delInstrText")]
+    DelInstrText(TextXml),
     #[serde(rename = "fldChar")]
     FldChar(FldCharXml),
     #[serde(rename = "footnoteReference")]
@@ -233,12 +251,15 @@ pub(crate) enum RunChildXml {
     ContinuationSeparator,
     #[serde(rename = "AlternateContent")]
     AlternateContent(AltContentXml),
-    /// `<w:commentReference>` — comment anchor inside a run. Comments are not
-    /// rendered (matching Word's default print output); parsed only so a
-    /// commented run doesn't fail the document. The range markers
+    /// `<w:commentReference>` — comment anchor inside a run: where the
+    /// balloon's connector attaches (issue #154). The range markers
     /// (`commentRangeStart/End`) are handled at the paragraph level above.
     #[serde(rename = "commentReference")]
     CommentReference(BookmarkEndXml),
+    /// `<w:annotationRef>` — the reference mark inside a comment's own body
+    /// (issue #154). Dropped: the balloon labels itself with the author.
+    #[serde(rename = "annotationRef")]
+    AnnotationRef(IgnoredXml),
     /// `<w:rPr>` captured separately; included here for serde ordering.
     #[serde(rename = "rPr")]
     RPr(Box<RPrXml>),

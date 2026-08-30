@@ -113,7 +113,9 @@ Work deliberately *not* done. It is here rather than at a site because there is 
 | `font_scaling.docx` | Font sizing and scaling |
 | `sample-emoji.docx` | Color-emoji pipeline |
 | `fonts/*.ttf`, `fonts/*.ttc` | §17.8 face resolution — built by `scripts/make_font_fixtures.py`, exercised by `tests/font_resolution.rs`. Regenerate rather than hand-edit; the build is deterministic |
-| `comment-reference.docx` | `<w:commentReference>` inside a run (parsed, not rendered) |
+| `comment-reference.docx` | A real Word package with `<w:commentRangeStart/End>` and `<w:commentReference>` plus `word/comments.xml` (and the modern-comments sibling parts, which stay unread) — since issue #154 the comment renders: range wash, narrow-margin balloon, Cyrillic author. Exercised by `tests/comments.rs` |
+| `tracked-changes.docx`, `tracked-changes-final.docx` | Issue #154 — one body, two `w:revisionView` states: unaccepted `<w:ins>`/`<w:del>` by two authors (palette pin), a control paragraph, and a §17.3.2.37/§17.3.2.9 strike/dstrike paragraph that must stay struck in *both* views — the discriminator between a revision mark and strike formatting — and a wholly deleted paragraph (run deletions plus the §17.13.5.15 mark deletion) that strikes in markup and merges away in final, leaving no phantom blank line. Built by `scripts/make_tracked_changes_fixtures.py`; exercised by `tests/tracked_changes.rs` |
+| `comments.docx`, `comments-hidden.docx` | Issue #154 — two comments by two authors (one with no initials), a multi-paragraph balloon, a range spanning a paragraph boundary, a control paragraph, and a 1.5in right margin for balloon room; the `-hidden` twin adds `w:revisionView w:comments="0"` and must draw none of it. Built by `scripts/make_comments_fixtures.py`; exercised by `tests/comments.rs` |
 | `russian-numbering.docx` | `russianUpper` list numbering (А, Б, В…) |
 | `numbering-direct-indent.docx` | Direct paragraph `w:ind` overriding the numbering level's indentation (suffix-tab position) |
 | `centered-numbered-heading.docx` | Numbered heading with `jc=center` (suffix tab must not suppress alignment) |

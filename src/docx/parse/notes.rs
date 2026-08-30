@@ -17,10 +17,13 @@ pub fn parse_notes(data: &[u8]) -> Result<HashMap<NoteId, Vec<Block>>> {
         return Ok(HashMap::new());
     }
     let file: NotesFileXml = from_xml(data)?;
-    let mut ctx = body::ConvertCtx::new();
     let mut out = HashMap::new();
     for note in file.entries {
         let Some(id) = note.id else { continue };
+        // A fresh ctx per note: notes are independent stories, and an
+        // unbalanced revision or comment marker in one must not stamp the
+        // ones after it (issue #154).
+        let mut ctx = body::ConvertCtx::new();
         let (blocks, _) = body::convert_container(note.content, &mut ctx);
         out.insert(NoteId::new(id), blocks);
     }

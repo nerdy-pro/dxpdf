@@ -722,6 +722,31 @@ pub(super) fn emit_line_commands(
                         });
                     }
 
+                    // §17.3.2.37 / §17.3.2.9: one line through the run, or two
+                    // for `w:dstrike` straddling the single-strike position a
+                    // thickness apart — in the run's own color, like the
+                    // underline above. Emitted as `DrawCommand::Line`: the
+                    // painter already draws Underline and Line identically.
+                    if font.strike_lines > 0 {
+                        let strike_y = y - font.strike_position;
+                        let offsets: &[f32] = if font.strike_lines >= 2 {
+                            &[-1.0, 1.0]
+                        } else {
+                            &[0.0]
+                        };
+                        for off in offsets {
+                            let line_y = strike_y + font.strike_thickness * *off;
+                            commands.push(DrawCommand::Line {
+                                line: crate::render::geometry::PtLineSegment::new(
+                                    PtOffset::new(x, line_y),
+                                    PtOffset::new(x + rendered_width, line_y),
+                                ),
+                                color: *color,
+                                width: font.strike_thickness,
+                            });
+                        }
+                    }
+
                     x += rendered_width;
                 }
                 Fragment::Image {
@@ -898,6 +923,12 @@ pub(super) fn emit_line_commands(
                     commands.push(DrawCommand::NamedDestination {
                         position: PtOffset::new(x, *cursor_y),
                         name: name.clone(),
+                    });
+                }
+                Fragment::CommentAnchor(id) => {
+                    commands.push(DrawCommand::CommentAnchor {
+                        position: PtOffset::new(x, *cursor_y + line.ascent),
+                        id: *id,
                     });
                 }
             }
@@ -1477,6 +1508,9 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             }),
             color: crate::render::resolve::color::RgbColor::BLACK,
             shading: None,

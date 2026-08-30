@@ -35,6 +35,9 @@ pub(crate) struct ParsedPPr {
     pub style_id: Option<StyleId>,
     pub run_properties: Option<RunProperties>,
     pub section_properties: Option<crate::docx::model::SectionProperties>,
+    /// §17.13.5.15: the paragraph mark itself is tracked-deleted — how Word
+    /// spells a whole-paragraph delete (issue #154).
+    pub mark_deleted: bool,
 }
 
 /// Schema for the `<w:pPr>` element (§17.3.1).
@@ -296,12 +299,15 @@ impl PPrXml {
             .into_value()
             .map(|v| StyleId::new(v.val));
 
-        let (run_properties, _run_style_id) = match Dup::from(self.r_pr).into_value() {
+        let (run_properties, mark_deleted) = match Dup::from(self.r_pr).into_value() {
             Some(r) => {
-                let (rp, sid) = r.split();
-                (Some(rp), sid)
+                // §17.13.5.15: read the mark deletion before `split` consumes
+                // the bag.
+                let mark_deleted = r.mark_deleted();
+                let (rp, _sid) = r.split();
+                (Some(rp), mark_deleted)
             }
-            None => (None, None),
+            None => (None, false),
         };
         // rStyle inside pPr/rPr applies to the paragraph mark only; the
         // legacy parser discards this style id too.
@@ -343,6 +349,7 @@ impl PPrXml {
             style_id,
             run_properties,
             section_properties,
+            mark_deleted,
         }
     }
 }

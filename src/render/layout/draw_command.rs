@@ -153,6 +153,13 @@ pub enum DrawCommand {
         position: PtOffset,
         name: String,
     },
+    /// Issue #154: a comment anchor's resolved page position. Consumed (and
+    /// removed) by the balloon pass in `render`; inert if it ever reaches the
+    /// painter.
+    CommentAnchor {
+        position: PtOffset,
+        id: crate::model::CommentId,
+    },
     /// §17.3.1.19: brackets one heading paragraph's commands so the PDF
     /// outline can point at it. Draws nothing.
     Outline(OutlineMark),
@@ -314,7 +321,8 @@ impl DrawCommand {
                 rect.origin.x += dx;
                 rect.origin.y += dy;
             }
-            DrawCommand::NamedDestination { position, .. } => {
+            DrawCommand::NamedDestination { position, .. }
+            | DrawCommand::CommentAnchor { position, .. } => {
                 position.x += dx;
                 position.y += dy;
             }
@@ -362,6 +370,7 @@ impl DrawCommand {
             DrawCommand::LinkAnnotation { .. }
             | DrawCommand::InternalLink { .. }
             | DrawCommand::NamedDestination { .. }
+            | DrawCommand::CommentAnchor { .. }
             | DrawCommand::Outline(_) => None,
         }
     }
@@ -591,9 +600,9 @@ mod tests {
 
     fn origin_of(cmd: &DrawCommand) -> (f32, f32) {
         match cmd {
-            DrawCommand::Text { position, .. } | DrawCommand::NamedDestination { position, .. } => {
-                (position.x.raw(), position.y.raw())
-            }
+            DrawCommand::Text { position, .. }
+            | DrawCommand::NamedDestination { position, .. }
+            | DrawCommand::CommentAnchor { position, .. } => (position.x.raw(), position.y.raw()),
             DrawCommand::Underline { line, .. } | DrawCommand::Line { line, .. } => {
                 (line.start.x.raw(), line.start.y.raw())
             }

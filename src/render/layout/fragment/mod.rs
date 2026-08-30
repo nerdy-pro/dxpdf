@@ -96,6 +96,17 @@ pub struct FontProps {
     pub underline_position: Pt,
     /// Underline thickness from font metrics.
     pub underline_thickness: Pt,
+    /// §17.3.2.37 `w:strike` / §17.3.2.9 `w:dstrike`: how many lines to draw
+    /// through the run — 0, 1, or 2. The model's tri-state (`None` inherit,
+    /// `Some(StrikeStyle::None)` explicit off, `Some(Single | Double)`)
+    /// collapses here into a count, exactly as `underline` collapses into a
+    /// bool above: by this seam the cascade has already answered.
+    pub strike_lines: u8,
+    /// Strike position from font metrics (positive = above baseline — the
+    /// opposite sign of `underline_position`, matching where each line goes).
+    pub strike_position: Pt,
+    /// Strike thickness from font metrics.
+    pub strike_thickness: Pt,
 }
 
 /// Font metrics for a specific font at a specific size.
@@ -339,6 +350,9 @@ pub enum Fragment {
     Bookmark {
         name: String,
     },
+    /// Issue #154: a comment's anchor (`w:commentReference`) — zero-width
+    /// marker the balloon pass attaches the connector to.
+    CommentAnchor(crate::model::CommentId),
 }
 
 impl Fragment {
@@ -352,7 +366,8 @@ impl Fragment {
             Fragment::LineBreak { .. }
             | Fragment::ColumnBreak
             | Fragment::PageBreak { .. }
-            | Fragment::Bookmark { .. } => Pt::ZERO,
+            | Fragment::Bookmark { .. }
+            | Fragment::CommentAnchor(_) => Pt::ZERO,
         }
     }
 
@@ -373,7 +388,9 @@ impl Fragment {
             | Fragment::PTab { line_height, .. }
             | Fragment::LineBreak { line_height }
             | Fragment::PageBreak { line_height } => *line_height,
-            Fragment::ColumnBreak | Fragment::Bookmark { .. } => Pt::ZERO,
+            Fragment::ColumnBreak | Fragment::Bookmark { .. } | Fragment::CommentAnchor(_) => {
+                Pt::ZERO
+            }
         }
     }
 
@@ -419,7 +436,10 @@ impl Fragment {
     /// holding nothing but bookmarks still shows nothing.
     pub fn occupies_line(&self) -> bool {
         match self {
-            Fragment::PageBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => false,
+            Fragment::PageBreak { .. }
+            | Fragment::ColumnBreak
+            | Fragment::Bookmark { .. }
+            | Fragment::CommentAnchor(_) => false,
             Fragment::Text { .. }
             | Fragment::Image { .. }
             | Fragment::Emoji { .. }
@@ -546,9 +566,20 @@ pub fn font_props_from_run(
         rtl: Toggle::from_option(rp.rtl),
         char_spacing,
         text_scale,
+        // §17.3.2.37 / §17.3.2.9: `w:dstrike` already won over `w:strike` at
+        // parse (`resolve_strike`), so the cascade hands one answer here;
+        // `Some(StrikeStyle::None)` is the explicit "no strike" override and
+        // draws nothing, mirroring `UnderlineStyle::None` above.
+        strike_lines: match rp.strike {
+            Some(crate::model::StrikeStyle::Single) => 1,
+            Some(crate::model::StrikeStyle::Double) => 2,
+            Some(crate::model::StrikeStyle::None) | None => 0,
+        },
         // Populated by the measurer from Skia font metrics.
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        strike_position: Pt::ZERO,
+        strike_thickness: Pt::ZERO,
     }
 }
 

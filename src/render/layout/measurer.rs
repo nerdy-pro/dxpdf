@@ -227,6 +227,40 @@ impl<'r> TextMeasurer<'r> {
         (position, thickness)
     }
 
+    /// §17.3.2.37: strike position/thickness from font metrics.
+    /// Returns (strike_position, strike_thickness) in points; position is
+    /// positive **above** the baseline, because that is where the line goes:
+    /// emission draws at `baseline − position`, the same formula the
+    /// underline uses. Skia reports the raw value y-down (negative above),
+    /// so one negation yields the positive-above convention.
+    pub fn strike_metrics(&self, font_props: &FontProps) -> (Pt, Pt) {
+        let mut cache = self.font_cache.borrow_mut();
+        let font = cache.get(
+            self.registry,
+            &font_props.family,
+            font_props.size,
+            font_props.bold,
+            font_props.italic,
+        );
+        let (_, metrics) = font.metrics();
+        // Fallback when the face carries no OS/2 strikeout values: 30% of the
+        // ascent above the baseline — roughly where lowercase letters center —
+        // spelled in Skia's y-down terms (ascent is negative) so one negation
+        // serves both sources.
+        let raw_pos = metrics.strikeout_position();
+        let raw_thick = metrics.strikeout_thickness();
+        if raw_pos.is_none() || raw_thick.is_none() {
+            log::warn!(
+                "font '{}' ({:?}) missing strikeout metrics, using 0.3×ascent as fallback",
+                font_props.family,
+                font_props.size
+            );
+        }
+        let position = Pt::new(-raw_pos.unwrap_or(metrics.ascent * 0.3));
+        let thickness = Pt::new(raw_thick.unwrap_or(1.0));
+        (position, thickness)
+    }
+
     /// Get line height for the default font (used for empty paragraphs).
     /// §17.3.1.33: includes leading so Auto line spacing scales the full
     /// font-recommended height.
@@ -331,6 +365,33 @@ mod tests {
     use crate::render::fonts::Toggle;
     use std::rc::Rc;
 
+    /// §17.3.2.37: the strike line sits between the baseline and the top of
+    /// the glyphs — the opposite side from the underline. Structural over a
+    /// host face: no metric literal is pinned, only the two signs and the
+    /// ordering that puts each line where it belongs.
+    #[test]
+    fn strike_sits_above_the_baseline_and_underline_below() {
+        let registry = FontRegistry::new(skia_safe::FontMgr::new());
+        let measurer = TextMeasurer::new(&registry);
+        let fp = fp_at_scale(1.0);
+        let (_, metrics) = measurer.measure("x", &fp);
+        let (strike_pos, strike_thick) = measurer.strike_metrics(&fp);
+        let (under_pos, _) = measurer.underline_metrics(&fp);
+        assert!(
+            strike_pos > Pt::ZERO && strike_pos < metrics.ascent,
+            "strike position {strike_pos:?} must fall inside the ascent {:?}",
+            metrics.ascent,
+        );
+        assert!(strike_thick > Pt::ZERO);
+        // Both emit at `baseline − position`, so a larger stored value draws
+        // higher: the strike must land strictly above the underline.
+        assert!(
+            under_pos < strike_pos,
+            "underline (stored {under_pos:?}) must draw below the strike \
+             (stored {strike_pos:?})"
+        );
+    }
+
     fn fp_at_scale(scale: f32) -> FontProps {
         FontProps {
             rtl: crate::render::fonts::Toggle::Absent,
@@ -343,6 +404,9 @@ mod tests {
             text_scale: scale,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            strike_lines: 0,
+            strike_position: Pt::ZERO,
+            strike_thickness: Pt::ZERO,
         }
     }
 

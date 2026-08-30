@@ -27,6 +27,12 @@ use super::shading::ShdXml;
 /// `crate::docx::parse::primitives::duplicates`.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct RPrXml {
+    /// §17.13.5.15 `<w:del>` inside a paragraph mark's `rPr` — the mark
+    /// itself is deleted, which is how Word spells a whole-paragraph tracked
+    /// delete. Presence-only; the attributes are the wrapper's usual id/
+    /// author/date and nothing here reads them.
+    #[serde(rename = "del", default)]
+    del: Vec<MarkDelXml>,
     #[serde(rename = "rStyle", default)]
     r_style: Vec<ValString>,
     #[serde(rename = "rFonts", default)]
@@ -135,7 +141,17 @@ struct NonNegativeDimensionVal<U: Unit> {
     val: Dimension<U>,
 }
 
+/// Payload of `rPr/del` — attributes (id/author/date) accepted and ignored.
+#[derive(Clone, Debug, Deserialize, Default)]
+pub(crate) struct MarkDelXml {}
+
 impl RPrXml {
+    /// §17.13.5.15: whether this property bag (as a paragraph mark's `rPr`)
+    /// carries a `<w:del>` — the mark is deleted.
+    pub(crate) fn mark_deleted(&self) -> bool {
+        !self.del.is_empty()
+    }
+
     /// Split into `(properties, style_id)`. The style id applies first in
     /// the cascade (§17.7.2), so it stays separate from the direct-formatting
     /// `RunProperties`.
