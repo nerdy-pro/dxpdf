@@ -260,6 +260,7 @@ mod tests {
                     cant_split: Some(true),
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 })
                 .collect(),
             col_widths: vec![Pt::new(100.0)],
@@ -1953,6 +1954,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             cell_spacing: Pt::ZERO,
@@ -2087,6 +2089,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -2462,6 +2465,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             cell_spacing: Pt::ZERO,
@@ -2537,6 +2541,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
                 TableRowInput {
                     cells: vec![
@@ -2568,6 +2573,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
                 TableRowInput {
                     cells: vec![
@@ -2595,6 +2601,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
             ],
             col_widths: vec![Pt::new(50.0), Pt::new(50.0)],

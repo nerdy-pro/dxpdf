@@ -128,16 +128,29 @@ pub(super) fn measure_table_rows(
             // would. Mirrors the same clamp in `build/table.rs`.
             let grid_start = grid_idx.min(col_widths.len());
             let grid_end = (grid_start + span).min(col_widths.len());
-            // §17.4.45: the grid slots were already shrunk so they sum to
-            // `table_width - cell_spacing`; offsetting every cell by one
-            // spacing and taking one off its width then leaves exactly
-            // `cell_spacing` between adjacent cells *and* at both table edges,
-            // without changing the table's own width. A `gridSpan` cell
-            // absorbs the interior gaps it covers, which is what a merged cell
-            // should do.
-            let slots: Pt = col_widths[grid_start..grid_end].iter().copied().sum();
-            let cell_w: Pt = (slots - cell_spacing).max(Pt::ZERO);
-            let cell_x: Pt = col_widths[..grid_start].iter().copied().sum::<Pt>() + cell_spacing;
+            // §17.4.60 `tblPrEx/bidiVisual`: this row's cells stand off the
+            // shared grid — each keeps the width `build::table` computed for
+            // it before the flip, in visual order, at an x measured from the
+            // row's own leading offset rather than from `col_widths` at all
+            // (`RowBidiOverride`). `grid_start`/`grid_end` above still advance
+            // so `entry.grid_col` gets *some* value, but nothing below reads
+            // them for this row's geometry.
+            let (cell_x, cell_w) = if let Some(ovr) = &row.bidi_override {
+                let x = ovr.leading_offset + ovr.cell_widths[..cell_ci].iter().copied().sum::<Pt>();
+                (x, ovr.cell_widths[cell_ci])
+            } else {
+                // §17.4.45: the grid slots were already shrunk so they sum to
+                // `table_width - cell_spacing`; offsetting every cell by one
+                // spacing and taking one off its width then leaves exactly
+                // `cell_spacing` between adjacent cells *and* at both table
+                // edges, without changing the table's own width. A `gridSpan`
+                // cell absorbs the interior gaps it covers, which is what a
+                // merged cell should do.
+                let slots: Pt = col_widths[grid_start..grid_end].iter().copied().sum();
+                let w = (slots - cell_spacing).max(Pt::ZERO);
+                let x = col_widths[..grid_start].iter().copied().sum::<Pt>() + cell_spacing;
+                (x, w)
+            };
 
             // §17.4.39/§17.4.66 against §17.4.41/§17.4.42: a border is drawn
             // *inside* the cell box, so the content box starts at
@@ -179,18 +192,22 @@ pub(super) fn measure_table_rows(
             // §17.4.45: a spaced table has no shared edges at all — each cell
             // keeps its four borders wholly inside itself, so each is charged in
             // full, and the plan (which resolves as though collapsed) does not
-            // describe it.
-            let (extra_left, extra_right) = if cell_spacing > Pt::ZERO {
-                (
-                    (border_width(b.left) - cell.margins.left).max(Pt::ZERO),
-                    (border_width(b.right) - cell.margins.right).max(Pt::ZERO),
-                )
-            } else {
-                (
-                    charge(plan.vertical(grid_start, row_idx), cell.margins.left),
-                    charge(plan.vertical(grid_end, row_idx), cell.margins.right),
-                )
-            };
+            // describe it. §17.4.60 `tblPrEx/bidiVisual` puts this row's cells
+            // in the same position for the same reason: they stand nowhere the
+            // plan's grid lines do, so there is nothing shared to charge half
+            // of (`RowBidiOverride`).
+            let (extra_left, extra_right) =
+                if cell_spacing > Pt::ZERO || row.bidi_override.is_some() {
+                    (
+                        (border_width(b.left) - cell.margins.left).max(Pt::ZERO),
+                        (border_width(b.right) - cell.margins.right).max(Pt::ZERO),
+                    )
+                } else {
+                    (
+                        charge(plan.vertical(grid_start, row_idx), cell.margins.left),
+                        charge(plan.vertical(grid_end, row_idx), cell.margins.right),
+                    )
+                };
             // The horizontal twin needs no such split, and the asymmetry is
             // worth stating rather than leaving to be rediscovered. §17.4.38
             // reserves a strip *between* two rows' content boxes wide enough for
@@ -403,6 +420,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 

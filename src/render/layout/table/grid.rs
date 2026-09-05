@@ -381,6 +381,7 @@ mod tests {
             cant_split: None,
             grid_before,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 

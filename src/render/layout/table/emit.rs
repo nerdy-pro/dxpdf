@@ -293,8 +293,12 @@ fn emit_one_row(
         // §17.4.45: a spaced table has no grid to collapse onto, so each cell
         // closes its own frame here. A collapsed one paints nothing per cell —
         // its borders stand on grid lines and are rasterized once for the whole
-        // slice, by `SliceBuilder::finish`.
-        if !collapsed {
+        // slice, by `SliceBuilder::finish`. §17.4.60 `tblPrEx/bidiVisual` puts
+        // this row's cells in the spaced row's position even in an otherwise
+        // collapsed table: they stand off the shared grid, `plan_table_borders`
+        // was told to skip them (`RowBidiOverride`), and nothing else will ever
+        // paint their edges if this does not.
+        if !collapsed || row.bidi_override.is_some() {
             emit_cell_frame(
                 bufs.border_commands,
                 &CellBorders {
@@ -426,6 +430,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 

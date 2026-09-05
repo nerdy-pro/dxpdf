@@ -5,7 +5,8 @@ use crate::render::geometry;
 use crate::render::layout::paragraph::DropCapInfo;
 use crate::render::layout::section::LayoutBlock;
 use crate::render::layout::table::{
-    compute_column_widths, CellBorderConfig, CellBorderOverride, TableCellInput, TableRowInput,
+    compute_column_widths, CellBorderConfig, CellBorderOverride, RowBidiOverride, TableCellInput,
+    TableRowInput,
 };
 use crate::render::resolve::color::{resolve_color, ColorContext};
 use crate::render::resolve::conditional::{
@@ -807,7 +808,11 @@ pub(super) fn build_table(
         .iter()
         .enumerate()
         .map(|(row_idx, row)| {
-            let cells: Vec<TableCellInput> = row
+            // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>`: this row's own
+            // declared width per cell, paired with the cell built below — see
+            // `RowBidiOverride` for why a flipped row needs its own widths
+            // rather than the shared grid's.
+            let (cells, cell_widths): (Vec<TableCellInput>, Vec<Pt>) = row
                 .cells
                 .iter()
                 .enumerate()
@@ -861,14 +866,17 @@ pub(super) fn build_table(
                     let cell_margins_h = Pt::from(resolved_h.left) + Pt::from(resolved_h.right);
                     let inner_width = (cell_width - cell_margins_h).max(Pt::ZERO);
 
-                    build_table_cell(
-                        cell,
-                        raw_table_style,
-                        default_cell_margins,
-                        &cond,
-                        inner_width,
-                        ctx,
-                        state,
+                    (
+                        build_table_cell(
+                            cell,
+                            raw_table_style,
+                            default_cell_margins,
+                            &cond,
+                            inner_width,
+                            ctx,
+                            state,
+                        ),
+                        cell_width,
                     )
                 })
                 .collect();
@@ -878,6 +886,38 @@ pub(super) fn build_table(
             // empirical evidence motivating this pass.
             let mut cells = cells;
             normalize_row_uniform_vertical_insets(&mut cells);
+
+            // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>`: reverse this
+            // one row into visual order, each cell keeping the width just
+            // computed above rather than the slot it now occupies, and swap
+            // each cell's own logical left/right the same way `mirror_columns`
+            // does for a whole `bidiVisual` table — `w:tcBorders/w:left` is a
+            // logical edge regardless of whether the flip is table-wide or
+            // scoped to one row. See `RowBidiOverride` for the render this
+            // reproduces and what it leaves open.
+            let bidi_override = if row
+                .property_exceptions
+                .as_ref()
+                .and_then(|ex| ex.bidi_visual)
+                == Some(true)
+            {
+                let mut cell_widths = cell_widths;
+                cells.reverse();
+                cell_widths.reverse();
+                for cell in cells.iter_mut() {
+                    std::mem::swap(&mut cell.margins.left, &mut cell.margins.right);
+                    if let Some(b) = cell.cell_borders.as_mut() {
+                        std::mem::swap(&mut b.left, &mut b.right);
+                    }
+                }
+                let total: Pt = cell_widths.iter().copied().sum();
+                Some(RowBidiOverride {
+                    cell_widths,
+                    leading_offset: (available_width - total).max(Pt::ZERO),
+                })
+            } else {
+                None
+            };
 
             TableRowInput {
                 cells,
@@ -910,6 +950,7 @@ pub(super) fn build_table(
                         };
                         convert_table_border_config(&merged, state)
                     }),
+                bidi_override,
             }
         })
         .collect();
@@ -927,6 +968,32 @@ pub(super) fn build_table(
              <w:vMerge w:val=\"restart\"/> above them in the same grid column; \
              rendering each as an ordinary cell"
         );
+    }
+
+    // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>` on a single row: Word's
+    // own render swaps it with the row immediately following it rather than
+    // leaving it between its neighbours — measured against
+    // `test-files/issue-157-tblprex-bidi.docx` (`RowBidiOverride`'s doc names
+    // what this is settled over and what it is not). A plain vector swap, at
+    // the same seam as `mirror_columns` below and for the same reason: every
+    // downstream pass — measurement, border resolution, splitting, painting —
+    // reads `rows` by vector position with no separate notion of document
+    // order, so doing this once, here, is transparent to all of them.
+    //
+    // Snapshotted before mutating: swapping row `i` moves whatever was at
+    // `i + 1` into `i`, so re-deriving "does this row have the override" from
+    // the row now sitting at a given index, after an earlier swap already
+    // moved things around, would either skip a row or process one twice.
+    let flipped: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.bidi_override.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    for i in flipped {
+        if i + 1 < rows.len() {
+            rows.swap(i, i + 1);
+        }
     }
 
     // §17.4.1 `bidiVisual`, for the same reason and at the same seam: once,
@@ -1941,6 +2008,7 @@ mod tests {
             cant_split: None,
             grid_before,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 

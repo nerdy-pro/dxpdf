@@ -122,6 +122,60 @@ pub struct TableRowInput {
     /// `val="none"` to `None` here, matching the layout's invariant
     /// that `None` is "draw nothing" everywhere else in this module.
     pub border_overrides: Option<TableBorderConfig>,
+    /// §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>` on this one row. See
+    /// [`RowBidiOverride`].
+    pub bidi_override: Option<RowBidiOverride>,
+}
+
+/// §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>` — this one row is
+/// individually right-to-left, independent of the table's own direction.
+///
+/// Reversing this row into visual order the way a whole-table `bidiVisual`
+/// does (`build::table::mirror_columns`) is not available here: that function
+/// swaps the *shared* column grid for every row at once, and a single flipped
+/// row would then disagree with its neighbours about what each grid column is
+/// — `mirror_columns`' own doc names this as the reason a row-level exception
+/// "needs its own design rather than a flag here."
+///
+/// Word's render supplies that design (`test-files/issue-157-tblprex-bidi.docx`,
+/// measured 2026-09-05): the row's cells keep their own declared widths rather
+/// than resizing to the slot they visually land in, so its boundaries do not
+/// land on the shared grid at all — the fixture's own heading predicts exactly
+/// this ("the mirrored row's slot boundaries do not line up with the rows
+/// around it"). So this row opts out of the grid entirely: a cell's width
+/// comes from here instead of `col_widths` (`measure_table_rows`), its borders
+/// are drawn as a closed frame per cell (`emit_cell_frame`) instead of through
+/// the shared `super::borders::BorderPlan`, and it is excluded from every
+/// cross-row border computation as if it were not part of the table's grid at
+/// all — see the `bidi_override` checks in `borders.rs`.
+///
+/// The same render also settled where the row sits and when it paints. Its own
+/// total width is right-aligned against the same "available width" a whole
+/// `bidiVisual` table is (`section::helpers::table_x_offset`), as if it were,
+/// by itself, a mini right-to-left table — `leading_offset` below is that.
+/// And it paints *after* the row that would otherwise follow it rather than
+/// between its neighbours, which `build::table` applies as a plain adjacent
+/// swap of two `TableRowInput`s at the same seam as `mirror_columns`, early
+/// enough that every downstream pass (measurement, border resolution,
+/// splitting, painting) simply sees rows in final visual order and needs no
+/// separate notion of "document order" at all.
+///
+/// Both are measured from the one arrangement the fixture tests — a single
+/// flipped row with exactly one row after it — and are not verified for any
+/// other: two flipped rows, a flipped row with nothing following it, `vMerge`
+/// crossing it, or a `gridSpan` cell on it. Those are open questions this does
+/// not answer, in the same way `RowHeightRule::content_height`'s doc names
+/// what it does not.
+pub struct RowBidiOverride {
+    /// Each cell's own declared width, in **visual** order — index 0 is this
+    /// row's leftmost cell as painted, which is the *last* `<w:tc>` in
+    /// document order. Same length as `TableRowInput::cells`, paired with it
+    /// 1:1.
+    pub cell_widths: Vec<Pt>,
+    /// Distance from the table's own local x = 0 to this row's own left edge,
+    /// computed so its right edge reaches the *page's* content width rather
+    /// than the table's own — see the struct doc above.
+    pub leading_offset: Pt,
 }
 
 /// §17.4.83: cell vertical alignment.

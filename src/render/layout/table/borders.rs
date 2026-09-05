@@ -144,14 +144,26 @@ fn declare_cell_borders(
         // fall back to the table-wide config.
         let row_table_borders = row.border_overrides.as_ref().or(borders);
         let cells_in_row = row.cells.len();
+        // §17.4.60 `tblPrEx/bidiVisual`: this row shares no edge with any
+        // neighbour (`RowBidiOverride`), so it declares its top/bottom the way
+        // a standalone one-row table would — both outer, neither `insideH` —
+        // by lying about its own position rather than teaching
+        // `resolve_cell_effective_borders` a second axis. `first_in_row`/
+        // `last_in_row` still come from this row's own (already-reversed) cell
+        // order, unaffected.
+        let (position_row, position_num_rows) = if row.bidi_override.is_some() {
+            (0, 1)
+        } else {
+            (row_idx, num_rows)
+        };
         for (cell_i, cell_input) in row.cells.iter().enumerate() {
             let span = cell_input.grid_span.max(1) as usize;
             let mut cell_borders = resolve_cell_effective_borders(
                 cell_input,
                 row_table_borders,
                 CellPosition {
-                    row: row_idx,
-                    num_rows,
+                    row: position_row,
+                    num_rows: position_num_rows,
                     first_in_row: cell_i == 0,
                     last_in_row: cell_i + 1 == cells_in_row,
                 },
@@ -259,6 +271,17 @@ pub(super) fn resolve_table_cell_borders(
         // `saturating_sub`, not `- 1`: an empty table would underflow.
         for upper in 0..num_rows.saturating_sub(1) {
             let lower = upper + 1;
+
+            // §17.4.60 `tblPrEx/bidiVisual`: neither side of this pair shares
+            // a real edge with the other when one of them is a flipped row
+            // (`RowBidiOverride`) — its cells stand somewhere else entirely.
+            // Leave both sides exactly as `declare_cell_borders` seeded them
+            // (each already outer-declared, per the position lie above)
+            // instead of resolving a conflict between two edges that were
+            // never facing each other.
+            if rows[upper].bidi_override.is_some() || rows[lower].bidi_override.is_some() {
+                continue;
+            }
 
             // Per-column resolved border for this inter-row edge.
             let resolved: Vec<CellEdge> = (0..num_grid_cols)
@@ -465,6 +488,13 @@ pub(super) fn plan_table_borders(
     // has neither, and a row gapped at that end has only one.
     let mut v = vec![CellEdge::Absent; (num_grid_cols + 1) * num_rows];
     for (r, starts) in grid_indices.iter().enumerate() {
+        // §17.4.60 `tblPrEx/bidiVisual`: this row's cells stand off the shared
+        // grid entirely (`RowBidiOverride`), so it contributes nothing here —
+        // its own verticals are painted directly, per cell, alongside its
+        // content (`emit.rs`), not rasterized from this plan.
+        if rows[r].bidi_override.is_some() {
+            continue;
+        }
         for (ci, &start) in starts.iter().enumerate() {
             let span = rows[r].cells[ci].grid_span.max(1) as usize;
             let end = (start + span).min(num_grid_cols);
@@ -487,11 +517,18 @@ pub(super) fn plan_table_borders(
     let mut h = vec![CellEdge::Absent; (num_rows + 1) * num_grid_cols];
     for r in 0..=num_rows {
         for c in 0..num_grid_cols {
+            // §17.4.60 `tblPrEx/bidiVisual`: a flipped row (`RowBidiOverride`)
+            // contributes no horizontal either — excluded on both sides of
+            // every boundary it touches, the same reason as the verticals
+            // above. Its neighbour's facing declaration (already seeded as an
+            // outer edge, not `insideH` — see `declare_cell_borders`) is what
+            // is left standing once it drops out of the pair.
             let above = r
                 .checked_sub(1)
+                .filter(|&up| rows[up].bidi_override.is_none())
                 .and_then(|up| cell_index_at_grid_col(&rows[up], c).map(|ci| cells[up][ci].bottom))
                 .unwrap_or(CellEdge::Absent);
-            let below = (r < num_rows)
+            let below = (r < num_rows && rows[r].bidi_override.is_none())
                 .then(|| cell_index_at_grid_col(&rows[r], c).map(|ci| cells[r][ci].top))
                 .flatten()
                 .unwrap_or(CellEdge::Absent);
@@ -1684,6 +1721,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -1785,6 +1823,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: Some(no_borders),
+                bidi_override: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("normal")],
@@ -1793,6 +1832,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0)];
@@ -1926,6 +1966,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             })
             .collect()
     }
@@ -2021,6 +2062,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             })
             .collect();
         let slices = layout_table_paginated(
@@ -2122,6 +2164,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
