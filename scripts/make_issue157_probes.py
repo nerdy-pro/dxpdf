@@ -12,8 +12,11 @@ vMerge overflow and cell spacing, and the reason those are now decided.
 ---------------------------------------------------------------------------
 
 `w:tblPrEx` may carry `bidiVisual`, flipping a single row against a table whose
-other rows run left to right. The engine parses it (`TableRowPropertyExceptions::bidi_visual`)
-and does not act on it, because the grid is shared and the two readings differ:
+other rows run left to right. The engine parses it (`TableRowPropertyExceptions::bidi_visual`);
+it is now acted on — see `RowBidiOverride` and the `bidi_override` checks in
+`table/borders.rs`, `table/measure.rs`, and the row-swap in `build/table.rs`.
+
+Two readings of the width question were live before a render:
 
   A. the row's cells keep their **declared widths** and swap places, so the
      mirrored row's slot boundaries do not line up with the rows around it;
@@ -29,6 +32,26 @@ wide, as it is in rows 1 and 3. Under (B) it is 100pt only by coincidence of
 being the middle column — so look at `A` instead: 50pt under (A), 150pt under
 (B). The cells are labelled and separately shaded so this is a ruler
 measurement, not a judgement.
+
+**Measured 2026-09-05** (pixel-counted off a fresh render, calibrated against
+the page's own margins): cell `A` comes out 50pt — reading (A). The same render
+answered two questions this docstring never posed: the flipped row sits with
+its own right edge on the *page's* content width, as if it were a mini
+right-to-left table of its own, and it paints **after** the row that would
+otherwise follow it rather than between its neighbours (row 2 of 3 renders
+third). Both are implemented alongside the width finding and are measured from
+this one arrangement only — see `RowBidiOverride`'s doc for what remains open.
+
+**`with_styles=True`, added the same day**, for the reason `write()` gives: the
+first Word render used a package with no `styles.xml`, and Word's own template
+defaults (Calibri 11pt, non-zero paragraph spacing) made every row's height
+disagree with this engine's ECMA-default read (Times New Roman 10pt, zero
+spacing) for a reason that had nothing to do with `bidiVisual` at all — the row
+height mismatch was a fixture gap, not a rendering defect. Stating the defaults
+explicitly, the same fix `bidi-visual-table.docx` and `empty_row_probe` already
+use, does not change any width, position or paint-order finding above — none of
+them depend on the font — only the row heights, which now read the same values
+in both renderers instead of two different application defaults.
 
 ---------------------------------------------------------------------------
 2. issue-157-empty-row-edge.docx — §17.4.66 across a row of no height
@@ -339,7 +362,7 @@ def write(name: str, body: str, with_styles: bool = False) -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    write("issue-157-tblprex-bidi.docx", tblprex_probe())
+    write("issue-157-tblprex-bidi.docx", tblprex_probe(), with_styles=True)
     write("issue-157-empty-row-edge.docx", empty_row_probe(), with_styles=True)
 
 
