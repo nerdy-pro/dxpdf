@@ -16,6 +16,49 @@ pub enum RowHeightRule {
     Exact(Pt),
 }
 
+impl RowHeightRule {
+    /// §17.4.80 applied: the height of the row's **content box**, given the
+    /// height `content` wants. The rules on the row's two boundaries stand
+    /// outside that box (§17.4.38's strips) and are no part of this.
+    ///
+    /// # Measured, and it has been the other way
+    ///
+    /// ECMA-376 says only "the height of the current table row" and specifies no
+    /// stroke geometry for table borders anywhere, so it cannot say whether a
+    /// row's rules are part of its height. Word can, and does:
+    /// `test-files/issue-157-empty-row-edge.docx` table 4 declares 40pt against
+    /// 6pt of rule and Word draws **40pt of cell**, with the rules outside it.
+    /// Table 5 declares the same as `atLeast` and draws the same, so one rule
+    /// covers both. Table 3 declares 2pt — less than its own rules — and gets
+    /// exactly 2pt, so there is no collapse either.
+    ///
+    /// The rival reading was that the declared height *contains* the rules, by
+    /// analogy with the other axis: `border-content-charge.docx` settled that a
+    /// shared border is charged **half to each cell's content box**, which puts a
+    /// border inside the box it bounds. That analogy is wrong here, and the cost
+    /// of believing it is recorded rather than deleted — it was implemented, and
+    /// what exposed it was a fixture with a row 20 times the width of its rules.
+    /// The earlier evidence for it came from rows of 0 and 2pt against 6pt of
+    /// rule, where a 2pt cell and a hairline are not distinguishable by eye.
+    ///
+    /// # `w:val="0"` is not a height
+    ///
+    /// It is the marker for *unconstrained*, and Word honours it as one even
+    /// under `hRule="exact"`: table 2 of that fixture declares zero and Word
+    /// draws a full row of cell. [MS-OI29500] §2.4.77(c) is the corroboration —
+    /// it records that Word requires `val="0"` whenever `hRule="auto"`, which is
+    /// the same fact from the producing side. A literal reading draws a flat row
+    /// and loses the cell entirely, which is what this engine used to do.
+    pub(super) fn content_height(self, content: Pt) -> Pt {
+        match self {
+            // Zero is "unconstrained", not "flat" — see above.
+            Self::Exact(h) | Self::AtLeast(h) if h <= Pt::ZERO => content,
+            Self::AtLeast(min) => content.max(min),
+            Self::Exact(h) => h,
+        }
+    }
+}
+
 /// A table row for layout.
 pub struct TableRowInput {
     pub cells: Vec<TableCellInput>,

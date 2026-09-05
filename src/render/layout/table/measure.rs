@@ -12,7 +12,7 @@ use crate::render::layout::cell::{layout_cell, CellLayout};
 use super::borders::{border_width, plan_table_borders, resolve_table_cell_borders};
 use super::grid::{expand_rows_for_vmerge, is_vmerge_continue};
 use super::types::{
-    CellLayoutEntry, MeasuredRow, MeasuredTable, RowHeightRule, TableBorderConfig, TableRowInput,
+    CellLayoutEntry, MeasuredRow, MeasuredTable, TableBorderConfig, TableRowInput,
     VerticalMergeState,
 };
 
@@ -25,6 +25,25 @@ use super::types::{
 /// row is suppressed. Used for adjacent table border collapse: consecutive tables
 /// with the same style are treated as a single merged table, so the second table's
 /// top border would duplicate the first table's bottom border.
+/// §17.4.38: the strip reserved between this row's content box and the next
+/// row's, wide enough for the border on the boundary they share.
+///
+/// Zero for the last row, which has no shared boundary, and for a §17.4.45
+/// spaced table, where every cell draws its own borders inside its own box and
+/// the gap between rows is the spacing itself.
+///
+/// One definition, read twice: the assembly pass reports it as
+/// `MeasuredRow::border_gap_below`, and the measuring pass needs it earlier
+/// because a declared row height has to contain it.
+fn strip_below(row: &[super::borders::CellBorders], has_next: bool, cell_spacing: Pt) -> Pt {
+    if !has_next || cell_spacing > Pt::ZERO {
+        return Pt::ZERO;
+    }
+    row.iter()
+        .map(|b| border_width(b.bottom))
+        .fold(Pt::ZERO, Pt::max)
+}
+
 pub(super) fn measure_table_rows(
     rows: &[TableRowInput],
     col_widths: &[Pt],
@@ -249,10 +268,11 @@ pub(super) fn measure_table_rows(
             grid_idx += span;
         }
 
-        match row.height_rule {
-            Some(RowHeightRule::AtLeast(min_h)) => max_height = max_height.max(min_h),
-            Some(RowHeightRule::Exact(h)) => max_height = h,
-            None => {}
+        // §17.4.80 measures this box and not the rules around it — see
+        // `RowHeightRule::content_height`, which holds the Word render that
+        // settles it and the reading it refuted.
+        if let Some(rule) = row.height_rule {
+            max_height = rule.content_height(max_height);
         }
 
         // §17.4.45: the row's box reserves its own leading gap, mirroring the
@@ -278,14 +298,7 @@ pub(super) fn measure_table_rows(
             // With cell spacing there is no shared edge to reserve room for:
             // every cell draws its own bottom border inside its own box, and
             // the gap between rows is the spacing itself.
-            let border_gap_below = if row_idx + 1 < num_rows && cell_spacing <= Pt::ZERO {
-                borders
-                    .iter()
-                    .map(|b| border_width(b.bottom))
-                    .fold(Pt::ZERO, Pt::max)
-            } else {
-                Pt::ZERO
-            };
+            let border_gap_below = strip_below(&borders, row_idx + 1 < num_rows, cell_spacing);
             MeasuredRow {
                 entries,
                 borders,
@@ -932,6 +945,119 @@ mod tests {
             None,
             false,
         )
+    }
+
+    /// The same, with a 3 pt `insideH` — so each interior boundary reserves a
+    /// 3 pt strip (§17.4.38) between two rows' content boxes, outside both.
+    fn bordered_sized_table(rows: &[TableRowInput]) -> super::MeasuredTable {
+        let three = single(3.0);
+        let borders = TableBorderConfig {
+            top: Some(three),
+            bottom: Some(three),
+            left: None,
+            right: None,
+            inside_h: Some(three),
+            inside_v: None,
+        };
+        measure_table_rows(
+            rows,
+            &[Pt::new(50.0)],
+            Pt::ZERO,
+            Pt::new(10.0),
+            Some(&borders),
+            None,
+            false,
+        )
+    }
+
+    /// §17.4.80 measures the row's **content box**, and the rules on its two
+    /// boundaries stand outside it: a row declaring 40 pt gets 40 pt of cell
+    /// whatever its borders weigh.
+    ///
+    /// **Measured** against a Word render of
+    /// `test-files/issue-157-empty-row-edge.docx` (2026-08-19), table 4. The
+    /// bordered fixture is what makes this a test rather than a tautology — with
+    /// no borders the two readings agree.
+    ///
+    /// This assertion has been the other way, briefly and wrongly: see
+    /// `RowHeightRule::content_height` for the analogy that produced it and the
+    /// render that refuted it.
+    #[test]
+    fn an_exact_row_height_is_its_content_box_whatever_its_borders_weigh() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            (m.rows[0].border_gap_below, m.rows[1].border_gap_below),
+            (Pt::new(3.0), Pt::new(3.0)),
+            "the fixture must actually reserve a strip on both boundaries"
+        );
+        assert_eq!(
+            m.rows[1].height,
+            Pt::new(40.0),
+            "40 pt of cell, rules outside"
+        );
+    }
+
+    /// …including a row that declares less than its own rules: it gets what it
+    /// declared, and the rules stand outside it as always. Word draws 2 pt of
+    /// cell between two 3 pt rules (table 3 of the same fixture).
+    #[test]
+    fn a_row_shorter_than_its_rules_still_gets_the_height_it_declares() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(2.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            m.rows[1].height,
+            Pt::new(2.0),
+            "2 pt declared, 2 pt of cell"
+        );
+    }
+
+    /// §17.4.80 `atLeast` measures the same box — Word's table 5 is table 4's
+    /// declaration with the rule changed, and draws the same 40 pt.
+    #[test]
+    fn an_at_least_row_height_is_measured_the_same_way() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::AtLeast(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(m.rows[1].height, Pt::new(40.0));
+    }
+
+    /// §17.4.80 with `w:val="0"` is **no constraint**, not a height of nothing —
+    /// even under `hRule="exact"`. Word draws a full row of cell where a literal
+    /// reading draws none (table 2 of the fixture), and [MS-OI29500] §2.4.77(c)
+    /// records the same fact from the producing side: Word requires `val="0"`
+    /// whenever `hRule="auto"`, which makes zero the marker for unconstrained.
+    ///
+    /// Asserted against the same row with no rule at all, so the content height
+    /// is never pinned — whatever it is, both sides get it.
+    #[test]
+    fn an_exact_height_of_zero_is_no_constraint_at_all() {
+        let with_zero = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::ZERO)),
+            row(vec![cell_of(1)]),
+        ]);
+        let unconstrained = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row(vec![cell_of(1)]),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            with_zero.rows[1].height, unconstrained.rows[1].height,
+            "a zero exact height must measure like no height at all"
+        );
+        assert!(
+            with_zero.rows[1].height > Pt::ZERO,
+            "and that is a real row"
+        );
     }
 
     /// The measurement the rules are compared against: three 14 pt lines.

@@ -525,3 +525,141 @@ fn table_after_body_text_still_moves_to_the_next_page_when_it_does_not_fit() {
         assert!(!page.commands.is_empty(), "page {i} is blank");
     }
 }
+
+// ── §17.4.80: what a declared row height measures ───────────────────────────
+
+/// A three-row, one-column table with a 3pt `insideH`, whose **middle** row
+/// carries `tr_pr` verbatim.
+fn banded_table(tr_pr: &str) -> Vec<u8> {
+    let row = |extra: &str, label: &str| {
+        format!(
+            "<w:tr>{extra}<w:tc><w:tcPr><w:tcW w:w=\"4000\" w:type=\"dxa\"/></w:tcPr>\
+               <w:p><w:r><w:t>{label}</w:t></w:r></w:p></w:tc></w:tr>"
+        )
+    };
+    doc(&format!(
+        r#"<w:tbl>
+      <w:tblPr>
+        <w:tblW w:w="4000" w:type="dxa"/><w:tblLayout w:type="fixed"/>
+        <w:tblBorders>
+          <w:top w:val="single" w:sz="24" w:space="0" w:color="000000"/>
+          <w:bottom w:val="single" w:sz="24" w:space="0" w:color="000000"/>
+          <w:left w:val="nil"/><w:right w:val="nil"/>
+          <w:insideH w:val="single" w:sz="24" w:space="0" w:color="000000"/>
+          <w:insideV w:val="nil"/>
+        </w:tblBorders>
+      </w:tblPr>
+      <w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid>
+      {upper}{middle}{lower}
+    </w:tbl>"#,
+        upper = row("", "upper"),
+        middle = row(tr_pr, "middle"),
+        lower = row("", "lower"),
+    ))
+}
+
+/// The middle row's **content box**: the gap between the two rules bounding it.
+fn middle_row_box(bytes: &[u8]) -> f32 {
+    let pages = layout(bytes);
+    let mut rules: Vec<(f32, f32)> = pages
+        .iter()
+        .flat_map(|p| &p.commands)
+        .filter_map(|c| match c {
+            DrawCommand::Rect { rect, .. } if rect.size.height.raw() < rect.size.width.raw() => {
+                Some((
+                    rect.origin.y.raw(),
+                    (rect.origin.y + rect.size.height).raw(),
+                ))
+            }
+            _ => None,
+        })
+        .collect();
+    rules.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(
+        rules.len(),
+        4,
+        "table top, two interior rules, table bottom"
+    );
+    rules[2].0 - rules[1].1
+}
+
+/// §17.4.80 measures the row's **content box**, and its rules stand outside it:
+/// a row declaring 40pt gets 40pt of cell, with its two 3pt rules on top.
+///
+/// **Measured** against a Word render of `test-files/issue-157-empty-row-edge.docx`
+/// (2026-08-19), whose table 4 declares exactly this and draws 40pt of cell.
+/// 40pt is chosen to clear the 6pt of rule comfortably, so the two readings
+/// differ by those 6pt with no floor or collapse anywhere near.
+///
+/// This has been the other way and was wrong. The reading that the declared
+/// height *contains* the rules was argued from the convention on the other axis
+/// — `border-content-charge.docx` put a shared border inside the content box it
+/// bounds — and from an earlier, coarser reading of the same fixture's tables 2
+/// and 3, whose rows are small enough that a 2pt cell and a hairline are hard to
+/// tell apart. Table 4 is 20 times that size and settles it: the vertical axis
+/// does **not** follow the horizontal one here.
+#[test]
+fn an_exact_row_height_is_the_height_of_its_content_box() {
+    let box_h = middle_row_box(&banded_table(
+        r#"<w:trPr><w:trHeight w:val="800" w:hRule="exact"/></w:trPr>"#,
+    ));
+    assert!(
+        (box_h - 40.0).abs() < 0.01,
+        "800 twips is 40pt of cell, rules outside it, not {box_h}pt"
+    );
+}
+
+/// …and a row declaring less than its own rules still gets exactly what it
+/// declared, the rules standing outside it as always. Word's table 3 draws 2pt
+/// of cell between two 3pt rules.
+#[test]
+fn a_row_shorter_than_its_rules_still_gets_the_height_it_declares() {
+    let box_h = middle_row_box(&banded_table(
+        r#"<w:trPr><w:trHeight w:val="40" w:hRule="exact"/></w:trPr>"#,
+    ));
+    assert!(
+        (box_h - 2.0).abs() < 0.01,
+        "40 twips is 2pt of cell however thick the rules are, not {box_h}pt"
+    );
+}
+
+/// §17.4.80 `atLeast` measures the same box, as a floor rather than a pin —
+/// Word's table 5 is table 4's declaration with the rule changed, and draws the
+/// same 40pt.
+#[test]
+fn an_at_least_row_height_is_measured_the_same_way() {
+    let box_h = middle_row_box(&banded_table(
+        r#"<w:trPr><w:trHeight w:val="800" w:hRule="atLeast"/></w:trPr>"#,
+    ));
+    assert!(
+        (box_h - 40.0).abs() < 0.01,
+        "800 twips is 40pt of cell under atLeast too, not {box_h}pt"
+    );
+}
+
+/// §17.4.80 with **`w:val="0"`** is no constraint at all: the row is as tall as
+/// its content, not flat.
+///
+/// [MS-OI29500] §2.4.77(c) records that Word requires `val="0"` whenever
+/// `hRule="auto"`, which makes zero the marker for *unconstrained* rather than a
+/// height of nothing — and Word renders it that way even when the rule says
+/// `exact`. Its table 2 draws a full row of cell where a literal reading draws
+/// none at all, which is how this was found.
+///
+/// Asserted as a relation to the same table with no `trHeight`, so the empty
+/// paragraph's line height is never pinned — whatever it is, both sides get it.
+#[test]
+fn an_exact_height_of_zero_is_no_constraint_at_all() {
+    let zero = middle_row_box(&banded_table(
+        r#"<w:trPr><w:trHeight w:val="0" w:hRule="exact"/></w:trPr>"#,
+    ));
+    let unconstrained = middle_row_box(&banded_table(""));
+    assert!(
+        (zero - unconstrained).abs() < 0.01,
+        "a zero exact height must lay out like no height at all: {zero} vs {unconstrained}"
+    );
+    assert!(
+        zero > 1.0,
+        "and that is a real row, not a flat one: {zero}pt"
+    );
+}

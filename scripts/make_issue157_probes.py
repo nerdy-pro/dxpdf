@@ -62,21 +62,32 @@ each other:
             happens.
 
 Table 4 asks the question the first three cannot, and it is the one that matters
-most: **what does `w:trHeight` measure?** Its middle row declares 40pt, comfortably
-more than its own 6pt of borders, so no floor and no collapse is involved and the
-two readings differ by a clean 6pt:
+most: **what does `w:trHeight` measure?** Its middle row declares 40pt,
+comfortably more than its own 6pt of borders, so no floor and no collapse is
+involved and the two readings differ by a clean 6pt:
 
-  * the yellow row measures 40pt  -> the declared height is the row's *content
-                                     box* and the borders are added outside it,
-                                     which is what this engine does today;
-  * the yellow row measures 34pt  -> the declared height is the row *including*
-                                     its borders, and the content gets what is
-                                     left.
+  * the yellow row measures 40pt <- WORD -> the declared height is the row's
+                                   *content box*, its rules standing outside it;
+  * the yellow row measures 34pt        -> it would include them.
 
-The second reading is what tables 2 and 3 hint at — both come out looking alike
-in Word, which is what happens when a declared height smaller than the borders
-collapses onto them — but a hint measured near a floor is not a rule. Table 4 has
-no floor anywhere near it, so it answers plainly.
+MEASURED 2026-08-19: Word draws **40pt**. Table 5 declares the same as `atLeast`
+and draws 40pt too, so one rule covers both — which matters more than its
+position suggests, since `atLeast` is what an omitted `hRule` becomes at the
+parse seam and so carries nearly every `<w:trHeight>` written.
+
+That refuted a reading this engine briefly shipped: that the declared height
+*contains* the rules, by analogy with the other axis, where
+`border-content-charge.docx` settled that a shared border is charged half to each
+cell's *content box*. The analogy is wrong here. What made it plausible was
+tables 2 and 3 — rows of 0 and 2pt against 6pt of rule, where a 2pt cell and a
+hairline are not distinguishable by eye. Table 4 is twenty times that size.
+
+**Table 2 is where the real defect was.** It declares `hRule="exact"` with
+`w:val="0"`, and Word draws a full row of cell — about one empty line. Zero is
+not a height, it is the marker for *unconstrained*, which [MS-OI29500] §2.4.77(c)
+corroborates from the producing side: Word requires `val="0"` whenever
+`hRule="auto"`. A literal reading draws a flat row and loses the cell, which is
+what this engine did until that render.
 
 Read the black band at the middle boundary against table 1's, which is one 3pt
 rule and the control for the other two:
@@ -229,10 +240,10 @@ def empty_row_probe() -> str:
             f"<w:tblGrid>{GRID1}</w:tblGrid>{rows}</w:tbl>"
         )
 
-    def short_row(twips: int) -> str:
+    def short_row(twips: int, rule: str = "exact") -> str:
         return (
             "<w:tr><w:trPr>"
-            f'<w:trHeight w:val="{twips}" w:hRule="exact"/>'
+            f'<w:trHeight w:val="{twips}" w:hRule="{rule}"/>'
             "</w:trPr>" + EMPTY_CELL + "</w:tr>"
         )
 
@@ -248,7 +259,10 @@ def empty_row_probe() -> str:
         + "<w:p/>"
         + heading("4. The same, with a 40pt row - taller than its borders, so nothing is floored.")
         + table(short_row(800))
-        + heading("Measure table 4's yellow row: 40pt means trHeight is the content box, 34 means it includes the borders.")
+        + "<w:p/>"
+        + heading("5. The same 40pt, declared atLeast rather than exact.")
+        + table(short_row(800, rule="atLeast"))
+        + heading("Measure the yellow rows of tables 4 and 5: 40pt means trHeight is the content box, 34 means it includes the borders.")
     )
 
 
