@@ -101,6 +101,13 @@ fn make_docx(document_xml: &str) -> Vec<u8> {
 /// off the aspect ratio the junctions are found by. A vertical segment is then
 /// 48pt tall and a horizontal one 88pt wide, so nothing but a junction is
 /// square, and [`squares`] needs to know no coordinate to find them.
+///
+/// `atLeast`, not `exact` — this file's rows are otherwise unconstrained
+/// (empty `<w:p/>` cells), so either rule fixes them at the same 60pt with no
+/// row-to-row interior charge to keep uniform across the different border
+/// weights each test below passes in (`RowHeightRule::content_height` charges
+/// `exact` half of each interior boundary's *drawn* width, which for a
+/// `double` is three rules deep, not one).
 fn junction_table(v_colour: &str, h_colour: &str, style: &str) -> String {
     weighted_table(v_colour, h_colour, style, SZ, SZ)
 }
@@ -114,7 +121,7 @@ fn weighted_table(v_colour: &str, h_colour: &str, style: &str, v_sz: &str, h_sz:
         })
         .collect();
     let row = format!(
-        r#"<w:tr><w:trPr><w:trHeight w:val="1200" w:hRule="exact"/></w:trPr>{cells}</w:tr>"#
+        r#"<w:tr><w:trPr><w:trHeight w:val="1200" w:hRule="atLeast"/></w:trPr>{cells}</w:tr>"#
     );
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

@@ -18,28 +18,46 @@ pub enum RowHeightRule {
 
 impl RowHeightRule {
     /// §17.4.80 applied: the height of the row's **content box**, given the
-    /// height `content` wants. The rules on the row's two boundaries stand
-    /// outside that box (§17.4.38's strips) and are no part of this.
+    /// height `content` wants and `border_charge` — half of each of this row's
+    /// two *interior* boundaries, `Pt::ZERO` for a table's own outer edges,
+    /// which hang outside the box instead (`border-outer-box.docx`; the caller
+    /// computes it, since only it knows which boundaries are interior).
     ///
-    /// # Measured, and it has been the other way
+    /// # Measured, and it has been two other ways
     ///
     /// ECMA-376 says only "the height of the current table row" and specifies no
     /// stroke geometry for table borders anywhere, so it cannot say whether a
-    /// row's rules are part of its height. Word can, and does:
-    /// `test-files/issue-157-empty-row-edge.docx` table 4 declares 40pt against
-    /// 6pt of rule and Word draws **40pt of cell**, with the rules outside it.
-    /// Table 5 declares the same as `atLeast` and draws the same, so one rule
-    /// covers both. Table 3 declares 2pt — less than its own rules — and gets
-    /// exactly 2pt, so there is no collapse either.
+    /// row's rules are part of its height. Word can, and a re-measurement of
+    /// `test-files/issue-157-empty-row-edge.docx` on 2026-09-05 (pixel-counted
+    /// off a fresh render, calibrated against the table's own fixed-layout
+    /// width rather than eyeballed) settled it a second time: `atLeast` draws
+    /// the full 40pt table 5 declares, rules outside as before, but `exact`
+    /// draws only **~37pt** for table 4's identical 40pt — short by exactly
+    /// half of each of its two 3pt interior rules. `AtLeast` is a floor on
+    /// *content*, unrelated to the borders around it; `Exact` pins the row's
+    /// total box, which the interior rules eat into from both sides the same
+    /// way a shared vertical eats into a cell's width. Table 3's 2pt row (less
+    /// than the 3pt charged from each side) floors at zero rather than going
+    /// negative, which is consistent with the same rule rather than a separate
+    /// collapse.
     ///
-    /// The rival reading was that the declared height *contains* the rules, by
-    /// analogy with the other axis: `border-content-charge.docx` settled that a
-    /// shared border is charged **half to each cell's content box**, which puts a
-    /// border inside the box it bounds. That analogy is wrong here, and the cost
-    /// of believing it is recorded rather than deleted — it was implemented, and
-    /// what exposed it was a fixture with a row 20 times the width of its rules.
-    /// The earlier evidence for it came from rows of 0 and 2pt against 6pt of
-    /// rule, where a 2pt cell and a hairline are not distinguishable by eye.
+    /// # Two rival readings, both refuted by a render
+    ///
+    /// The first (shipped briefly) was that `Exact`'s declared height *contains*
+    /// the rules on **both** its interior boundaries in full, by analogy with
+    /// `border-content-charge.docx`'s shared-vertical finding taken literally
+    /// rather than halved. Table 4's 40pt-against-6pt-of-rule refuted it: Word's
+    /// ~37pt is 3pt short of 40, not 6.
+    ///
+    /// The second (recorded here from 2026-08-19 to 2026-09-05, and the reason
+    /// this doc comment is now on its third telling) was that the rules stand
+    /// **wholly** outside the box for `Exact` too, the same as `AtLeast` — drawn
+    /// from a render that, in hindsight, mismeasured table 4 as a clean 40pt.
+    /// What both wrong readings share is that they came from a single
+    /// measurement each; the fixture's own tables 2 and 3 warn about exactly
+    /// this, since a 2pt cell and a hairline are not distinguishable by eye —
+    /// this reading is the first to also fit table 3 without a separate case
+    /// for the floor.
     ///
     /// # `w:val="0"` is not a height
     ///
@@ -48,13 +66,15 @@ impl RowHeightRule {
     /// draws a full row of cell. [MS-OI29500] §2.4.77(c) is the corroboration —
     /// it records that Word requires `val="0"` whenever `hRule="auto"`, which is
     /// the same fact from the producing side. A literal reading draws a flat row
-    /// and loses the cell entirely, which is what this engine used to do.
-    pub(super) fn content_height(self, content: Pt) -> Pt {
+    /// and loses the cell entirely, which is what this engine used to do. This
+    /// is decided before `border_charge` ever applies, since an unconstrained
+    /// row is not measuring a box at all.
+    pub(super) fn content_height(self, content: Pt, border_charge: Pt) -> Pt {
         match self {
             // Zero is "unconstrained", not "flat" — see above.
             Self::Exact(h) | Self::AtLeast(h) if h <= Pt::ZERO => content,
             Self::AtLeast(min) => content.max(min),
-            Self::Exact(h) => h,
+            Self::Exact(h) => (h - border_charge).max(Pt::ZERO),
         }
     }
 }

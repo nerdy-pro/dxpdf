@@ -583,43 +583,80 @@ fn middle_row_box(bytes: &[u8]) -> f32 {
     rules[2].0 - rules[1].1
 }
 
-/// §17.4.80 measures the row's **content box**, and its rules stand outside it:
-/// a row declaring 40pt gets 40pt of cell, with its two 3pt rules on top.
+/// §17.4.80 measures the row's **content box**, and an *interior* rule eats
+/// into it from both sides — half the boundary above, half the one below — the
+/// same way a shared vertical eats into a cell's width: a row declaring 40pt
+/// between two 3pt `insideH` rules gets 40 − 1.5 − 1.5 = 37pt of cell.
 ///
-/// **Measured** against a Word render of `test-files/issue-157-empty-row-edge.docx`
-/// (2026-08-19), whose table 4 declares exactly this and draws 40pt of cell.
-/// 40pt is chosen to clear the 6pt of rule comfortably, so the two readings
-/// differ by those 6pt with no floor or collapse anywhere near.
+/// **Measured** against a Word render of `test-files/issue-157-empty-row-edge.docx`,
+/// table 4 — re-measured 2026-09-05, pixel-counted off a fresh render and
+/// calibrated against the table's own fixed-layout width (200pt / 750px)
+/// rather than eyeballed. 40pt is chosen to clear the 6pt of rule comfortably,
+/// so the reading is not confused with a floor.
 ///
-/// This has been the other way and was wrong. The reading that the declared
-/// height *contains* the rules was argued from the convention on the other axis
-/// — `border-content-charge.docx` put a shared border inside the content box it
-/// bounds — and from an earlier, coarser reading of the same fixture's tables 2
-/// and 3, whose rows are small enough that a 2pt cell and a hairline are hard to
-/// tell apart. Table 4 is 20 times that size and settles it: the vertical axis
-/// does **not** follow the horizontal one here.
+/// This has been two other ways, each wrong and each from a single render. The
+/// first (shipped briefly) put the whole 6pt of rule inside the box, by
+/// analogy with `border-content-charge.docx`'s shared-vertical finding taken
+/// literally rather than halved. The second — recorded here from 2026-08-19 to
+/// 2026-09-05 — read the same render as a clean 40pt with the rules wholly
+/// outside, on the strength of tables 2 and 3, whose rows are small enough
+/// that a 2pt cell and a hairline are hard to tell apart. Table 4 is 20 times
+/// that size, and a second, calibrated measurement puts it at 37pt, not 40.
 #[test]
-fn an_exact_row_height_is_the_height_of_its_content_box() {
+fn an_exact_row_height_is_charged_half_of_each_interior_border() {
     let box_h = middle_row_box(&banded_table(
         r#"<w:trPr><w:trHeight w:val="800" w:hRule="exact"/></w:trPr>"#,
     ));
     assert!(
-        (box_h - 40.0).abs() < 0.01,
-        "800 twips is 40pt of cell, rules outside it, not {box_h}pt"
+        (box_h - 37.0).abs() < 0.01,
+        "800 twips is 40pt minus half of each of its two 3pt interior rules, \
+         37pt of cell, not {box_h}pt"
     );
 }
 
-/// …and a row declaring less than its own rules still gets exactly what it
-/// declared, the rules standing outside it as always. Word's table 3 draws 2pt
-/// of cell between two 3pt rules.
+/// …and a row declaring less than the rules charged against it floors at zero
+/// rather than going negative — the same rule as the 40pt case above, not a
+/// separate collapse. Word's table 3 draws this row as a hairline rather than
+/// a clean 2pt of cell, which is what a zero floor predicts and a pass-through
+/// of the declared value does not.
+///
+/// A floored, zero-height row leaves its two interior rules with nothing
+/// between them, so `middle_row_box`'s "table top, two interior rules, table
+/// bottom" no longer holds — the pair coalesces into one 6pt rect the way any
+/// two abutting same-colour rects do (`coalesce_abutting_rects`), leaving 3
+/// rects rather than 4. That coalesced band is asserted directly instead.
 #[test]
-fn a_row_shorter_than_its_rules_still_gets_the_height_it_declares() {
-    let box_h = middle_row_box(&banded_table(
+fn a_row_shorter_than_its_rules_floors_at_zero_rather_than_going_negative() {
+    let pages = layout(&banded_table(
         r#"<w:trPr><w:trHeight w:val="40" w:hRule="exact"/></w:trPr>"#,
     ));
+    let mut rules: Vec<(f32, f32)> = pages
+        .iter()
+        .flat_map(|p| &p.commands)
+        .filter_map(|c| match c {
+            DrawCommand::Rect { rect, .. } if rect.size.height.raw() < rect.size.width.raw() => {
+                Some((
+                    rect.origin.y.raw(),
+                    (rect.origin.y + rect.size.height).raw(),
+                ))
+            }
+            _ => None,
+        })
+        .collect();
+    rules.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(
+        rules.len(),
+        3,
+        "table top, one coalesced interior band, table bottom — not 4 \
+         separate rules, since the floored row leaves none of its own \
+         between them"
+    );
+    let band_h = rules[1].1 - rules[1].0;
     assert!(
-        (box_h - 2.0).abs() < 0.01,
-        "40 twips is 2pt of cell however thick the rules are, not {box_h}pt"
+        (band_h - 6.0).abs() < 0.01,
+        "40 twips (2pt) is less than the 3pt charged from each side, so the \
+         content box floors at zero and its two 3pt interior rules meet with \
+         nothing between them: one 6pt band, not {band_h}pt"
     );
 }
 

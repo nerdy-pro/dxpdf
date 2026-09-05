@@ -268,11 +268,34 @@ pub(super) fn measure_table_rows(
             grid_idx += span;
         }
 
-        // §17.4.80 measures this box and not the rules around it — see
-        // `RowHeightRule::content_height`, which holds the Word render that
-        // settles it and the reading it refuted.
+        // §17.4.80 measures this box, minus half of each *interior* boundary's
+        // rule under `hRule="exact"` — see `RowHeightRule::content_height`,
+        // which holds the Word render that settles it and the two readings it
+        // refuted. The table's own outer top/bottom are excluded (`row_idx == 0`
+        // / `row_idx + 1 == num_rows`): those hang wholly outside every row's
+        // box regardless of `height_rule` (`border-outer-box.docx`), so only a
+        // boundary shared with another row is ever charged. Read from `plan`
+        // rather than `resolved_borders`, for the reason `charge` above does:
+        // resolution clears the losing side of a shared edge to `Absent`, and
+        // both rows meeting on a line are charged from it alike.
         if let Some(rule) = row.height_rule {
-            max_height = rule.content_height(max_height);
+            let boundary_width = |r: usize| {
+                (0..col_widths.len())
+                    .map(|c| border_width(plan.horizontal(r, c)))
+                    .fold(Pt::ZERO, Pt::max)
+            };
+            let top_charge = if row_idx == 0 {
+                Pt::ZERO
+            } else {
+                boundary_width(row_idx)
+            };
+            let bottom_charge = if row_idx + 1 == num_rows {
+                Pt::ZERO
+            } else {
+                boundary_width(row_idx + 1)
+            };
+            let border_charge = (top_charge + bottom_charge) * 0.5;
+            max_height = rule.content_height(max_height, border_charge);
         }
 
         // §17.4.45: the row's box reserves its own leading gap, mirroring the
@@ -970,20 +993,24 @@ mod tests {
         )
     }
 
-    /// §17.4.80 measures the row's **content box**, and the rules on its two
-    /// boundaries stand outside it: a row declaring 40 pt gets 40 pt of cell
-    /// whatever its borders weigh.
+    /// §17.4.80 measures the row's **content box**, and an *interior* rule eats
+    /// into it from both sides — half of the boundary above, half of the one
+    /// below — the same way a shared vertical eats into a cell's width. A row
+    /// between two others, declaring 40pt against two 3pt `insideH` rules, gets
+    /// 40 − 1.5 − 1.5 = 37pt of cell.
     ///
     /// **Measured** against a Word render of
-    /// `test-files/issue-157-empty-row-edge.docx` (2026-08-19), table 4. The
-    /// bordered fixture is what makes this a test rather than a tautology — with
-    /// no borders the two readings agree.
+    /// `test-files/issue-157-empty-row-edge.docx`, table 4 — re-measured
+    /// 2026-09-05, pixel-counted off a fresh render and calibrated against the
+    /// table's own fixed-layout width (200pt / 750px) rather than eyeballed.
+    /// The bordered fixture is what makes this a test rather than a tautology —
+    /// with no borders every reading agrees.
     ///
-    /// This assertion has been the other way, briefly and wrongly: see
-    /// `RowHeightRule::content_height` for the analogy that produced it and the
-    /// render that refuted it.
+    /// This assertion has been two other ways, briefly and each time from a
+    /// single render: see `RowHeightRule::content_height` for both and what
+    /// refuted each.
     #[test]
-    fn an_exact_row_height_is_its_content_box_whatever_its_borders_weigh() {
+    fn an_exact_row_height_is_charged_half_of_each_interior_border() {
         let m = bordered_sized_table(&[
             row(vec![cell_of(1)]),
             row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(40.0))),
@@ -996,16 +1023,40 @@ mod tests {
         );
         assert_eq!(
             m.rows[1].height,
-            Pt::new(40.0),
-            "40 pt of cell, rules outside"
+            Pt::new(37.0),
+            "40pt declared, minus half of each of its two 3pt interior rules"
         );
     }
 
-    /// …including a row that declares less than its own rules: it gets what it
-    /// declared, and the rules stand outside it as always. Word draws 2 pt of
-    /// cell between two 3 pt rules (table 3 of the same fixture).
+    /// A row's own outer top and bottom are excluded from the charge above —
+    /// they hang wholly outside every row's box regardless of `height_rule`
+    /// (`border-outer-box.docx`), so only an *interior* boundary is ever
+    /// charged. The same 40pt/3pt-`insideH` row as above, but first in its
+    /// table: its top is the table's own outer edge (uncharged) and only its
+    /// bottom is interior, so it loses half of one rule, not two — 40 − 1.5 =
+    /// 38.5pt, not 37.
     #[test]
-    fn a_row_shorter_than_its_rules_still_gets_the_height_it_declares() {
+    fn a_table_s_own_outer_edge_is_never_charged_to_an_exact_row() {
+        let m = bordered_sized_table(&[
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            m.rows[0].height,
+            Pt::new(38.5),
+            "40pt declared, minus half of the one interior rule below it — its \
+             own top is the table's outer edge and pays nothing"
+        );
+    }
+
+    /// …including a row shorter than the rules charged against it: it floors at
+    /// zero rather than going negative, which is the same rule as the 40pt case
+    /// above and not a separate collapse. Word draws table 3's 2pt-against-6pt
+    /// row as a hairline rather than a clean 2pt of cell, which is what the
+    /// zero floor (and not the declared value passing through unmodified) now
+    /// predicts.
+    #[test]
+    fn a_row_shorter_than_its_rules_floors_at_zero_rather_than_going_negative() {
         let m = bordered_sized_table(&[
             row(vec![cell_of(1)]),
             row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(2.0))),
@@ -1013,8 +1064,9 @@ mod tests {
         ]);
         assert_eq!(
             m.rows[1].height,
-            Pt::new(2.0),
-            "2 pt declared, 2 pt of cell"
+            Pt::ZERO,
+            "2pt declared is less than the 3pt charged from each side, so the \
+             content box floors at zero rather than going negative"
         );
     }
 
