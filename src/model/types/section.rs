@@ -28,6 +28,18 @@ pub struct SectionProperties {
     /// §17.6.5: `<w:footerReference>`. See [`SectionProperties::header_refs`].
     pub footer_refs: SectionHeaderFooterRefs,
     pub title_page: Option<bool>,
+    /// §17.6.6 `w:bidi`: right-to-left section layout — which side of the
+    /// content area is the **leading** one.
+    ///
+    /// Distinct from §17.4.1 `w:bidiVisual`, which reverses the cells inside a
+    /// single table; a document may set either without the other. What reads
+    /// this is `render::layout::page::PageConfig::from_section`, which resolves
+    /// it to a [`BaseDirection`](crate::i18n::bidi::BaseDirection) — the
+    /// engine's existing word for the same question at paragraph level.
+    ///
+    /// `Option<bool>` rather than `Dup<bool>` to match `title_page`: both are
+    /// toggles the `$value` walk above collapses last-wins as it goes.
+    pub bidi: Option<bool>,
     pub section_type: Dup<SectionType>,
     /// §17.6.12: page numbering settings for this section.
     pub page_number_type: Dup<PageNumberType>,

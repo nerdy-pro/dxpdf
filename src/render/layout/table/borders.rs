@@ -1,21 +1,36 @@
 //! Table borders — §17.4.66 resolution, and the drawing of what it resolved.
 //!
-//! Resolution is the larger half and runs in two passes:
-//! [`resolve_table_cell_borders`] drives them, [`resolve_cell_effective_borders`]
-//! answers what one cell declares, and [`resolve_border_conflict`] answers which
-//! of two cells facing each other across a shared edge wins it. [`CellEdge`]'s
-//! three states are what makes the whole thing expressible — an omitted edge
-//! and a `val="nil"` one paint the same nothing but inherit differently.
+//! Everything starts from [`declare_cell_borders`], which answers what each cell
+//! *declares* on its four edges and looks across none of them:
+//! [`resolve_cell_effective_borders`] maps the table's borders onto a cell's
+//! position in its row and lays the cell's own `w:tcBorders` on top. [`CellEdge`]'s
+//! three states are what makes that expressible — an omitted edge and a
+//! `val="nil"` one paint the same nothing but inherit differently.
 //!
-//! Emission is the smaller half, and splits the same way the geometry does:
-//! [`emit_cell_borders`] paints what is inside one cell's box, [`OpenBand`] owns
-//! the strip between two rows — which is inside neither, and is where every
-//! reported corner defect has been — and [`emit_table_outline`] draws the outer
-//! rectangle a §17.4.45-spaced table needs, since its cells no longer touch the
-//! table's boundary.
+//! Two readers then ask two different questions of those declarations, and the
+//! split is the point of this module:
+//!
+//! * [`resolve_table_cell_borders`] — **how much of each edge is charged to each
+//!   cell**, which insets its content box. A per-cell question with a per-cell
+//!   answer.
+//! * [`plan_table_borders`] — **what line stands on each line of the grid**,
+//!   which is what reaches the page. A collapsed border sits on an edge two
+//!   cells share, so it belongs to neither; [`BorderPlan`] is indexed by grid
+//!   line and has no notion of an owning cell at all.
+//!
+//! Both resolve with [`resolve_border_conflict`]; only the pairs they feed it
+//! differ. The doc on `resolve_table_cell_borders` says where the two disagree
+//! and why that disagreement is still open.
+//!
+//! Emission follows the same shape as the geometry, and there are two:
+//! [`rasterize_border_grid`] paints a collapsed table's grid as junctions and
+//! the segments between them — every rect disjoint from every other by
+//! construction — while a §17.4.45-spaced table has no grid to collapse onto and
+//! takes [`emit_cell_frame`] per cell plus [`emit_table_outline`] for the
+//! rectangle its cells no longer reach.
 
 use crate::render::dimension::Pt;
-use crate::render::geometry::PtRect;
+use crate::render::geometry::{PtRect, PtSize};
 
 use super::grid::{cell_index_at_grid_col, is_vmerge_continue};
 use super::types::{
@@ -23,6 +38,7 @@ use super::types::{
     TableRowInput, VerticalMergeState,
 };
 use crate::render::layout::draw_command::DrawCommand;
+use crate::render::resolve::color::RgbColor;
 
 /// One cell edge during and after §17.4.38 resolution.
 ///
@@ -90,41 +106,27 @@ pub(super) struct CellBorders {
     pub(super) right: CellEdge,
 }
 
-/// §17.4.66: resolve every cell's four edges for the whole table.
+/// §17.4.38 / §17.7.6: what each cell *declares* on its four edges, before any
+/// question of who paints a shared one.
 ///
-/// Two passes, and they are different questions. The first asks what each cell
-/// *declares*, cell by cell — table borders mapped onto the cell's grid
-/// position, then the cell's own `w:tcBorders` on top, via
-/// [`resolve_cell_effective_borders`]. The second asks who *paints* each shared
-/// edge, which no cell can answer alone: two cells face each other across every
-/// interior edge, the winner is [`resolve_border_conflict`], and only one of
-/// them may draw it or the line doubles.
-///
-/// The horizontal half of that second pass is the involved one, because
-/// `w:gridSpan` means the two sides of an edge need not have the same cells.
-/// The edge is resolved *per grid column*, and then a whole row takes ownership
-/// of it — see `can_own` for the two conditions a row must meet, and why the
-/// upper row is preferred when both can.
-///
-/// `num_grid_cols` is the table-wide grid column count (`col_widths.len()`),
-/// which is what makes a cell "at the table edge" rather than merely last in
-/// its row (§17.4.15 `gridBefore` separates the two).
-///
-/// Returns one [`CellBorders`] per cell, in row order, indexed the same way
-/// `rows[r].cells` is.
-pub(super) fn resolve_table_cell_borders(
+/// The first of the two passes both readers below start from: table borders
+/// mapped onto the cell's position in its row via
+/// [`resolve_cell_effective_borders`], the cell's own `w:tcBorders` on top, then
+/// §17.4.84's two vertical-merge clearings. Nothing here looks across an edge.
+struct Declarations {
+    /// One per cell, in row order, indexed the same way `rows[r].cells` is.
+    cells: Vec<Vec<CellBorders>>,
+    /// The grid column each cell starts at, indexed the same way.
+    grid_indices: Vec<Vec<usize>>,
+}
+
+fn declare_cell_borders(
     rows: &[TableRowInput],
-    num_grid_cols: usize,
     borders: Option<&TableBorderConfig>,
-    // §17.4.45 `tblCellSpacing`, already resolved to points. Non-zero means the
-    // cells share no edges, which decides both the seeding and whether the
-    // collapse pass runs at all.
     cell_spacing: Pt,
-    // §17.4.38: adjacent-table collapse — see `measure_table_rows`.
-    suppress_first_row_top: bool,
-) -> Vec<Vec<CellBorders>> {
+) -> Declarations {
     let num_rows = rows.len();
-    let mut resolved_borders: Vec<Vec<CellBorders>> = Vec::new();
+    let mut cells: Vec<Vec<CellBorders>> = Vec::new();
     let mut grid_indices: Vec<Vec<usize>> = Vec::new();
     for (row_idx, row) in rows.iter().enumerate() {
         let mut row_borders = Vec::new();
@@ -141,17 +143,29 @@ pub(super) fn resolve_table_cell_borders(
         // preserved during conversion. Use it verbatim; otherwise
         // fall back to the table-wide config.
         let row_table_borders = row.border_overrides.as_ref().or(borders);
-        for cell_input in row.cells.iter() {
+        let cells_in_row = row.cells.len();
+        // §17.4.60 `tblPrEx/bidiVisual`: this row shares no edge with any
+        // neighbour (`RowBidiOverride`), so it declares its top/bottom the way
+        // a standalone one-row table would — both outer, neither `insideH` —
+        // by lying about its own position rather than teaching
+        // `resolve_cell_effective_borders` a second axis. `first_in_row`/
+        // `last_in_row` still come from this row's own (already-reversed) cell
+        // order, unaffected.
+        let (position_row, position_num_rows) = if row.bidi_override.is_some() {
+            (0, 1)
+        } else {
+            (row_idx, num_rows)
+        };
+        for (cell_i, cell_input) in row.cells.iter().enumerate() {
             let span = cell_input.grid_span.max(1) as usize;
             let mut cell_borders = resolve_cell_effective_borders(
                 cell_input,
                 row_table_borders,
-                GridPosition {
-                    row: row_idx,
-                    col: grid_idx,
-                    span,
-                    num_rows,
-                    num_grid_cols,
+                CellPosition {
+                    row: position_row,
+                    num_rows: position_num_rows,
+                    first_in_row: cell_i == 0,
+                    last_in_row: cell_i + 1 == cells_in_row,
                 },
                 cell_spacing > Pt::ZERO,
             );
@@ -165,9 +179,57 @@ pub(super) fn resolve_table_cell_borders(
             row_grid.push(grid_idx);
             grid_idx += span;
         }
-        resolved_borders.push(row_borders);
+        cells.push(row_borders);
         grid_indices.push(row_grid);
     }
+    Declarations {
+        cells,
+        grid_indices,
+    }
+}
+
+/// §17.4.66: how much of each edge is charged to each cell — the **measurement**
+/// question, and only that one.
+///
+/// This used to be the whole of border resolution and is now half of it. What it
+/// answers is how far a cell's content box is inset by the borders around it
+/// (`measure_table_rows`), which is a per-*cell* question and therefore has a
+/// per-cell answer. Where the line each edge resolves to actually goes on the
+/// page is a different question with a different shape, and
+/// [`plan_table_borders`] answers that one — a collapsed border stands on an
+/// edge two cells share, so it belongs to neither of them.
+///
+/// The two are deliberately not folded together, because they disagree and the
+/// disagreement is **unsettled**. Here a shared vertical is charged wholly to
+/// the cell on its left (the winner is written to that cell's `right` and the
+/// facing `left` is cleared); a centred border puts half its width in each. The
+/// second reading is what Word's collapsed model implies and what
+/// [`plan_table_borders`] paints, but changing what a cell is *charged* moves
+/// text in every bordered table in the corpus, and `tests/table_cell_content_box.rs`
+/// pins today's rule against a reasoned defect history. **Word reference render
+/// needed**: one table whose `w:sz` steps 4 → 48 across otherwise-identical
+/// rows, measuring where the first glyph lands, which separates "the full width
+/// is inside the cell" from "half of it is".
+///
+/// `num_grid_cols` is the table-wide grid column count (`col_widths.len()`),
+/// which is what makes a cell "at the table edge" rather than merely last in
+/// its row (§17.4.15 `gridBefore` separates the two).
+pub(super) fn resolve_table_cell_borders(
+    rows: &[TableRowInput],
+    num_grid_cols: usize,
+    borders: Option<&TableBorderConfig>,
+    // §17.4.45 `tblCellSpacing`, already resolved to points. Non-zero means the
+    // cells share no edges, which decides both the seeding and whether the
+    // collapse pass runs at all.
+    cell_spacing: Pt,
+    // §17.4.38: adjacent-table collapse — see `measure_table_rows`.
+    suppress_first_row_top: bool,
+) -> ResolvedTableBorders {
+    let num_rows = rows.len();
+    let Declarations {
+        cells: mut resolved_borders,
+        grid_indices,
+    } = declare_cell_borders(rows, borders, cell_spacing);
 
     // [MS-OI29500] §17.4.66: *"If the cell spacing is nonzero ... then all
     // cell borders and outer table borders display."* With a gap between
@@ -209,6 +271,17 @@ pub(super) fn resolve_table_cell_borders(
         // `saturating_sub`, not `- 1`: an empty table would underflow.
         for upper in 0..num_rows.saturating_sub(1) {
             let lower = upper + 1;
+
+            // §17.4.60 `tblPrEx/bidiVisual`: neither side of this pair shares
+            // a real edge with the other when one of them is a flipped row
+            // (`RowBidiOverride`) — its cells stand somewhere else entirely.
+            // Leave both sides exactly as `declare_cell_borders` seeded them
+            // (each already outer-declared, per the position lie above)
+            // instead of resolving a conflict between two edges that were
+            // never facing each other.
+            if rows[upper].bidi_override.is_some() || rows[lower].bidi_override.is_some() {
+                continue;
+            }
 
             // Per-column resolved border for this inter-row edge.
             let resolved: Vec<CellEdge> = (0..num_grid_cols)
@@ -292,13 +365,26 @@ pub(super) fn resolve_table_cell_borders(
                     if (start..end).any(|gc| covered[gc]) {
                         // Any column already painted from above → defer the
                         // whole cell so a partly-covered span can't double up.
+                        // The columns it *would* have covered alone become a
+                        // band fill below.
                         resolved_borders[lower][ci].top = CellEdge::Absent;
                     } else if (start..end).all(|gc| resolved[gc].paints_same(resolved[start])) {
                         resolved_borders[lower][ci].top = resolved[start];
+                        for c in covered.iter_mut().take(end).skip(start) {
+                            *c = true;
+                        }
                     } else {
                         resolved_borders[lower][ci].top = CellEdge::Absent;
                     }
                 }
+
+                // Whatever neither side could paint is simply not charged to
+                // either — `covered` is dropped here. It is not lost: the run
+                // still resolves to a line, and [`plan_table_borders`] puts that
+                // line on the grid boundary it stands on, which has no owning
+                // row to fall between. That is the whole of what the `BandFill`
+                // machinery this replaced was for.
+                let _ = &covered;
             }
         }
     }
@@ -310,27 +396,182 @@ pub(super) fn resolve_table_cell_borders(
         }
     }
 
-    resolved_borders
+    ResolvedTableBorders {
+        cells: resolved_borders,
+    }
 }
 
-/// Where one cell sits in the table's grid.
+/// What §17.4.66 charges to each cell: every cell's four edges.
+pub(super) struct ResolvedTableBorders {
+    pub(super) cells: Vec<Vec<CellBorders>>,
+}
+
+/// §17.4.66: what line stands on each line of the table's border grid — the
+/// **painting** question.
 ///
-/// The five indices travel together because they answer one question between
-/// them — is this cell at the table's top, bottom, left or right edge? — and
-/// none of them answers it alone. `col` is the cell's **absolute** starting grid
-/// column, past the row's §17.4.15 `gridBefore`, which is what makes the
-/// question different from "is it first or last in its row": `gridBefore` and
-/// §17.4.14 `gridAfter` can leave a row's first or last cell short of the
-/// table's edge.
+/// Indexed by grid line, never by cell, and that is the whole point. A collapsed
+/// border stands on an edge two cells *share*, so asking a cell to paint it has
+/// no well-defined answer: the same line is derivable from both sides, and
+/// whichever one paints decides where it sits. Three defects were reported
+/// against the per-cell emitter this replaced, all of them squares at a
+/// boundary that the cells touching it had each been emptied of.
+///
+/// Two things that used to need machinery fall out of the indexing:
+///
+/// * A row gapped by §17.4.15 `gridBefore` above one gapped by §17.4.14
+///   `gridAfter` leaves runs of a boundary that *neither row's cells* can paint,
+///   because a cell paints one border across its whole width. Here there is no
+///   owning row to fall between — `h[r][c]` is per grid column, and a run is a
+///   run.
+/// * A `w:gridSpan` cell has no vertical inside its own span, so those grid
+///   lines are simply `Absent` rather than something a cell has to decline.
+pub(super) struct BorderPlan {
+    cols: usize,
+    rows: usize,
+    /// `(cols + 1) * rows`, row-major within each grid line: the vertical on
+    /// grid line `c` alongside row `r` is at `c * rows + r`.
+    v: Vec<CellEdge>,
+    /// `(rows + 1) * cols`, column-major within each boundary: the horizontal on
+    /// row boundary `r` over grid column `c` is at `r * cols + c`.
+    h: Vec<CellEdge>,
+}
+
+impl BorderPlan {
+    /// Number of grid columns; there are `cols + 1` vertical grid lines.
+    pub(super) fn cols(&self) -> usize {
+        self.cols
+    }
+
+    /// The vertical on grid line `c` (`0..=cols`), alongside row `r`.
+    pub(super) fn vertical(&self, c: usize, r: usize) -> CellEdge {
+        if c > self.cols || r >= self.rows {
+            return CellEdge::Absent;
+        }
+        self.v[c * self.rows + r]
+    }
+
+    /// The horizontal on row boundary `r` (`0..=rows`), over grid column `c`.
+    pub(super) fn horizontal(&self, r: usize, c: usize) -> CellEdge {
+        if r > self.rows || c >= self.cols {
+            return CellEdge::Absent;
+        }
+        self.h[r * self.cols + c]
+    }
+}
+
+/// §17.4.66: resolve the whole border grid of a **collapsed** table.
+///
+/// Cell spacing is not a parameter because a spaced table has no grid to
+/// collapse onto — its cells share no edges, so it takes the other constructor
+/// of [`TableBorderGeometry`] and keeps a closed frame per cell.
+///
+/// Both families resolve the same way and with the same function: each grid
+/// segment has at most two declarations facing it, and
+/// [`resolve_border_conflict`] picks between them. What differs is only which
+/// two.
+pub(super) fn plan_table_borders(
+    rows: &[TableRowInput],
+    num_grid_cols: usize,
+    borders: Option<&TableBorderConfig>,
+    // §17.4.38: adjacent-table collapse — see `measure_table_rows`.
+    suppress_first_row_top: bool,
+) -> BorderPlan {
+    let num_rows = rows.len();
+    let Declarations {
+        cells,
+        grid_indices,
+    } = declare_cell_borders(rows, borders, Pt::ZERO);
+
+    // Verticals. On grid line `c` in row `r`, the two facing declarations are
+    // the `right` of the cell whose span *ends* at `c` and the `left` of the
+    // cell whose span *starts* there. A line strictly inside a `w:gridSpan`
+    // has neither, and a row gapped at that end has only one.
+    let mut v = vec![CellEdge::Absent; (num_grid_cols + 1) * num_rows];
+    for (r, starts) in grid_indices.iter().enumerate() {
+        // §17.4.60 `tblPrEx/bidiVisual`: this row's cells stand off the shared
+        // grid entirely (`RowBidiOverride`), so it contributes nothing here —
+        // its own verticals are painted directly, per cell, alongside its
+        // content (`emit.rs`), not rasterized from this plan.
+        if rows[r].bidi_override.is_some() {
+            continue;
+        }
+        for (ci, &start) in starts.iter().enumerate() {
+            let span = rows[r].cells[ci].grid_span.max(1) as usize;
+            let end = (start + span).min(num_grid_cols);
+            if start >= end {
+                continue;
+            }
+            let b = &cells[r][ci];
+            for (c, edge) in [(start, b.left), (end, b.right)] {
+                let slot = &mut v[c * num_rows + r];
+                *slot = resolve_border_conflict(*slot, edge);
+            }
+        }
+    }
+
+    // Horizontals. On boundary `r` over grid column `c`, the two facing
+    // declarations are the `bottom` of the cell covering `c` in row `r - 1` and
+    // the `top` of the cell covering it in row `r`. Either may be missing — at
+    // the table's own two boundaries, and wherever a row's cells do not reach
+    // that column.
+    let mut h = vec![CellEdge::Absent; (num_rows + 1) * num_grid_cols];
+    for r in 0..=num_rows {
+        for c in 0..num_grid_cols {
+            // §17.4.60 `tblPrEx/bidiVisual`: a flipped row (`RowBidiOverride`)
+            // contributes no horizontal either — excluded on both sides of
+            // every boundary it touches, the same reason as the verticals
+            // above. Its neighbour's facing declaration (already seeded as an
+            // outer edge, not `insideH` — see `declare_cell_borders`) is what
+            // is left standing once it drops out of the pair.
+            let above = r
+                .checked_sub(1)
+                .filter(|&up| rows[up].bidi_override.is_none())
+                .and_then(|up| cell_index_at_grid_col(&rows[up], c).map(|ci| cells[up][ci].bottom))
+                .unwrap_or(CellEdge::Absent);
+            let below = (r < num_rows && rows[r].bidi_override.is_none())
+                .then(|| cell_index_at_grid_col(&rows[r], c).map(|ci| cells[r][ci].top))
+                .flatten()
+                .unwrap_or(CellEdge::Absent);
+            h[r * num_grid_cols + c] = resolve_border_conflict(above, below);
+        }
+    }
+
+    // §17.4.38: adjacent-table collapse removes the whole of the table's top
+    // boundary, the one the table above already painted as its bottom.
+    if suppress_first_row_top {
+        for e in h.iter_mut().take(num_grid_cols) {
+            *e = CellEdge::Absent;
+        }
+    }
+
+    BorderPlan {
+        cols: num_grid_cols,
+        rows: num_rows,
+        v,
+        h,
+    }
+}
+
+/// Which edges of the table, and of its own row, one cell touches.
+///
+/// Deliberately **not** a grid position. The border rule turned out to be about
+/// the row's cells rather than the grid: a row's first `<w:tc>` takes the
+/// table's `w:left` whether or not it starts at grid column 0, because nothing
+/// faces its leading edge either way. Carrying `col`/`span`/`num_grid_cols`
+/// here invited the grid-column reading that two Word renders have now refuted,
+/// and nothing read them once the rule was right.
 #[derive(Clone, Copy)]
-pub(super) struct GridPosition {
+pub(super) struct CellPosition {
     pub(super) row: usize,
-    pub(super) col: usize,
-    /// §17.4.17 `gridSpan`, at least 1.
-    pub(super) span: usize,
     pub(super) num_rows: usize,
-    /// Grid columns in the whole table, not in this row.
-    pub(super) num_grid_cols: usize,
+    /// Whether this cell is the first `<w:tc>` of its `<w:tr>` — *not* whether
+    /// it starts at grid column 0. The two differ exactly when §17.4.15
+    /// `gridBefore` gaps the row, and the border rule follows this one.
+    pub(super) first_in_row: bool,
+    /// The same for the last `<w:tc>`, which §17.4.14 `gridAfter` — or a row
+    /// whose cells simply do not reach the grid's end — separates from reaching
+    /// the last grid column.
+    pub(super) last_in_row: bool,
 }
 
 /// §17.4.38 / §17.7.6: resolve effective borders for a cell.
@@ -339,7 +580,7 @@ pub(super) struct GridPosition {
 pub(super) fn resolve_cell_effective_borders(
     cell: &TableCellInput,
     table_borders: Option<&TableBorderConfig>,
-    at: GridPosition,
+    at: CellPosition,
     // §17.4.45: whether this table has a non-zero `w:tblCellSpacing`. See the
     // `outer` closure below — it is the whole reason this parameter exists.
     spaced: bool,
@@ -351,8 +592,6 @@ pub(super) fn resolve_cell_effective_borders(
     // an empty table. No caller passes `num_rows == 0` today, but the field is
     // free and the guard would live entirely in the callers.
     let is_last_row = at.row + 1 == at.num_rows;
-    let is_first_col = at.col == 0;
-    let is_last_col = at.col + at.span >= at.num_grid_cols;
 
     // §17.4.45 / issue #168: with a non-zero cell spacing the outer edges are
     // **not** seeded from the table's own borders. A spaced cell is inset from
@@ -387,12 +626,36 @@ pub(super) fn resolve_cell_effective_borders(
     } else {
         tb.and_then(|b| b.inside_h).into()
     };
-    let mut left: CellEdge = if is_first_col {
+    // §17.4.36 against §17.4.15/§17.4.14: the question is about the row's
+    // **cells**, not about the grid.
+    //
+    // §17.4.66 resolves a cell edge against "cell borders and outer table
+    // borders". A row's first `<w:tc>` has no cell facing its leading edge —
+    // §17.4.15 `gridBefore` leaves those grid columns blank — so the table's own
+    // border is what faces it, wherever across the grid that edge happens to
+    // fall. `gridBefore` moves where the edge *is*, not what it is. Same for the
+    // last cell and §17.4.14 `gridAfter`.
+    //
+    // So this is deliberately keyed on the cell's index in its row and not on
+    // its grid column, and the two differ exactly when a row is gapped.
+    // **Measured, not reasoned**: Word renders `grid-gap-borders.docx` with a
+    // 3pt red `w:left` on the leading edge of `D`, `F` and `G` and a 3pt green
+    // `w:right` on the trailing edge of `E` and `F`. It renders the same edge
+    // bare in `bidi-visual-table.docx`, whose `w:left` is `nil` — the same rule,
+    // since `nil` paints nothing.
+    //
+    // Two other readings were held here and both were wrong, which is why the
+    // grid-column form is not worth trying again: `insideV` (grid columns exist
+    // to the left, so the edge is interior) is refuted by the `nil` render, and
+    // *nothing at all* (§17.4.35 places `w:left` "around the table", and this
+    // edge is 50pt inside it) is refuted by this one. The second was argued from
+    // the spec's wording and fit every measurement available at the time.
+    let mut left: CellEdge = if at.first_in_row {
         outer(tb.and_then(|b| b.left))
     } else {
         tb.and_then(|b| b.inside_v).into()
     };
-    let mut right: CellEdge = if is_last_col {
+    let mut right: CellEdge = if at.last_in_row {
         outer(tb.and_then(|b| b.right))
     } else {
         tb.and_then(|b| b.inside_v).into()
@@ -559,224 +822,660 @@ fn colour_luminance(b: &TableBorderLine) -> (u32, u32, u32) {
     (r + bl + 2 * g, bl + 2 * g, g)
 }
 
-/// One cell's box, as the border emitter needs it.
+/// Where the line on one placed boundary comes from.
 ///
-/// `h` is the row's **content** height and `band_below` the strip §17.4.38
-/// reserves under it for the row's bottom borders. They are separate fields
-/// because they are separate things to the edges that read them: the bottom
-/// border sits at the top of the band where one is reserved and is inset into
-/// the content box where none is, while the verticals stop where the bottom
-/// border starts either way. Adding them together before the call — which is
-/// what this took before — made one number mean both, and left the caller
-/// computing the vertical's extent a second time to compensate.
+/// A page slice does not always put the plan's two neighbours on either side of
+/// a y, so which of the plan's boundaries a placed one shows is not simply its
+/// row index. Two shapes do it: the seam under a §17.4.49 repeated header, whose
+/// next row is not the header's successor and which therefore shows the
+/// *header's own* lower boundary; and a continuation slice's first row, whose
+/// predecessor is on the page before.
+#[derive(Clone, Copy)]
+pub(super) struct BoundarySource {
+    /// Which of the plan's boundaries (`0..=rows`) holds the line for this y.
+    pub(super) plan_boundary: usize,
+    /// §17.4.38: the line to draw where that boundary is `Absent`, for a
+    /// continuation slice whose top edge conflict resolution gave to the page
+    /// before. `None` everywhere else.
+    ///
+    /// Only `Absent` falls through to it. An edge the author set to `nil` stays
+    /// empty — they asked for no border — and [`CellEdge`]'s third state is what
+    /// keeps the two distinguishable this far down.
+    pub(super) restore: Option<TableBorderLine>,
+}
+
+/// One row as a page slice placed it: which plan row it is, and the two
+/// boundaries it sits between.
+///
+/// The boundaries are y values in table-local coordinates, and consecutive
+/// placed rows share one — `placed[i].bottom == placed[i + 1].top` — so each is
+/// rasterized once.
+pub(super) struct PlacedRow {
+    pub(super) plan_row: usize,
+    pub(super) top: Pt,
+    pub(super) bottom: Pt,
+    /// Where the line on the boundary at `top` comes from. The one at `bottom`
+    /// belongs to the row below, except on the slice's last row, where
+    /// [`rasterize_border_grid`] takes the plan's boundary under it — the cut
+    /// closes the table off exactly as its own edge would.
+    pub(super) top_source: BoundarySource,
+}
+
+/// The width a resolved edge paints, zero where it paints nothing.
+fn edge_width(e: CellEdge) -> Pt {
+    e.line().map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO)
+}
+
+/// How much of the page a border of this style and `w:sz` actually occupies.
+///
+/// **§17.18.2's `w:sz` is the width of one rule, not of the whole border.** A
+/// `single` is that one rule; a `double` is two of them with a gap of the same
+/// `w:sz` between, so it is **three times as wide** as a `single` of equal
+/// `w:sz`. Every geometric question about a border — how much of a cell it
+/// insets, how wide the §17.4.38 strip between two rows is, how big a junction
+/// square is, where the rules themselves fall — is about this width and not
+/// about `w:sz`.
+///
+/// **Measured in Word**, off `test-files/border-junction-colour.docx`: its
+/// fourth table crosses a 12pt `single` with a 12pt `double`, and Word draws the
+/// double as *cell, 12pt rule, gap, 12pt rule, cell*.
+///
+/// This is the same fact as [`border_weight`], which is why they share a body.
+/// [MS-OI29500] §17.4.66 ranks a `double` above a `single` of equal `w:sz`
+/// threefold, and the reason is simply that it is three times as wide — one
+/// fact, not two rules that happen to agree. The engine used to hold them apart:
+/// it weighed a double at 3x while drawing it inside a single's band, dividing
+/// `w:sz` into thirds, and `tests/table_geometry_paint.rs` cited the weight rule
+/// as the justification with the inference running backwards.
+pub(crate) fn drawn_width(b: &TableBorderLine) -> Pt {
+    b.width
+        * match b.style {
+            TableBorderStyle::Single => 1.0,
+            TableBorderStyle::Double => 3.0,
+        }
+}
+
+/// §17.4.66: paint one page slice's share of a table's border grid.
+///
+/// **Every rect this emits is disjoint from every other, by construction**, and
+/// together they cover the whole network. That is the property three reported
+/// corner defects were each a violation of, and it is here a consequence of the
+/// decomposition rather than something the code has to be argued into:
+///
+/// * a **junction** is the neighbourhood of a node — one grid line crossed with
+///   one row boundary;
+/// * a **horizontal segment** lives in the open x-interval *between* two nodes
+///   on one boundary;
+/// * a **vertical segment** lives in the open y-interval between two nodes on
+///   one grid line.
+///
+/// Each family is disjoint from itself (different nodes, different intervals),
+/// and from the other two — a node's neighbourhood is exactly what the segments
+/// have removed from theirs, which is `subtract` below rather than a trim at
+/// each segment's own two ends, because a junction can be wider than the column
+/// beside it.
+///
+/// The single exception is two *segments* on parallel lines closer together than
+/// the lines are thick, which is the author's geometry being impossible rather
+/// than this decomposition's: see `is_parallel_crowding` in
+/// `tests/table_border_corners.rs`, which audits the invariant over the whole
+/// corpus and allows exactly that.
+///
+/// Where a border sits on its line — straddling a shared one, inside one shared
+/// with nothing — is decided by `inside`, below.
+///
+/// `x` holds the `cols + 1` vertical grid lines; `placed` is this slice's rows,
+/// top to bottom.
+pub(super) fn rasterize_border_grid(
+    commands: &mut Vec<DrawCommand>,
+    plan: &BorderPlan,
+    x: &[Pt],
+    placed: &[PlacedRow],
+    // The slice's own box. Only the four lines bounding it are affected — see
+    // `inside` below.
+    box_size: PtSize,
+) {
+    if placed.is_empty() || x.len() < 2 {
+        return;
+    }
+    let cols = plan.cols();
+
+    // The boundaries this slice paints, top to bottom: one above each placed
+    // row, then one below the last. Which of the plan's boundaries each one
+    // shows is `BoundarySource`'s question, not this loop's — a continuation
+    // slice and a repeated header both break the correspondence.
+    let lines_of = |source: BoundarySource| -> Vec<CellEdge> {
+        (0..cols)
+            .map(|c| match plan.horizontal(source.plan_boundary, c) {
+                CellEdge::Absent => source.restore.into(),
+                resolved => resolved,
+            })
+            .collect()
+    };
+    let mut boundaries: Vec<(Pt, Vec<CellEdge>)> = Vec::with_capacity(placed.len() + 1);
+    for row in placed {
+        boundaries.push((row.top, lines_of(row.top_source)));
+    }
+    // The slice's foot is the plan's boundary under its last row — a page cut
+    // closes the table off with the same line its own edge would, which is what
+    // the row above the cut would have painted had the next row followed it.
+    let last = &placed[placed.len() - 1];
+    boundaries.push((
+        last.bottom,
+        lines_of(BoundarySource {
+            plan_boundary: last.plan_row + 1,
+            restore: None,
+        }),
+    ));
+
+    // §17.4.66 / issue #157: a row of **zero height** puts two boundaries at one
+    // y, and an empty `<w:tr/>` — a row with no cells at all — is the shape that
+    // does it. Two boundaries at one y are one boundary: resolve the lower into
+    // the upper and leave it empty, exactly as two cells facing across a shared
+    // edge are resolved. Painting both put the same rect on the page twice and
+    // left its colour to emission order.
+    //
+    // This settles only the double-*paint*. Whether an empty row should separate
+    // its neighbours at all — giving that boundary two lines a row apart rather
+    // than one — is what `test-files/issue-157-empty-row-edge.docx` asks, and it
+    // is **still open**, though not in the shape it was first asked.
+    //
+    // For a cell-less `<w:tr/>` it is unanswerable: Word refuses to open such a
+    // document at all (measured 2026-08-19, isolated against a variant identical
+    // but for the row, which opens). `CT_Row` makes the cell group
+    // `minOccurs="0"`, so the element is schema-valid and Word's reader is
+    // stricter than the schema — the same class of rejection three `issue-165-*`
+    // fixtures hit over a `.rels` namespace. A document holding one is therefore
+    // one Word itself calls corrupt: no fidelity target exists, and rendering it
+    // rather than rejecting the package is a robustness choice, not a match.
+    //
+    // The probe was rebuilt around the two spellings Word does accept, both of
+    // which reach this merge: a row of `hRule="exact"` at 0, whose boundaries
+    // coincide exactly, and one at 2pt, which is shorter than its own two 3pt
+    // borders. Those *can* be measured, and the fixture's tables 2 and 3 are
+    // where. Today this engine draws a 6pt band at the first and 3pt/2pt/3pt at
+    // the second, against a 3pt control.
+    for b in 1..boundaries.len() {
+        if boundaries[b].0 != boundaries[b - 1].0 {
+            continue;
+        }
+        let lower = std::mem::replace(&mut boundaries[b].1, vec![CellEdge::Absent; cols]);
+        for (c, edge) in lower.into_iter().enumerate() {
+            let upper = boundaries[b - 1].1[c];
+            boundaries[b - 1].1[c] = resolve_border_conflict(upper, edge);
+        }
+    }
+
+    // Width of the horizontal reaching each node from its left and its right.
+    // A node at grid line `c` on boundary `b` is met by columns `c - 1` and `c`.
+    let h_at_node = |b: usize, c: usize| -> Pt {
+        let lines = &boundaries[b].1;
+        let left = c
+            .checked_sub(1)
+            .map(|i| lines[i])
+            .unwrap_or(CellEdge::Absent);
+        let right = lines.get(c).copied().unwrap_or(CellEdge::Absent);
+        edge_width(left).max(edge_width(right))
+    };
+    // The same for the verticals reaching it from above and below — the placed
+    // rows on either side of the boundary, which need not be plan-adjacent.
+    let v_at_node = |b: usize, c: usize| -> Pt {
+        let above = b
+            .checked_sub(1)
+            .map(|i| plan.vertical(c, placed[i].plan_row))
+            .unwrap_or(CellEdge::Absent);
+        let below = placed
+            .get(b)
+            .map(|r| plan.vertical(c, r.plan_row))
+            .unwrap_or(CellEdge::Absent);
+        edge_width(above).max(edge_width(below))
+    };
+
+    // §17.4.66: **every vertical border straddles its grid line, the table's
+    // own two included.** A 1pt `insideV` and a 3pt `w:left` meeting at one line
+    // come out concentric on it, and so do the table's own edges — half of each
+    // falls outside the box the table reports.
+    //
+    // **Measured**, against `test-files/border-outer-box.docx`: a paragraph at
+    // the page margin above two tables of one `w:tblInd` and one `w:tblW`
+    // differing only in outer border weight. Word draws the 12pt frame at
+    // 60..72 and 360..372 against a 300pt grid, and moves the *interior* line
+    // 6pt left with it. Straddling alone would put that frame at 66..78 and
+    // leave the interior line where it was, so the whole table has shifted left
+    // by half its leading border — which is `build::table`'s indent, and the
+    // reading it already names: §17.4.50 `w:tblInd` measures to the **first
+    // cell's text edge**, so the grid sits half a leading border to the left of
+    // it and that cell's content lands back on the indent.
+    //
+    // Two readings were held here before and both are refuted by that render.
+    // Shifting these four *inside* the box kept `TableSlice::size` containing
+    // the ink but pushed the first column's text in by the whole border; hanging
+    // them wholly outside put the frame in the right place and the interior line
+    // in the wrong one, and vertically painted a top border straight through the
+    // paragraph above.
+    //
+    // What it costs is stated rather than hidden: a table's ink reaches half a
+    // border past the box it reports on the left and the right, so a full-width
+    // table paints into the page margin. That is what Word does, and §17.4.63's
+    // auto-width guard is drawn at the *paper* edge rather than the text
+    // column's precisely so the margin has room to absorb it
+    // (`tests/table_auto_width.rs`).
+    //
+    // The **horizontals are a different question and are left alone**, because
+    // nothing has measured them and the obvious symmetry is destructive: down
+    // the page there is no margin to hang into, only the block above and the
+    // block below, and `TableSlice::size` is what the stacker flows against. So
+    // a table's own top and bottom go *inside* the box, which is what `place_y`
+    // does and what it did before any of this.
+    //
+    // **Word reference render needed** for that half: a table with a 12pt
+    // `w:top` under a paragraph, measuring whether the paragraph's last baseline
+    // moves when the border grows. `border-outer-box.docx` asks only the
+    // horizontal question.
+    //
+    // `place_y` is expressed against the slice's box rather than against the
+    // *index* of the outermost line, and the difference is a case the index gets
+    // wrong: a page cut's boundary is the last one this slice paints but sits
+    // half a reserved strip above the slice's foot, so it is interior after all
+    // and its border belongs centred on it.
+    let place_x = |centre: Pt, w: Pt| -> Pt { centre - w * 0.5 };
+    let place_y = |centre: Pt, w: Pt, limit: Pt| -> Pt {
+        let straddling = centre - w * 0.5;
+        if straddling < Pt::ZERO {
+            Pt::ZERO
+        } else if straddling + w > limit {
+            limit - w
+        } else {
+            straddling
+        }
+    };
+
+    // 1. Junctions, resolved but **not yet emitted**. A node needs one only
+    //    where both axes reach it: with one axis alone the segments on either
+    //    side lost nothing to it and already abut at the node.
+    //
+    //    Held rather than emitted because two things need them. A segment is
+    //    what the junctions it runs into leave of its interval, so they must all
+    //    be known before any segment is cut. And each one is emitted *among the
+    //    segments of the axis whose colour it took*, so that
+    //    `coalesce_abutting_rects` can fuse the pair — see `junction_axes` and
+    //    the passes below.
+    struct Junction {
+        node: (usize, usize),
+        x: (Pt, Pt),
+        y: (Pt, Pt),
+        color: RgbColor,
+        /// Whether the **vertical** is the line that won this square, which is
+        /// only about its colour and which pass emits it. The geometry below is
+        /// the product of both axes either way.
+        along_vertical: bool,
+        /// §17.18.2: how the vertical meeting here divides across x.
+        v_style: TableBorderStyle,
+        /// … and the horizontal across y. The square is the product of the two,
+        /// so a `double` on either axis runs its gap through the crossing.
+        h_style: TableBorderStyle,
+    }
+    let mut junctions: Vec<Junction> = Vec::new();
+    for (b, (y, _)) in boundaries.iter().enumerate() {
+        for (c, &gx) in x.iter().enumerate() {
+            let (vw, hw) = (v_at_node(b, c), h_at_node(b, c));
+            if vw <= Pt::ZERO || hw <= Pt::ZERO {
+                continue;
+            }
+            let (Some(horizontal), Some(vertical)) = junction_axes(plan, placed, &boundaries, b, c)
+            else {
+                continue;
+            };
+            let (jx, jy) = (place_x(gx, vw), place_y(*y, hw, box_size.height));
+            // §17.4.66's weight step, which is `drawn_width`: the heavier line
+            // takes the square, and the horizontal wins only a tie.
+            let along_vertical = drawn_width(&vertical) > drawn_width(&horizontal);
+            junctions.push(Junction {
+                node: (b, c),
+                x: (jx, jx + vw),
+                y: (jy, jy + hw),
+                color: if along_vertical {
+                    vertical.color
+                } else {
+                    horizontal.color
+                },
+                along_vertical,
+                v_style: vertical.style,
+                h_style: horizontal.style,
+            });
+        }
+    }
+    // One §17.18.2 rule of the junction, indexed **along the axis that owns
+    // it** — its `k`-th x-band in the vertical pass, its `k`-th y-band in the
+    // horizontal one. The passes below walk `k` outermost so that each rule of a
+    // junction lands next to the piece of segment it abuts; emitting a whole
+    // junction and then a whole segment interleaves them as `A₀ A₁ B₀ B₁`, where
+    // `A₀` meets `B₀` and `A₁` meets `B₁` and neither pair is adjacent, so
+    // `coalesce_abutting_rects` fuses nothing and every join reaches the page as
+    // a hairline.
+    let emit_junction_rule = |commands: &mut Vec<DrawCommand>, j: &Junction, k: usize| {
+        let (along, across) = if j.along_vertical {
+            (j.v_style, j.h_style)
+        } else {
+            (j.h_style, j.v_style)
+        };
+        let (a0, a1, c0, c1) = if j.along_vertical {
+            (j.x.0, j.x.1, j.y.0, j.y.1)
+        } else {
+            (j.y.0, j.y.1, j.x.0, j.x.1)
+        };
+        let Some((at, thickness)) = sub_rules(along, a0, a1 - a0).nth(k) else {
+            return;
+        };
+        for (other, extent) in sub_rules(across, c0, c1 - c0) {
+            let rect = if j.along_vertical {
+                PtRect::from_xywh(at, other, thickness, extent)
+            } else {
+                PtRect::from_xywh(other, at, extent, thickness)
+            };
+            commands.push(DrawCommand::Rect {
+                rect,
+                color: j.color,
+            });
+        }
+    };
+    let junction_at = |b: usize, c: usize, vertical: bool| -> Option<&Junction> {
+        junctions
+            .iter()
+            .find(|j| j.node == (b, c) && j.along_vertical == vertical)
+    };
+
+    // 2 and 3. The segments: each one's interval **minus every junction whose
+    //    square it runs into**.
+    //
+    //    Subtraction against the junctions it actually meets, not a trim at its
+    //    own two ends, and the difference is not academic. A junction is as wide
+    //    as the vertical standing in it, so a grid line closer to its neighbour
+    //    than half that width *reaches past* it — into the next column's
+    //    horizontal, or into the next grid line's vertical, neither of which a
+    //    two-ended trim would touch. Both shapes are real rather than contrived:
+    //    the spacer columns of Word's own `MediumShading` table styles are 0.7pt
+    //    wide against 3pt borders, which is six overlaps on one page of
+    //    `sample-docx-files-sample1.docx` and eighteen more across the local
+    //    corpus.
+    //
+    //    The one overlap this cannot remove is between two *segments* — two
+    //    parallel lines whose boundaries are closer together than the lines are
+    //    thick. That is the author's geometry being impossible (a `hRule="exact"`
+    //    row shorter than its own borders, or an empty `<w:tr/>`), not the
+    //    decomposition's, and `tests/table_border_corners.rs` allows exactly it.
+    let cuts_across = |band: (Pt, Pt), vertical: bool| -> Vec<(Pt, Pt)> {
+        junctions
+            .iter()
+            .filter(|j| {
+                let across = if vertical { j.x } else { j.y };
+                across.1 > band.0 && band.1 > across.0
+            })
+            .map(|j| if vertical { j.y } else { j.x })
+            .collect()
+    };
+
+    // Each pass walks its own axis **in order**, emitting each junction it won
+    // just before the segment that abuts it. The order is not cosmetic: a
+    // junction has the colour of the line that won it, so it and that line's
+    // segment beside it are the same colour and always share an edge, and
+    // `coalesce_abutting_rects` fuses such a pair only when the two are
+    // *consecutive* commands. Emitted apart they never are, and each one reaches
+    // the page as a seam under a rasterizer that anti-aliases every fill on its
+    // own — `tests/table_shading_seams.rs` is that defect's audit and caught
+    // exactly this.
+    for (b, (y, lines)) in boundaries.iter().enumerate() {
+        for k in 0..MAX_RULES {
+            for (c, edge) in lines.iter().enumerate() {
+                if let Some(j) = junction_at(b, c, false) {
+                    emit_junction_rule(commands, j, k);
+                }
+                let Some(line) = edge.line() else { continue };
+                let w = drawn_width(&line);
+                let y0 = place_y(*y, w, box_size.height);
+                let band = (y0, y0 + w);
+                let Some((ry, rh)) = sub_rules(line.style, band.0, w).nth(k) else {
+                    continue;
+                };
+                for (x0, x1) in subtract(x[c], x[c + 1], &cuts_across(band, false)) {
+                    commands.push(DrawCommand::Rect {
+                        rect: PtRect::from_xywh(x0, ry, x1 - x0, rh),
+                        color: line.color,
+                    });
+                }
+            }
+            if let Some(j) = junction_at(b, lines.len(), false) {
+                emit_junction_rule(commands, j, k);
+            }
+        }
+    }
+
+    for (c, &gx) in x.iter().enumerate() {
+        for k in 0..MAX_RULES {
+            for (b, row) in placed.iter().enumerate() {
+                if let Some(j) = junction_at(b, c, true) {
+                    emit_junction_rule(commands, j, k);
+                }
+                let Some(line) = plan.vertical(c, row.plan_row).line() else {
+                    continue;
+                };
+                let w = drawn_width(&line);
+                let x0 = place_x(gx, w);
+                let band = (x0, x0 + w);
+                let Some((rx, rw)) = sub_rules(line.style, band.0, w).nth(k) else {
+                    continue;
+                };
+                for (y0, y1) in subtract(row.top, row.bottom, &cuts_across(band, true)) {
+                    commands.push(DrawCommand::Rect {
+                        rect: PtRect::from_xywh(rx, y0, rw, y1 - y0),
+                        color: line.color,
+                    });
+                }
+            }
+            if let Some(j) = junction_at(placed.len(), c, true) {
+                emit_junction_rule(commands, j, k);
+            }
+        }
+    }
+}
+
+/// `[a, b]` with every interval in `cuts` removed, as the surviving runs.
+///
+/// `cuts` need be neither sorted nor disjoint, and runs of zero or negative
+/// length are dropped — a segment entirely covered by junctions yields nothing,
+/// which is exactly right for a grid column narrower than the borders at its
+/// two ends.
+fn subtract(a: Pt, b: Pt, cuts: &[(Pt, Pt)]) -> Vec<(Pt, Pt)> {
+    let mut runs = vec![(a, b)];
+    for &(c0, c1) in cuts {
+        let mut next = Vec::with_capacity(runs.len() + 1);
+        for (r0, r1) in runs {
+            if c1 <= r0 || c0 >= r1 {
+                next.push((r0, r1));
+                continue;
+            }
+            if r0 < c0 {
+                next.push((r0, c0));
+            }
+            if c1 < r1 {
+                next.push((c1, r1));
+            }
+        }
+        runs = next;
+    }
+    runs.retain(|&(r0, r1)| r1 - r0 > Pt::ZERO);
+    runs
+}
+
+/// The two lines that make the square at a node: `(horizontal, vertical)`.
+///
+/// **ECMA-376 does not settle what happens where two table borders cross**, and
+/// neither does [MS-OI29500]. The standard specifies no stroke geometry at all,
+/// and §17.4.66's precedence list is about *conflicting* declarations on one
+/// edge — a junction is not a conflict, since all four segments meeting there
+/// are correct and all four want the square.
+///
+/// So the rule is this engine's, and it is now **measured** rather than guessed.
+/// `test-files/border-junction-colour.docx` is the probe, and its tables answer
+/// in two halves. Tables 1 and 2 carry 12pt `insideV` and `insideH` of equal
+/// weight and style and swap which axis is darker; Word draws the pale crossing
+/// then the dark one, so **at equal weight the horizontal takes the square** and
+/// colour never decides. Table 5 pairs a 12pt vertical with a 3pt horizontal —
+/// the case those two are silent about — and Word draws the vertical through it,
+/// so **the heavier line wins** and the horizontal only breaks a tie.
+///
+/// Which is §17.4.66's own weight step, and nothing after it: weight is
+/// [`drawn_width`], and the style and colour steps that follow there are
+/// replaced by "the horizontal". Both of the engine's earlier rules — the full
+/// `border_precedence` order, and a tie broken toward the vertical — are
+/// refuted, the first by tables 1 and 2 and the second by them as well.
+///
+/// The caller picks the colour; **both** lines are returned because the square
+/// is not one colour's rect. §17.18.2 splits each axis across its own short
+/// side, and the square is the **product** of the two splits, whichever won it.
+/// Word's third table crosses two 12pt `double`s and draws a 2 × 2 lattice of
+/// ink with both gaps running through — reported as "the borders are negative
+/// space, so it looks like every cell has its own border", which is what a
+/// lattice looks like and what neither a single square nor a pair of rungs can
+/// be. So each axis contributes its own [`sub_rules`], and a `single`
+/// contributing one full band is the same rule, not a case.
+///
+/// Within each axis the two facing lines are ranked by **declared width first**
+/// and [`border_precedence`] only to break a tie. Width first because the square
+/// is as wide as the widest line reaching it (`v_at_node`/`h_at_node`), so
+/// dividing it by any other line's rules would put the crossing out of step with
+/// the segment it continues.
+///
+/// **Word reference render needed** for the one shape the probe does not settle:
+/// a `single` crossing a `double`, where the product punches the double's gap
+/// through the solid line; the rival reading runs the solid line through
+/// unbroken and interrupts only the double. That is the probe's fourth table,
+/// and it is still open.
+fn junction_axes(
+    plan: &BorderPlan,
+    placed: &[PlacedRow],
+    boundaries: &[(Pt, Vec<CellEdge>)],
+    b: usize,
+    c: usize,
+) -> (Option<TableBorderLine>, Option<TableBorderLine>) {
+    let rank = |l: &TableBorderLine| (drawn_width(l), border_precedence(l));
+    let wider = |a: Option<TableBorderLine>, b: Option<TableBorderLine>| match (a, b) {
+        (Some(a), Some(b)) if rank(&b) > rank(&a) => Some(b),
+        (Some(a), _) => Some(a),
+        (None, b) => b,
+    };
+    let lines = &boundaries[b].1;
+    let horizontal = wider(
+        c.checked_sub(1).and_then(|i| lines[i].line()),
+        lines.get(c).and_then(|e| e.line()),
+    );
+    let vertical = wider(
+        b.checked_sub(1)
+            .and_then(|i| plan.vertical(c, placed[i].plan_row).line()),
+        placed
+            .get(b)
+            .and_then(|r| plan.vertical(c, r.plan_row).line()),
+    );
+    (horizontal, vertical)
+}
+
+/// §17.18.2: how a border of width `w` starting at `start` divides across its
+/// own short axis, as the `(start, width)` of each rule it is actually made of.
+///
+/// A `single` is one rule filling the whole width; a `double` is two of a third
+/// it, a third apart. §17.4.38 fixes those thirds: `w:sz` is the pair's total,
+/// which is also why [MS-OI29500] §17.4.66 ranks a `double` above a `single` of
+/// equal `w:sz`.
+///
+/// One function for both the segments and the junction squares, which is what
+/// makes a crossing come out as the product of its two axes' rules rather than
+/// as a shape of its own.
+/// The most rules any §17.18.2 style divides into — a `double`'s two.
+const MAX_RULES: usize = 2;
+
+fn sub_rules(style: TableBorderStyle, start: Pt, w: Pt) -> impl Iterator<Item = (Pt, Pt)> {
+    let sub = w * (1.0 / 3.0);
+    match style {
+        TableBorderStyle::Single => [Some((start, w)), None],
+        TableBorderStyle::Double => [Some((start, sub)), Some((start + w - sub, sub))],
+    }
+    .into_iter()
+    .flatten()
+}
+
+/// §17.4.45: the four borders of one cell, drawn inside its own box.
+///
+/// The **spaced** constructor's emitter, and only that one. [MS-OI29500]
+/// §17.4.66: *"If the cell spacing is nonzero ... then all cell borders and
+/// outer table borders display."* With a gap between them adjacent cells share
+/// no edge, so there is no grid line for a border to stand on and nothing to
+/// centre — each cell keeps its four borders wholly inside itself, and the
+/// table's own rectangle is drawn separately by [`emit_table_outline`].
+///
+/// Every corner square of the box is painted by exactly one of the two edges
+/// that meet there: the horizontals own the corners, because they span the full
+/// cell width, and the verticals fill only what is left between them. Both
+/// halves are load-bearing — painting a corner twice lets the second rect win it
+/// when the two edges differ in colour, and painting it not at all leaves a hole
+/// one border wide.
+///
+/// That the horizontal owns them was a decomposition convenience here and is now
+/// also what Word does at a *collapsed* crossing (`junction_axes`), so the two
+/// constructors agree on the one question ECMA leaves open to both.
+pub(super) fn emit_cell_frame(commands: &mut Vec<DrawCommand>, b: &CellBorders, cell: CellBox) {
+    // Resolution is over by now, so `Suppressed` and `Absent` are the same
+    // thing here: nothing to paint.
+    let (top, bottom) = (b.top.line(), b.bottom.line());
+    let top_w = top.map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO);
+    let bot_w = bottom.map(|l| drawn_width(&l)).unwrap_or(Pt::ZERO);
+
+    // A spaced row reserves no strip below it — the gap between rows *is* the
+    // spacing — so a bottom border is always inset into the cell's own foot.
+    let (top_y, bottom_y) = (cell.y, cell.y + cell.h - bot_w);
+
+    if let Some(ref line) = top {
+        emit_border_rect(
+            commands,
+            line,
+            PtRect::from_xywh(cell.x, top_y, cell.w, top_w),
+            true,
+        );
+    }
+    if let Some(ref line) = bottom {
+        emit_border_rect(
+            commands,
+            line,
+            PtRect::from_xywh(cell.x, bottom_y, cell.w, bot_w),
+            true,
+        );
+    }
+
+    let (v_top, v_bottom) = (top_y + top_w, bottom_y);
+    let v_height = v_bottom - v_top;
+    if v_height <= Pt::ZERO {
+        return;
+    }
+    if let Some(line) = b.left.line() {
+        let w = drawn_width(&line);
+        let rect = PtRect::from_xywh(cell.x, v_top, w, v_height);
+        emit_border_rect(commands, &line, rect, false);
+    }
+    if let Some(line) = b.right.line() {
+        let w = drawn_width(&line);
+        let rect = PtRect::from_xywh(cell.x + cell.w - w, v_top, w, v_height);
+        emit_border_rect(commands, &line, rect, false);
+    }
+}
+
+/// One cell's box, as [`emit_cell_frame`] needs it.
 #[derive(Clone, Copy)]
 pub(super) struct CellBox {
     pub(super) x: Pt,
     pub(super) w: Pt,
     /// Top of the row's content box.
     pub(super) y: Pt,
-    /// Height of the row's content box, **excluding** `band_below`.
+    /// Height of the row's content box.
     pub(super) h: Pt,
-    /// §17.4.38: the band reserved below this row for its bottom borders. Zero
-    /// on the table's last row and on a row that ends a page slice at a cut,
-    /// where the bottom border is inset into the content box instead.
-    pub(super) band_below: Pt,
-}
-
-/// The x-intervals a cell's two vertical borders paint in, empty where an edge
-/// paints nothing.
-///
-/// Both [`emit_cell_borders`] and every crossing of an [`OpenBand`] read the
-/// intervals from here, so a vertical border and its crossing of a row boundary
-/// cannot disagree about where the vertical is.
-pub(super) fn vertical_bands(
-    b: &CellBorders,
-    cell_x: Pt,
-    cell_w: Pt,
-) -> [Option<(TableBorderLine, Pt, Pt)>; 2] {
-    [
-        b.left.line().map(|l| (l, cell_x, cell_x + l.width)),
-        b.right
-            .line()
-            .map(|l| (l, cell_x + cell_w - l.width, cell_x + cell_w)),
-    ]
-}
-
-/// Emit all four borders for a cell as filled rectangles.
-/// Borders are drawn INWARD from the cell edge per OOXML.
-///
-/// **A cell paints inside its own box and nowhere else, and every corner square
-/// of that box is painted by exactly one of the two edges that meet there.**
-/// Horizontal borders (top/bottom) own the corners, because they span the full
-/// cell width; the verticals fill only what is left between them. Both halves
-/// are load-bearing — painting a corner twice lets the second rect win it when
-/// the two edges differ in colour, and painting it not at all leaves a hole one
-/// border wide, which is what the stroke-based approach this replaced left at
-/// every corner through anti-aliasing.
-///
-/// Inside the box the rule needs nothing from outside it: a corner square exists
-/// only where the horizontal paints, since an edge that paints nothing has zero
-/// width and leaves no square to own. (Guarding the insets on `top.is_some()` /
-/// `bottom.is_some()` would read as the same rule and be dead code.)
-///
-/// What this function deliberately does **not** decide is the strip between one
-/// row and the next, which belongs to neither of the two cells that touch it.
-/// See [`OpenBand`] — that strip is where all three reported corner defects
-/// were.
-pub(super) fn emit_cell_borders(commands: &mut Vec<DrawCommand>, b: CellBorders, cell: CellBox) {
-    // Resolution is over by now, so `Suppressed` and `Absent` are the same
-    // thing here: nothing to paint.
-    let (top, bottom) = (b.top.line(), b.bottom.line());
-    let top_w = top.map(|b| b.width).unwrap_or(Pt::ZERO);
-    let bot_w = bottom.map(|b| b.width).unwrap_or(Pt::ZERO);
-
-    // Where the bottom border starts, which is also where the verticals stop:
-    // the top of the reserved band, or `bot_w` above the content box's foot
-    // where no band was reserved.
-    let bottom_y = if cell.band_below > Pt::ZERO {
-        cell.y + cell.h
-    } else {
-        cell.y + cell.h - bot_w
-    };
-
-    // Horizontal borders: full cell width, covering corner squares.
-    if let Some(ref border) = top {
-        emit_border_rect(
-            commands,
-            border,
-            PtRect::from_xywh(cell.x, cell.y, cell.w, top_w),
-            true,
-        );
-    }
-    if let Some(ref border) = bottom {
-        emit_border_rect(
-            commands,
-            border,
-            PtRect::from_xywh(cell.x, bottom_y, cell.w, bot_w),
-            true,
-        );
-    }
-
-    // Vertical borders: whatever the horizontals leave between them.
-    let v_height = bottom_y - (cell.y + top_w);
-    if v_height > Pt::ZERO {
-        for (border, x0, x1) in vertical_bands(&b, cell.x, cell.w).into_iter().flatten() {
-            emit_border_rect(
-                commands,
-                &border,
-                PtRect::from_xywh(x0, cell.y + top_w, x1 - x0, v_height),
-                false,
-            );
-        }
-    }
-}
-
-/// §17.4.38: the strip between one row's content box and the next row's, and
-/// what has been painted in it so far.
-///
-/// A row's bottom borders are drawn *below* its content — `measure_table_rows`
-/// reserves the strip at the widest bottom border in the row — so the strip
-/// belongs to the row boundary rather than to either row, and the verticals of
-/// both rows end at it. It is the only place in a table where a square can be
-/// reached by a border from a cell that does not contain it, and all three
-/// reported corner defects were there.
-///
-/// The three had one shape between them. Each cell painted its four edges from
-/// its own resolved borders and yielded its corner squares to its own
-/// horizontal, which is sound *inside* the cell's box, where that horizontal
-/// spans the full width. In the strip it is not sound at all: the horizontal
-/// covering a square there can be in the row above, the vertical needing it can
-/// be in the row below, and a cell asked only about its own two edges answers
-/// "nobody" without noticing that anything else meets there.
-///
-/// So the strip is a value passed from the row above to the row below instead of
-/// a length each row re-derives. It records the x-intervals already painted —
-/// first by the bottom borders that paint in it, then by each vertical that
-/// crosses it — and every crossing asks it first. Both halves of the convention
-/// are then structural rather than arithmetic:
-///
-/// * nothing is painted twice, because a crossing records its interval before
-///   the next asker sees it, and
-/// * nothing is left unpainted, because the last asker's claim is
-///   unconditional — a vertical whose x is still clear takes the strip there,
-///   whichever row it is in.
-pub(super) struct OpenBand {
-    /// Top of the strip; meaningless when `height` is zero.
-    top: Pt,
-    /// Height of the strip. Zero where the row above reserved none: the table's
-    /// last row, a row that ends a page slice at a cut, and every row of a
-    /// §17.4.45-spaced table, whose rows share no edge to reserve for.
-    height: Pt,
-    /// x-intervals of the strip already painted, in the order they were
-    /// claimed.
-    painted: Vec<(Pt, Pt)>,
-}
-
-impl Default for OpenBand {
-    /// No strip at all — what a page slice starts with, its first row having no
-    /// row above it to have reserved one.
-    fn default() -> Self {
-        Self {
-            top: Pt::ZERO,
-            height: Pt::ZERO,
-            painted: Vec::new(),
-        }
-    }
-}
-
-impl OpenBand {
-    /// The strip under a row whose content box ends at `top`, before anything
-    /// has been painted in it.
-    pub(super) fn new(top: Pt, height: Pt) -> Self {
-        Self {
-            top,
-            height,
-            painted: Vec::new(),
-        }
-    }
-
-    /// Record that `x0..x1` of the strip is painted — what a bottom border does
-    /// across the whole width of its cell.
-    pub(super) fn cover(&mut self, x0: Pt, x1: Pt) {
-        self.painted.push((x0, x1));
-    }
-
-    /// Carry `line` across the strip at `x0..x1`, unless something already
-    /// paints there.
-    ///
-    /// The single place a vertical border crosses a row boundary. It is reached
-    /// from both sides — by the row above once its bottom borders are in, then
-    /// by the row below — so whichever of the two has an edge at that x carries
-    /// the line across, and a second one arriving finds the interval taken.
-    pub(super) fn cross(
-        &mut self,
-        commands: &mut Vec<DrawCommand>,
-        line: &TableBorderLine,
-        x0: Pt,
-        x1: Pt,
-    ) {
-        if self.height <= Pt::ZERO || self.covers(x0, x1) {
-            return;
-        }
-        emit_border_rect(
-            commands,
-            line,
-            PtRect::from_xywh(x0, self.top, x1 - x0, self.height),
-            false,
-        );
-        self.painted.push((x0, x1));
-    }
-
-    /// Whether the strip is painted across `x0..x1`, decided at the midpoint.
-    ///
-    /// Every interval here is either a cell's full width or one border's
-    /// thickness at a cell edge, and a crossing sits wholly inside a cell — so
-    /// an interval either contains the crossing or is disjoint from it, and the
-    /// midpoint tells the two apart without an epsilon.
-    fn covers(&self, x0: Pt, x1: Pt) -> bool {
-        let mid = x0 + (x1 - x0) * 0.5;
-        self.painted.iter().any(|(a, b)| *a <= mid && mid <= *b)
-    }
 }
 
 /// §17.4.45 / issue #168: draw the table's own outer border, for a table whose
@@ -794,7 +1493,7 @@ impl OpenBand {
 /// an intermediate slice ends at a page cut, not at the table's edge, so it
 /// gets left and right only.
 ///
-/// Geometry mirrors [`emit_cell_borders`] exactly — horizontals span the full
+/// Geometry mirrors [`emit_cell_frame`] exactly — horizontals span the full
 /// width and own the corners, verticals are inset between them — so an outline
 /// and a cell edge of the same width meet the same way a cell edge meets its
 /// neighbour.
@@ -813,8 +1512,8 @@ pub(super) fn emit_table_outline(
     let (x, y) = (rect.origin.x, rect.origin.y);
     let (w, h) = (rect.size.width, rect.size.height);
 
-    let top_w = top.map(|b| b.width).unwrap_or(Pt::ZERO);
-    let bot_w = bottom.map(|b| b.width).unwrap_or(Pt::ZERO);
+    let top_w = top.map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO);
+    let bot_w = bottom.map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO);
 
     if let Some(ref border) = top {
         emit_border_rect(commands, border, PtRect::from_xywh(x, y, w, top_w), true);
@@ -831,18 +1530,20 @@ pub(super) fn emit_table_outline(
     let v_height = h - top_w - bot_w;
     if v_height > Pt::ZERO {
         if let Some(ref border) = cfg.left {
+            let bw = drawn_width(border);
             emit_border_rect(
                 commands,
                 border,
-                PtRect::from_xywh(x, y + top_w, border.width, v_height),
+                PtRect::from_xywh(x, y + top_w, bw, v_height),
                 false,
             );
         }
         if let Some(ref border) = cfg.right {
+            let bw = drawn_width(border);
             emit_border_rect(
                 commands,
                 border,
-                PtRect::from_xywh(x + w - border.width, y + top_w, border.width, v_height),
+                PtRect::from_xywh(x + w - bw, y + top_w, bw, v_height),
                 false,
             );
         }
@@ -851,23 +1552,24 @@ pub(super) fn emit_table_outline(
 
 /// [MS-OI29500] §17.4.66: border weight = width × style number, in points.
 ///
+/// Which is [`drawn_width`] — a border's weight in the conflict order *is* the
+/// space it takes on the page, and the two were only ever separate because the
+/// engine drew a `double` in a third of the room it weighed. See that function
+/// for the measurement that joined them.
+///
 /// The spec states the rule in eighths of a point (`w:sz`), but every use is a
 /// *comparison* between two weights, and converting both to eighths scales both
 /// by the same 8 — so the factor cancels. Keeping it in points avoids implying
 /// that a unit conversion is load-bearing here. `border_precedence` scales to
 /// eighths once, where rounding to an integer sort key does depend on the unit.
 fn border_weight(b: &TableBorderLine) -> f32 {
-    let style_number = match b.style {
-        TableBorderStyle::Single => 1.0,
-        TableBorderStyle::Double => 3.0,
-    };
-    b.width.raw() * style_number
+    drawn_width(b).raw()
 }
 
 /// Width of the line this edge paints, or zero when it paints none — which
 /// includes a suppressed edge, since suppression reserves no space.
 pub(super) fn border_width(b: CellEdge) -> Pt {
-    b.line().map(|b| b.width).unwrap_or(Pt::ZERO)
+    b.line().map(|b| drawn_width(&b)).unwrap_or(Pt::ZERO)
 }
 
 fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
@@ -879,56 +1581,32 @@ fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
     }
 }
 
-/// Emit a border as filled rectangle(s).
-/// `is_horizontal` controls double-border sub-rect orientation.
+/// Emit a border as the filled rectangle(s) of its §17.18.2 rules.
+///
+/// `is_horizontal` says which axis is the border's **short** one, since that is
+/// the axis a `double` divides across — the same division [`sub_rules`] gives a
+/// junction square, applied to one axis here because a segment has only one.
 fn emit_border_rect(
     commands: &mut Vec<DrawCommand>,
     b: &TableBorderLine,
     rect: PtRect,
     is_horizontal: bool,
 ) {
-    match b.style {
-        TableBorderStyle::Single => {
-            commands.push(DrawCommand::Rect {
-                rect,
-                color: b.color,
-            });
-        }
-        TableBorderStyle::Double => {
-            // §17.4.38: total = w:sz, each sub-line = sz/3, gap = sz/3.
-            let sub = b.width * (1.0 / 3.0);
-            if is_horizontal {
-                // Two horizontal sub-rects: top and bottom of the border area.
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, rect.size.width, sub),
-                    color: b.color,
-                });
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(
-                        rect.origin.x,
-                        rect.origin.y + rect.size.height - sub,
-                        rect.size.width,
-                        sub,
-                    ),
-                    color: b.color,
-                });
-            } else {
-                // Two vertical sub-rects: left and right of the border area.
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(rect.origin.x, rect.origin.y, sub, rect.size.height),
-                    color: b.color,
-                });
-                commands.push(DrawCommand::Rect {
-                    rect: PtRect::from_xywh(
-                        rect.origin.x + rect.size.width - sub,
-                        rect.origin.y,
-                        sub,
-                        rect.size.height,
-                    ),
-                    color: b.color,
-                });
-            }
-        }
+    let (start, extent) = if is_horizontal {
+        (rect.origin.y, rect.size.height)
+    } else {
+        (rect.origin.x, rect.size.width)
+    };
+    for (at, thickness) in sub_rules(b.style, start, extent) {
+        let rect = if is_horizontal {
+            PtRect::from_xywh(rect.origin.x, at, rect.size.width, thickness)
+        } else {
+            PtRect::from_xywh(at, rect.origin.y, thickness, rect.size.height)
+        };
+        commands.push(DrawCommand::Rect {
+            rect,
+            color: b.color,
+        });
     }
 }
 
@@ -941,6 +1619,7 @@ mod tests {
     use crate::render::layout::fragment::{FontProps, Fragment, TextMetrics};
     use crate::render::layout::paragraph::ParagraphStyle;
     use crate::render::layout::section::LayoutBlock;
+    use crate::render::layout::table::TableSlice;
     use crate::render::layout::table::{
         layout_table, CellVAlign, TableBorderConfig, TableBorderLine, TableBorderStyle,
         TableCellInput, TableRowInput,
@@ -1002,23 +1681,32 @@ mod tests {
         }
     }
 
-    /// Every border rect of a 1×2 table, at its exact position and in the order
-    /// the painter walks them.
+    /// Every border rect of a 1×2 table, at its exact position — the whole
+    /// decomposition [`rasterize_border_grid`] produces, written out.
     ///
-    /// [MS-OI29500] §17.4.66: the one shared vertical edge is resolved once and
-    /// drawn by the left cell, which is why there are seven rects and not eight.
-    /// A count alone cannot tell a correct seven from a wrong one, so every
-    /// number below is derived instead: each column is 100pt and every border
-    /// 0.5pt, and the row is 15pt — one 14pt default line, plus the top and
-    /// bottom borders that are drawn *inside* its own box and so cannot be
-    /// drawn over its content. It is the table's only row, so no strip is
-    /// reserved below it and its bottom border is inset into the box's foot
-    /// rather than sitting under it; `measure_table_rows` charges both to the
-    /// height for exactly that reason. Horizontals span the **full** cell width
-    /// and own the corners; the verticals fill the 14pt the horizontals leave
-    /// between them, which is the convention [`emit_cell_borders`] states. A
-    /// cell's four edges are emitted top, bottom, left, right, and the cells in
-    /// row order.
+    /// The network is three grid lines (x = 0, 100, 200) crossing two boundaries
+    /// (y = 0, 15), and it comes out as **13** rects in three families that
+    /// tile it exactly: 6 junction squares at the 6 nodes, 4 horizontal segments
+    /// in the gaps between nodes along the two boundaries, 3 vertical segments
+    /// in the gaps along the three grid lines. A count alone could not tell a
+    /// correct 13 from a wrong one, so every number is derived: the columns are
+    /// 100pt and every border 0.5pt, so a border straddles its line by 0.25 each
+    /// side; the row is 15pt — one 14pt default line plus the 0.5pt each of the
+    /// two horizontals is *charged* for, since `resolve_table_cell_borders`
+    /// insets the content box by the full width even though only half of it lies
+    /// inside (see that function on why the two disagree and why the charging
+    /// half is the unsettled one).
+    ///
+    /// [MS-OI29500] §17.4.66: the shared vertical at x = 100 appears **once**.
+    /// That is the property this file's older shape asserted as "seven rects,
+    /// not eight", and it survives the decomposition — a per-cell emitter could
+    /// paint it twice, and the grid has nowhere to put a second one.
+    ///
+    /// Note the outer borders reach 0.25pt outside `result.size` on all four
+    /// sides, because a border centred on the table's own edge is half outside
+    /// it. Whether Word's table box contains its outer borders or straddles them
+    /// is **open** — see `resolve_table_cell_borders` — and this test pins
+    /// today's answer rather than endorsing it.
     #[test]
     fn borders_emit_lines() {
         let line = TableBorderLine {
@@ -1033,6 +1721,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -1052,20 +1741,47 @@ mod tests {
             false,
         );
 
+        // The box is the grid across x — the two outer verticals straddle its
+        // edges, half in and half out — and the grid plus its own two
+        // horizontals down y, which stay inside.
         assert_eq!(
             result.size,
             crate::render::geometry::PtSize::new(Pt::new(200.0), Pt::new(15.0))
         );
+        // Every border is 0.5pt (`w`) and half of one is `h`. **Every** vertical
+        // straddles its grid line, the table's own two included, while its top
+        // and bottom stay inside the box (`place_x`/`place_y`). So the grid's
+        // four ordinates on the page are:
+        let (w, h) = (0.5_f32, 0.25_f32);
+        let (left, mid, right) = (-h, 100.0 - h, 200.0 - h);
+        let (top, bottom) = (0.0, 15.0 - w);
+        // The order is asserted along with the geometry, and is not incidental:
+        // every junction is emitted **among the horizontals**, whose colour it
+        // takes (`junction_axes`), immediately before the segment it abuts, so
+        // `coalesce_abutting_rects` can fuse the pair. Hence each boundary walks
+        // junction / segment / junction / segment / junction, and the grid lines
+        // that follow are bare segments.
         assert_eq!(
             rects(&result.commands),
             vec![
-                (0.0, 0.0, 100.0, 0.5),    // cell 0 top, full cell width
-                (0.0, 14.5, 100.0, 0.5),   // cell 0 bottom, flush with the row
-                (0.0, 0.5, 0.5, 14.0),     // cell 0 left, inset between them
-                (99.5, 0.5, 0.5, 14.0),    // cell 0 right — the shared edge
-                (100.0, 0.0, 100.0, 0.5),  // cell 1 top
-                (100.0, 14.5, 100.0, 0.5), // cell 1 bottom
-                (199.5, 0.5, 0.5, 14.0),   // cell 1 right; its left was resolved away
+                // The two boundaries, each as its three nodes and the two
+                // segments between them.
+                (left, top, w, w),
+                (left + w, top, mid - left - w, w),
+                (mid, top, w, w),
+                (mid + w, top, right - mid - w, w),
+                (right, top, w, w),
+                (left, bottom, w, w),
+                (left + w, bottom, mid - left - w, w),
+                (mid, bottom, w, w),
+                (mid + w, bottom, right - mid - w, w),
+                (right, bottom, w, w),
+                // Then the three grid lines, each what the junctions at its two
+                // ends have left of it. The one at x = 100 is the shared edge,
+                // drawn once.
+                (left, top + w, w, bottom - top - w),
+                (mid, top + w, w, bottom - top - w),
+                (right, top + w, w, bottom - top - w),
             ],
         );
     }
@@ -1107,6 +1823,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: Some(no_borders),
+                bidi_override: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("normal")],
@@ -1115,6 +1832,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0)];
@@ -1206,6 +1924,39 @@ mod tests {
             .collect()
     }
 
+    /// The **union** of the ink a ray meets, as sorted disjoint intervals.
+    /// `vertical` sends the ray down at `x = at` and returns y intervals;
+    /// otherwise it runs right at `y = at` and they are x.
+    ///
+    /// This is how a claim about *what a band contains* is asked of a command
+    /// stream that is free to split every line at its junctions: the ray sees
+    /// the union, so the decomposition is invisible to it and only the geometry
+    /// is asserted. Touching intervals merge, because two abutting rects are one
+    /// line to any reader — which is exactly what a junction and its two
+    /// segments are.
+    fn ink_along(cmds: &[DrawCommand], at: f32, vertical: bool) -> Vec<(f32, f32)> {
+        let mut runs: Vec<(f32, f32)> = rects(cmds)
+            .into_iter()
+            .filter_map(|(x, y, w, h)| {
+                let (across, along) = if vertical {
+                    ((x, x + w), (y, y + h))
+                } else {
+                    ((y, y + h), (x, x + w))
+                };
+                (across.0 <= at && at <= across.1).then_some(along)
+            })
+            .collect();
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (a, b) in runs {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1e-4 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        merged
+    }
+
     fn two_rows() -> Vec<TableRowInput> {
         (0..2)
             .map(|_| TableRowInput {
@@ -1215,6 +1966,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             })
             .collect()
     }
@@ -1310,6 +2062,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             })
             .collect();
         let slices = layout_table_paginated(
@@ -1411,6 +2164,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -1438,12 +2192,16 @@ mod tests {
     /// notice.
     ///
     /// One 100 × 20pt cell (`Exact` keeps the arithmetic free of text metrics),
-    /// every edge a 3pt double. The verticals run the 14pt (20 − 3 − 3) the
-    /// horizontals leave between them, exactly as for a single of the same
-    /// width — the sub-lines are *inside* the band, so they change nothing
-    /// about how the edges meet.
+    /// every edge a 3pt double.
+    ///
+    /// Asserted by *probing* the ink rather than by listing rects, because the
+    /// rect list is a property of the grid decomposition (which splits every
+    /// line at its junctions) and this claim is not: it is about what the band
+    /// contains, at any one point along it. Probing across a boundary's middle
+    /// asks exactly that question and does not care how many pieces the line
+    /// arrived in.
     #[test]
-    fn a_double_border_paints_two_sub_lines_of_a_third_the_declared_width() {
+    fn a_double_border_paints_two_sub_lines_of_the_declared_width() {
         let d = double(3.0);
         let result = layout_table(
             &[sized_row(20.0, 1)],
@@ -1462,47 +2220,57 @@ mod tests {
             false,
         );
 
+        // The ink intervals a ray at `x` meets going down, and vice versa.
+        let down = |x: f32| ink_along(&result.commands, x, true);
+        let across = |y: f32| ink_along(&result.commands, y, false);
+
+        // Down the middle of the cell: the two horizontals, each two 3pt rules a
+        // 3pt gap apart — `drawn_width`, so a `w:sz` of 3pt occupies 9. These
+        // are the table's own boundaries, and a *horizontal* one stays inside
+        // the box (`place_y`), keeping its outer face: 0..9 at the top and
+        // 11..20 at the foot of a 20pt row.
         assert_eq!(
-            rects(&result.commands),
-            vec![
-                // Top: two full-width lines at the band's outer edges, 0..1 and
-                // 2..3 — a 1pt gap between them.
-                (0.0, 0.0, 100.0, 1.0),
-                (0.0, 2.0, 100.0, 1.0),
-                // Bottom: the same pair in the band 17..20.
-                (0.0, 17.0, 100.0, 1.0),
-                (0.0, 19.0, 100.0, 1.0),
-                // Left: split the other way — two 1pt columns in the band
-                // 0..3, each running the 14pt between the horizontals.
-                (0.0, 3.0, 1.0, 14.0),
-                (2.0, 3.0, 1.0, 14.0),
-                // Right: the same pair in the band 97..100.
-                (97.0, 3.0, 1.0, 14.0),
-                (99.0, 3.0, 1.0, 14.0),
-            ],
+            down(50.0),
+            vec![(0.0, 3.0), (6.0, 9.0), (11.0, 14.0), (17.0, 20.0)],
+            "a horizontal double splits along its short axis — stacked, not side by side"
+        );
+        // Across the middle of the row: the two verticals, split the other way
+        // and **straddling** their grid lines (`place_x`), so the 9pt bands are
+        // centred on x = 0 and x = 100.
+        assert_eq!(
+            across(10.0),
+            vec![(-4.5, -1.5), (1.5, 4.5), (95.5, 98.5), (101.5, 104.5)],
+            "a vertical double splits along *its* short axis"
         );
     }
 
-    /// The band a `double` occupies is the band `border_width` reserves for it,
-    /// so a double and a single of the same `w:sz` meet their neighbours
-    /// identically — only the interior of the band differs.
+    /// A `double` occupies **three times** the band a `single` of the same
+    /// `w:sz` does, and keeps the same outer face: two rules of `w:sz` with a
+    /// `w:sz` gap between them ([`drawn_width`]).
     ///
     /// Asserted against the single as a control rather than against literals:
-    /// the claim is a relation between the two styles, and pinning the doubles'
-    /// coordinates alone could not tell "same band" from "same numbers I typed
-    /// twice".
+    /// the claim is a relation between the two styles, and pinning the double's
+    /// coordinates alone could not tell "three times" from "numbers I typed".
+    /// Each run the single fills whole comes back as two runs of exactly that
+    /// width, one gap of it apart, on the same side of the box the control's
+    /// single sits on — which says the rule width, the gap width and the
+    /// direction it grows in, all three. The direction differs by axis, and that
+    /// is the point of probing both: a vertical straddles its grid line and a
+    /// horizontal stays inside the box (`place_x`/`place_y`).
+    ///
+    /// The rays cross the middle of an edge, never a corner, and that is
+    /// load-bearing: a corner is the *product* of its two axes' rules
+    /// (`junction_axes`), so summing ink over the whole table and expecting a
+    /// clean multiple of the control's would not hold there.
     #[test]
-    fn a_double_border_occupies_the_same_band_as_a_single_of_the_same_width() {
-        // The four edges are emitted in a fixed order (top, bottom, left,
-        // right), `rects_per_edge` rects each — itself an assertion: a single
-        // paints one line per edge, a double two.
-        let bands = |style: TableBorderStyle, rects_per_edge: usize| -> Vec<(f32, f32, f32, f32)> {
+    fn a_double_border_occupies_three_times_the_band_of_a_single_of_the_same_width() {
+        let render = |style: TableBorderStyle| {
             let line = TableBorderLine {
                 width: Pt::new(3.0),
                 color: RgbColor::BLACK,
                 style,
             };
-            let result = layout_table(
+            layout_table(
                 &[sized_row(20.0, 1)],
                 &[Pt::new(100.0)],
                 Pt::ZERO,
@@ -1517,36 +2285,52 @@ mod tests {
                 }),
                 None,
                 false,
-            );
-            let r = rects(&result.commands);
-            assert_eq!(
-                r.len(),
-                4 * rects_per_edge,
-                "{style:?}: four edges at {rects_per_edge} rect(s) each"
-            );
-            // Each edge's band is the bounding box of the rects it painted.
-            r.chunks(rects_per_edge)
-                .map(|edge| {
-                    let x0 = edge.iter().map(|e| e.0).fold(f32::INFINITY, f32::min);
-                    let y0 = edge.iter().map(|e| e.1).fold(f32::INFINITY, f32::min);
-                    let x1 = edge
-                        .iter()
-                        .map(|e| e.0 + e.2)
-                        .fold(f32::NEG_INFINITY, f32::max);
-                    let y1 = edge
-                        .iter()
-                        .map(|e| e.1 + e.3)
-                        .fold(f32::NEG_INFINITY, f32::max);
-                    (x0, y0, x1 - x0, y1 - y0)
-                })
-                .collect()
+            )
         };
-
-        assert_eq!(
-            bands(TableBorderStyle::Double, 2),
-            bands(TableBorderStyle::Single, 1),
-            "a double fills the same four bands as a single of the same w:sz"
+        let (dbl, sgl) = (
+            render(TableBorderStyle::Double),
+            render(TableBorderStyle::Single),
         );
+
+        // A ray crossing the middle of every edge, in both directions. Each
+        // ray meets two edges: the near one, whose outer face is its start, and
+        // the far one, whose outer face is its end.
+        for (probe, at) in [(true, 50.0_f32), (false, 10.0_f32)] {
+            let runs = |slice: &TableSlice| ink_along(&slice.commands, at, probe);
+            let control = runs(&sgl);
+            assert_eq!(control.len(), 2, "two edges on this ray: {control:?}");
+            let (near, far) = (control[0], control[1]);
+            let w = near.1 - near.0;
+            assert_eq!(w, far.1 - far.0, "the control's two edges: {control:?}");
+            // A ray down the page crosses the two *horizontals*, which stay
+            // inside the box (`place_y`) and so grow inward from their own outer
+            // face; a ray across it crosses the two verticals, which straddle
+            // their grid lines (`place_x`) and so grow outward about their own
+            // centres.
+            let want = if probe {
+                vec![
+                    (near.0, near.0 + w),
+                    (near.0 + 2.0 * w, near.0 + 3.0 * w),
+                    (far.1 - 3.0 * w, far.1 - 2.0 * w),
+                    (far.1 - w, far.1),
+                ]
+            } else {
+                let centre = |r: (f32, f32)| (r.0 + r.1) * 0.5;
+                [near, far]
+                    .into_iter()
+                    .flat_map(|edge| {
+                        let c = centre(edge);
+                        [(c - 1.5 * w, c - 0.5 * w), (c + 0.5 * w, c + 1.5 * w)]
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                runs(&dbl),
+                want,
+                "two rules of the declared width, one of it apart — probe \
+                 vertical={probe}"
+            );
+        }
     }
 
     // ── §17.4.66 at a vertical edge, across a `w:gridSpan` boundary ──────────
@@ -1564,8 +2348,14 @@ mod tests {
     ///
     /// Three 50pt columns, row `[span-2 | plain]`. The span cell's own right is
     /// `insideV` at 0.5pt; the plain cell declares a 2pt left. §17.4.66 step 2
-    /// gives it to the heavier border, drawn on the span cell's right at
-    /// x = 100 − 2, and the plain cell draws no left edge at all.
+    /// gives the edge to the heavier border, once — the whole point being that
+    /// the two cells do not each draw their own.
+    ///
+    /// Asserted as the interval each vertical covers, expressed from the grid
+    /// line it stands on: a shared line is straddled and the table's own two are
+    /// gone inside, so what identifies a border is its line plus which of the
+    /// two it is. Writing bare origins instead made a test about *which* borders
+    /// exist fail whenever their thickness moved.
     #[test]
     fn a_gridspan_cell_resolves_one_vertical_edge_at_its_far_side() {
         let mut wide = TableCellInput {
@@ -1619,19 +2409,25 @@ mod tests {
             false,
         );
 
+        let verticals: Vec<(f32, f32)> = rects(&result.commands)
+            .into_iter()
+            .filter(|&(_, _, w, h)| h > w)
+            .map(|(x, _, w, _)| (x, w))
+            .collect();
         assert_eq!(
-            rects(&result.commands),
+            verticals,
             vec![
-                // The table's own left edge, on the span cell.
-                (0.0, 0.0, 1.0, 20.0),
-                // The one interior vertical: the winner, 2pt, drawn inward from
-                // the span cell's right edge at x = 100.
-                (98.0, 0.0, 2.0, 20.0),
-                // The table's own right edge, on the plain cell.
-                (149.0, 0.0, 1.0, 20.0),
+                // The table's own left edge, straddling grid line 0 — half of
+                // it left of the box, which begins at x = 0.
+                (-0.5, 1.0),
+                // The one interior vertical: the 2pt winner, straddling grid
+                // line 2 at x = 100 — the span cell's far side.
+                (100.0 - 1.0, 2.0),
+                // The table's own right edge, straddling grid line 3 at x = 150.
+                (149.5, 1.0),
             ],
             "nothing may be painted at x = 50 — that grid boundary is interior \
-             to the span — and the plain cell must not repeat the shared edge"
+             to the span — and the shared edge is drawn once, not once per cell"
         );
     }
 
@@ -1643,17 +2439,27 @@ mod tests {
     /// means the two of them overlap and there is nothing between them.
     ///
     /// Two things follow, and both are the point of this test. No rect is
-    /// emitted with a non-positive height — `v_height > 0` is what stops the
-    /// verticals from becoming inverted rectangles, which the painter would
-    /// render as nothing or as a smear depending on the backend. And the two
-    /// horizontals still paint at full width, so neither declared border is
-    /// silently dropped.
+    /// emitted with a non-positive extent — the guard on each segment's length
+    /// is what stops the verticals from becoming inverted rectangles, which the
+    /// painter would render as nothing or as a smear depending on the backend.
+    /// And the two horizontals still paint at full width, so neither declared
+    /// border is silently dropped.
     ///
-    /// The verticals *are* dropped, and there is nowhere to put them: the band
-    /// they would occupy has negative height. What a renderer should instead do
-    /// with a row shorter than its borders — grow it, or clip the borders into
-    /// it — is not something §17.4.80 or §17.4.66 settles, and this test
-    /// deliberately does not pin an answer to it.
+    /// The verticals survive, and that is the whole of what changed here: a
+    /// table's own top and bottom edges hang **outside** the box
+    /// (`rasterize_border_grid`, measured against
+    /// `test-files/border-outer-box.docx`), so a 2pt row is not short of
+    /// anything and its verticals get their full 2pt. The pathology this test
+    /// was written for — a row with negative space left between its own
+    /// borders — cannot arise from *outer* ones at all now.
+    ///
+    /// It can still arise between two **interior** boundaries, which do straddle
+    /// their lines: an `hRule="exact"` row shorter than the two shared borders
+    /// above and below it, or an empty `<w:tr/>` between two rows. That is the
+    /// one case where two border rects legitimately overlap, it is the author's
+    /// geometry being impossible rather than the decomposition's, and any audit
+    /// of the overlap invariant has to allow it — see `is_parallel_crowding` in
+    /// `tests/table_border_corners.rs`.
     #[test]
     fn a_row_shorter_than_its_own_borders_drops_no_horizontal_and_inverts_nothing() {
         let thick = TableBorderLine {
@@ -1687,24 +2493,31 @@ mod tests {
             r.iter().all(|(_, _, w, h)| *w > 0.0 && *h > 0.0),
             "no rect may be emitted with a non-positive extent, got {r:?}"
         );
-        assert_eq!(r.len(), 2, "both horizontals, neither vertical: {r:?}");
-        assert_eq!(
-            (r[0].0, r[0].2, r[0].3),
-            (0.0, 100.0, 3.0),
-            "the top border keeps its declared width and spans the cell"
+        // Every rect belongs to one of the two boundary bands, each 3pt tall and
+        // pushed inside the 2pt row from its own end — 0..3 from the top, −1..2
+        // from the foot. Nothing taller, which is what says the verticals were
+        // dropped rather than emitted clamped or inverted.
+        assert!(
+            r.iter()
+                .all(|&(_, y, _, h)| h == 3.0 && (y == 0.0 || y == -1.0)),
+            "only the two 3pt boundary bands may be painted, got {r:?}"
         );
-        assert_eq!(r[0].1, 0.0, "and starts at the row's top edge");
+        // And both are there at full width. Each spans the cell *and* the half
+        // of the 1pt `w:left`/`w:right` that straddles out past either end of
+        // it, which the junctions at the band's two ends fill.
+        for (label, y) in [("top", 0.5_f32), ("bottom", 1.5_f32)] {
+            assert_eq!(
+                ink_along(&result.commands, y, false),
+                vec![(-0.5, 100.5)],
+                "the {label} border spans the cell, junctions included"
+            );
+        }
+        // The two bands overlap, because 2pt of row cannot hold 3pt of border on
+        // each of its edges. Asserted rather than tolerated — see the doc above.
         assert_eq!(
-            (r[1].0, r[1].2, r[1].3),
-            (0.0, 100.0, 3.0),
-            "so does the bottom border"
-        );
-        assert_eq!(
-            r[1].1 + r[1].3,
-            2.0,
-            "the bottom border is flush with the row's bottom edge — drawn \
-             inward from it, which for a row shorter than the border puts its \
-             far side above the row's own top"
+            ink_along(&result.commands, 50.0, true),
+            vec![(-1.0, 3.0)],
+            "the two bands cross, so a ray down the cell meets one 4pt run"
         );
     }
 
@@ -2145,12 +2958,14 @@ mod edge_mapping_tests {
         let b = resolve_cell_effective_borders(
             &plain_cell(),
             Some(&config()),
-            GridPosition {
+            CellPosition {
                 row: row_idx,
-                col: grid_col,
-                span: 1,
                 num_rows,
-                num_grid_cols,
+                // A full row of single-column cells, which is what these cases
+                // model: cell index and grid column coincide, so no gap exists
+                // and "first in row" and "at grid column 0" have one answer.
+                first_in_row: grid_col == 0,
+                last_in_row: grid_col + 1 == num_grid_cols,
             },
             spaced,
         );

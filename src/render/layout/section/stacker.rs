@@ -363,6 +363,7 @@ pub fn stack_blocks(
                 border_config,
                 indent,
                 alignment,
+                direction,
                 ..
             } => {
                 // §17.4.1: a nested table can't be cleanly bisected, so the
@@ -387,6 +388,16 @@ pub fn stack_blocks(
                     table.size.width,
                     content_width,
                     Pt::ZERO,
+                    // §17.4.1 travels on the block, so a `bidiVisual` table
+                    // nested in a cell or sitting in a header places correctly
+                    // here. §17.6.6 does not: this function lays out table cells
+                    // and headers/footers, containers that reach it without a
+                    // section. So a table that declares no direction of its own
+                    // is left-to-right here even inside a `w:bidi` section —
+                    // threading one through `stack_blocks` is its own unit
+                    // (seven call sites, and whether a nested table follows the
+                    // section or its own cell is not a question this answers).
+                    direction.unwrap_or(crate::i18n::bidi::BaseDirection::Ltr),
                 );
 
                 for mut cmd in table.commands {

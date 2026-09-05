@@ -14,7 +14,7 @@ use crate::render::dimension::Pt;
 use crate::render::geometry::{PtRect, PtSize};
 use crate::render::layout::draw_command::DrawCommand;
 
-mod borders;
+pub(crate) mod borders;
 mod emit;
 mod grid;
 mod measure;
@@ -24,7 +24,7 @@ mod types;
 pub use grid::compute_column_widths;
 pub use types::*;
 
-use borders::emit_table_outline;
+use borders::{emit_table_outline, rasterize_border_grid};
 use emit::{emit_split_row, emit_table_rows, SliceCursor, TableCommandBuffers};
 use grid::{build_row_groups, row_group_end};
 use measure::measure_table_rows;
@@ -131,6 +131,13 @@ impl SliceBuilder {
     /// without that, a table that happens to paginate would lose the bottom gap
     /// the same table keeps when it fits on one page.
     ///
+    /// §17.4.66: the two constructors part here, and they are exclusive. A
+    /// **collapsed** table (`cell_spacing == 0`) has one grid its cells share,
+    /// and the whole slice's borders are rasterized from it in one pass — every
+    /// rect disjoint from every other, see [`rasterize_border_grid`]. A
+    /// **spaced** one has no shared edges at all: each cell closed its own frame
+    /// as it was emitted, and only the table's own rectangle is left.
+    ///
     /// Issue #168: a spaced table's outer border is its own rectangle, because
     /// the cells no longer touch the table's edges. Left and right bound every
     /// slice; top and bottom follow the same two conditions the gap does.
@@ -139,12 +146,13 @@ impl SliceBuilder {
     /// there is nothing for it to suppress.
     fn finish(
         mut self,
-        table_width: Pt,
+        measured: &MeasuredTable,
         cell_spacing: Pt,
         borders: Option<&TableBorderConfig>,
         carries_top: bool,
         carries_bottom: bool,
     ) -> TableSlice {
+        let table_width = measured.table_width;
         let height = self.cursor.y
             + if carries_bottom {
                 cell_spacing
@@ -159,6 +167,14 @@ impl SliceBuilder {
                 PtRect::from_xywh(Pt::ZERO, Pt::ZERO, table_width, height),
                 carries_top,
                 carries_bottom,
+            );
+        } else {
+            rasterize_border_grid(
+                &mut self.border_commands,
+                &measured.plan,
+                &measured.grid_x,
+                &self.cursor.placed,
+                PtSize::new(table_width, height),
             );
         }
 
@@ -222,7 +238,7 @@ pub fn layout_table(
     );
 
     // The whole table is one slice, so it carries both of the table's edges.
-    builder.finish(measured.table_width, cell_spacing, borders, true, true)
+    builder.finish(&measured, cell_spacing, borders, true, true)
 }
 
 /// Pagination parameters for `layout_table_paginated`.
@@ -528,7 +544,7 @@ pub(crate) fn layout_table_paginated_with_page_heights(
             // The table's own top edge is on the first slice and its own bottom
             // edge on the last; every slice in between ends at a page cut.
             builder.finish(
-                measured.table_width,
+                &measured,
                 cell_spacing,
                 borders,
                 slice_idx == 0,
@@ -641,6 +657,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -674,6 +691,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
             TableRowInput {
                 cells: vec![simple_cell("c"), simple_cell("d")],
@@ -682,6 +700,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
         ];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
@@ -734,6 +753,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         // Column B is only 80 wide, so "long " + "text" (120) wraps
         let col_widths = vec![Pt::new(200.0), Pt::new(80.0)];
@@ -759,6 +779,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -806,6 +827,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
         let result = layout_table(
@@ -850,6 +872,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -895,6 +918,7 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
         let result = layout_table(
@@ -948,6 +972,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(100.0), Pt::new(200.0), Pt::new(10.0)];
         let result = layout_table(
@@ -986,20 +1011,29 @@ mod tests {
         assert_eq!(result.size.width.raw(), 320.0);
     }
 
-    /// §17.4.15 + §17.4.38: a row inset from **both** table edges takes
-    /// `inside_v` on both sides, never the outer `left`/`right`.
+    /// §17.4.15 + §17.4.66: a row inset from **both** table edges takes the
+    /// outer `left`/`right` at its own two ends, and `inside_v` only between
+    /// its cells.
     ///
     /// `grid_before = 1` moves the first cell off the left edge; the two cells
     /// then span only grid columns 1–2 of 4, so the last one stops short of the
-    /// right edge as well. Distinct widths identify which border was applied —
-    /// `left`/`right` are 4pt, `inside_v` is 1pt — so a single 4pt rect
-    /// anywhere in the output means an outer border leaked onto an interior
-    /// edge.
+    /// right edge as well. §17.4.66 resolves an edge against "cell borders and
+    /// outer table borders" — neither of this row's outer ends has a cell
+    /// facing it, so the table's border is what faces them, wherever across the
+    /// grid they fall.
     ///
-    /// The right-edge half of this used to be spelled `grid_after: 1` on a
-    /// field no layout code read; it is the cells' spans that place that edge.
+    /// Distinct widths identify which border was applied: `left`/`right` are
+    /// 4pt and `inside_v` is 1pt, so the whole claim is three rects and their x.
+    ///
+    /// **This test asserted the opposite until a Word render of
+    /// `test-files/grid-gap-borders.docx` settled it** — that a gapped row's
+    /// ends are interior and take `inside_v`. It is inverted rather than
+    /// deleted because the geometry it pins is the same; only the answer
+    /// changed. Its old form merely *forbade* a 4pt rect without saying what
+    /// stood at those ends, which is why it also passed under a third reading
+    /// (nothing at all) that was equally wrong.
     #[test]
-    fn row_inset_from_both_edges_uses_inside_v_on_both_sides() {
+    fn row_inset_from_both_edges_takes_the_outer_borders_at_its_own_ends() {
         let rows = vec![TableRowInput {
             cells: vec![simple_cell("A"), simple_cell("B")],
             height_rule: None,
@@ -1007,27 +1041,23 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(10.0), Pt::new(50.0), Pt::new(50.0), Pt::new(10.0)];
+        let line = |w: f32| {
+            Some(TableBorderLine {
+                width: Pt::new(w),
+                color: RgbColor::BLACK,
+                style: TableBorderStyle::Single,
+            })
+        };
         let borders = TableBorderConfig {
             top: None,
             bottom: None,
-            left: Some(TableBorderLine {
-                width: Pt::new(4.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
-            right: Some(TableBorderLine {
-                width: Pt::new(4.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
+            left: line(4.0),
+            right: line(4.0),
             inside_h: None,
-            inside_v: Some(TableBorderLine {
-                width: Pt::new(1.0),
-                color: RgbColor::BLACK,
-                style: TableBorderStyle::Single,
-            }),
+            inside_v: line(1.0),
         };
         let result = layout_table(
             &rows,
@@ -1039,31 +1069,34 @@ mod tests {
             false,
         );
 
-        // Vertical border rects have width equal to the border thickness
-        // (depth) and height >= 1. Find any 4pt-thick border rect.
-        let has_thick_vertical = result.commands.iter().any(|c| match c {
-            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
-                rect.size.width.raw() == 4.0 && rect.size.height.raw() > 1.0
-            }
-            _ => false,
-        });
-        assert!(
-            !has_thick_vertical,
-            "no 4pt-thick vertical border should appear: gridBefore/gridAfter \
-             mean cells aren't at the table's left/right edges, so left/right \
-             borders are not applied"
-        );
+        // Every vertical border rect, as (x, width). With no top/bottom borders
+        // configured there are no horizontals to filter out beyond the height
+        // test.
+        let mut verticals: Vec<(f32, f32)> = result
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Rect { rect, color }
+                    if *color == RgbColor::BLACK && rect.size.height.raw() > 1.0 =>
+                {
+                    Some((rect.origin.x.raw(), rect.size.width.raw()))
+                }
+                _ => None,
+            })
+            .collect();
+        verticals.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-        // Inside_v (1pt) should appear at the boundary between cell A and cell B.
-        let has_inside_v = result.commands.iter().any(|c| match c {
-            DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
-                rect.size.width.raw() == 1.0
-            }
-            _ => false,
-        });
-        assert!(
-            has_inside_v,
-            "1pt inside_v border between cells must appear"
+        // Cell A occupies 10..60 and B 60..110 (grid 10/50/50/10, one column
+        // skipped). So three verticals, on grid lines 10, 60 and 110: the row's
+        // leading edge, the shared A|B edge resolved once, and the trailing
+        // edge. Asserted as centres, because §17.4.66 centres a collapsed border
+        // on its grid line — which is what makes the 4pt and the 1pt comparable
+        // at all, since their rects begin at different distances from it.
+        let centres: Vec<(f32, f32)> = verticals.iter().map(|&(x, w)| (x + w * 0.5, w)).collect();
+        assert_eq!(
+            centres,
+            vec![(10.0, 4.0), (60.0, 1.0), (110.0, 4.0)],
+            "leading 4pt w:left, interior 1pt insideV, trailing 4pt w:right"
         );
     }
 
@@ -1099,6 +1132,7 @@ mod tests {
             cant_split: None,
             grid_before: 1,
             border_overrides: None,
+            bidi_override: None,
         };
         let row_b = TableRowInput {
             cells: vec![
@@ -1119,6 +1153,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         };
         let col_widths = vec![Pt::new(50.0), Pt::new(100.0), Pt::new(150.0)];
         let result = layout_table(
@@ -1194,6 +1229,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(200.0)];
         let result = layout_table(
@@ -1237,45 +1273,98 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }];
         let col_widths = vec![Pt::new(100.0)];
 
-        // Without suppression: top border present.
-        let normal = layout_table(
-            &rows,
-            &col_widths,
-            Pt::ZERO,
-            Pt::new(14.0),
-            Some(&borders),
-            None,
-            false,
-        );
-        let normal_borders: Vec<_> = normal
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
-            .collect();
+        let render = |suppress| {
+            layout_table(
+                &rows,
+                &col_widths,
+                Pt::ZERO,
+                Pt::new(14.0),
+                Some(&borders),
+                None,
+                suppress,
+            )
+        };
+        let normal = render(false);
+        let suppressed = render(true);
 
-        // With suppression: top border removed.
-        let suppressed = layout_table(
-            &rows,
-            &col_widths,
-            Pt::ZERO,
-            Pt::new(14.0),
-            Some(&borders),
-            None,
-            true,
-        );
-        let suppressed_borders: Vec<_> = suppressed
-            .commands
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::Rect { color, .. } if *color == RgbColor::BLACK))
-            .collect();
+        // §17.4.66: how far ink reaches along a boundary, as the union of the
+        // x-intervals of every border rect crossing that y.
+        //
+        // A *count* of rects would not do, and used to: the grid rasterizer
+        // paints each junction square as its own command, so "four borders" is
+        // eight rects and the number says nothing about where any of them is.
+        // What suppression means is that one boundary is bare and the other
+        // three are not, which is what this measures — and it measures it as a
+        // difference between two renders of one table, so no coordinate but the
+        // 0.5pt border width is pinned.
+        let ink_at_y = |slice: &TableSlice, y: Pt| -> Pt {
+            slice
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                        (rect.origin.y <= y && y <= rect.origin.y + rect.size.height)
+                            .then_some(rect.size.width)
+                    }
+                    _ => None,
+                })
+                .fold(Pt::ZERO, |a, w| a + w)
+        };
+        // The top boundary is sampled inside its own band. A *horizontal* on the
+        // table's own edge lies wholly within the box (§17.4.66 — see `place_y`
+        // in `rasterize_border_grid`), so half a border-width down is inside the
+        // top border where one exists. Its two verticals do not: they straddle
+        // the box's own edges (`place_x`, measured against
+        // `test-files/border-outer-box.docx`), half of each falling outside. So
+        // with a top border the band reaches the whole 100pt column plus half a
+        // border of overhang at each end, and without one only the two verticals
+        // cross that y.
+        let top = border_line.width * 0.5;
+        let bottom = normal.size.height;
+        let mid = bottom * 0.5;
 
-        // Normal has 4 borders (top, bottom, left, right).
-        assert_eq!(normal_borders.len(), 4, "all 4 borders present");
-        // Suppressed has 3 borders (bottom, left, right — no top).
-        assert_eq!(suppressed_borders.len(), 3, "top border suppressed");
+        assert_eq!(
+            ink_at_y(&normal, top),
+            col_widths[0] + border_line.width,
+            "the unsuppressed table paints its own top boundary, right across \
+             the column and over the halves of the two verticals straddling its \
+             ends"
+        );
+        assert_eq!(
+            ink_at_y(&suppressed, top),
+            border_line.width + border_line.width,
+            "§17.4.38: suppression leaves the top boundary bare — only the two \
+             verticals cross that y"
+        );
+        // The controls. Suppression reaches that boundary and nothing else: both
+        // renders still paint their bottom edge and both verticals, measured at
+        // each table's *own* foot because the two are no longer the same height.
+        //
+        // And the height difference is itself the assertion, not an allowance —
+        // it is exactly one border, because a table's own *horizontal* edge is
+        // charged to the content box it insets (`measure_table_rows`), so
+        // removing one gives that room back. Its verticals are charged nothing,
+        // hanging outside the box, and neither of them is what this measures.
+        assert_eq!(
+            normal.size.height - suppressed.size.height,
+            border_line.width,
+            "the suppressed top gives its charged width back to the row"
+        );
+        for (label, y) in [("verticals", mid), ("bottom", bottom)] {
+            let (a, b) = (
+                ink_at_y(&normal, y),
+                ink_at_y(
+                    &suppressed,
+                    y - (normal.size.height - suppressed.size.height),
+                ),
+            );
+            assert_eq!(a, b, "suppression must not touch the {label}");
+            assert!(b > Pt::ZERO, "{label} still painted");
+        }
     }
 
     #[test]
@@ -1313,6 +1402,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
             TableRowInput {
                 cells: vec![
@@ -1324,6 +1414,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
             TableRowInput {
                 cells: vec![TableCellInput {
@@ -1340,6 +1431,7 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             },
         ];
 
@@ -1352,27 +1444,50 @@ mod tests {
             None,
             false,
         );
-        let mut right_edge_segments: Vec<_> = result
+        // The ink a ray down the table's right edge (grid line 2, x = 200) meets,
+        // merged into runs. Two runs would mean a gap where the merged cell
+        // crosses the boundary its sibling column paints a horizontal on; one
+        // run means the line is whole.
+        //
+        // Asserted as the union rather than as a pair of segments, because the
+        // grid rasterizer splits every line at its junctions: how many rects
+        // arrive is a property of the decomposition, and continuity is not.
+        let mut runs: Vec<(f32, f32)> = result
             .commands
             .iter()
             .filter_map(|command| match command {
-                DrawCommand::Rect { rect, color }
-                    if *color == RgbColor::BLACK
-                        && rect.origin.x.raw() == 199.0
-                        && rect.size.width.raw() == 1.0 =>
-                {
-                    Some(*rect)
+                DrawCommand::Rect { rect, color } if *color == RgbColor::BLACK => {
+                    let (x0, x1) = (
+                        rect.origin.x.raw(),
+                        rect.origin.x.raw() + rect.size.width.raw(),
+                    );
+                    (x0 <= 200.0 && 200.0 <= x1).then(|| {
+                        (
+                            rect.origin.y.raw(),
+                            rect.origin.y.raw() + rect.size.height.raw(),
+                        )
+                    })
                 }
                 _ => None,
             })
             .collect();
-        right_edge_segments.sort_by(|a, b| a.origin.y.raw().total_cmp(&b.origin.y.raw()));
-
-        let first_end = right_edge_segments[0].origin.y + right_edge_segments[0].size.height;
-        let continuation_start = right_edge_segments[1].origin.y;
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (a, b) in runs {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1e-4 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
         assert_eq!(
-            first_end, continuation_start,
-            "a vertically merged outer border must cross the inter-row border band"
+            merged.len(),
+            1,
+            "a vertically merged outer border must cross the row boundary its \
+             sibling column paints a horizontal on: {merged:?}"
+        );
+        assert!(
+            merged[0].1 - merged[0].0 >= result.size.height.raw(),
+            "and it must run the whole height of the table: {merged:?}"
         );
     }
 
@@ -1412,6 +1527,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         };
         let row1 = TableRowInput {
             cells: vec![
@@ -1431,6 +1547,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         };
         let col_widths = vec![Pt::new(100.0), Pt::new(100.0)];
         let result = layout_table(
@@ -1511,6 +1628,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -1546,6 +1664,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -1720,6 +1839,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         };
         let row1 = TableRowInput {
             cells: vec![TableCellInput {
@@ -1736,6 +1856,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         };
         let col_widths = vec![Pt::new(40.0)];
         let slices = layout_table_paginated(

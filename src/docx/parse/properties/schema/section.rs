@@ -55,6 +55,13 @@ pub(crate) enum SectChildXml {
     Type(ValStSectionMark),
     #[serde(rename = "pgNumType")]
     PgNumType(PgNumTypeXml),
+    /// §17.6.6 `<w:bidi/>` — "Right to Left Section Layout". Decides which side
+    /// of the content area is the *leading* one, and so what §17.4.50 `tblInd`
+    /// measures from and which edge §17.4.28 `w:jc`'s `start`/`end` name. It is
+    /// **not** §17.4.1 `w:bidiVisual`, which reverses the cells inside one
+    /// table and says nothing about placement.
+    #[serde(rename = "bidi")]
+    Bidi(OnOff),
     #[serde(other)]
     Other,
 }
@@ -317,6 +324,7 @@ impl From<SectPrXml> for SectionProperties {
         let mut header_refs = SectionHeaderFooterRefs::default();
         let mut footer_refs = SectionHeaderFooterRefs::default();
         let mut title_page: Option<bool> = None;
+        let mut bidi: Option<bool> = None;
         let mut section_type: Vec<SectionType> = Vec::new();
         let mut page_number_type: Vec<PgNumTypeXml> = Vec::new();
 
@@ -333,6 +341,8 @@ impl From<SectPrXml> for SectionProperties {
                 SectChildXml::FooterRef(r) => assign_hf_ref(&mut footer_refs, r),
                 // §17.7.2 governs the toggle; last wins by the spec's own rule.
                 SectChildXml::TitlePg(OnOff(b)) => title_page = Some(b),
+                // §17.7.2 last-wins, as for `titlePg` above.
+                SectChildXml::Bidi(OnOff(b)) => bidi = Some(b),
                 SectChildXml::Type(v) => section_type.push(SectionType::from(v.val)),
                 SectChildXml::PgNumType(v) => page_number_type.push(v),
                 SectChildXml::Other => {}
@@ -347,6 +357,7 @@ impl From<SectPrXml> for SectionProperties {
             header_refs,
             footer_refs,
             title_page,
+            bidi,
             section_type: Dup::from(section_type),
             page_number_type: Dup::from(page_number_type).map(Into::into),
             rsids: SectionRevisionIds {

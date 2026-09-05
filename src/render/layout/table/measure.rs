@@ -9,10 +9,10 @@ use crate::render::dimension::Pt;
 
 use crate::render::layout::cell::{layout_cell, CellLayout};
 
-use super::borders::{border_width, resolve_table_cell_borders};
+use super::borders::{border_width, plan_table_borders, resolve_table_cell_borders};
 use super::grid::{expand_rows_for_vmerge, is_vmerge_continue};
 use super::types::{
-    CellLayoutEntry, MeasuredRow, MeasuredTable, RowHeightRule, TableBorderConfig, TableRowInput,
+    CellLayoutEntry, MeasuredRow, MeasuredTable, TableBorderConfig, TableRowInput,
     VerticalMergeState,
 };
 
@@ -25,6 +25,25 @@ use super::types::{
 /// row is suppressed. Used for adjacent table border collapse: consecutive tables
 /// with the same style are treated as a single merged table, so the second table's
 /// top border would duplicate the first table's bottom border.
+/// §17.4.38: the strip reserved between this row's content box and the next
+/// row's, wide enough for the border on the boundary they share.
+///
+/// Zero for the last row, which has no shared boundary, and for a §17.4.45
+/// spaced table, where every cell draws its own borders inside its own box and
+/// the gap between rows is the spacing itself.
+///
+/// One definition, read twice: the assembly pass reports it as
+/// `MeasuredRow::border_gap_below`, and the measuring pass needs it earlier
+/// because a declared row height has to contain it.
+fn strip_below(row: &[super::borders::CellBorders], has_next: bool, cell_spacing: Pt) -> Pt {
+    if !has_next || cell_spacing > Pt::ZERO {
+        return Pt::ZERO;
+    }
+    row.iter()
+        .map(|b| border_width(b.bottom))
+        .fold(Pt::ZERO, Pt::max)
+}
+
 pub(super) fn measure_table_rows(
     rows: &[TableRowInput],
     col_widths: &[Pt],
@@ -65,13 +84,24 @@ pub(super) fn measure_table_rows(
     // Pass 2a: §17.4.66 border resolution — what each cell declares, then who
     // owns each shared edge. Both live in `borders.rs`; this phase only needs
     // the answer.
-    let resolved_borders = resolve_table_cell_borders(
+    let resolved = resolve_table_cell_borders(
         rows,
         col_widths.len(),
         borders,
         cell_spacing,
         suppress_first_row_top,
     );
+    let resolved_borders = resolved.cells;
+
+    // §17.4.66: what stands on each line of the grid — the painting answer, kept
+    // separate from the charging one above. See `borders.rs`' module doc.
+    let plan = plan_table_borders(rows, col_widths.len(), borders, suppress_first_row_top);
+
+    // x of every vertical grid line. §17.4.45's spacing offsets the whole grid
+    // by one, matching `cell_x` below; a collapsed table adds zero.
+    let grid_x: Vec<Pt> = (0..=col_widths.len())
+        .map(|c| col_widths[..c].iter().copied().sum::<Pt>() + cell_spacing)
+        .collect();
 
     // Pass 2b: lay out each cell.
     let mut row_cell_layouts: Vec<Vec<CellLayoutEntry>> = Vec::new();
@@ -98,16 +128,29 @@ pub(super) fn measure_table_rows(
             // would. Mirrors the same clamp in `build/table.rs`.
             let grid_start = grid_idx.min(col_widths.len());
             let grid_end = (grid_start + span).min(col_widths.len());
-            // §17.4.45: the grid slots were already shrunk so they sum to
-            // `table_width - cell_spacing`; offsetting every cell by one
-            // spacing and taking one off its width then leaves exactly
-            // `cell_spacing` between adjacent cells *and* at both table edges,
-            // without changing the table's own width. A `gridSpan` cell
-            // absorbs the interior gaps it covers, which is what a merged cell
-            // should do.
-            let slots: Pt = col_widths[grid_start..grid_end].iter().copied().sum();
-            let cell_w: Pt = (slots - cell_spacing).max(Pt::ZERO);
-            let cell_x: Pt = col_widths[..grid_start].iter().copied().sum::<Pt>() + cell_spacing;
+            // §17.4.60 `tblPrEx/bidiVisual`: this row's cells stand off the
+            // shared grid — each keeps the width `build::table` computed for
+            // it before the flip, in visual order, at an x measured from the
+            // row's own leading offset rather than from `col_widths` at all
+            // (`RowBidiOverride`). `grid_start`/`grid_end` above still advance
+            // so `entry.grid_col` gets *some* value, but nothing below reads
+            // them for this row's geometry.
+            let (cell_x, cell_w) = if let Some(ovr) = &row.bidi_override {
+                let x = ovr.leading_offset + ovr.cell_widths[..cell_ci].iter().copied().sum::<Pt>();
+                (x, ovr.cell_widths[cell_ci])
+            } else {
+                // §17.4.45: the grid slots were already shrunk so they sum to
+                // `table_width - cell_spacing`; offsetting every cell by one
+                // spacing and taking one off its width then leaves exactly
+                // `cell_spacing` between adjacent cells *and* at both table
+                // edges, without changing the table's own width. A `gridSpan`
+                // cell absorbs the interior gaps it covers, which is what a
+                // merged cell should do.
+                let slots: Pt = col_widths[grid_start..grid_end].iter().copied().sum();
+                let w = (slots - cell_spacing).max(Pt::ZERO);
+                let x = col_widths[..grid_start].iter().copied().sum::<Pt>() + cell_spacing;
+                (x, w)
+            };
 
             // §17.4.39/§17.4.66 against §17.4.41/§17.4.42: a border is drawn
             // *inside* the cell box, so the content box starts at
@@ -118,9 +161,73 @@ pub(super) fn measure_table_rows(
             // horizontal pair is what let a row whose top border was thicker
             // than its top cell margin overflow its own box by the difference,
             // straight into the strip where the bottom border paints.
+            //
+            // **How much of a border is "inside" depends on whether the edge is
+            // shared**, and it is the same rule `rasterize_border_grid` paints
+            // by: a collapsed vertical straddles **every** line it stands on,
+            // the table's own two included, so each is charged half of it to
+            // whichever cell is on that side.
+            //
+            // **Both halves measured.** `test-files/border-content-charge.docx`
+            // steps a *shared* border 0.5 → 12pt with zero cell margins, and
+            // Word draws the following cell's glyph flush against the border's
+            // inner edge at every weight — which refutes charging it nothing
+            // (the glyph would sit on the grid line with the border painted
+            // through it) and charging it in full (a gap of half the border).
+            // `test-files/border-outer-box.docx` asks the same of a table's
+            // *own* edge, and Word straddles that one too — the whole table
+            // shifts half a leading border left so the charged half puts the
+            // first cell's text back on the indent (`build::table`'s indent,
+            // and `rasterize_border_grid`'s `place_x`).
+            // `tests/table_cell_content_box.rs` and `tests/table_outer_box.rs`
+            // hold the two assertions.
+            //
+            // The charge comes from the **plan** and not from `resolved_borders`
+            // for the same reason: resolution hands a shared edge to one of the
+            // two cells and clears the other, so the loser's own `left` says
+            // `Absent` and would be charged nothing. Both cells stand on one
+            // line and both must see it.
             let b = &resolved_borders[row_idx][cell_ci];
-            let extra_left = (border_width(b.left) - cell.margins.left).max(Pt::ZERO);
-            let extra_right = (border_width(b.right) - cell.margins.right).max(Pt::ZERO);
+            let charge = |edge, margin: Pt| (border_width(edge) * 0.5 - margin).max(Pt::ZERO);
+            // §17.4.45: a spaced table has no shared edges at all — each cell
+            // keeps its four borders wholly inside itself, so each is charged in
+            // full, and the plan (which resolves as though collapsed) does not
+            // describe it. §17.4.60 `tblPrEx/bidiVisual` puts this row's cells
+            // in the same position for the same reason: they stand nowhere the
+            // plan's grid lines do, so there is nothing shared to charge half
+            // of (`RowBidiOverride`).
+            let (extra_left, extra_right) =
+                if cell_spacing > Pt::ZERO || row.bidi_override.is_some() {
+                    (
+                        (border_width(b.left) - cell.margins.left).max(Pt::ZERO),
+                        (border_width(b.right) - cell.margins.right).max(Pt::ZERO),
+                    )
+                } else {
+                    (
+                        charge(plan.vertical(grid_start, row_idx), cell.margins.left),
+                        charge(plan.vertical(grid_end, row_idx), cell.margins.right),
+                    )
+                };
+            // The horizontal twin needs no such split, and the asymmetry is
+            // worth stating rather than leaving to be rediscovered. §17.4.38
+            // reserves a strip *between* two rows' content boxes wide enough for
+            // the border on their shared boundary (`border_gap_below`), so an
+            // interior horizontal already takes its room from neither box —
+            // which is the half-each rule delivered by geometry instead of by a
+            // charge. `extra_top` therefore only ever sees the table's own top
+            // edge, which — unlike its own left and right — is still drawn
+            // *inside* the box (`place_y`) and charged in full. That asymmetry
+            // is stated where it is decided (`rasterize_border_grid`): the
+            // horizontal half is measured and the vertical half is not, and
+            // straddling a top border paints half of it through the paragraph
+            // above.
+            //
+            // The one shape that escapes this is a boundary the *lower* row owns
+            // (`can_own` prefers the upper, and only a `gridSpan` mismatch
+            // overrides it): there the strip is zero and the lower row is
+            // charged the full width. That is an interior edge and so untouched
+            // by the outer-box measurement; no render has measured it either
+            // way, and it is left as it was rather than swept along.
             let extra_top = (border_width(b.top) - cell.margins.top).max(Pt::ZERO);
             let extra_bottom = if reserves_band_below {
                 Pt::ZERO
@@ -169,6 +276,7 @@ pub(super) fn measure_table_rows(
             }
 
             entries.push(CellLayoutEntry {
+                content_dx: extra_left,
                 layout,
                 cell_x,
                 cell_w,
@@ -177,10 +285,34 @@ pub(super) fn measure_table_rows(
             grid_idx += span;
         }
 
-        match row.height_rule {
-            Some(RowHeightRule::AtLeast(min_h)) => max_height = max_height.max(min_h),
-            Some(RowHeightRule::Exact(h)) => max_height = h,
-            None => {}
+        // §17.4.80 measures this box, minus half of each *interior* boundary's
+        // rule under `hRule="exact"` — see `RowHeightRule::content_height`,
+        // which holds the Word render that settles it and the two readings it
+        // refuted. The table's own outer top/bottom are excluded (`row_idx == 0`
+        // / `row_idx + 1 == num_rows`): those hang wholly outside every row's
+        // box regardless of `height_rule` (`border-outer-box.docx`), so only a
+        // boundary shared with another row is ever charged. Read from `plan`
+        // rather than `resolved_borders`, for the reason `charge` above does:
+        // resolution clears the losing side of a shared edge to `Absent`, and
+        // both rows meeting on a line are charged from it alike.
+        if let Some(rule) = row.height_rule {
+            let boundary_width = |r: usize| {
+                (0..col_widths.len())
+                    .map(|c| border_width(plan.horizontal(r, c)))
+                    .fold(Pt::ZERO, Pt::max)
+            };
+            let top_charge = if row_idx == 0 {
+                Pt::ZERO
+            } else {
+                boundary_width(row_idx)
+            };
+            let bottom_charge = if row_idx + 1 == num_rows {
+                Pt::ZERO
+            } else {
+                boundary_width(row_idx + 1)
+            };
+            let border_charge = (top_charge + bottom_charge) * 0.5;
+            max_height = rule.content_height(max_height, border_charge);
         }
 
         // §17.4.45: the row's box reserves its own leading gap, mirroring the
@@ -206,20 +338,14 @@ pub(super) fn measure_table_rows(
             // With cell spacing there is no shared edge to reserve room for:
             // every cell draws its own bottom border inside its own box, and
             // the gap between rows is the spacing itself.
-            let border_gap_below = if row_idx + 1 < num_rows && cell_spacing <= Pt::ZERO {
-                borders
-                    .iter()
-                    .map(|b| border_width(b.bottom))
-                    .fold(Pt::ZERO, Pt::max)
-            } else {
-                Pt::ZERO
-            };
+            let border_gap_below = strip_below(&borders, row_idx + 1 < num_rows, cell_spacing);
             MeasuredRow {
                 entries,
                 borders,
                 height,
                 leading_gap: cell_spacing,
                 border_gap_below,
+                plan_row: row_idx,
             }
         })
         .collect();
@@ -227,6 +353,8 @@ pub(super) fn measure_table_rows(
     MeasuredTable {
         rows: measured_rows,
         table_width,
+        plan,
+        grid_x,
     }
 }
 
@@ -292,6 +420,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -859,6 +988,148 @@ mod tests {
         )
     }
 
+    /// The same, with a 3 pt `insideH` — so each interior boundary reserves a
+    /// 3 pt strip (§17.4.38) between two rows' content boxes, outside both.
+    fn bordered_sized_table(rows: &[TableRowInput]) -> super::MeasuredTable {
+        let three = single(3.0);
+        let borders = TableBorderConfig {
+            top: Some(three),
+            bottom: Some(three),
+            left: None,
+            right: None,
+            inside_h: Some(three),
+            inside_v: None,
+        };
+        measure_table_rows(
+            rows,
+            &[Pt::new(50.0)],
+            Pt::ZERO,
+            Pt::new(10.0),
+            Some(&borders),
+            None,
+            false,
+        )
+    }
+
+    /// §17.4.80 measures the row's **content box**, and an *interior* rule eats
+    /// into it from both sides — half of the boundary above, half of the one
+    /// below — the same way a shared vertical eats into a cell's width. A row
+    /// between two others, declaring 40pt against two 3pt `insideH` rules, gets
+    /// 40 − 1.5 − 1.5 = 37pt of cell.
+    ///
+    /// **Measured** against a Word render of
+    /// `test-files/issue-157-empty-row-edge.docx`, table 4 — re-measured
+    /// 2026-09-05, pixel-counted off a fresh render and calibrated against the
+    /// table's own fixed-layout width (200pt / 750px) rather than eyeballed.
+    /// The bordered fixture is what makes this a test rather than a tautology —
+    /// with no borders every reading agrees.
+    ///
+    /// This assertion has been two other ways, briefly and each time from a
+    /// single render: see `RowHeightRule::content_height` for both and what
+    /// refuted each.
+    #[test]
+    fn an_exact_row_height_is_charged_half_of_each_interior_border() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            (m.rows[0].border_gap_below, m.rows[1].border_gap_below),
+            (Pt::new(3.0), Pt::new(3.0)),
+            "the fixture must actually reserve a strip on both boundaries"
+        );
+        assert_eq!(
+            m.rows[1].height,
+            Pt::new(37.0),
+            "40pt declared, minus half of each of its two 3pt interior rules"
+        );
+    }
+
+    /// A row's own outer top and bottom are excluded from the charge above —
+    /// they hang wholly outside every row's box regardless of `height_rule`
+    /// (`border-outer-box.docx`), so only an *interior* boundary is ever
+    /// charged. The same 40pt/3pt-`insideH` row as above, but first in its
+    /// table: its top is the table's own outer edge (uncharged) and only its
+    /// bottom is interior, so it loses half of one rule, not two — 40 − 1.5 =
+    /// 38.5pt, not 37.
+    #[test]
+    fn a_table_s_own_outer_edge_is_never_charged_to_an_exact_row() {
+        let m = bordered_sized_table(&[
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            m.rows[0].height,
+            Pt::new(38.5),
+            "40pt declared, minus half of the one interior rule below it — its \
+             own top is the table's outer edge and pays nothing"
+        );
+    }
+
+    /// …including a row shorter than the rules charged against it: it floors at
+    /// zero rather than going negative, which is the same rule as the 40pt case
+    /// above and not a separate collapse. Word draws table 3's 2pt-against-6pt
+    /// row as a hairline rather than a clean 2pt of cell, which is what the
+    /// zero floor (and not the declared value passing through unmodified) now
+    /// predicts.
+    #[test]
+    fn a_row_shorter_than_its_rules_floors_at_zero_rather_than_going_negative() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::new(2.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            m.rows[1].height,
+            Pt::ZERO,
+            "2pt declared is less than the 3pt charged from each side, so the \
+             content box floors at zero rather than going negative"
+        );
+    }
+
+    /// §17.4.80 `atLeast` measures the same box — Word's table 5 is table 4's
+    /// declaration with the rule changed, and draws the same 40 pt.
+    #[test]
+    fn an_at_least_row_height_is_measured_the_same_way() {
+        let m = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::AtLeast(Pt::new(40.0))),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(m.rows[1].height, Pt::new(40.0));
+    }
+
+    /// §17.4.80 with `w:val="0"` is **no constraint**, not a height of nothing —
+    /// even under `hRule="exact"`. Word draws a full row of cell where a literal
+    /// reading draws none (table 2 of the fixture), and [MS-OI29500] §2.4.77(c)
+    /// records the same fact from the producing side: Word requires `val="0"`
+    /// whenever `hRule="auto"`, which makes zero the marker for unconstrained.
+    ///
+    /// Asserted against the same row with no rule at all, so the content height
+    /// is never pinned — whatever it is, both sides get it.
+    #[test]
+    fn an_exact_height_of_zero_is_no_constraint_at_all() {
+        let with_zero = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row_sized(vec![cell_of(1)], RowHeightRule::Exact(Pt::ZERO)),
+            row(vec![cell_of(1)]),
+        ]);
+        let unconstrained = bordered_sized_table(&[
+            row(vec![cell_of(1)]),
+            row(vec![cell_of(1)]),
+            row(vec![cell_of(1)]),
+        ]);
+        assert_eq!(
+            with_zero.rows[1].height, unconstrained.rows[1].height,
+            "a zero exact height must measure like no height at all"
+        );
+        assert!(
+            with_zero.rows[1].height > Pt::ZERO,
+            "and that is a real row"
+        );
+    }
+
     /// The measurement the rules are compared against: three 14 pt lines.
     #[test]
     fn an_unconstrained_row_is_as_tall_as_its_content() {
@@ -1092,6 +1363,17 @@ mod tests {
     /// break the shared edge at all is the real question, and it is a
     /// border-resolution one — asserted here as it stands so that changing it is
     /// a deliberate act.
+    ///
+    /// No Word render will decide it **for a cell-less row**: Word refuses to
+    /// open a document holding a `<w:tr/>` at all (measured 2026-08-19). So this
+    /// assertion pins a robustness decision rather than a fidelity one, and is
+    /// free to change on a reasoned argument — there is no measurement it can
+    /// contradict.
+    ///
+    /// The neighbouring question *is* measurable, and
+    /// `test-files/issue-157-empty-row-edge.docx` was rebuilt to ask it: a row
+    /// of `hRule="exact"` height, which Word opens, puts two boundaries at one y
+    /// the same way. See `table::borders`, where they are merged.
     #[test]
     fn a_row_with_no_cells_is_zero_height_and_moves_nothing() {
         let slots = vec![Pt::new(50.0), Pt::new(50.0)];
@@ -1154,10 +1436,17 @@ mod tests {
     /// Nothing pinned that deflation: `cell_w` is unchanged by it, so it is
     /// only visible in what the content does with the width it is given.
     ///
+    /// The border has to be a **shared** one, and that is the whole of the
+    /// setup: §17.4.66 charges half of a shared border to each of the two cells
+    /// that meet on it, and *nothing at all* to a table's own edge, which hangs
+    /// outside the box (`borders::rasterize_border_grid`, measured against
+    /// `test-files/border-outer-box.docx`). So the heavy border goes on the
+    /// second cell's left edge, where a first cell faces it.
+    ///
     /// Two words of 30 pt in a 62 pt cell: they fit on one line with no border,
-    /// and a 10 pt left border leaves 52 pt, which is one word short.
+    /// and half of a 10 pt shared border leaves 57 pt, which is one word short.
     #[test]
-    fn a_border_wider_than_the_margin_narrows_the_content_and_can_force_a_wrap() {
+    fn a_shared_border_wider_than_the_margin_narrows_the_content_and_can_force_a_wrap() {
         let heavy = single(10.0);
         let with_left_border = TableCellInput {
             cell_borders: Some(CellBorderConfig {
@@ -1168,10 +1457,16 @@ mod tests {
             }),
             ..cell_of(2)
         };
+        // An empty first cell, so it faces the heavy edge without contributing
+        // any height of its own.
+        let facing = || TableCellInput {
+            blocks: vec![],
+            ..cell(1, None)
+        };
         let measure = |c: TableCellInput| {
             measure_table_rows(
-                &[row(vec![c])],
-                &[Pt::new(62.0)],
+                &[row(vec![facing(), c])],
+                &[Pt::new(62.0), Pt::new(62.0)],
                 Pt::ZERO,
                 Pt::new(10.0),
                 None,
@@ -1190,11 +1485,79 @@ mod tests {
         assert_eq!(
             bordered.rows[0].height,
             Pt::new(28.0),
-            "…and not across the 52 pt the 10 pt border leaves"
+            "…and not across the 57 pt half of the 10 pt shared border leaves"
         );
         assert_eq!(
-            bordered.rows[0].entries[0].cell_w, plain.rows[0].entries[0].cell_w,
+            bordered.rows[0].entries[1].cell_w, plain.rows[0].entries[1].cell_w,
             "the cell's own box is unchanged — only its content width narrows"
+        );
+    }
+
+    /// The control, and the rule the one above is the counterpart of: a table's
+    /// **own** edge is charged exactly like a shared one, half of it, because it
+    /// straddles its grid line exactly like one.
+    ///
+    /// There is no special case left to test for — which is the assertion. This
+    /// used to charge the full width, and briefly charged nothing at all; both
+    /// are refuted by `test-files/border-outer-box.docx`, where Word straddles
+    /// the table's own edge and shifts the whole table half a border left so the
+    /// charged half puts the first cell's text back on the indent
+    /// (`build::table`'s indent, `tests/table_outer_box.rs`).
+    #[test]
+    fn an_outer_border_is_charged_the_same_half_a_shared_one_is() {
+        let bordered = |side_is_outer: bool| {
+            let cells = if side_is_outer {
+                vec![TableCellInput {
+                    cell_borders: Some(CellBorderConfig {
+                        top: None,
+                        bottom: None,
+                        left: Some(CellBorderOverride::Border(single(10.0))),
+                        right: None,
+                    }),
+                    ..cell_of(2)
+                }]
+            } else {
+                vec![
+                    TableCellInput {
+                        blocks: vec![],
+                        ..cell(1, None)
+                    },
+                    TableCellInput {
+                        cell_borders: Some(CellBorderConfig {
+                            top: None,
+                            bottom: None,
+                            left: Some(CellBorderOverride::Border(single(10.0))),
+                            right: None,
+                        }),
+                        ..cell_of(2)
+                    },
+                ]
+            };
+            let widths = if side_is_outer {
+                vec![Pt::new(62.0)]
+            } else {
+                vec![Pt::new(62.0), Pt::new(62.0)]
+            };
+            let m = measure_table_rows(
+                &[row(cells)],
+                &widths,
+                Pt::ZERO,
+                Pt::new(10.0),
+                None,
+                None,
+                false,
+            );
+            m.rows[0].height
+        };
+        assert_eq!(
+            bordered(true),
+            bordered(false),
+            "a table's own left edge narrows its cell exactly as a shared one does"
+        );
+        assert_eq!(
+            bordered(true),
+            Pt::new(28.0),
+            "and half of the 10 pt leaves 57 pt, one word short of the 60 pt of text"
         );
     }
 

@@ -381,6 +381,7 @@ mod tests {
             cant_split: None,
             grid_before,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -456,15 +457,19 @@ mod tests {
         MeasuredTable {
             rows: rows
                 .iter()
-                .map(|&(h, gap)| MeasuredRow {
+                .enumerate()
+                .map(|(i, &(h, gap))| MeasuredRow {
                     entries: Vec::new(),
                     borders: Vec::new(),
                     height: Pt::new(h),
                     leading_gap: Pt::ZERO,
                     border_gap_below: Pt::new(gap),
+                    plan_row: i,
                 })
                 .collect(),
             table_width: Pt::new(100.0),
+            plan: super::super::borders::plan_table_borders(&[], 0, None, false),
+            grid_x: Vec::new(),
         }
     }
 
@@ -572,6 +577,7 @@ mod tests {
                 border_config: None,
                 indent: Pt::ZERO,
                 alignment: None,
+                direction: None,
                 float_info: None,
                 style_id: None,
             }],
@@ -593,6 +599,7 @@ mod tests {
             cell_x: Pt::ZERO,
             cell_w: Pt::new(100.0),
             grid_col,
+            content_dx: Pt::ZERO,
         }
     }
 

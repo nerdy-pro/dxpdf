@@ -1,4 +1,4 @@
-//! §17.4.38 / §17.4.66: the square where two table borders join.
+//! §17.4.38 / §17.4.66: the structural invariants of a table's border network.
 //!
 //! ECMA-376 says which edges a cell paints and [MS-OI29500] §17.4.66 says which
 //! of two facing cells wins a shared one, but neither says anything about the
@@ -9,16 +9,30 @@
 //! both been emptied of, while the borders that actually meet there belonged to
 //! the neighbouring row and the neighbouring column.
 //!
-//! So this file asserts the property rather than any one shape of it: over a
-//! whole rendered document, **every junction square is ink**. A junction is
-//! where a vertical border rect and a horizontal one touch or overlap; the
-//! square they join in is the vertical's x-band crossed with the horizontal's
-//! y-band. Nothing here knows which cell a rect came from, which is the point —
+//! So this file asserts properties rather than any one shape of them, over whole
+//! rendered documents, and nothing here knows which cell a rect came from —
 //! that knowledge is exactly what each of the three defects had too little of.
+//! Three properties, which between them say the network is a set of lines that
+//! meet cleanly:
+//!
+//! 1. **Every junction square is ink.** A junction is where a vertical border
+//!    rect and a horizontal one touch or overlap; the square they join in is the
+//!    vertical's x-band crossed with the horizontal's y-band. A hole there is
+//!    the reported notch.
+//! 2. **No two border rects overlap.** Where two do, which colour reaches the
+//!    page is decided by emission *order* rather than by any rule — so a
+//!    document renders one way and the same borders in another arrangement
+//!    render another. Painting a square twice is the other half of the same
+//!    defect as painting it not at all.
+//! 3. **No collinear pair is separated by a gap narrower than itself.** A break
+//!    in a line one border-width long is never deliberate: real space between
+//!    two tables is orders of magnitude wider. This is the notch that the
+//!    junction audit cannot see, because it is a hole in a line with nothing
+//!    crossing it.
 //!
 //! The fixture is the reporter's own document. `test-cases/` is untracked
-//! (private customer documents), so the test is gated on its presence and is a
-//! no-op in CI; the same invariant is asserted on in-memory tables by
+//! (private customer documents), so those tests are gated on its presence and
+//! are a no-op in CI; the same invariants are asserted on in-memory tables by
 //! `render::layout::table::emit`'s own tests, which do run there.
 
 use dxpdf::render::layout::draw_command::{DrawCommand, LayoutedPage};
@@ -30,6 +44,10 @@ const MAX_BORDER_THICKNESS: f32 = 3.0;
 const EPS: f32 = 0.001;
 
 type Rect = (f32, f32, f32, f32);
+
+/// The committed corpus. Absolute, so the audits do not depend on the working
+/// directory a test binary happens to be run from.
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-files");
 
 fn border_rects(page: &LayoutedPage) -> Vec<Rect> {
     page.commands
@@ -121,9 +139,145 @@ fn junctions(rects: &[Rect]) -> (usize, Vec<Rect>) {
     (checked, missing)
 }
 
-/// `(pages, junctions checked, one report line per page that has an unpainted
-/// junction)` for one document.
-fn audit(path: &std::path::Path) -> (usize, usize, Vec<String>) {
+/// Whether two rects share positive area. Touching along an edge is not
+/// overlapping — abutting rects are how every line in this engine is built.
+fn overlaps(a: Rect, b: Rect) -> bool {
+    let (ax0, ax1, ay0, ay1) = a;
+    let (bx0, bx1, by0, by1) = b;
+    ax1 - bx0 > EPS && bx1 - ax0 > EPS && ay1 - by0 > EPS && by1 - ay0 > EPS
+}
+
+/// The one overlap that is the document's fault rather than the renderer's:
+/// **two parallel lines closer together than they are thick**.
+///
+/// Two boundaries a hair apart, each carrying a border wider than the gap, cross
+/// whatever a renderer does with them — there is no decomposition that separates
+/// them, because the geometry the author asked for is impossible. `hRule="exact"`
+/// on a row shorter than its own borders is one way to write it (§17.4.80, and
+/// what `issue-157-empty-row-edge` now holds — two rows of that shape, at 0 and
+/// at 2pt); a cell-less `<w:tr/>` between two rows is another (§17.4.66), and no
+/// fixture carries one any more, because Word will not open a document that
+/// does.
+///
+/// Recognised narrowly, and the narrowness is the whole of it. The two must run
+/// the same extent along **their long axis** and sit at different positions
+/// across their short one — two parallel lines, stacked through their own
+/// thickness.
+///
+/// Matching on "same extent along *some* axis" is not enough, and the difference
+/// is not hypothetical: a junction overrunning a horizontal segment shares the
+/// segment's **short** axis (both are that boundary's 0.5pt band) and differs
+/// along the long one. That is exactly the defect this audit caught in
+/// `sample-docx-files-sample1.docx`, and the loose form exempts it.
+fn is_parallel_crowding(a: Rect, b: Rect) -> bool {
+    let same = |p: (f32, f32), q: (f32, f32)| (p.0 - q.0).abs() <= EPS && (p.1 - q.1).abs() <= EPS;
+    let (ax, ay) = ((a.0, a.1), (a.2, a.3));
+    let (bx, by) = ((b.0, b.1), (b.2, b.3));
+    // A square is ambiguous and `>=` calls it horizontal; both rects must agree
+    // with the shared axis either way, so the ambiguity cannot let a pair in.
+    let long_is_x = |r: Rect| r.1 - r.0 >= r.3 - r.2;
+    let stacked = |shared_is_x: bool| long_is_x(a) == shared_is_x && long_is_x(b) == shared_is_x;
+    (same(ax, bx) && !same(ay, by) && stacked(true))
+        || (same(ay, by) && !same(ax, bx) && stacked(false))
+}
+
+/// `(pairs_examined, overlapping pairs, reported as their intersection)`.
+///
+/// The intersection is the useful report: it is the square whose colour is
+/// undecided, and it is usually a junction, which is what says *why* the pair
+/// exists.
+fn overlapping(rects: &[Rect]) -> (usize, Vec<Rect>) {
+    let mut examined = 0usize;
+    let mut bad = Vec::new();
+    for (i, a) in rects.iter().copied().enumerate() {
+        for b in rects[i + 1..].iter().copied() {
+            examined += 1;
+            if overlaps(a, b) && !is_parallel_crowding(a, b) {
+                let square = (a.0.max(b.0), a.1.min(b.1), a.2.max(b.2), a.3.min(b.3));
+                if !bad.contains(&square) {
+                    bad.push(square);
+                }
+            }
+        }
+    }
+    (examined, bad)
+}
+
+/// `(collinear pairs examined, gaps in a line narrower than the line is thick)`.
+///
+/// Grouped by *overlapping band* rather than by exact coordinate, because two
+/// segments of one grid line may differ in width — a 3pt `w:left` above a 1pt
+/// one is still one line — and their bands then share only their overlap. Only
+/// gaps shorter than the thicker of the two are reported: that is the size a
+/// notch is, and it is far below any real space between two tables.
+fn collinear_gaps(rects: &[Rect]) -> (usize, Vec<Rect>) {
+    let mut examined = 0usize;
+    let mut bad: Vec<Rect> = Vec::new();
+
+    // (along-axis extractor, across-axis extractor, rebuild) for each of the two
+    // orientations, so the same walk serves both.
+    let vertical = |r: &Rect| r.1 - r.0 < r.3 - r.2;
+    for want_vertical in [true, false] {
+        let group: Vec<Rect> = rects
+            .iter()
+            .copied()
+            .filter(|r| vertical(r) == want_vertical)
+            .collect();
+        for (i, a) in group.iter().copied().enumerate() {
+            for b in group[i + 1..].iter().copied() {
+                // `across` is the band the two must share to be collinear;
+                // `along` is the direction the gap is measured in.
+                let (across_a, across_b, along_a, along_b) = if want_vertical {
+                    ((a.0, a.1), (b.0, b.1), (a.2, a.3), (b.2, b.3))
+                } else {
+                    ((a.2, a.3), (b.2, b.3), (a.0, a.1), (b.0, b.1))
+                };
+                let share = across_a.1.min(across_b.1) - across_a.0.max(across_b.0);
+                if share <= EPS {
+                    continue;
+                }
+                let (lo, hi) = if along_a.0 <= along_b.0 {
+                    (along_a, along_b)
+                } else {
+                    (along_b, along_a)
+                };
+                let gap = hi.0 - lo.1;
+                let thickness = (across_a.1 - across_a.0).max(across_b.1 - across_b.0);
+                if gap <= EPS || gap >= thickness {
+                    continue;
+                }
+                examined += 1;
+                let hole = if want_vertical {
+                    (
+                        across_a.0.max(across_b.0),
+                        across_a.1.min(across_b.1),
+                        lo.1,
+                        hi.0,
+                    )
+                } else {
+                    (
+                        lo.1,
+                        hi.0,
+                        across_a.0.max(across_b.0),
+                        across_a.1.min(across_b.1),
+                    )
+                };
+                if !covered(hole, rects) && !bad.contains(&hole) {
+                    bad.push(hole);
+                }
+            }
+        }
+    }
+    (examined, bad)
+}
+
+/// What one page is asked. `(things examined, violations)` — the count is what
+/// makes a clean run non-vacuous.
+type PageCheck = fn(&[Rect]) -> (usize, Vec<Rect>);
+
+/// `(pages, things checked, one report line per page that has a violation)` for
+/// one document.
+fn audit(path: &std::path::Path, check: PageCheck) -> (usize, usize, Vec<String>) {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let doc =
         dxpdf::docx::parse(&bytes).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
@@ -132,7 +286,7 @@ fn audit(path: &std::path::Path) -> (usize, usize, Vec<String>) {
     let mut total_checked = 0usize;
     let mut failures = Vec::new();
     for (i, page) in pages.iter().enumerate() {
-        let (checked, missing) = junctions(&border_rects(page));
+        let (checked, missing) = check(&border_rects(page));
         total_checked += checked;
         if !missing.is_empty() {
             failures.push(format!(
@@ -170,16 +324,20 @@ fn is_word_owner_file(p: &std::path::Path) -> bool {
         .is_some_and(|n| n.starts_with("~$"))
 }
 
-/// Run the audit over a corpus and print one line per document, so a run with
+/// Run one check over a corpus and print a line per document, so a run with
 /// `--nocapture` is the corpus-wide report and not only a pass/fail.
-fn audit_corpus(dir: &str) -> Vec<String> {
+///
+/// Returns `(things checked, failure lines)`. The count is the non-vacuity
+/// guard: a check that examined nothing has proved nothing, and the rect filter
+/// silently ceasing to match is a realistic way for that to happen.
+fn audit_corpus(dir: &str, unit: &str, check: PageCheck) -> (usize, Vec<String>) {
     let mut failures = Vec::new();
     let mut checked_total = 0usize;
     for path in corpus(dir) {
-        let (pages, checked, mut bad) = audit(&path);
+        let (pages, checked, mut bad) = audit(&path, check);
         checked_total += checked;
         println!(
-            "{:>5} junctions {:>3} pages  {:>2} unpainted  {}",
+            "{:>7} {unit} {:>3} pages  {:>2} bad  {}",
             checked,
             pages,
             bad.len(),
@@ -188,10 +346,10 @@ fn audit_corpus(dir: &str) -> Vec<String> {
         failures.append(&mut bad);
     }
     println!(
-        "{dir}: {checked_total} junctions checked, {} unpainted",
+        "{dir}: {checked_total} {unit} checked, {} bad",
         failures.len()
     );
-    failures
+    (checked_total, failures)
 }
 
 /// The whole committed corpus, every page: no junction is painted by nobody.
@@ -201,7 +359,8 @@ fn audit_corpus(dir: &str) -> Vec<String> {
 /// class stays closed only while something asks the question on every render.
 #[test]
 fn no_committed_fixture_has_an_unpainted_border_junction() {
-    let failures = audit_corpus(concat!(env!("CARGO_MANIFEST_DIR"), "/test-files"));
+    let (checked, failures) = audit_corpus(FIXTURES, "junctions", junctions);
+    assert!(checked > 100, "audit examined only {checked} junctions");
     assert!(
         failures.is_empty(),
         "border junctions painted by nobody:\n{}",
@@ -217,10 +376,82 @@ fn no_local_corpus_document_has_an_unpainted_border_junction() {
         eprintln!("SKIPPED: test-cases/ not present");
         return;
     }
-    let failures = audit_corpus("test-cases");
+    let (_, failures) = audit_corpus("test-cases", "junctions", junctions);
     assert!(
         failures.is_empty(),
         "border junctions painted by nobody:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The whole committed corpus: **no two border rects overlap**.
+///
+/// The other half of the junction defect. A square painted twice has no defined
+/// colour — the later command wins, so the answer is emission order, which is
+/// not a rule anyone can state or a reader can predict. It is also the exact
+/// symptom of a model in which two different things both believe they own a
+/// square, which is what a per-cell emitter is whenever the square is on a
+/// shared edge.
+#[test]
+fn no_committed_fixture_paints_a_border_square_twice() {
+    let (checked, failures) = audit_corpus(FIXTURES, "rect pairs", overlapping);
+    assert!(checked > 1000, "audit examined only {checked} pairs");
+    assert!(
+        failures.is_empty(),
+        "border rects overlap (intersections):\n{}",
+        failures.join("\n")
+    );
+}
+
+// There is deliberately **no local-corpus twin of the overlap audit**, and the
+// reason is a real limit rather than an oversight.
+//
+// Every check in this file works from draw commands, which is the whole point —
+// no knowledge of which cell, or which *table*, painted a rect. For the junction
+// and gap audits that costs nothing. For the overlap audit it costs the one case
+// the untracked corpus is full of and the committed one has none of: a **nested
+// table** flush with its parent's edge. Both tables draw that edge, correctly and
+// independently, and the two rects land on the same line. From the command
+// stream that is indistinguishable from a junction overrunning a segment inside
+// one table — the defect this audit caught in `sample-docx-files-sample1.docx` —
+// because both are two rects of one colour partly covering each other, with
+// neither containing the other.
+//
+// So the audit runs strictly on the corpus where the distinction cannot arise.
+// Making it run on the other one needs the rects tagged with the table that drew
+// them, which is a change to `DrawCommand` for a test's benefit, and not one to
+// make without a defect asking for it.
+
+/// The whole committed corpus: **a line is not broken by a gap narrower than
+/// itself**.
+///
+/// The notch the junction audit cannot see. Where two segments of one grid line
+/// stop short of each other with nothing crossing between them, no junction
+/// exists to be checked — the hole is in the line itself. Bounding the gap by
+/// the line's own thickness is what keeps real space out of it: two tables
+/// separated by a paragraph are orders of magnitude further apart than a border
+/// is thick.
+#[test]
+fn no_committed_fixture_breaks_a_border_line_by_less_than_its_width() {
+    let (_, failures) = audit_corpus(FIXTURES, "collinear gaps", collinear_gaps);
+    assert!(
+        failures.is_empty(),
+        "border lines broken by a sub-width gap:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The same over the untracked local corpus. A no-op without it.
+#[test]
+fn no_local_corpus_document_breaks_a_border_line_by_less_than_its_width() {
+    if corpus("test-cases").is_empty() {
+        eprintln!("SKIPPED: test-cases/ not present");
+        return;
+    }
+    let (_, failures) = audit_corpus("test-cases", "collinear gaps", collinear_gaps);
+    assert!(
+        failures.is_empty(),
+        "border lines broken by a sub-width gap:\n{}",
         failures.join("\n")
     );
 }

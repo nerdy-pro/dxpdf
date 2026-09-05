@@ -64,6 +64,11 @@ pub(crate) struct TblPrXml {
     tblp_pr: Vec<TblpPrXml>,
     #[serde(rename = "tblOverlap", default)]
     tbl_overlap: Vec<ValAttr<StTblOverlap>>,
+    /// §17.4.1 `<w:bidiVisual/>` — the table's columns run right to left, so
+    /// the first cell of a row is the rightmost one. `CT_OnOff`, and
+    /// `Vec<OnOff>` for the same last-wins reason as every other toggle here.
+    #[serde(rename = "bidiVisual", default)]
+    bidi_visual: Vec<OnOff>,
     /// Children this schema does not name — recorded so an unimplemented
     /// table property is visible under `RUST_LOG=warn` instead of vanishing.
     /// See [`UnknownChildren`].
@@ -211,6 +216,14 @@ pub(crate) struct TblPrExXml {
         deserialize_with = "deserialize_vec_nonnegative_table_measure"
     )]
     tbl_cell_spacing: Vec<TableMeasureXml>,
+    /// §17.4.1 on a row: this row's columns run right to left, independently of
+    /// the table's own `w:bidiVisual`.
+    ///
+    /// Modelled so it is *visible* — an unnamed child vanishes into
+    /// [`UnknownChildren`] and only ever surfaces under `RUST_LOG=warn` — but
+    /// nothing acts on it yet. See `TableRowPropertyExceptions::bidi_visual`.
+    #[serde(rename = "bidiVisual", default)]
+    bidi_visual: Vec<OnOff>,
     /// Children this schema does not name — recorded so an unimplemented
     /// table property is visible under `RUST_LOG=warn` instead of vanishing.
     /// See [`UnknownChildren`].
@@ -224,6 +237,7 @@ impl From<TblPrExXml> for crate::docx::model::TableRowPropertyExceptions {
         Self {
             borders: Dup::from(x.tbl_borders).into_value().map(Into::into),
             cell_spacing: Dup::from(x.tbl_cell_spacing).into_value().map(Into::into),
+            bidi_visual: last_toggle(x.bidi_visual),
         }
     }
 }
@@ -249,6 +263,7 @@ impl TblPrXml {
             positioning: Dup::from(self.tblp_pr).map(Into::into),
             overlap: Dup::from(self.tbl_overlap)
                 .map(|v| crate::docx::model::TableOverlap::from(v.val)),
+            bidi_visual: Dup::from(self.bidi_visual).map(|OnOff(on)| on),
         };
         (props, style_id)
     }
@@ -748,6 +763,74 @@ mod tests {
 
     /// LibreOffice's tdf#167843 regression fixture, verbatim: `val="04A0"`
     /// alongside a single `firstRow="0"`. 04A0 clears lastRow (0x040) and
+    /// §17.4.1 on a *row* (`w:tblPrEx`) is a separate element from the one on
+    /// the table, and this is the only thing that currently observes it.
+    ///
+    /// Nothing acts on it — `TableRowPropertyExceptions::bidi_visual` says why
+    /// — so without this test the field could be renamed, misspelled or dropped
+    /// and every render would agree. That is exactly the failure mode modelling
+    /// it was meant to end: an unnamed child vanishes silently.
+    #[test]
+    fn tbl_pr_ex_bidi_visual_is_modelled_rather_than_unknown() {
+        let parse = |xml: &str| -> (crate::docx::model::TableRowPropertyExceptions, Vec<String>) {
+            let x: TblPrExXml = quick_xml::de::from_str(xml).unwrap();
+            let unknown: Vec<String> = x.unknown.names().iter().map(|n| n.to_string()).collect();
+            (x.into(), unknown)
+        };
+
+        let (ex, unknown) = parse("<tblPrEx><bidiVisual/></tblPrEx>");
+        assert_eq!(ex.bidi_visual, Some(true));
+        assert!(
+            unknown.is_empty(),
+            "a modelled child must not also be recorded as unknown: {unknown:?}"
+        );
+
+        let (off, _) = parse(r#"<tblPrEx><bidiVisual val="0"/></tblPrEx>"#);
+        assert_eq!(off.bidi_visual, Some(false), "an explicit off is stated");
+
+        let (absent, _) = parse("<tblPrEx/>");
+        assert_eq!(absent.bidi_visual, None);
+    }
+
+    /// §17.4.1 `w:bidiVisual` is a `CT_OnOff`, so all four of its states have to
+    /// be distinguishable at this seam — and the two that are *not* "on" are the
+    /// ones the render tests cannot see.
+    ///
+    /// A render test can only tell a mirrored table from an unmirrored one, so
+    /// it reads `Some(false)` and `None` alike as "did not mirror" and would
+    /// pass with either wired to the other. Only the parse layer can say that an
+    /// explicit `w:val="0"` is a *stated* off — which matters as soon as the
+    /// value has anywhere to inherit from, and is the difference `Dup` exists to
+    /// carry.
+    #[test]
+    fn tbl_pr_bidi_visual_is_a_toggle_with_four_states() {
+        let read = |xml: &str| parse_tbl_pr(xml).0.bidi_visual.cloned();
+
+        assert_eq!(read("<tblPr/>"), None, "absent states nothing");
+        assert_eq!(
+            read("<tblPr><bidiVisual/></tblPr>"),
+            Some(true),
+            "bare is on"
+        );
+        assert_eq!(
+            read(r#"<tblPr><bidiVisual val="0"/></tblPr>"#),
+            Some(false),
+            "an explicit off is stated, not absent"
+        );
+        // §17.7.2 last-wins, which is why the field is a `Vec` and not an
+        // `Option` — the same rule every other toggle in this file follows.
+        assert_eq!(
+            read(r#"<tblPr><bidiVisual/><bidiVisual val="0"/></tblPr>"#),
+            Some(false),
+            "the last occurrence wins"
+        );
+        assert_eq!(
+            read(r#"<tblPr><bidiVisual val="0"/><bidiVisual/></tblPr>"#),
+            Some(true),
+            "…in both directions"
+        );
+    }
+
     /// lastColumn (0x100) and clears noHBand (0x200) — none of which may
     /// reach the model, because note (c) says the whole bitmask is unread.
     #[test]
@@ -1092,10 +1175,15 @@ mod tests {
 
     #[test]
     fn tbl_pr_records_an_unmodelled_child() {
-        let x: TblPrXml =
-            quick_xml::de::from_str(r#"<tblPr><tblStyle val="Grid"/><bidiVisual/></tblPr>"#)
-                .unwrap();
-        assert_eq!(x.unknown.names(), ["bidiVisual"]);
+        // `w:tblCaption` (§17.4.60) stands in for `w:bidiVisual`, which used to
+        // be the example here and is now modelled — the pairing this pins is
+        // "unnamed is captured, named is not", so it needs a child the schema
+        // still does not name.
+        let x: TblPrXml = quick_xml::de::from_str(
+            r#"<tblPr><tblStyle val="Grid"/><tblCaption val="c"/></tblPr>"#,
+        )
+        .unwrap();
+        assert_eq!(x.unknown.names(), ["tblCaption"]);
         // The modelled sibling is unaffected by the catch-all.
         assert_eq!(
             x.split().1.map(|s| s.as_str().to_string()),
