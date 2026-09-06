@@ -2,7 +2,7 @@
 
 **Convert Microsoft Word DOCX files to PDF without Microsoft Office, LibreOffice, or any cloud API.**
 
-dxpdf is an open-source, standalone DOCX-to-PDF conversion engine written in Rust and powered by [Skia](https://skia.org). It reads `.docx` files and produces high-fidelity PDF output — preserving text formatting, tables, images, headers, footers, hyperlinks, and page layout. Available as a CLI tool, a Rust library, and a Python package.
+dxpdf is an open-source, standalone DOCX-to-PDF conversion engine written in Rust and powered by [Skia](https://skia.org). It reads `.docx` files and produces high-fidelity PDF output — preserving text formatting, tables, images, headers, footers, hyperlinks, and page layout. Available as a CLI tool, a Rust library, a Python package, and Go bindings.
 
 [![Crates.io](https://img.shields.io/crates/v/dxpdf)](https://crates.io/crates/dxpdf)
 [![Documentation](https://img.shields.io/docsrs/dxpdf)](https://docs.rs/dxpdf)
@@ -20,7 +20,7 @@ Built by [nerdy.pro](https://nerdy.pro).
 - **Type-safe** — compile-time dimensional type system (`Twips`, `Pt`, `Emu`) prevents unit mixing bugs
 - **Standalone** — no Office installation, no LibreOffice, no external services needed
 - **Cross-platform** — runs natively on macOS, Linux, and Windows
-- **Three interfaces** — use as a CLI tool, Rust library (`use dxpdf;`), or Python package (`import dxpdf`)
+- **Four interfaces** — use as a CLI tool, Rust library (`use dxpdf;`), Python package (`import dxpdf`), or Go bindings (`import "github.com/nerdy-pro/dxpdf/go"`)
 - **Unicode-aware** — grapheme-correct segmentation, plus full-color emoji including ZWJ, skin-tone, keycap and flag sequences shaped through Skia's HarfBuzz
 - **Internationalised** — UAX #14 line breaking (including Thai, Lao, Khmer and Burmese), UAX #9 bidirectional text, and CLDR-driven numbers and dates that follow the document's own `w:lang`
 - **Packaged** — `cargo install`, `pip install`, or a `.deb` for Debian and Ubuntu
@@ -68,6 +68,18 @@ dxpdf = "0.5.1"
 ```bash
 pip install dxpdf
 ```
+
+### Go Package
+
+Requires `CGO_ENABLED=1` and a C compiler. Supported on linux/amd64,
+linux/arm64, darwin/amd64 and darwin/arm64 (not yet Windows).
+
+```bash
+go get github.com/nerdy-pro/dxpdf/go
+cd $(go env GOMODCACHE)/github.com/nerdy-pro/dxpdf/go@<version> && go generate ./...
+```
+
+See [`go/README.md`](go/README.md) for details.
 
 ## Usage
 
@@ -134,6 +146,22 @@ dxpdf.convert_file("input.docx", "output.pdf")
 # Customize embedded-image resolution (default 220 DPI)
 pdf_bytes = dxpdf.convert(open("input.docx", "rb").read(), image_dpi=300)
 dxpdf.convert_file("input.docx", "output.pdf", image_dpi=300)
+```
+
+### Go — Convert DOCX to PDF Programmatically
+
+```go
+import "github.com/nerdy-pro/dxpdf/go"
+
+// Bytes in, bytes out
+pdfBytes, err := dxpdf.Convert(docxBytes)
+
+// File path to file path
+err := dxpdf.ConvertFile("input.docx", "output.pdf")
+
+// Customize embedded-image resolution (default 220 DPI)
+pdfBytes, err := dxpdf.ConvertWithOptions(docxBytes, 300)
+err := dxpdf.ConvertFileWithOptions("input.docx", "output.pdf", 300)
 ```
 
 ## Supported DOCX Features

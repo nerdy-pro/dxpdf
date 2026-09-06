@@ -181,12 +181,13 @@ fn deb_metadata_is_complete_and_points_at_files_that_exist() {
         "the man page must land in section 1's directory or `man dxpdf` will not find it"
     );
 
-    // The crate is `crate-type = ["rlib", "cdylib"]`, so `cargo build
-    // --release` also emits `libdxpdf.so` — the body of the PyO3 extension
-    // module, with no soname, no headers and no ABI promise. cargo-deb's
-    // *default* asset set picks up C-ABI dynamic libraries, so the explicit
-    // list above exists to keep that out of /usr/lib. `verify_deb.py` proves
-    // it stayed out; this proves nobody added it back by hand.
+    // The crate is `crate-type = ["rlib", "cdylib", "staticlib"]`, so `cargo
+    // build --release` also emits `libdxpdf.so` and `libdxpdf.a` — the bodies
+    // of the PyO3 extension module and the Go bindings' cgo target, neither
+    // with a soname, headers or an ABI promise. cargo-deb's *default* asset
+    // set picks up C-ABI libraries, so the explicit list above exists to keep
+    // both out of /usr/lib. `verify_deb.py` proves they stayed out; this
+    // proves nobody added them back by hand.
     assert!(
         !sources.iter().any(|s| s.contains("libdxpdf")),
         "the cdylib must not be packaged: {sources:?}"

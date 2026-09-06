@@ -81,6 +81,53 @@ jobs:
       - name: Build without default features
         run: cargo build --no-default-features
 
+  # Cheap, Linux-only check of the Go bindings' C ABI (`capi` feature,
+  # `src/capi.rs`). Deliberately does not fetch anything from GitHub
+  # Releases — it stages the static library this same job just built, so it
+  # exercises the cgo boundary on every PR without depending on release
+  # assets existing for an unmerged change. macOS/Windows linking is not
+  # covered here; see `go.yml` and AGENTS.md's Go-bindings note for why.
+  go-bindings:
+    name: Go bindings (capi)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype-dev
+
+      - name: Build the capi staticlib
+        run: cargo build --release --features capi
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --locked
+
+      - name: Check the committed C header is up to date
+        run: cargo test --test capi_header
+
+      - name: Stage the static library for cgo
+        run: |
+          mkdir -p go/internal/capi/lib/linux_amd64
+          cp target/release/libdxpdf.a go/internal/capi/lib/linux_amd64/
+
+      - name: go vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: go test
+        working-directory: go
+        run: go test ./... -race
+
   build:
     name: Build release
     runs-on: ubuntu-latest

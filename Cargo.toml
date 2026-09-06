@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "text-processing"]
 exclude = ["test-cases/", "test-files/", "scripts/", "output/", "plans/"]
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 # Debian package (issue #92), built by `cargo deb` and attached to each GitHub
 # release by `.github/workflows/deb.yml`. This is an upstream-built `.deb`, not
@@ -76,10 +76,12 @@ is required and nothing is sent over the network.
 Fonts are resolved through fontconfig from those installed on the machine, \
 together with any fonts embedded in the document."""
 # Explicit, because cargo-deb's default asset set also picks up C-ABI dynamic
-# libraries — and this crate is `crate-type = ["rlib", "cdylib"]`, so a release
-# build emits `libdxpdf.so` as well as the binary. That file is the body of the
-# PyO3 extension module: no soname, no headers, no ABI promise, and nothing
-# that should be in /usr/lib. `verify_deb.py` fails the build if it appears.
+# libraries — and this crate is `crate-type = ["rlib", "cdylib", "staticlib"]`,
+# so a release build emits `libdxpdf.so` and `libdxpdf.a` as well as the
+# binary. Those are the bodies of the PyO3 extension module and the Go
+# bindings' cgo target respectively: no soname, no headers, no ABI promise,
+# and nothing that should be in /usr/lib. `verify_deb.py` fails the build if
+# either appears.
 assets = [
     ["target/release/dxpdf", "usr/bin/", "755"],
     ["man/dxpdf.1", "usr/share/man/man1/", "644"],
@@ -221,6 +223,10 @@ icu_segmenter = { version = "2.2.0", default-features = false, features = ["auto
 [features]
 default = ["subset-fonts"]
 python = ["pyo3"]
+# The Go bindings' C ABI (`src/capi.rs`), consumed via cgo against the
+# `staticlib` artifact above. No dependency of its own — unlike `python`,
+# nothing beyond `std` is needed to expose `extern "C"` functions.
+capi = []
 # `fontcull` (Google's klippa packaged for Rust) produces a *complete* subsetted
 # SFNT — cmap, hhea, OS/2 preserved — so Skia can shape against it normally
 # during paint. The earlier `subsetter` (Typst) crate strips cmap by design,

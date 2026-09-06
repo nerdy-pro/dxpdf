@@ -6,7 +6,7 @@ is a pointer to this file, not a second copy. Add guidance here, never there.
 
 ## Project
 
-**dxpdf** — a fast DOCX-to-PDF converter in Rust, powered by Skia. Three interfaces: CLI tool, Rust library, and Python package (via PyO3/maturin).
+**dxpdf** — a fast DOCX-to-PDF converter in Rust, powered by Skia. Four interfaces: CLI tool, Rust library, Python package (via PyO3/maturin), and Go bindings (via a C ABI and cgo).
 
 ## Build & Test Commands
 
@@ -24,13 +24,15 @@ cargo fmt --all                # Auto-format
 
 System dependencies (Linux): `libfontconfig1-dev`, `libfreetype-dev`. Requires `clang` for Skia. Toolchain is pinned to 1.95.0 via `rust-toolchain.toml`.
 
-**Cargo features**: `subset-fonts` (default, via `fontcull`) runs the font-subsetting pass; `python` gates the PyO3 bindings. Build with `--no-default-features` to skip subsetting (the pass is `#[cfg(feature = "subset-fonts")]`-gated in `render_with_font_mgr`).
+**Cargo features**: `subset-fonts` (default, via `fontcull`) runs the font-subsetting pass; `python` gates the PyO3 bindings; `capi` gates the Go bindings' C ABI (`src/capi.rs`). Build with `--no-default-features` to skip subsetting (the pass is `#[cfg(feature = "subset-fonts")]`-gated in `render_with_font_mgr`).
 
 Benchmarking: `cargo bench` for Criterion benchmarks (`benches/convert_bench.rs`, `benches/parse_bench.rs`). `RUST_LOG=debug` for per-phase timing from CLI; `RUST_LOG=warn` surfaces unsupported-feature warnings logged by parse/layout.
 
 CLI usage: `cargo run -- input.docx [-o output.pdf] [--image-dpi 300]` (release binary: `dxpdf`). `--image-dpi` sets the resolution embedded raster images are downsampled to — default 220 (matching Word), valid range 1–2400.
 
 Python bindings: `maturin develop --features python` builds and installs into the active venv. The `python` feature is gated in `Cargo.toml`.
+
+Go bindings (`go/`): a nested Go module (`module github.com/nerdy-pro/dxpdf/go`) that reaches the engine via cgo against `src/capi.rs`'s C ABI, statically linked — `crate-type` includes `staticlib` for exactly this. Build the library and generate the header with `cargo build --release --features capi` and `scripts/generate_capi_header.sh` (needs `cargo install cbindgen`; `tests/capi_header.rs` catches the header going stale). The Go side needs `CGO_ENABLED=1`, a C compiler, and the prebuilt static library for the host `GOOS`/`GOARCH` under `go/internal/capi/lib/`, fetched once via `go generate ./...` in `go/` (`go/internal/capi/fetch_libs.sh`, downloading from this repo's GitHub Release assets — never committed, since a Skia-containing static archive is tens of MB per platform and git never shrinks). Supported today: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64. **Not yet Windows** — static-linking a Skia-containing archive through cgo on MSVC is a combination this repo has not exercised anywhere else (the existing Windows Python wheel links dynamically), so it is deferred rather than guessed at; picking it up is a matter of extending `.github/workflows/go.yml`'s matrix and `go/`'s per-platform `cgo_*.go` files once someone can iterate against a real MSVC link. The `#cgo LDFLAGS` system-library list is verified by an actual link + `go test`/`-race` run on darwin/arm64 (native) and linux/arm64 (a `rust:1.95-bookworm` container); darwin/amd64 and linux/amd64 carry the same flags as their verified sibling architecture, unverified on real amd64 hardware — see the per-platform `cgo_*.go` files' own comments for which is which, and `.github/workflows/go.yml`/`ci.yml`'s `go-bindings` job for where the rest get proven or refuted.
 
 Note: `Cargo.toml` excludes dev-only paths — `test-files/`, `scripts/`, `output/` — from the published crate. Any local-only scratch corpora are excluded there too, so nothing local can be published by accident.
 
@@ -101,6 +103,7 @@ Work deliberately *not* done. It is here rather than at a site because there is 
 
 - **Rust**: `convert(&[u8])` uses default options; `convert_with_options(&[u8], &RenderOptions)` is the full entry point. `RenderOptions` is a builder (`with_image_dpi`) with `DEFAULT_IMAGE_DPI = 220.0`; non-finite or non-positive requests are clamped up to `MIN_IMAGE_DPI`.
 - **Python** (`--features python`, built with maturin via `pyproject.toml`): `convert(docx_bytes, image_dpi=220)` and `convert_file(input, output, image_dpi=220)`. Type stubs and the `py.typed` marker live in `python/dxpdf/`.
+- **Go** (`--features capi`, consumed as `github.com/nerdy-pro/dxpdf/go`): `Convert(docxBytes)`/`ConvertWithOptions(docxBytes, imageDPI)` and `ConvertFile(input, output)`/`ConvertFileWithOptions(input, output, imageDPI)`, deliberately shaped to match the Python surface one-for-one (`go/dxpdf.go`'s doc comment says so explicitly, so the two can be read side by side). `DefaultImageDPI`/`MinImageDPI` mirror the Rust constants. Unlike Python, file I/O is pure Go on top of the byte-in/byte-out call — there is no C-side `convert_file`, keeping `src/capi.rs`'s `unsafe` surface to one function.
 
 ## Working in this repo
 
@@ -166,7 +169,7 @@ docker run --rm -v "$PWD:/w" -w /w debian:12-slim bash -c '
   lintian --fail-on error,warning target/debian/*.deb'
 ```
 
-Two things that are not obvious from the files. The `assets` list is explicit because cargo-deb's default set also picks up C-ABI dynamic libraries, and `crate-type = ["rlib", "cdylib"]` means a release build emits `libdxpdf.so` — the PyO3 extension body, which has no business in `/usr/lib`. And when testing an install in a Debian *container*, delete `/etc/dpkg/dpkg.cfg.d/docker` first: it sets `path-exclude /usr/share/man/*`, so dpkg drops the man page and the test appears to prove the package has none.
+Two things that are not obvious from the files. The `assets` list is explicit because cargo-deb's default set also picks up C-ABI libraries, and `crate-type = ["rlib", "cdylib", "staticlib"]` means a release build emits `libdxpdf.so` and `libdxpdf.a` — the PyO3 extension body and the Go bindings' cgo target, neither of which has any business in `/usr/lib`. And when testing an install in a Debian *container*, delete `/etc/dpkg/dpkg.cfg.d/docker` first: it sets `path-exclude /usr/share/man/*`, so dpkg drops the man page and the test appears to prove the package has none.
 
 **How a change is built here.** Three conventions that the CI commands below do not enforce and that reviewers assume have happened:
 
@@ -182,6 +185,7 @@ cargo clippy --all-targets -- -D warnings   # CI enforces zero warnings
 cargo test --all
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps   # CI enforces zero doc warnings
 cargo build --no-default-features           # `subset-fonts` off still compiles
+cargo build --release --features capi       # the Go bindings' C ABI still compiles
 ```
 
 The doc check catches dangling `[`links`]`, links from public docs to private
