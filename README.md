@@ -41,8 +41,8 @@ Every [release](https://github.com/nerdy-pro/dxpdf/releases) ships a `.deb` for
 `amd64` and `arm64`:
 
 ```bash
-curl -LO https://github.com/nerdy-pro/dxpdf/releases/download/v0.5.1/dxpdf_0.5.1-1_amd64.deb
-sudo apt install ./dxpdf_0.5.1-1_amd64.deb
+curl -LO https://github.com/nerdy-pro/dxpdf/releases/download/v0.6.0/dxpdf_0.6.0-1_amd64.deb
+sudo apt install ./dxpdf_0.6.0-1_amd64.deb
 ```
 
 Installs `dxpdf` to `/usr/bin` with a `dxpdf(1)` man page, and recommends
@@ -60,7 +60,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dxpdf = "0.5.1"
+dxpdf = "0.6.0"
 ```
 
 ### Python Package
@@ -76,7 +76,6 @@ linux/arm64, darwin/amd64 and darwin/arm64 (not yet Windows).
 
 ```bash
 go get github.com/nerdy-pro/dxpdf/go
-cd $(go env GOMODCACHE)/github.com/nerdy-pro/dxpdf/go@<version> && go generate ./...
 ```
 
 See [`go/README.md`](go/README.md) for details.
