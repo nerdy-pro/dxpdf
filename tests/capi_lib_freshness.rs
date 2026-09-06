@@ -80,11 +80,25 @@ fn hash_source_tree(root: &Path) -> u64 {
     let mut hasher = Fnv1a::new();
     for path in source_files(root) {
         let bytes = fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
-        // The path itself is part of the hash so that renaming or moving a
-        // file (without touching its content) still counts as a change.
-        let relative = path.strip_prefix(root).unwrap().to_string_lossy();
+        // Both hashed values have to be platform-invariant, or this fails on
+        // every Windows CI run for reasons that have nothing to do with
+        // staleness — measured, not guessed: it did, in exactly these two
+        // ways, the first time this ran there. Git on Windows checks these
+        // files out as CRLF (no `.gitattributes` forces LF, and one isn't
+        // added for this alone — the repo also tracks real binaries, and a
+        // blanket line-ending policy risks git's own text/binary detection
+        // mangling one of those instead), so line endings are normalized
+        // before hashing content. And `Path::strip_prefix` yields
+        // `\`-separated components on Windows vs `/` elsewhere, so the
+        // relative path is normalized too before it goes into the hash.
+        let relative = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         hasher.write(relative.as_bytes());
-        hasher.write(&bytes);
+        let normalized: Vec<u8> = bytes.into_iter().filter(|&b| b != b'\r').collect();
+        hasher.write(&normalized);
     }
     hasher.0
 }
