@@ -22,10 +22,3 @@ __pycache__/
 /dist/
 /.venv/
 /venv/
-
-# Go tooling — prebuilt static libraries fetched by
-# go/internal/capi/fetch_libs.sh (`go generate ./...`), never committed:
-# tens of MB per platform and git never shrinks. go/internal/capi/dxpdf.h
-# (the header) is the one generated file in that directory that *is*
-# committed.
-/go/internal/capi/lib/

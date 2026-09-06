@@ -82,11 +82,15 @@ jobs:
         run: cargo build --no-default-features
 
   # Cheap, Linux-only check of the Go bindings' C ABI (`capi` feature,
-  # `src/capi.rs`). Deliberately does not fetch anything from GitHub
-  # Releases — it stages the static library this same job just built, so it
-  # exercises the cgo boundary on every PR without depending on release
-  # assets existing for an unmerged change. macOS/Windows linking is not
-  # covered here; see `go.yml` and AGENTS.md's Go-bindings note for why.
+  # `src/capi.rs`) and of the committed `go/internal/capi/lib/linux_amd64/
+  # libdxpdf.a` itself — `go test` links against exactly the file checked
+  # into the repo (no staging step: it's already there after checkout),
+  # which is the one functional proof that a committed library still works,
+  # on every PR. `tests/capi_lib_freshness.rs`, run as part of the `test`
+  # job's `cargo test --all` on every platform, is what catches the other
+  # three platforms' libraries going stale without a way to execute them
+  # here. macOS/Windows *linking* is not covered here; see AGENTS.md's
+  # Go-bindings note for why.
   go-bindings:
     name: Go bindings (capi)
     runs-on: ubuntu-latest
@@ -106,7 +110,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libfreetype-dev
 
-      - name: Build the capi staticlib
+      - name: Build the capi staticlib (compile check)
         run: cargo build --release --features capi
 
       - name: Install cbindgen
@@ -115,16 +119,11 @@ jobs:
       - name: Check the committed C header is up to date
         run: cargo test --test capi_header
 
-      - name: Stage the static library for cgo
-        run: |
-          mkdir -p go/internal/capi/lib/linux_amd64
-          cp target/release/libdxpdf.a go/internal/capi/lib/linux_amd64/
-
       - name: go vet
         working-directory: go
         run: go vet ./...
 
-      - name: go test
+      - name: go test (against the committed libdxpdf.a)
         working-directory: go
         run: go test ./... -race
 

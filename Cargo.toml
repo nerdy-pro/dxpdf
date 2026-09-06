@@ -1,6 +1,6 @@
 [package]
 name = "dxpdf"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 description = "Fast DOCX-to-PDF converter powered by Skia"
 license = "MIT"
@@ -10,7 +10,12 @@ documentation = "https://docs.rs/dxpdf"
 readme = "README.md"
 keywords = ["docx", "pdf", "converter", "word", "ooxml"]
 categories = ["command-line-utilities", "text-processing"]
-exclude = ["test-cases/", "test-files/", "scripts/", "output/", "plans/"]
+# `go/` is excluded for a harder reason than the rest: once its
+# `internal/capi/lib/*/libdxpdf.a` are committed (prebuilt per-platform
+# static libraries, tens of MB each), including it would make the published
+# crate tarball hundreds of MB — crates.io's default per-crate limit is far
+# below that. None of `go/` is needed to build or use the Rust crate anyway.
+exclude = ["test-cases/", "test-files/", "scripts/", "output/", "plans/", "go/"]
 
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]

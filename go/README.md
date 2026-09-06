@@ -8,22 +8,28 @@ the same Rust engine the CLI and Python package use — see
 ## Requirements
 
 - `CGO_ENABLED=1` and a C compiler (cgo requirement).
-- The prebuilt static library for your platform, fetched once via `go
-  generate` (see below). Currently built for linux/amd64, linux/arm64,
-  darwin/amd64 and darwin/arm64 — not yet Windows.
+- One of linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 — not yet
+  Windows.
+- No tagged releases of this module yet, so `go get .../go@vX.Y.Z` won't
+  resolve. Plain `go get github.com/nerdy-pro/dxpdf/go` (or `@main`, or a
+  commit SHA to pin) works fine — Go falls back to a pseudo-version off the
+  default branch tip.
 
 ## Install
 
+The prebuilt static library for every supported platform is committed
+under `internal/capi/lib/` (see that directory's own note on why, and
+`tests/capi_lib_freshness.rs` in the main repo for how staleness against
+the Rust source is caught), so there's no separate fetch step:
+
 ```sh
 go get github.com/nerdy-pro/dxpdf/go
-cd $(go env GOMODCACHE)/github.com/nerdy-pro/dxpdf/go@<version> && go generate ./...
 ```
 
 Or, working from a clone of the main repo:
 
 ```sh
 cd go
-go generate ./...   # downloads internal/capi/lib/<os>_<arch>/libdxpdf.a
 go build ./...
 ```
 

@@ -10,9 +10,11 @@
 // memory-ownership invariants this package relies on.
 //
 // Building a program that imports this package requires CGO_ENABLED=1 and a
-// C compiler, plus the prebuilt static library for the current GOOS/GOARCH
-// under internal/capi/lib/ — fetched by running `go generate` once before
-// the first build. See README.md.
+// C compiler. The prebuilt static library for every supported GOOS/GOARCH is
+// committed under internal/capi/lib/ (see that directory's own note on why,
+// and tests/capi_lib_freshness.rs in the main repo for how staleness against
+// the Rust source is caught), so no separate fetch step is needed. See
+// README.md.
 package dxpdf
 
 /*
@@ -27,14 +29,6 @@ import (
 	"os"
 	"unsafe"
 )
-
-//go:generate ./internal/capi/fetch_libs.sh
-
-// releaseVersion is the dxpdf crate version this package's prebuilt static
-// libraries are fetched for — kept in lockstep with the `[package] version`
-// in ../Cargo.toml (see AGENTS.md's release-process note) and read by
-// internal/capi/fetch_libs.sh to build the download URL.
-const releaseVersion = "0.5.1"
 
 // DefaultImageDPI is the target resolution (pixels per inch) embedded
 // raster images are downsampled to when not overridden, matching the Rust
