@@ -1,0 +1,104 @@
+name: Publish Go bindings
+
+# Same trigger as `publish.yml`/`deb.yml`: one GitHub Release drives every
+# published artifact. This job attaches the Go bindings' prebuilt static
+# libraries to that same release (go/internal/capi/fetch_libs.sh downloads
+# them from there) and pushes the separate `go/vX.Y.Z` *git* tag Go's module
+# resolver needs for `go get github.com/nerdy-pro/dxpdf/go@vX.Y.Z` — that
+# tag carries no release assets of its own, it just has to exist.
+#
+# Windows is not built here: see AGENTS.md's Go-bindings note for why
+# static-linking a Skia-containing archive through cgo on MSVC is deferred
+# rather than guessed at.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build static lib (${{ matrix.target.label }})
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          # Keep in step with go-bindings' sibling matrices in `python.yml`/
+          # `ci.yml`'s build-wheels — same runners, same triples, minus
+          # Windows.
+          - label: linux-x86_64
+            runner: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+          - label: linux-aarch64
+            runner: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+          - label: macos-arm64
+            runner: macos-latest
+            triple: aarch64-apple-darwin
+          - label: macos-x86_64
+            runner: macos-15-intel
+            triple: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target.triple }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype-dev
+
+      - name: Build the capi staticlib
+        run: cargo build --release --features capi --target ${{ matrix.target.triple }}
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar czf dist/libdxpdf-go-${{ matrix.target.label }}.tar.gz \
+            -C target/${{ matrix.target.triple }}/release libdxpdf.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libdxpdf-go-${{ matrix.target.label }}
+          path: dist/*.tar.gz
+
+  publish:
+    name: Attach to release and tag the Go module
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      # `gh release upload` writes to the release this workflow was
+      # triggered by; pushing the `go/vX.Y.Z` tag is a second git write.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release upload "${{ github.event.release.tag_name }}" dist/*.tar.gz \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      # Go's module resolver expects a nested module's tag to be prefixed
+      # with its subdirectory: `go/v0.5.1`, not `v0.5.1`. This carries no
+      # release assets of its own — it only has to exist, pointing at the
+      # same commit the main release tag does.
+      - name: Tag the Go module
+        run: |
+          git tag "go/${{ github.event.release.tag_name }}" "${{ github.event.release.tag_name }}"
+          git push origin "go/${{ github.event.release.tag_name }}"
