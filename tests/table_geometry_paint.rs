@@ -131,42 +131,58 @@ fn one_cell_table(style: &str) -> String {
 /// tests read.
 type Run = (f32, f32);
 
-/// The horizontal border rects (wide and thin) as `(y, height)`, sorted by y,
-/// and the verticals as `(x, width)`, sorted by x.
+/// The **distinct** horizontal border runs as `(y, height)`, sorted by y, and
+/// the verticals as `(x, width)`, sorted by x.
+///
+/// Distinct, because a line arrives in pieces: the border rasterizer splits
+/// every one at the junctions along it, so one 3pt edge is a junction square,
+/// a segment and another junction square — three rects at one `(start,
+/// thickness)`. How many pieces a line comes in is a property of that
+/// decomposition; how many *lines* there are, and how thick each is, is the
+/// question here, and collapsing equal runs asks exactly it.
 fn edge_runs(pages: &[LayoutedPage]) -> (Vec<Run>, Vec<Run>) {
     let all = rects(pages);
-    let mut horizontal: Vec<Run> = all
+    let distinct = |mut v: Vec<Run>| -> Vec<Run> {
+        v.sort_by(|a: &Run, b: &Run| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        v.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4);
+        v
+    };
+    let horizontal = all
         .iter()
         .filter(|(_, _, w, h)| w > h)
         .map(|&(_, y, _, h)| (y, h))
         .collect();
-    let mut vertical: Vec<Run> = all
+    let vertical = all
         .iter()
         .filter(|(_, _, w, h)| w <= h)
         .map(|&(x, _, w, _)| (x, w))
         .collect();
-    horizontal.sort_by(|a, b| a.0.total_cmp(&b.0));
-    vertical.sort_by(|a, b| a.0.total_cmp(&b.0));
-    (horizontal, vertical)
+    (distinct(horizontal), distinct(vertical))
 }
 
-/// A `w:val="double"` edge reaches the page as **two** lines of a third the
-/// declared width, a third of it apart — not one line, and not two lines of the
-/// full width.
+/// A `w:val="double"` edge is **three rules wide**: two lines of the declared
+/// `w:sz`, one `w:sz` of clear space between them.
 ///
-/// [MS-OI29500] §17.4.66 treats `w:sz` as the whole border for weight purposes
-/// (a double outweighs a single of the same `sz` threefold), and §17.18.2's
-/// `double` is a pair of rules with a gap. The two together fix the geometry:
-/// the declared 3pt is the pair's total, so each rule is 1pt and the gap is 1pt.
+/// **Measured in Word**, off `test-files/border-junction-colour.docx`, whose
+/// fourth table crosses a 12pt `single` with a 12pt `double` — Word draws the
+/// double as *cell, 12pt rule, gap, 12pt rule, cell*, not as two 4pt rules
+/// packed into 12pt.
+///
+/// So `w:sz` is the width of **one rule**, and a `double` occupies three times
+/// what a `single` of the same `w:sz` does. That is the same fact as
+/// [MS-OI29500] §17.4.66's weight rule, which ranks a `double` above a `single`
+/// of equal `w:sz` threefold: it outranks it *because it is three times as
+/// wide*. This file used to assert the opposite — that the declared width was
+/// the pair's total and each rule a third of it — and cited the weight rule as
+/// the reason, which had the inference backwards.
 ///
 /// Asserted against the same table drawn `single` as a control, so the claim is
-/// a relation between the two — the pair occupies exactly the band the single
-/// fills — rather than four numbers that happen to match the implementation.
-/// The control is what makes the whole path load-bearing: it pins that `w:sz`
-/// still reached layout as 3pt, so a failure here is about the *style* and not
-/// about the unit.
+/// a relation between the two styles rather than four numbers that happen to
+/// match the implementation. The control is what makes the whole path
+/// load-bearing: it pins that `w:sz` still reached layout as 3pt, so a failure
+/// here is about the *style* and not about the unit.
 #[test]
-fn a_double_border_reaches_the_page_as_two_lines_a_third_of_the_width_apart() {
+fn a_double_border_is_three_rules_wide_each_of_the_declared_sz() {
     let (single_h, single_v) = edge_runs(&layout(&one_cell_table("single")));
     let (double_h, double_v) = edge_runs(&layout(&one_cell_table("double")));
 
@@ -188,12 +204,12 @@ fn a_double_border_reaches_the_page_as_two_lines_a_third_of_the_width_apart() {
     );
     assert_eq!(double_v.len(), 4, "and per vertical: {double_v:?}");
     assert!(
-        double_h.iter().chain(&double_v).all(|&(_, t)| t == 1.0),
-        "each line is w:sz / 3; got {double_h:?} / {double_v:?}"
+        double_h.iter().chain(&double_v).all(|&(_, t)| t == 3.0),
+        "each rule is the declared w:sz, unreduced; got {double_h:?} / {double_v:?}"
     );
 
-    // Each edge's pair sits at the two ends of the band the single filled: same
-    // near side, same far side, a 1pt gap between them.
+    // Each edge is a rule, a gap and a rule, every one of them the `w:sz` the
+    // control draws as its whole edge.
     for (pair, control, axis) in [
         (&double_h[..2], single_h[0], "top"),
         (&double_h[2..], single_h[1], "bottom"),
@@ -201,18 +217,14 @@ fn a_double_border_reaches_the_page_as_two_lines_a_third_of_the_width_apart() {
         (&double_v[2..], single_v[1], "right"),
     ] {
         assert_eq!(
-            pair[0].0, control.0,
-            "{axis}: the pair starts where the single does"
-        );
-        assert_eq!(
-            pair[1].0 + pair[1].1,
-            control.0 + control.1,
-            "{axis}: and ends where it ends"
-        );
-        assert_eq!(
             pair[1].0 - (pair[0].0 + pair[0].1),
-            1.0,
-            "{axis}: w:sz / 3 of clear space between the two lines"
+            control.1,
+            "{axis}: one w:sz of clear space between the two rules"
+        );
+        assert_eq!(
+            (pair[1].0 + pair[1].1) - pair[0].0,
+            control.1 * 3.0,
+            "{axis}: the whole edge is three times the single's"
         );
     }
 }

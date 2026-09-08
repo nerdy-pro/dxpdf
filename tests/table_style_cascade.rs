@@ -663,6 +663,64 @@ fn a_table_style_cannot_forbid_float_overlap() {
     );
 }
 
+/// §17.4.1 `bidiVisual` — the last of the six, and the one with the widest
+/// blast radius if it were read from a style: reversing the column order of
+/// every table that names the style would invert the meaning of each of their
+/// rows.
+///
+/// The fixture discriminates because mirroring swaps the two cells' contents
+/// across the page, so `A` and `B` change places — a two-column grid is enough
+/// for that even though its columns are equal, since the *text* moves with them.
+///
+/// There are **two independent barriers** and this test only guards one of them,
+/// which is worth knowing before trusting it alone. `merge_table_properties`
+/// omits the field from its cascade, and `build::table` reads it from the
+/// `<w:tbl>` alone; either would hold the line by itself, so restoring the
+/// cascade leaves this test passing. `table_properties_merge_covers_every_field`
+/// in `render::resolve::properties` is what fails then. This one fails when the
+/// *read site* grows a style fallback.
+#[test]
+fn a_table_style_cannot_reverse_the_column_order() {
+    assert_style_does_not_reach_the_table(r#"<w:bidiVisual/>"#, "", "bidiVisual");
+
+    // …and the direct level really does mirror, so the parity above is between
+    // a working feature and its absence rather than between two no-ops. Keyed
+    // on the cell's own label rather than on an index into the command stream,
+    // which the mirror also reorders.
+    let x_of = |pages: &[LayoutedPage], label: &str| -> f32 {
+        pages
+            .iter()
+            .flat_map(|p| &p.commands)
+            .find_map(|c| match c {
+                DrawCommand::Text { text, position, .. } if &**text == label => {
+                    Some(position.x.raw())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no cell {label:?} on the page"))
+    };
+    let direct = layout(
+        &table_document(r#"<w:bidiVisual/>"#),
+        &styles_with("<w:tblPr/>"),
+    );
+    let control = layout(&table_document(""), &styles_with("<w:tblPr/>"));
+
+    // As a *gap between the two cells*, not as two absolute x values: §17.4.1
+    // also makes the table's leading margin the right one, so the mirrored table
+    // no longer occupies the control's span (`tests/table_leading_margin.rs`).
+    // The columns are equal, so a correct mirror puts A exactly as far to the
+    // right of B as B was of A.
+    assert!(
+        x_of(&control, "A") < x_of(&control, "B"),
+        "the control runs left to right"
+    );
+    assert_eq!(
+        x_of(&direct, "A") - x_of(&direct, "B"),
+        x_of(&control, "B") - x_of(&control, "A"),
+        "cell A takes cell B's column once the columns reverse, and B takes A's"
+    );
+}
+
 // ── §17.7.4.3: `basedOn` inheritance of the style's own `<w:tblPr>` ─────────
 
 /// A `<w:tblPr>` carrying one of every table property that reaches layout
@@ -745,11 +803,30 @@ fn a_child_table_style_overrides_only_the_properties_it_restates() {
     );
     // The parent centers the 200 pt table in a 468 pt content area, which would
     // put its left edge at 206 pt; the child pulls it back to the left margin,
-    // where the parent's `tblInd` then applies. First text: 72 (margin) + 36
-    // (tblInd) + 7.2 (one cell spacing) + 6 (left cell margin).
+    // where the parent's `tblInd` then applies. First text:
+    //
+    //     72    margin
+    //   + 36    tblInd
+    //   −  1.5  half the parent's 3 pt leading border — `build_table` shifts the
+    //           table left by it so a *collapsed* table's first cell lands on
+    //           the indent (`test-files/border-outer-box.docx`, measured)
+    //   + 14.4  one cell spacing: §17.4.45's 144 twips is a **half**-gap, so the
+    //           gap is twice it (`issue-165-cellspacing-scale.docx`, measured)
+    //   +  6    left cell margin
+    //   ─────
+    //    126.9
+    //
+    // The 1.5 is a **known inconsistency, not a rule**, and this is the second
+    // place it surfaces. A §17.4.45-spaced table takes the shift from
+    // `build_table` — which is shared — while `emit_table_outline` still draws
+    // its borders inside the box rather than straddling, so nothing here answers
+    // the shift and the content ends up half a border left of the indent. The
+    // straddle was measured on a collapsed table; no render covers a spaced one.
+    // Recorded rather than corrected, because correcting it means choosing
+    // between two unmeasured readings — see the note in `build_table`.
     assert_eq!(
         text_xs(&derived).first().copied(),
-        Some(121.20),
+        Some(126.90),
         "the child's own jc wins over the parent's"
     );
     assert!(

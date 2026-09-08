@@ -132,36 +132,85 @@ pub fn layout(bytes: &[u8]) -> Vec<LayoutedPage> {
 
 /// Every cell's drawn `(x, width)` in the table's first row, in cell order.
 ///
-/// Read off the horizontal border rects at the table's top edge: each cell
-/// draws exactly one, spanning that cell's column slice. That makes a cell the
-/// grid could not seat directly visible as a `width` of 0 rather than something
-/// inferred from where its text landed.
+/// Read off the **verticals** standing on the first row, one per grid line its
+/// cells reach. Not off the horizontal above them, which is what this used to
+/// do: a junction is emitted among the horizontals now (`borders::junction_axes`
+/// — Word gives the crossing to the horizontal), so `coalesce_abutting_rects`
+/// fuses each one into the line it abuts and the whole boundary arrives as a
+/// single unbroken rect with no gap in it to recover a grid line from. The
+/// verticals are the family the junctions have been cut *out* of, so each is one
+/// clean segment per row per grid line.
+///
+/// Recovering rather than counting rects is the point. A rect count measures the
+/// decomposition; the geometry these tests are about is where the grid lines
+/// fall, which is what a cell's column *is*.
 pub fn first_row_cells(pages: &[LayoutedPage]) -> Vec<(f32, f32)> {
-    let rects: Vec<(f32, f32, f32)> = pages
+    // Every border rect as `(x0, x1, y0, y1)` — thin one way or the other. A
+    // shading rect or an image would swamp the search.
+    let rects: Vec<(f32, f32, f32, f32)> = pages
         .iter()
         .flat_map(|p| &p.commands)
         .filter_map(|c| match c {
-            // Horizontal edges only: a border rect is 0.5 pt thick one way.
-            DrawCommand::Rect { rect, .. } if rect.size.height.raw() <= 1.0 => Some((
-                rect.origin.y.raw(),
-                rect.origin.x.raw(),
-                rect.size.width.raw(),
-            )),
+            DrawCommand::Rect { rect, .. } => {
+                let (x, y) = (rect.origin.x.raw(), rect.origin.y.raw());
+                let (w, h) = (rect.size.width.raw(), rect.size.height.raw());
+                (w.min(h) <= 1.0).then_some((x, x + w, y, y + h))
+            }
             _ => None,
         })
         .collect();
-    let top = rects
+
+    // A vertical segment: thin in x, and taller than it is wide.
+    let is_vertical =
+        |&(x0, x1, y0, y1): &(f32, f32, f32, f32)| x1 - x0 <= 1.0 && y1 - y0 > x1 - x0;
+    let first = rects
         .iter()
-        .map(|(y, _, _)| *y)
+        .filter(|r| is_vertical(r))
+        .map(|r| r.2)
         .fold(f32::INFINITY, f32::min);
-    rects
+    if !first.is_finite() {
+        return Vec::new();
+    }
+    let mut bands: Vec<(f32, f32)> = rects
         .iter()
-        .filter(|(y, _, _)| (*y - top).abs() < 0.01)
-        .map(|(_, x, w)| (*x, *w))
-        .collect()
+        .filter(|r| is_vertical(r) && (r.2 - first).abs() < 0.01)
+        .map(|(x0, x1, ..)| (*x0, *x1))
+        .collect();
+    bands.sort_by(|p, q| p.0.total_cmp(&q.0));
+    bands.dedup_by(|a, b| (a.0 - b.0).abs() < 0.01);
+    if bands.len() < 2 {
+        return Vec::new();
+    }
+
+    // §17.4.66: a border straddles the line it stands on — every line, the
+    // table's own edges included (`test-files/border-outer-box.docx`, measured).
+    // So a grid line is its band's centre, with no case for the ends: this read
+    // the outer two as their bands' outer faces while the engine drew them
+    // inside, and both halves of that were wrong at once.
+    let lines: Vec<f32> = bands.iter().map(|&(x0, x1)| (x0 + x1) * 0.5).collect();
+    lines.windows(2).map(|p| (p[0], p[1] - p[0])).collect()
 }
 
-/// Assert `got` matches `want` as `(x, width)` pairs, to 0.01 pt.
+/// How far a recovered column may sit from where this file states it: **half a
+/// border**.
+///
+/// Every grid line comes back exactly now — it is its border band's centre —
+/// but the lines themselves are half a leading border to the left of where the
+/// expectations below put them. That is `build_table`'s doing and it is
+/// deliberate: §17.4.66 straddles the table's leading edge, so the table is
+/// shifted left by half of it to leave the first cell's *text* on the indent,
+/// which is what `w:tblInd` measures to (`test-files/border-outer-box.docx`,
+/// measured in Word). The expectations are written at the indent, because that
+/// is what a `<w:tblGrid>` is read against.
+///
+/// So the tolerance absorbs that half-border, doubled for a width because a
+/// column has two ends — though widths now land exactly, since both ends shift
+/// together. It costs these tests nothing: they are about columns tens of points
+/// wide, and where a border sits on its line is
+/// `tests/table_grid_gap_borders.rs`' subject, not this file's.
+const HALF_BORDER: f32 = 0.26;
+
+/// Assert `got` matches `want` as `(x, width)` pairs, to [`HALF_BORDER`].
 pub fn assert_cells(got: &[(f32, f32)], want: &[(f32, f32)], what: &str) {
     assert_eq!(
         got.len(),
@@ -172,7 +221,7 @@ pub fn assert_cells(got: &[(f32, f32)], want: &[(f32, f32)], what: &str) {
     );
     for (i, (g, w)) in got.iter().zip(want).enumerate() {
         assert!(
-            (g.0 - w.0).abs() < 0.01 && (g.1 - w.1).abs() < 0.01,
+            (g.0 - w.0).abs() < HALF_BORDER && (g.1 - w.1).abs() < 2.0 * HALF_BORDER,
             "{what}: cell {i} drawn at x={:.2} w={:.2}, expected x={:.2} w={:.2} — all: {got:?}",
             g.0,
             g.1,

@@ -183,6 +183,13 @@ pub fn merge_table_properties(
         positioning,
         overlap,
     );
+    // `bidi_visual` is deliberately absent from that list, and so is `style_id`.
+    // [MS-OI29500] §2.1.250(a)/§2.1.249(a) put `w:bidiVisual` among the
+    // `CT_TblPrBase` children Word does not read from a style's `tblPr`, so it
+    // is taken from the `<w:tbl>` alone — `render::layout::build::table` argues
+    // the whole six-element split and reads it there. Adding it here would make
+    // a style able to reverse the columns of every table that names it, which
+    // Word does not do.
 }
 
 /// §17.7.2: merge a parent's `<w:tcPr>` into a child's, property by property.
@@ -887,6 +894,7 @@ mod tests {
                 y: None,
             })),
             overlap: Dup::from(Some(TableOverlap::Never)),
+            bidi_visual: Dup::from(Some(true)),
         }
     }
 
@@ -915,11 +923,21 @@ mod tests {
         assert_eq!(out.style_col_band_size, base.style_col_band_size);
         assert_eq!(out.positioning, base.positioning);
         assert_eq!(out.overlap, base.overlap);
-        // The one deliberate exclusion: `basedOn` is the inheritance edge, and
+        // The two deliberate exclusions. `basedOn` is the inheritance edge, and
         // a `tblStyle` inside a style's own `tblPr` must not become a second.
         assert_eq!(
             out.style_id, None,
             "style_id must not be inherited — see merge_table_properties"
+        );
+        // §17.4.1 `bidiVisual` is one of the six [MS-OI29500] §2.1.250(a) says
+        // Word does not read from a style's `tblPr`, so a parent style must not
+        // be able to reverse a child table's columns. Asserted here rather than
+        // only at the render end, because this is the function whose field list
+        // decides it.
+        assert_eq!(
+            out.bidi_visual.cloned(),
+            None,
+            "bidi_visual must not be inherited — see merge_table_properties"
         );
     }
 

@@ -106,6 +106,25 @@ fn layout(bytes: &[u8]) -> Vec<LayoutedPage> {
     dxpdf::render::resolve_and_layout(parsed).1
 }
 
+/// `w:sz="4"` in [`table`], as points: the width of every border it declares.
+///
+/// §17.4.66: an outer border **straddles** its grid line and the table sits half
+/// its leading border to the left of the indent, so that `w:tblInd` still
+/// measures to the first cell's text edge (`borders::rasterize_border_grid` and
+/// `build_table`, both measured against `test-files/border-outer-box.docx` —
+/// Word draws that fixture's 12pt right border at 360–372 against a declared
+/// right edge of 372).
+///
+/// The two halves cancel on the trailing edge: the box ends half a border short
+/// of the grid and the border reaches half a border past the box, so **the ink
+/// ends exactly on the declared grid line**, which is why no expectation below
+/// adds anything to it. They do not cancel on the leading edge, where the shift
+/// and the straddle both go left and the ink starts a whole border outside.
+///
+/// Kept as a named constant because the paper guard below is a *bound* rather
+/// than an equality, and that bound is still in these units.
+const OUTER: f32 = 0.5;
+
 /// The rightmost x any border rect reaches — the table's drawn right edge.
 fn drawn_right_edge(pages: &[LayoutedPage]) -> f32 {
     pages
@@ -133,9 +152,17 @@ fn an_auto_table_wider_than_the_page_is_kept_on_the_page() {
     ));
     let page_width = pages[0].page_size.width.raw();
 
+    // The **grid** is what the guard clamps, and it is clamped to the paper
+    // edge exactly; the outer border may hang up to `OUTER` past it, which is the
+    // third of the deliberate imprecisions `clamp_auto_grid_to_page` names —
+    // the guard is given the grid and knows nothing of the borders that will be
+    // drawn around it. Bounding the overflow rather than forbidding it keeps
+    // this a regression test for the reported defect, which drew 460 pt of
+    // table off the sheet.
     assert!(
-        drawn_right_edge(&pages) <= page_width + 0.01,
-        "table drawn to x={:.1} on a {page_width:.0} pt page — {:.1} pt of it is off the paper",
+        drawn_right_edge(&pages) <= page_width + OUTER + 0.01,
+        "table drawn to x={:.1} on a {page_width:.0} pt page — {:.1} pt of it is \
+         off the paper, more than the {OUTER} pt its own border may hang",
         drawn_right_edge(&pages),
         drawn_right_edge(&pages) - page_width,
     );
@@ -156,11 +183,13 @@ fn an_auto_table_that_overflows_the_margin_but_not_the_paper_is_untouched() {
         r#"<w:gridCol w:w="10000"/>"#,
     ));
 
-    // 10000 twips = 500 pt, drawn from the 72 pt left margin.
+    // 10000 twips = 500 pt, drawn from the 72 pt left margin. The ink ends on
+    // the grid line itself — see `OUTER` for why nothing is added here.
     assert!(
         (drawn_right_edge(&pages) - 572.0).abs() < 0.01,
-        "declared grid was rescaled: right edge {:.2}, expected 572.00",
+        "declared grid was rescaled: right edge {:.2}, expected {:.2}",
         drawn_right_edge(&pages),
+        572.0,
     );
 }
 
@@ -174,11 +203,12 @@ fn an_auto_table_that_fits_keeps_its_declared_grid() {
         r#"<w:gridCol w:w="3000"/><w:gridCol w:w="3000"/>"#,
     ));
 
-    // 6000 twips = 300 pt from x=72.
+    // 6000 twips = 300 pt from x=72, and the ink ends on that grid line.
     assert!(
         (drawn_right_edge(&pages) - 372.0).abs() < 0.01,
-        "a fitting grid was rescaled: right edge {:.2}, expected 372.00",
+        "a fitting grid was rescaled: right edge {:.2}, expected {:.2}",
         drawn_right_edge(&pages),
+        372.0,
     );
 }
 

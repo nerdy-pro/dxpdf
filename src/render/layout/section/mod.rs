@@ -261,6 +261,7 @@ mod tests {
                     cant_split: Some(true),
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 })
                 .collect(),
             col_widths: vec![Pt::new(100.0)],
@@ -268,6 +269,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         }
@@ -276,6 +278,7 @@ mod tests {
     fn small_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -448,6 +451,7 @@ mod tests {
     fn two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -1951,12 +1955,14 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             cell_spacing: Pt::ZERO,
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         }];
@@ -2084,6 +2090,7 @@ mod tests {
             cant_split: None,
             grid_before: 0,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -2097,6 +2104,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: Some(super::TableFloatInfo {
                 right_gap: Pt::ZERO,
                 bottom_gap: Pt::ZERO,
@@ -2458,12 +2466,14 @@ mod tests {
                 cant_split: None,
                 grid_before: 0,
                 border_overrides: None,
+                bidi_override: None,
             }],
             col_widths: vec![Pt::new(100.0)],
             cell_spacing: Pt::ZERO,
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2532,6 +2542,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
                 TableRowInput {
                     cells: vec![
@@ -2563,6 +2574,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
                 TableRowInput {
                     cells: vec![
@@ -2590,6 +2602,7 @@ mod tests {
                     cant_split: None,
                     grid_before: 0,
                     border_overrides: None,
+                    bidi_override: None,
                 },
             ],
             col_widths: vec![Pt::new(50.0), Pt::new(50.0)],
@@ -2597,6 +2610,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2660,6 +2674,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: None,
             style_id: None,
         });
@@ -2786,6 +2801,7 @@ mod tests {
     fn tall_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(160.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),
@@ -2994,6 +3010,7 @@ mod tests {
             border_config: None,
             indent: Pt::ZERO,
             alignment: None,
+            direction: None,
             float_info: Some(super::TableFloatInfo {
                 right_gap: Pt::ZERO,
                 bottom_gap: Pt::ZERO,
@@ -3255,6 +3272,7 @@ mod tests {
             }),
             indent: Pt::ZERO,
             alignment,
+            direction: None,
             float_info,
             style_id: None,
         }
@@ -3499,6 +3517,7 @@ mod tests {
     fn unequal_two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
             header_margin: Pt::new(5.0),

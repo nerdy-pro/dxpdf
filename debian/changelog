@@ -1,3 +1,12 @@
+dxpdf (0.6.0-1) unstable; urgency=medium
+
+  * Added Go bindings (github.com/nerdy-pro/dxpdf/go): a C ABI (`capi`
+    Cargo feature, src/capi.rs) reached via cgo, mirroring the Python
+    package's convert/convert_file API. Not part of this Debian package
+    itself — see go/README.md.
+
+ -- Ilya Nixan <nixan@nerdy.pro>  Sun, 06 Sep 2026 09:00:00 +0000
+
 dxpdf (0.5.1-1) unstable; urgency=medium
 
   * A repeated XML child no longer fails the document. A writer that emits two

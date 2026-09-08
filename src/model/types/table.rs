@@ -39,6 +39,14 @@ pub struct TableProperties {
     pub positioning: Dup<TablePositioning>,
     /// §17.4.56: whether this floating table can overlap other floating tables.
     pub overlap: Dup<TableOverlap>,
+    /// §17.4.1 `w:bidiVisual`: the table's columns run right to left, so the
+    /// first cell of a row is the rightmost one.
+    ///
+    /// Read from the `<w:tbl>`'s own `tblPr` alone and never from a table
+    /// style — [MS-OI29500] §2.1.250(a) lists it among the elements Word does
+    /// not accept there. `render::layout::build::table` states the whole rule
+    /// and holds the six-element split it belongs to.
+    pub bidi_visual: Dup<bool>,
 }
 
 /// §17.4.57: floating table positioning.
@@ -135,6 +143,22 @@ pub struct TableRowPropertyExceptions {
     pub borders: Option<TableBorders>,
     /// §17.4.44: per-row replacement for `TableProperties.cell_spacing`.
     pub cell_spacing: Option<TableMeasure>,
+    /// §17.4.1 `w:bidiVisual` on a single row — its columns run right to left,
+    /// independently of the table's own.
+    ///
+    /// **Parsed and carried, deliberately not acted on.** `build::table::mirror_columns`
+    /// rewrites a table into visual order by reversing the shared `col_widths`
+    /// once for the whole table, which a per-row flip cannot use: a lone row
+    /// mirrored against a grid the other rows read left-to-right could either
+    /// keep each cell's declared width or take the width of the slot it lands
+    /// in, and those are different pages. ECMA-376 settles neither — §17.4.1
+    /// describes the effect on cells and says nothing about the grid — so
+    /// `test-files/issue-157-tblprex-bidi.docx` is built to make the two
+    /// readings measurably different and the answer is a Word render away.
+    ///
+    /// Modelling it now is what makes the gap visible rather than silent: an
+    /// unmodelled child is dropped by the deserializer with nothing left behind.
+    pub bidi_visual: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default)]

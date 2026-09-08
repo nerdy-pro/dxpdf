@@ -9,11 +9,12 @@ the CI container.
 What it is guarding, in rough order of how expensive the failure is:
 
   1. **Nothing under /usr/lib.** The crate is ``crate-type = ["rlib",
-     "cdylib"]``, so a release build also emits ``libdxpdf.so`` — the body of
-     the PyO3 extension module, with no soname, no headers and no ABI promise.
-     cargo-deb's *default* asset set sweeps up C-ABI dynamic libraries, so the
-     explicit ``assets`` list in Cargo.toml exists to keep that out of the
-     package. This proves it stayed out.
+     "cdylib", "staticlib"]``, so a release build also emits ``libdxpdf.so``
+     and ``libdxpdf.a`` — the bodies of the PyO3 extension module and the Go
+     bindings' cgo target, neither with a soname, headers or an ABI promise.
+     cargo-deb's *default* asset set sweeps up C-ABI libraries, so the
+     explicit ``assets`` list in Cargo.toml exists to keep both out of the
+     package. This proves they stayed out.
 
   2. **No FreeType in Depends.** ``skia-safe[embed-freetype]`` static-links
      FreeType into Skia. If that feature is ever dropped, ``dpkg-shlibdeps``

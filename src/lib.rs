@@ -1,3 +1,5 @@
+#[cfg(feature = "capi")]
+mod capi;
 pub mod docx;
 pub mod error;
 pub mod field;

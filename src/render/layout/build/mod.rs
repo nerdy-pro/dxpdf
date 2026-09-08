@@ -333,6 +333,7 @@ fn build_non_story_content(
                     border_config: built.border_config,
                     indent: built.indent,
                     alignment: built.alignment,
+                    direction: built.direction,
                     float_info: built.float_info,
                     style_id: t.properties.style_id.clone(),
                 });

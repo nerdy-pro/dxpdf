@@ -5,7 +5,8 @@ use crate::render::geometry;
 use crate::render::layout::paragraph::DropCapInfo;
 use crate::render::layout::section::LayoutBlock;
 use crate::render::layout::table::{
-    compute_column_widths, CellBorderConfig, CellBorderOverride, TableCellInput, TableRowInput,
+    compute_column_widths, CellBorderConfig, CellBorderOverride, RowBidiOverride, TableCellInput,
+    TableRowInput,
 };
 use crate::render::resolve::color::{resolve_color, ColorContext};
 use crate::render::resolve::conditional::{
@@ -33,6 +34,9 @@ pub(super) struct BuiltTable {
     pub(super) indent: Pt,
     /// §17.4.28: table horizontal alignment (left/center/right).
     pub(super) alignment: Option<model::Alignment>,
+    /// §17.4.1 `bidiVisual` as a direction, or `None` when the table declares
+    /// none and inherits the section's §17.6.6 one.
+    pub(super) direction: Option<crate::i18n::bidi::BaseDirection>,
     pub(super) float_info: Option<super::super::section::TableFloatInfo>,
 }
 
@@ -64,94 +68,139 @@ fn row_height_rule(
 /// for this element — only `dxa` carries a usable value. `nil` and an omitted
 /// element are zero, which is every table in the test corpora.
 ///
-/// # No factor: the declared value *is* the gap, everywhere
+/// # The declared value is a half-gap: Word draws twice it
 ///
-/// Word renders `test-files/issue-165-cellspacing.docx` with gaps about twice
-/// this width (issue #165), which twice prompted the obvious conclusion —
-/// double the value — and it is wrong. The spec states no factor: §17.4.45 and
-/// [MS-OI29500] describe the value only as "the minimum amount of space which
-/// shall be left between all cells in the table including the width of the table
-/// borders in the calculation".
+/// Neither §17.4.45 nor [MS-OI29500] states a factor — both describe the value
+/// only as "the minimum amount of space which shall be left between all cells in
+/// the table including the width of the table borders in the calculation" — so
+/// the factor had to be measured. `test-files/issue-165-cellspacing-scale.docx`
+/// was authored to measure it and **Word's render doubles the declaration**, at
+/// the table's own edges and between two cells alike. The reading is scale-free
+/// and so survives a screenshot: with `3w + 4g = 360pt`, the ratio of cell to
+/// gap is 1.58 where the unfactored value predicts 4.67.
 ///
-/// **ONLYOFFICE settles it**, being an independent implementation that both
-/// renders and targets Word compatibility. `sdkjs`, in
-/// `word/Editor/Table/TableRecalculate.js`, insets each cell within its grid
-/// slot: `+= CellSpacing` on the first cell's outer side and on the last cell's,
-/// `+= CellSpacing / 2` on every interior side. So an interior gap is two halves
-/// and an edge gap is one whole — **every gap is exactly the declared value**,
-/// which is what this function returns and always did. It also carves them out
-/// of the grid rather than growing the table, confirming `reserve_cell_spacing`
-/// below.
+/// So this function returns twice what it is given, and everything downstream
+/// keeps treating its result as *the gap*: `reserve_cell_spacing` carves one out
+/// of the grid and `measure_table_rows` insets every cell by one, which is what
+/// makes the gap uniform. Doubling here rather than at those two sites keeps one
+/// definition of the word "spacing" in this module.
 ///
-/// So where does Word's doubling come from? The probe is the suspect, not the
-/// factor: `issue-165-cellspacing.docx` declares `tblCellSpacing` **twice**, 400
-/// in `tblPr` and 400 again in `trPr`. If Word sums them the effective spacing is
-/// 800 twips — exactly the doubling observed, with no factor anywhere. §17.4.45
-/// says the row value *supersedes* the table one and ONLYOFFICE implements
-/// override (`RowPr.TableCellSpacing = TablePr.TablePr.TableCellSpacing`, then a
-/// merge), but the spec saying "supersede" is not evidence about what Word does
-/// — [MS-OI29500] exists because Word deviates. That probe cannot tell the two
-/// apart, which is why it must not be used to justify a factor.
+/// # What that refutes, and why it is written down
 ///
-/// **Word reference render needed** (issue #165):
-/// `test-files/issue-165-cellspacing-scale.docx` declares the spacing at table
-/// level *only* in two of its four tables, so it separates "Word applies a
-/// factor" from "Word sums the two declarations" — and its fourth table, with
-/// 400 at table level and 800 on the row, measures the sum directly.
+/// This function returned the declared value unfactored, on an argument from
+/// ONLYOFFICE — an independent implementation that both renders and targets Word
+/// compatibility. `sdkjs`, in `word/Editor/Table/TableRecalculate.js`, insets
+/// each cell within its grid slot by `CellSpacing` on the table's outer sides
+/// and `CellSpacing / 2` on every interior one, making every gap exactly the
+/// declared value. Word's doubled gaps were explained instead as Word *summing*
+/// a table-level and a row-level declaration, since the only fixture measured at
+/// the time (`issue-165-cellspacing.docx`) declares 400 in both places.
 ///
-/// # Why the row-level value is still not applied
+/// Tables 2 and 3 of the scale probe declare the spacing at **table level only**
+/// and Word doubles them anyway. There is nothing to sum, so the factor is real
+/// and the sum theory is dead. A cross-implementation argument lost to a render
+/// of the implementation being matched, which is the order those two rank in.
 ///
-/// Not because the precedence is unclear. The primary text gives it exactly:
-/// §17.4.45 (`tblPr`) is "superseded by a table-level exception (§17.4.44) or
-/// the row cell spacing value (§17.4.43) in that order", and §17.4.44
-/// (`tblPrEx`) is "superseded by the row cell spacing value (§17.4.43)". Row
-/// beats exception beats table, and §17.4.43 adds two sentences no other level
-/// has: row-level spacing is added *inside* the text margins where table-level
-/// is added *outside*, and "Row-level cell spacing shall not increase the width
-/// of the overall table."
+/// # Row level supersedes, and the same render proves it
 ///
-/// **The one Word render on record contradicts "supersede".**
-/// `issue-165-cellspacing.docx` declares 400 at table level *and* 400 on the
-/// row. Superseding gives 400; Word draws about 800. Summing gives 800.
-/// A factor is ruled out by ONLYOFFICE above, so of the two readings left it is
-/// the spec's own that the measurement disagrees with — which is what
-/// [MS-OI29500] exists to record. Implementing §17.4.43 as written would move
-/// that fixture from matching the only Word measurement available to missing it
-/// by half, on the strength of text already known not to bind Word here.
+/// The precedence was never in doubt in the text: §17.4.45 (`tblPr`) is
+/// "superseded by a table-level exception (§17.4.44) or the row cell spacing
+/// value (§17.4.43) in that order", and §17.4.44 is "superseded by the row cell
+/// spacing value". What was in doubt was whether Word obeys it, because the one
+/// render then on record was equally consistent with summing.
 ///
-/// **And a differing row is not a local change.** The gap is uniform because
-/// one spacing is carved out of the grid by `reserve_cell_spacing` and the same
-/// value insets every cell, so slots plus one spacing equal the table width. A
-/// row using a different value breaks that, and repairing it needs three
-/// answers nothing supplies:
+/// Table 4 of the scale probe separates them: 400 on the table, 800 on the row.
+/// Supersede predicts 80pt gaps and 13.3pt cells, table-wins predicts 40pt gaps
+/// and 66.7pt cells, and summing predicts 120pt gaps, which 360pt of table
+/// cannot hold. Word draws cells 13.5pt wide, narrow enough that their labels
+/// wrap to one glyph per line. Supersede it is, and the row value governs the
+/// table's own edge inset too — not merely the gaps between cells.
 ///
-/// * does the row re-carve the grid from its own spacing — misaligning its
-///   column boundaries with the rows above and below — or inset within the
-///   slots the table-level value produced, leaving the row short of the table
-///   edge? §17.4.43's "shall not increase the width of the overall table" rules
-///   out *growing* the table and does not choose between these.
+/// `resolve_table_cell_spacing` applies that, and states the one case still
+/// unmeasured: rows that disagree with each other.
+fn resolve_cell_spacing(m: Option<model::TableMeasure>) -> Pt {
+    match m {
+        // §17.4.45's value is half the gap — see above. Word's own UI shows the
+        // doubled number, which is the same fact from the other side.
+        Some(model::TableMeasure::Twips(tw)) => (Pt::from(tw) * 2.0).max(Pt::ZERO),
+        // Auto / Pct / Nil / absent.
+        _ => Pt::ZERO,
+    }
+}
+
+/// §17.4.43: the row's own `tblCellSpacing`, or its `tblPrEx` one (§17.4.44).
+fn row_cell_spacing(row: &model::TableRow) -> Option<model::TableMeasure> {
+    row.properties
+        .cell_spacing
+        .cloned()
+        .or_else(|| {
+            row.property_exceptions
+                .as_ref()
+                .and_then(|e| e.cell_spacing)
+        })
+        // §17.4.45 ignores every measure but `dxa` here, and `nil` is a declared
+        // zero rather than an ignored value. So a `pct` or `auto` row has
+        // declared *nothing*: it leaves the table's value standing instead of
+        // superseding it with the zero `resolve_cell_spacing` would return.
+        .filter(|m| matches!(m, model::TableMeasure::Twips(_) | model::TableMeasure::Nil))
+}
+
+/// §17.4.43/§17.4.44/§17.4.45: the one gap this table renders with.
+///
+/// Row beats table-level exception beats table, per the precedence quoted in
+/// `resolve_cell_spacing` and confirmed against Word by the scale probe's fourth
+/// table. A row declaring nothing falls back to the table's value, so a table
+/// whose rows all stay silent resolves exactly as it did before this existed.
+///
+/// # Why the answer is still table-wide
+///
+/// Because a row using a *different* spacing from its neighbours is not a local
+/// change, and nothing has measured what Word does with one. The gap is uniform
+/// only because one spacing is carved out of the grid by `reserve_cell_spacing`
+/// and the same value insets every cell; a row with its own value breaks that
+/// and raises three questions no render answers:
+///
+/// * does that row re-carve the grid from its own spacing — misaligning its
+///   column boundaries with the rows above and below — or inset within the slots
+///   the table-level value produced, leaving it short of the table edge?
+///   §17.4.43's "Row-level cell spacing shall not increase the width of the
+///   overall table" rules out growing the table and does not choose between
+///   these.
 /// * what is the table's reported width when rows disagree? It is
 ///   `sum(slots) + cell_spacing` today, and it drives pagination, floating-table
 ///   registration and `jc` placement — so a wrong answer moves the whole table,
 ///   not one row.
 /// * is border collapsing still table-wide? `collapse_borders` is
-///   `cell_spacing <= 0` for the entire table. With spacing on some rows only,
-///   a per-row answer would collapse one row's borders and not its neighbour's,
-///   and no section says whether Word does that.
+///   `cell_spacing <= 0` for the entire table, so a per-row answer would collapse
+///   one row's borders and not its neighbour's, and no section says whether Word
+///   does that.
 ///
-/// **What would settle it**: a Word render of
-/// `issue-165-cellspacing-scale.docx`. Its two table-level-only tables give the
-/// factor, and its fourth table — 400 on the table, 800 on every row —
-/// distinguishes supersede (gap 800), sum (gap 1200) and table-wins (gap 400)
-/// in a single measurement, because all three predict a different number. A
-/// fifth table with the row value on *one* row only would answer the alignment
-/// and border-collapse questions above; the fixture does not have one yet.
-fn resolve_cell_spacing(m: Option<model::TableMeasure>) -> Pt {
-    match m {
-        Some(model::TableMeasure::Twips(tw)) => Pt::from(tw).max(Pt::ZERO),
-        // Auto / Pct / Nil / absent.
-        _ => Pt::ZERO,
+/// So a table whose rows **agree** takes that value, and one that does not keeps
+/// the table-level value and says so. No corpus document is affected either way:
+/// `issue-165-cellspacing.docx` and `issue-165-cellspacing-scale.docx` are the
+/// only two that declare the element at all, and every table in both is a single
+/// row, which cannot disagree with anything. The
+/// fixture that would settle it is a fifth table in
+/// `issue-165-cellspacing-scale.docx` carrying the row value on *one* row only;
+/// it does not have one yet.
+fn resolve_table_cell_spacing(rows: &[model::TableRow], table_level: Pt, warned: &mut bool) -> Pt {
+    let mut effective = rows
+        .iter()
+        .map(|r| row_cell_spacing(r).map_or(table_level, |m| resolve_cell_spacing(Some(m))));
+    let Some(first) = effective.next() else {
+        return table_level;
+    };
+    if effective.all(|s| s == first) {
+        return first;
     }
+    if !*warned {
+        *warned = true;
+        log::warn!(
+            "§17.4.43/§17.4.44: rows declare different tblCellSpacing values; using the \
+             table-level value ({table_level:?}) for the whole table"
+        );
+    }
+    table_level
 }
 
 /// Carve one `cell_spacing` out of the grid so the slots plus one spacing add
@@ -210,7 +259,15 @@ fn reserve_cell_spacing(col_widths: Vec<Pt>, cell_spacing: Pt) -> Vec<Pt> {
 ///   reach past the edge by that displacement;
 /// * a *nested* table is measured against the page rather than against its
 ///   cell, so it may still overflow the cell — but the enclosing table's own
-///   width already keeps it on the sheet.
+///   width already keeps it on the sheet;
+/// * §17.4.66 draws a table's outer border **outside** its box
+///   (`table::borders::rasterize_border_grid`), and this is given the grid,
+///   not the borders that will be drawn around it — so a clamped table's own
+///   right border hangs off the sheet by its own width. Threading the resolved
+///   border config down here to subtract it would make the guard depend on a
+///   later phase; the overflow it leaves is one border wide rather than the
+///   460 pt the reported defect drew, and `tests/table_auto_width.rs` bounds it
+///   at exactly that.
 ///
 /// **Word reference render needed**: what width Word actually gives an
 /// overflowing `w:type="auto"` table, at `tblLayout` both `fixed` and
@@ -483,12 +540,13 @@ pub(super) fn build_table(
     // renders without it; reading it would render a third-party document
     // differently from the Word its author checked it against.
     //
-    // Four of those seven are modelled and read here — `tblW`, `tblLook`,
-    // `tblpPr`, `tblOverlap` — so each is taken from the `<w:tbl>` alone below.
-    // `tblLayout` has no read site at all. The remaining two need no code:
-    // `TableProperties` has no `bidiVisual` field, and `tblStyle` is already
-    // excluded from `merge_table_properties` for an independent reason (it
-    // would be a second inheritance edge competing with `basedOn`).
+    // Five of those seven are modelled and read here — `tblW`, `tblLook`,
+    // `tblpPr`, `tblOverlap`, `bidiVisual` — so each is taken from the
+    // `<w:tbl>` alone below, and `merge_table_properties` omits all five from
+    // its field list. `tblLayout` has no read site at all. The last needs no
+    // code: `tblStyle` is already excluded from `merge_table_properties` for an
+    // independent reason (it would be a second inheritance edge competing with
+    // `basedOn`).
     //
     // The five that do cascade — `jc`, `tblInd`, `tblBorders`, `tblCellMar`,
     // `tblCellSpacing` — appear on neither list. So do the two band sizes,
@@ -584,13 +642,33 @@ pub(super) fn build_table(
         .unwrap_or(1);
 
     // §17.4.63 `tblW`, §17.4.55 `tblLook`, §17.4.57 `tblpPr`, §17.4.56
-    // `tblOverlap`: the `<w:tbl>`'s own `<w:tblPr>` and nothing else, per
-    // §2.1.250(a)/§2.1.249(a). Written as plain reads rather than as a cascade
-    // with the style arm deleted, so no later edit can restore one by reflex.
+    // `tblOverlap`, §17.4.1 `bidiVisual`: the `<w:tbl>`'s own `<w:tblPr>` and
+    // nothing else, per §2.1.250(a)/§2.1.249(a). Written as plain reads rather
+    // than as a cascade with the style arm deleted, so no later edit can
+    // restore one by reflex.
     let width = t.properties.width.get();
     let tbl_look = t.properties.look.get();
     let positioning = t.properties.positioning.get();
     let overlap = t.properties.overlap.cloned();
+    let declared_bidi_visual = t.properties.bidi_visual.get().copied();
+    let bidi_visual = declared_bidi_visual.unwrap_or(false);
+
+    // §17.4.1 is a statement about the table, not only about its cells: a
+    // `bidiVisual` table *is* a right-to-left table, so it also decides which
+    // margin is leading for §17.4.28 `jc` and §17.4.50 `tblInd`. Carried as an
+    // `Option` because absent is not the same as `w:val="0"` here — absent
+    // inherits the section's §17.6.6 direction, which only the placement site
+    // can see, and an explicit `0` overrides it.
+    //
+    // See `mirror_columns` for the evidence, and `tests/table_leading_margin.rs`
+    // for the assertions.
+    let direction = declared_bidi_visual.map(|rtl| {
+        if rtl {
+            crate::i18n::bidi::BaseDirection::Rtl
+        } else {
+            crate::i18n::bidi::BaseDirection::Ltr
+        }
+    });
 
     // §17.4.63: resolve table width from tblW.
     let is_auto_width = matches!(
@@ -607,6 +685,13 @@ pub(super) fn build_table(
     // by half the margins, producing a width discrepancy when consecutive
     // centered tables have different cell margins (cf. the stacked
     // "Anhang: Sauberkeit" tables in the Volvo Annahme-Protokoll).
+    //
+    // "Left-aligned" here means *start*-aligned, which is why the test is
+    // written as "neither centre nor end" and needs no direction of its own: the
+    // shift is carried as a negative `indent`, and `table_x_offset` applies an
+    // indent at whichever margin leads. A full-width right-to-left table
+    // therefore extends to the right, putting its leading cell's content back on
+    // the right margin — the same alignment, reflected.
     let extends_for_alignment = !matches!(
         alignment,
         Some(model::Alignment::Center) | Some(model::Alignment::End)
@@ -681,12 +766,20 @@ pub(super) fn build_table(
     // be left between all cells", not extra width. Reserving one spacing here
     // and offsetting each cell by one in `measure_table_rows` yields exactly
     // `cell_spacing` between adjacent cells *and* at both table edges.
-    let cell_spacing = resolve_cell_spacing(
+    let table_cell_spacing = resolve_cell_spacing(
         t.properties
             .cell_spacing
             .get()
             .or_else(|| style_table.and_then(|tp| tp.cell_spacing.get()))
             .copied(),
+    );
+    // §17.4.43: a row's own value supersedes the table's, and Word obeys that —
+    // the scale probe's fourth table measures it. `resolve_table_cell_spacing`
+    // states what it does when rows disagree, which no render has settled.
+    let cell_spacing = resolve_table_cell_spacing(
+        &t.rows,
+        table_cell_spacing,
+        &mut state.warned_row_cell_spacing,
     );
     let col_widths = reserve_cell_spacing(col_widths, cell_spacing);
     let style_overrides = raw_table_style
@@ -715,7 +808,11 @@ pub(super) fn build_table(
         .iter()
         .enumerate()
         .map(|(row_idx, row)| {
-            let cells: Vec<TableCellInput> = row
+            // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>`: this row's own
+            // declared width per cell, paired with the cell built below — see
+            // `RowBidiOverride` for why a flipped row needs its own widths
+            // rather than the shared grid's.
+            let (cells, cell_widths): (Vec<TableCellInput>, Vec<Pt>) = row
                 .cells
                 .iter()
                 .enumerate()
@@ -769,14 +866,17 @@ pub(super) fn build_table(
                     let cell_margins_h = Pt::from(resolved_h.left) + Pt::from(resolved_h.right);
                     let inner_width = (cell_width - cell_margins_h).max(Pt::ZERO);
 
-                    build_table_cell(
-                        cell,
-                        raw_table_style,
-                        default_cell_margins,
-                        &cond,
-                        inner_width,
-                        ctx,
-                        state,
+                    (
+                        build_table_cell(
+                            cell,
+                            raw_table_style,
+                            default_cell_margins,
+                            &cond,
+                            inner_width,
+                            ctx,
+                            state,
+                        ),
+                        cell_width,
                     )
                 })
                 .collect();
@@ -787,40 +887,37 @@ pub(super) fn build_table(
             let mut cells = cells;
             normalize_row_uniform_vertical_insets(&mut cells);
 
-            // A row may override the table's `tblCellSpacing`, and the spec is
-            // unambiguous about the order. Verified against the primary text:
-            // §17.4.45 (`tblPr`) "shall be superseded by a table-level
-            // exception (§17.4.44) or the row cell spacing value (§17.4.43) in
-            // that order", and §17.4.44 (`tblPrEx`) "shall be superseded by
-            // the row cell spacing value (§17.4.43)". So trPr > tblPrEx > tblPr.
-            //
-            // It is still not applied, and the reason is not that the order is
-            // unclear. See `resolve_cell_spacing` for why: implementing it
-            // requires three answers the spec does not give and no render has
-            // measured, and the one Word render on record points *away* from
-            // "supersede". Report it rather than dropping it silently; the
-            // parsed value stays on the model, so nothing has to be reparsed
-            // when a render settles it.
-            //
-            // Note this fires only on *disagreement*. A row restating the
-            // table's own value resolves to the same gap either way, which is
-            // why `issue-165-cellspacing.docx` is silent here and
-            // `issue-165-cellspacing-scale.docx` — table 400, row 800 — is not.
-            let row_spacing = row.properties.cell_spacing.cloned().or_else(|| {
-                row.property_exceptions
-                    .as_ref()
-                    .and_then(|e| e.cell_spacing)
-            });
-            if let Some(rs) = row_spacing {
-                if resolve_cell_spacing(Some(rs)) != cell_spacing && !state.warned_row_cell_spacing
-                {
-                    state.warned_row_cell_spacing = true;
-                    log::warn!(
-                        "§17.4.43/§17.4.44: row-level tblCellSpacing overrides are not applied; \
-                         using the table-level value ({cell_spacing:?})"
-                    );
+            // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>`: reverse this
+            // one row into visual order, each cell keeping the width just
+            // computed above rather than the slot it now occupies, and swap
+            // each cell's own logical left/right the same way `mirror_columns`
+            // does for a whole `bidiVisual` table — `w:tcBorders/w:left` is a
+            // logical edge regardless of whether the flip is table-wide or
+            // scoped to one row. See `RowBidiOverride` for the render this
+            // reproduces and what it leaves open.
+            let bidi_override = if row
+                .property_exceptions
+                .as_ref()
+                .and_then(|ex| ex.bidi_visual)
+                == Some(true)
+            {
+                let mut cell_widths = cell_widths;
+                cells.reverse();
+                cell_widths.reverse();
+                for cell in cells.iter_mut() {
+                    std::mem::swap(&mut cell.margins.left, &mut cell.margins.right);
+                    if let Some(b) = cell.cell_borders.as_mut() {
+                        std::mem::swap(&mut b.left, &mut b.right);
+                    }
                 }
-            }
+                let total: Pt = cell_widths.iter().copied().sum();
+                Some(RowBidiOverride {
+                    cell_widths,
+                    leading_offset: (available_width - total).max(Pt::ZERO),
+                })
+            } else {
+                None
+            };
 
             TableRowInput {
                 cells,
@@ -853,6 +950,7 @@ pub(super) fn build_table(
                         };
                         convert_table_border_config(&merged, state)
                     }),
+                bidi_override,
             }
         })
         .collect();
@@ -870,6 +968,41 @@ pub(super) fn build_table(
              <w:vMerge w:val=\"restart\"/> above them in the same grid column; \
              rendering each as an ordinary cell"
         );
+    }
+
+    // §17.4.60 `<w:tblPrEx><w:bidiVisual/></w:tblPrEx>` on a single row: Word's
+    // own render swaps it with the row immediately following it rather than
+    // leaving it between its neighbours — measured against
+    // `test-files/issue-157-tblprex-bidi.docx` (`RowBidiOverride`'s doc names
+    // what this is settled over and what it is not). A plain vector swap, at
+    // the same seam as `mirror_columns` below and for the same reason: every
+    // downstream pass — measurement, border resolution, splitting, painting —
+    // reads `rows` by vector position with no separate notion of document
+    // order, so doing this once, here, is transparent to all of them.
+    //
+    // Snapshotted before mutating: swapping row `i` moves whatever was at
+    // `i + 1` into `i`, so re-deriving "does this row have the override" from
+    // the row now sitting at a given index, after an earlier swap already
+    // moved things around, would either skip a row or process one twice.
+    let flipped: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.bidi_override.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    for i in flipped {
+        if i + 1 < rows.len() {
+            rows.swap(i, i + 1);
+        }
+    }
+
+    // §17.4.1 `bidiVisual`, for the same reason and at the same seam: once,
+    // over the finished rows. Everything downstream then sees an ordinary
+    // left-to-right table whose columns are already in visual order.
+    let mut col_widths = col_widths;
+    let mut border_config = border_config;
+    if bidi_visual {
+        mirror_columns(&mut rows, &mut col_widths, &mut border_config);
     }
 
     // §17.4.57: floating table positioning.
@@ -921,12 +1054,55 @@ pub(super) fn build_table(
     // reading under which the shift is not a special case at all but the same
     // rule at zero — is not settled here; a **Word reference render** of a
     // full-width left-aligned table at a non-zero `tblInd` would settle it.
+    //
+    // # The leading border's half
+    //
+    // §17.4.66 straddles a table's own left edge on its first grid line, so half
+    // of that border falls to the left of the grid and half is charged to the
+    // first cell's content (`table::borders`, `measure_table_rows`). Word puts
+    // that cell's **text** at the indent, not the grid line: measured against
+    // `test-files/border-outer-box.docx`, whose two tables differ only in outer
+    // border weight — the 12pt one draws its frame at 60..72 against a 300pt
+    // grid and carries its *interior* line 6pt left with it, which straddling
+    // alone cannot do. So the grid starts half a leading border to the left of
+    // the indent, and the charged half puts the text back on it.
+    //
+    // Which is the same rule as the cell-margin shift above, one level up: both
+    // are the first cell's content inset, and the content is inset by whichever
+    // of the two is larger. They are combined only where that shift applies,
+    // though — the corpus tuning it was drawn from is untouched by this
+    // measurement, whose fixture declares no cell margins at all.
+    //
+    // # Only a *table-level* border shifts the table, and that is unmeasured
+    //
+    // The width read here is `border_config.left`, so a leading border declared
+    // by the first cell (§17.4.39 `w:tcBorders/w:left`) or by a row's §17.4.60
+    // `tblPrEx` override moves nothing: the rasterizer straddles whatever line
+    // wins the outer edge, so that border's outer half lands in the margin with
+    // no shift to answer it, while a table-level border of the same weight is
+    // compensated. `tests/table_bidi_visual.rs` renders both and pins the
+    // straddle in each; what it cannot say is whether Word shifts for them too.
+    //
+    // Not repaired here, because the fix and its refutation cost the same
+    // measurement and only one of them can be guessed at. `border-outer-box.docx`
+    // declares its borders at table level only, so nothing on record separates
+    // "the table shifts by whatever border stands on its leading edge" from "the
+    // table shifts by what `tblBorders` declares". **Word reference render
+    // needed**: that fixture's thick table again, with its `w:left` moved from
+    // `w:tblBorders` to the first cell's `w:tcBorders` — same edge, same weight,
+    // and the first cell's text either stays on the indent or moves 6pt right.
+    let leading_border = border_config
+        .as_ref()
+        .and_then(|b| b.left.as_ref())
+        .map(|l| crate::render::layout::table::borders::drawn_width(l) * 0.5)
+        .unwrap_or(Pt::ZERO);
     let indent = match table_indent {
-        Some(model::TableMeasure::Twips(tw)) if tw.raw() != 0 => Pt::from(*tw),
+        Some(model::TableMeasure::Twips(tw)) if tw.raw() != 0 => Pt::from(*tw) - leading_border,
         _ if is_full_width && is_left_aligned => -default_cell_margins
             .map(|m| Pt::from(m.left))
-            .unwrap_or(Pt::ZERO),
-        _ => Pt::ZERO,
+            .unwrap_or(Pt::ZERO)
+            .max(leading_border),
+        _ => -leading_border,
     };
 
     BuiltTable {
@@ -936,6 +1112,7 @@ pub(super) fn build_table(
         border_config,
         indent,
         alignment,
+        direction,
         float_info,
     }
 }
@@ -1039,6 +1216,105 @@ fn grid_span(cell: &TableCell) -> u32 {
 /// **spanning** cells, because a rule stated in grid columns cannot be tested
 /// by a fixture whose every cell is one column wide — which is why the leak
 /// survived a suite of span-1 fixtures.
+/// §17.4.1 `w:bidiVisual` — rewrite a table's layout input from logical order
+/// into **visual** order, so that nothing downstream has to know about it.
+///
+/// The element says the first cell of a row is the rightmost one. That could be
+/// done by flipping the geometry instead — computing `cell_x` from the right in
+/// `table::measure` — and it deliberately is not. Every table subsystem is keyed
+/// on the **grid column index**: border resolution walks it to find the cell
+/// facing each shared edge, `is_vmerge_continue` looks a merge up by it,
+/// conditional regions are decided from it, and the paginator carries it across
+/// slices. Flipping geometry underneath all of that would make each of them
+/// direction-aware, and the border layer is the one where a partial answer has
+/// already cost three separate reports of unpainted junction squares
+/// (`tests/table_border_corners.rs`). Reversing the input costs one function and
+/// leaves every one of those invariants untouched.
+///
+/// # What has to move
+///
+/// * the slot widths, since a mirrored table's columns keep their widths and
+///   swap places — with an unequal grid, reversing the cells alone is visibly
+///   wrong;
+/// * each row's cells;
+/// * §17.4.15 `gridBefore`, which counts skipped columns at the row's *logical*
+///   start. After the flip that gap is at the visual right, so the new leading
+///   count is the row's old trailing one — `num_cols − gridBefore − Σ spans`,
+///   the `gridAfter` that `TableRowInput` documents as derivable rather than
+///   carried;
+/// * `left`/`right` on cell margins, cell borders, the row's `tblPrEx`
+///   override and the table's own border config.
+///
+/// `gridSpan` and `vMerge` need nothing: a span is a contiguous run of columns
+/// and stays one under reversal, and a merge is looked up by grid column, which
+/// this renumbers consistently for every row at once.
+///
+/// # Why `left` and `right` swap
+///
+/// Because they are the *logical* edges. The Transitional `w:left`/`w:right`
+/// this parser reads are Strict's `w:start`/`w:end` — which is why
+/// `docx::parse::properties::schema::border` and `::insets` already declare each
+/// pair as serde aliases of one another, and why `w:ind` has been logical in
+/// this engine since it was written (`paragraph::line_emit::physical_left_inset`).
+/// A cell's `w:left` border therefore belongs at its logical start, which under
+/// `bidiVisual` is on the right.
+///
+/// # What this function does not do, and what does it instead
+///
+/// §17.4.50 `tblInd` and §17.4.28 `jc` place the *table*, not its columns, so
+/// they are not rewritten here — but they **are** read against this element, at
+/// the placement site, through `BuiltTable::direction`. This function was once
+/// the whole of §17.4.1's implementation, on the reading that the element scopes
+/// to cell order; `test-files/bidi-visual-table.docx` rendered in Word refutes
+/// that, putting the `bidiVisual` table at the right margin and its otherwise
+/// identical control at the left. The fixture is a controlled experiment for it:
+/// every cell paragraph in both tables is RTL, so paragraph direction cannot be
+/// what moves one and not the other. §17.4.60 `tblPrEx` may also carry
+/// `bidiVisual` to flip a single
+/// row, which is not read — a row mirrored against its own table would break the
+/// one-grid-order-per-table assumption every subsystem above relies on, so it
+/// needs its own design rather than a flag here.
+///
+/// # Ordering
+///
+/// This must run **after** §17.7.6 conditional formatting has been resolved
+/// (`resolve_cell_conditional`, in the row loop above), which reads logical grid
+/// columns. `firstColumn` means the logical first column — the rightmost one
+/// once mirrored, as Word renders it. Moving this call earlier would silently
+/// shade the wrong column, and `tests/table_bidi_visual.rs` pins exactly that.
+fn mirror_columns(
+    rows: &mut [TableRowInput],
+    col_widths: &mut [Pt],
+    border_config: &mut Option<crate::render::layout::table::TableBorderConfig>,
+) {
+    let num_cols = col_widths.len();
+    col_widths.reverse();
+
+    for row in rows.iter_mut() {
+        let spanned: usize = row.cells.iter().map(|c| c.grid_span.max(1) as usize).sum();
+        // Saturating because a malformed row can overrun its grid — the same
+        // case `seat_every_cell` repairs and `measure_table_rows` clamps for.
+        // A row that does not fit keeps its cells and loses only the gap.
+        row.grid_before = num_cols
+            .saturating_sub(row.grid_before as usize)
+            .saturating_sub(spanned) as u32;
+        row.cells.reverse();
+        for cell in row.cells.iter_mut() {
+            std::mem::swap(&mut cell.margins.left, &mut cell.margins.right);
+            if let Some(b) = cell.cell_borders.as_mut() {
+                std::mem::swap(&mut b.left, &mut b.right);
+            }
+        }
+        if let Some(b) = row.border_overrides.as_mut() {
+            std::mem::swap(&mut b.left, &mut b.right);
+        }
+    }
+
+    if let Some(b) = border_config.as_mut() {
+        std::mem::swap(&mut b.left, &mut b.right);
+    }
+}
+
 fn promote_orphan_vmerge_continues(rows: &mut [TableRowInput]) -> usize {
     use crate::render::layout::table::VerticalMergeState;
 
@@ -1366,6 +1642,7 @@ fn build_cell_blocks(
                     border_config: built.border_config,
                     indent: built.indent,
                     alignment: built.alignment,
+                    direction: built.direction,
                     float_info: built.float_info,
                     style_id: nested_t.properties.style_id.clone(),
                 });
@@ -1596,19 +1873,21 @@ mod tests {
         }
     }
 
-    /// §17.4.45: the declared value passes through unscaled — it *is* the gap.
+    /// §17.4.45: the declared value is **half** the gap — Word draws twice it.
     ///
-    /// Pinned because it was briefly changed to `2x` on the strength of a Word
-    /// render, and reverted when ONLYOFFICE's renderer turned out to apply no
-    /// factor at all. See `resolve_cell_spacing`'s doc comment for that evidence
-    /// and for what the doubling in that render is more likely to have been.
+    /// Measured off a Word render of `test-files/issue-165-cellspacing-scale.docx`
+    /// (2026-08-18). This assertion has been both ways: it read `2x` on the
+    /// strength of an earlier render, was reverted to unscaled when ONLYOFFICE
+    /// turned out to apply no factor, and is `2x` again now that a fixture
+    /// declaring the spacing at *table level only* has been rendered — which is
+    /// what removes the "Word sums two declarations" explanation the revert
+    /// rested on. `resolve_cell_spacing`'s doc comment holds the whole of it.
     #[test]
-    fn a_declared_spacing_is_the_whole_gap() {
-        use crate::model::dimension::Dimension;
+    fn a_declared_spacing_is_half_the_gap_word_draws() {
         assert_eq!(
-            resolve_cell_spacing(Some(model::TableMeasure::Twips(Dimension::new(240)))),
-            Pt::new(12.0),
-            "240 twips = 12pt declared and 12pt rendered"
+            resolve_cell_spacing(Some(dxa(240))),
+            Pt::new(24.0),
+            "240 twips = 12pt declared and 24pt rendered"
         );
     }
 
@@ -1729,6 +2008,7 @@ mod tests {
             cant_split: None,
             grid_before,
             border_overrides: None,
+            bidi_override: None,
         }
     }
 
@@ -2597,6 +2877,7 @@ mod tests {
         let mut t = table_of(props, &[2000, 2000], 2);
         t.rows.push(model_row(0, &[1, 1]));
         t.rows[1].property_exceptions = Some(model::TableRowPropertyExceptions {
+            bidi_visual: None,
             borders: Some(model::TableBorders {
                 top: border(16, model::BorderStyle::Single),
                 inside_v: border(8, model::BorderStyle::None),
@@ -2634,64 +2915,118 @@ mod tests {
         );
     }
 
-    /// §17.4.43 / §17.4.44: a row-level `tblCellSpacing` is **not applied** —
-    /// `resolve_cell_spacing` sets out the three answers that would be needed
-    /// first — and it is *reported* rather than dropped in silence.
+    /// §17.4.43: a row's own `tblCellSpacing` supersedes the table's, and the
+    /// warning is now about rows disagreeing with *each other* — the one case
+    /// no render has measured and the only one still dropped.
     ///
-    /// What is reported is a disagreement, not the presence of a row-level
-    /// element. A row restating the table's own spacing resolves to the same
-    /// gap, so warning about it would report a difference that is not there:
-    /// that is why `issue-165-cellspacing.docx` (400 twips at both levels) is
-    /// silent while `issue-165-cellspacing-scale.docx` (400 and 800) is not.
-    /// The two are indistinguishable on the page — the geometry is the table's
-    /// value either way, which `tests/table_cell_spacing.rs` pins — so only
-    /// `BuildState` can tell them apart.
+    /// Word's render of `issue-165-cellspacing-scale.docx` settled the
+    /// precedence: its fourth table declares 400 on the table and 800 on the
+    /// row, and Word draws it as a plain 800 table. So a row value no longer
+    /// merely gets reported — it applies, which `tests/table_cell_spacing.rs`
+    /// pins on the page. What `BuildState` still records is a table whose rows
+    /// ask for different gaps, which cannot be honoured table-wide; see
+    /// `resolve_table_cell_spacing` for the three questions that would have to
+    /// be answered first.
     ///
-    /// The `pct` case is the same rule from the other end. §17.4.45 leaves
-    /// every measure but `dxa` without a usable value here, so a `pct` row
-    /// spacing against a table that declares none resolves to the same zero and
-    /// is not a disagreement either.
+    /// The `pct` case is §17.4.45 from the other end: every measure but `dxa`
+    /// and `nil` is ignored for this element, so such a row has declared nothing
+    /// and leaves the table's value standing rather than superseding it with a
+    /// zero.
     #[test]
-    fn a_row_cell_spacing_is_reported_only_when_it_resolves_to_a_different_gap() {
-        let warned = |table: Option<model::TableMeasure>,
-                      row: Option<model::TableMeasure>,
-                      exception: Option<model::TableMeasure>| {
-            let props = model::TableProperties {
-                width: measure(dxa(4000)),
-                cell_spacing: model::Dup::from(table),
-                ..Default::default()
-            };
-            let mut t = table_of(props, &[2000, 2000], 2);
-            t.rows[0].properties.cell_spacing = model::Dup::from(row);
+    fn a_row_level_spacing_supersedes_and_only_disagreeing_rows_are_reported() {
+        let row = |spacing: Option<model::TableMeasure>, exception: Option<model::TableMeasure>| {
+            let mut r = model_row(0, &[1u32, 1u32]);
+            r.properties.cell_spacing = model::Dup::from(spacing);
             if exception.is_some() {
-                t.rows[0].property_exceptions = Some(model::TableRowPropertyExceptions {
+                r.property_exceptions = Some(model::TableRowPropertyExceptions {
+                    bidi_visual: None,
                     borders: None,
                     cell_spacing: exception,
                 });
             }
-            build_reporting(&t).1.warned_row_cell_spacing
+            r
+        };
+        let resolve = |rows: Vec<model::TableRow>, table: Pt| {
+            let mut warned = false;
+            let got = resolve_table_cell_spacing(&rows, table, &mut warned);
+            (got, warned)
+        };
+        let table_level = resolve_cell_spacing(Some(dxa(240)));
+
+        assert_eq!(
+            resolve(vec![row(None, None), row(None, None)], table_level),
+            (table_level, false),
+            "rows that say nothing take the table's value"
+        );
+        assert_eq!(
+            resolve(
+                vec![row(Some(dxa(480)), None), row(Some(dxa(480)), None)],
+                table_level
+            ),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "rows that agree supersede the table, which is what Word draws"
+        );
+        assert_eq!(
+            resolve(
+                vec![row(None, Some(dxa(480))), row(None, Some(dxa(480)))],
+                table_level
+            ),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "§17.4.44's `tblPrEx` is read when the `trPr` is silent"
+        );
+        assert_eq!(
+            resolve(vec![row(Some(pct(2500)), None)], table_level),
+            (table_level, false),
+            "a measure §17.4.45 ignores is not a declaration and supersedes nothing"
+        );
+        assert_eq!(
+            resolve(
+                vec![row(Some(dxa(480)), None), row(None, None)],
+                table_level
+            ),
+            (table_level, true),
+            "rows asking for different gaps keep the table's value and are reported"
+        );
+    }
+
+    /// And `build_table` reads it — the pure function above is only half the
+    /// path. The value reaching layout is the row's, and it is a table whose
+    /// rows *disagree* that raises the flag on `BuildState`.
+    ///
+    /// Worth its own case because these two are wired separately: the geometry
+    /// comes from `BuiltTable::cell_spacing` and the diagnostic from
+    /// `BuildState`, and the old warning fired from inside the row loop, where
+    /// it could report a row the grid had never been built from.
+    #[test]
+    fn build_table_applies_the_row_spacing_and_reports_only_a_disagreement() {
+        let with_rows = |rows: Vec<Option<model::TableMeasure>>| {
+            let props = model::TableProperties {
+                width: measure(dxa(4000)),
+                cell_spacing: model::Dup::from(Some(dxa(240))),
+                ..Default::default()
+            };
+            let mut t = table_of(props, &[2000, 2000], 2);
+            t.rows = rows
+                .into_iter()
+                .map(|s| {
+                    let mut r = model_row(0, &[1u32, 1u32]);
+                    r.properties.cell_spacing = model::Dup::from(s);
+                    r
+                })
+                .collect();
+            let (built, state) = build_reporting(&t);
+            (built.cell_spacing, state.warned_row_cell_spacing)
         };
 
-        assert!(
-            !warned(Some(dxa(240)), None, None),
-            "a row that says nothing is not a disagreement"
+        assert_eq!(
+            with_rows(vec![Some(dxa(480)), Some(dxa(480))]),
+            (resolve_cell_spacing(Some(dxa(480))), false),
+            "agreeing rows supersede the table's 240 and raise nothing"
         );
-        assert!(
-            !warned(Some(dxa(240)), Some(dxa(240)), None),
-            "…nor is a row restating the table's own value"
-        );
-        assert!(
-            !warned(None, Some(pct(2500)), None),
-            "…nor a row whose measure §17.4.45 leaves without a value, which \
-             resolves to the same zero the table has"
-        );
-        assert!(
-            warned(Some(dxa(240)), Some(dxa(480)), None),
-            "a row asking for a different gap must be reported"
-        );
-        assert!(
-            warned(Some(dxa(240)), None, Some(dxa(480))),
-            "and §17.4.44's `tblPrEx` is read when the `trPr` is silent"
+        assert_eq!(
+            with_rows(vec![Some(dxa(480)), None]),
+            (resolve_cell_spacing(Some(dxa(240))), true),
+            "one row out of step keeps the table's value and is reported"
         );
     }
 

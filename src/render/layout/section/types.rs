@@ -348,6 +348,12 @@ pub enum LayoutBlock {
         indent: Pt,
         /// §17.4.28: table horizontal alignment.
         alignment: Option<crate::model::Alignment>,
+        /// §17.4.1 `bidiVisual`: the table's own direction, which decides which
+        /// margin `indent` and `alignment` are measured from. `None` when the
+        /// table declares none, in which case the section's §17.6.6 direction
+        /// answers instead — `section::helpers::table_x_offset` takes the one
+        /// answer, and only its callers know both halves.
+        direction: Option<crate::i18n::bidi::BaseDirection>,
         /// §17.4.58: floating table positioning — if present, text wraps around it.
         float_info: Option<TableFloatInfo>,
         /// §17.4.38: table style reference for adjacent table border collapse.

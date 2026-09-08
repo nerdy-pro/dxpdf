@@ -317,45 +317,76 @@ def build_cellspacing():
 
 # ── D. tblCellSpacing magnitude, and carve-vs-add ────────────────────────────
 #
+# MEASURED IN WORD, 2026-08-18. This probe was built to ask three questions and
+# the render answered all three; what follows records both the questions and the
+# answers, because two of them refuted a written finding rather than filling a
+# blank. `tests/table_cell_spacing.rs` asserts the answers and
+# `build::table::resolve_cell_spacing` holds the reasoning.
+#
 # Probe B settled *where* the spacing goes (edge gap = inter-cell gap) and then
 # turned up something it was not built to ask: Word's gaps came out about twice
 # this engine's. Neither ECMA-376 §17.4.44 nor [MS-OI29500] states a factor —
 # both say only "the minimum amount of space which shall be left between all
 # cells in the table including the width of the table borders in the
-# calculation" — so the factor has to be measured, not read.
+# calculation" — so the factor had to be measured, not read.
 #
 # Four tables, identical but for their spacing, all `tblW=7200` (360pt) with
 # three 2400-twip (120pt) columns and `tblLayout=fixed`. Stacked so their edges
 # line up on the page, which is what makes the second question free to read.
 #
-# **Question 1 — the factor.** Compare the rendered gap against the declared
-# value:
+# **Question 1 — the factor. ANSWER: the declared value is a half-gap.**
 #
-#   declared value is the gap (dxpdf today) → S200 gap 10pt, S400 gap 20pt
-#   declared value is a half-gap            → S200 gap 20pt, S400 gap 40pt
+#   declared value is the gap (dxpdf then) → S200 gap 10pt, S400 gap 20pt
+#   declared value is a half-gap  ← WORD   → S200 gap 20pt, S400 gap 40pt
 #
 # Two values rather than one so the answer is a *ratio* rather than a single
 # reading: whatever the factor is, S400's gap must be exactly twice S200's. A
 # constant offset — a border width folded in, say — would break that and is
-# worth knowing about before anything is multiplied by anything.
+# worth knowing about before anything is multiplied by anything. It did not:
+# the ratio holds, and the gap is uniform at 2x across both tables.
 #
-# **Question 2 — carve or add.** All four declare the same `tblW`, so:
+# The reading survives being taken off a screenshot because it is scale-free.
+# With `3w + 4g = 360pt`, table 3 shows 189px of cell against 120px of gap — a
+# ratio of 1.58, forcing g ≈ 41pt. Had the declared 20pt been the gap, the cells
+# would be 93.3pt and the ratio 4.67. Different picture, not different rounding.
 #
-#   carved out of the table (dxpdf today) → all four tables the same width,
-#                                           cells shrink as spacing grows
-#   added to the table                    → each table wider than the one above
+# This is what killed the argument that there is no factor. It came from
+# ONLYOFFICE, an independent implementation that both renders and targets Word
+# compatibility, and it explained Word's doubling as Word *summing* the
+# `tblPr` and `trPr` declarations `issue-165-cellspacing.docx` happens to carry
+# in both places. Tables 2 and 3 here declare the spacing at table level ONLY.
+# There is nothing to sum, and Word doubles them anyway.
 #
-# Just look at whether the right edges line up. This one is not in doubt for
-# any good reason — it is simply untested, and it changes the fix.
+# **Question 2 — carve or add. ANSWER: carved.**
 #
-# **Question 3 — precedence, as a bonus.** §17.4.44's own text says the
-# table-level value "shall be superseded by a table-level exception or the row
-# cell spacing value in that order". The last table declares 400 at table level
-# and 800 on its row; if Word renders it like a plain 800 table, supersede is
-# confirmed and this engine's `warned_row_cell_spacing` warning is honest about
-# what it is skipping. Probe B declares the same value in both places, so it
-# cannot tell supersede from add — which is why the tables here declare the
-# spacing at table level only, except this last one.
+#   carved out of the table  ← WORD → all four tables the same width,
+#                                     cells shrink as spacing grows
+#   added to the table              → each table wider than the one above
+#
+# Just look at whether the right edges line up. They do.
+#
+# **Question 3 — precedence. ANSWER: the row value supersedes.**
+#
+# §17.4.44's own text says the table-level value "shall be superseded by a
+# table-level exception or the row cell spacing value in that order", and the
+# doubt was never about the text — it was whether Word obeys it, since probe B
+# declares the same value at both levels and cannot tell supersede from sum.
+# The last table here declares 400 at table level and 800 on its row, and with
+# the factor known the three readings predict three different pictures:
+#
+#   supersede  ← WORD → 80pt gaps, 13.3pt cells (Word draws 13.5)
+#   table wins        → 40pt gaps, 66.7pt cells
+#   sum               → 120pt gaps, which 360pt of table cannot hold
+#
+# The cells come out narrow enough that their labels wrap to one glyph per line
+# — in Word as in dxpdf, which is the most distinctive number in the fixture and
+# the reason this one is not a close call.
+#
+# Still unmeasured, and the reason `resolve_table_cell_spacing` keeps a warning:
+# rows that disagree with *each other*. Every table here is one row, so nothing
+# says whether such a row re-carves the grid from its own spacing, what the
+# table's reported width then is, or whether border collapsing stays table-wide.
+# A fifth table carrying the row value on one row only would ask it.
 def build_cellspacing_scale():
     # Cell text is one unbroken alphanumeric token per cell — no space, no
     # hyphen. UAX #14 breaks at both, and the line fitter emits one draw command

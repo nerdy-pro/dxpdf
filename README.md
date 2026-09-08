@@ -2,7 +2,7 @@
 
 **Convert Microsoft Word DOCX files to PDF without Microsoft Office, LibreOffice, or any cloud API.**
 
-dxpdf is an open-source, standalone DOCX-to-PDF conversion engine written in Rust and powered by [Skia](https://skia.org). It reads `.docx` files and produces high-fidelity PDF output — preserving text formatting, tables, images, headers, footers, hyperlinks, and page layout. Available as a CLI tool, a Rust library, and a Python package.
+dxpdf is an open-source, standalone DOCX-to-PDF conversion engine written in Rust and powered by [Skia](https://skia.org). It reads `.docx` files and produces high-fidelity PDF output — preserving text formatting, tables, images, headers, footers, hyperlinks, and page layout. Available as a CLI tool, a Rust library, a Python package, and Go bindings.
 
 [![Crates.io](https://img.shields.io/crates/v/dxpdf)](https://crates.io/crates/dxpdf)
 [![Documentation](https://img.shields.io/docsrs/dxpdf)](https://docs.rs/dxpdf)
@@ -20,7 +20,7 @@ Built by [nerdy.pro](https://nerdy.pro).
 - **Type-safe** — compile-time dimensional type system (`Twips`, `Pt`, `Emu`) prevents unit mixing bugs
 - **Standalone** — no Office installation, no LibreOffice, no external services needed
 - **Cross-platform** — runs natively on macOS, Linux, and Windows
-- **Three interfaces** — use as a CLI tool, Rust library (`use dxpdf;`), or Python package (`import dxpdf`)
+- **Four interfaces** — use as a CLI tool, Rust library (`use dxpdf;`), Python package (`import dxpdf`), or Go bindings (`import "github.com/nerdy-pro/dxpdf/go"`)
 - **Unicode-aware** — grapheme-correct segmentation, plus full-color emoji including ZWJ, skin-tone, keycap and flag sequences shaped through Skia's HarfBuzz
 - **Internationalised** — UAX #14 line breaking (including Thai, Lao, Khmer and Burmese), UAX #9 bidirectional text, and CLDR-driven numbers and dates that follow the document's own `w:lang`
 - **Packaged** — `cargo install`, `pip install`, or a `.deb` for Debian and Ubuntu
@@ -41,8 +41,8 @@ Every [release](https://github.com/nerdy-pro/dxpdf/releases) ships a `.deb` for
 `amd64` and `arm64`:
 
 ```bash
-curl -LO https://github.com/nerdy-pro/dxpdf/releases/download/v0.5.1/dxpdf_0.5.1-1_amd64.deb
-sudo apt install ./dxpdf_0.5.1-1_amd64.deb
+curl -LO https://github.com/nerdy-pro/dxpdf/releases/download/v0.6.0/dxpdf_0.6.0-1_amd64.deb
+sudo apt install ./dxpdf_0.6.0-1_amd64.deb
 ```
 
 Installs `dxpdf` to `/usr/bin` with a `dxpdf(1)` man page, and recommends
@@ -60,7 +60,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dxpdf = "0.5.1"
+dxpdf = "0.6.0"
 ```
 
 ### Python Package
@@ -68,6 +68,17 @@ dxpdf = "0.5.1"
 ```bash
 pip install dxpdf
 ```
+
+### Go Package
+
+Requires `CGO_ENABLED=1` and a C compiler. Supported on linux/amd64,
+linux/arm64, darwin/amd64 and darwin/arm64 (not yet Windows).
+
+```bash
+go get github.com/nerdy-pro/dxpdf/go
+```
+
+See [`go/README.md`](go/README.md) for details.
 
 ## Usage
 
@@ -134,6 +145,22 @@ dxpdf.convert_file("input.docx", "output.pdf")
 # Customize embedded-image resolution (default 220 DPI)
 pdf_bytes = dxpdf.convert(open("input.docx", "rb").read(), image_dpi=300)
 dxpdf.convert_file("input.docx", "output.pdf", image_dpi=300)
+```
+
+### Go — Convert DOCX to PDF Programmatically
+
+```go
+import "github.com/nerdy-pro/dxpdf/go"
+
+// Bytes in, bytes out
+pdfBytes, err := dxpdf.Convert(docxBytes)
+
+// File path to file path
+err := dxpdf.ConvertFile("input.docx", "output.pdf")
+
+// Customize embedded-image resolution (default 220 DPI)
+pdfBytes, err := dxpdf.ConvertWithOptions(docxBytes, 300)
+err := dxpdf.ConvertFileWithOptions("input.docx", "output.pdf", 300)
 ```
 
 ## Supported DOCX Features
@@ -410,8 +437,10 @@ Validated against ISO 29500 (Office Open XML). **75 entries fully implemented, 1
 | PDF outline sidebar (`/Outlines`) | ✅ §17.3.1.19 `w:outlineLvl` → structure-element headers; levels 7–9 clamp to `H6` (ISO 32000-1 stops there) and headings in headers, footers and notes are excluded |
 | Line breaking | ✅ UAX #14 via ICU4X, per paragraph rather than per run, so a token split across `<w:r>` boundaries still breaks where the algorithm says. The four scripts UAX #14 hands to "complex context analysis" (Thai, Lao, Khmer, Burmese) get LSTM word boundaries; a token no rule may break is cut at the container edge rather than overflowing it |
 | Bidirectional text (`w:bidi`, `w:rtl`) | ✅ §17.3.1.6 / §17.3.2.30 UAX #9 levels resolved per paragraph, reordered per line, with rule L4 mirroring; `w:jc` and `w:ind` resolve against the base direction |
+| `w:bidi` section layout (§17.6.6) | ✅ a right-to-left section's **leading** margin is its right, so §17.4.28 `w:jc`'s `start`/`end` and §17.4.50 `tblInd` resolve against it — `w:jc="left"` right-aligns a table, since Transitional `left` *is* Strict `start`. A table's own §17.4.1 `w:bidiVisual` overrides it where present. The section's RTL *paragraph* default and multi-column order are not wired |
 | Bidirectional tab stops and numbering labels | ❌ §17.3.1.37 stop positions are not mirrored under `w:bidi`, so a line reorders within each tab-delimited segment and a label before its suffix tab stays at the left |
-| `w:bidiVisual` (mirrored table columns) | ❌ not parsed |
+| `w:bidiVisual` (mirrored table columns) | ✅ §17.4.1 columns run right to left — the layout input is rewritten into visual order once, so `w:gridSpan`, `w:gridBefore` and `w:vMerge` mirror with them, and `w:left`/`w:right` on cell margins and borders swap as the logical `start`/`end` edges they are. The element makes the *table* right-to-left, so it also decides which margin §17.4.28 `w:jc` and §17.4.50 `tblInd` measure from — a `bidiVisual` table with no `w:jc` sits at the right margin, as Word renders it. Read from the `<w:tbl>` alone per [MS-OI29500] §2.1.250(a); `w:tblPrEx/w:bidiVisual` is parsed but not acted on |
+| Row gaps at a table edge (§17.4.15/§17.4.14) | ✅ a row's first `<w:tc>` takes the table's `w:left` and its last takes `w:right`, wherever across the grid `gridBefore`/`gridAfter` put those edges — §17.4.66 resolves an edge against cell borders and outer table borders, and a gapped row's first cell has no cell facing it. Verified against a Word render of `test-files/grid-gap-borders.docx`. The run of a row boundary that neither adjoining row can paint is drawn in the boundary strip so the line stays at one y |
 | Automatic hyphenation | ❌ |
 
 </details>
