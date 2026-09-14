@@ -48,6 +48,9 @@ pub(super) fn emit_math_fragments<F>(
 /// Math has none.
 fn math_font(size: Pt) -> FontProps {
     FontProps {
+        strike_lines: 0,
+        strike_position: Pt::ZERO,
+        strike_thickness: Pt::ZERO,
         rtl: Toggle::Absent,
         family: Rc::from(DEFAULT_MATH_FONT),
         size,
@@ -334,6 +337,8 @@ mod tests {
             measurer: None,
             auto_fit: crate::render::layout::ShapeAutoFit::NONE,
             locale_tag: None,
+            revision_palette: None,
+            comment_marks: false,
         }
     }
 

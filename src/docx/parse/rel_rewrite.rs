@@ -78,6 +78,7 @@ fn rewrite_in_inlines(inlines: &mut [Inline], remap: &HashMap<RelId, RelId>) {
                 rewrite_in_inlines(&mut h.content, remap);
             }
             Inline::Field(f) => rewrite_in_inlines(&mut f.content, remap),
+            Inline::CommentRef(_) => {}
             Inline::AlternateContent(ac) => {
                 // §M.2.2: the renderer prefers a supported `<mc:Choice>` over
                 // `<mc:Fallback>` (see `layout::live_mc_branch`), so rIds
@@ -327,6 +328,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::Image(Box::new(image))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 
@@ -656,6 +658,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::Pict(pict)],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))];
         let remap = remap_one("rId1", "synth_vml_box");
 
@@ -692,6 +695,7 @@ mod tests {
                 content: vec![],
             })],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))];
         let remap = remap_one("rId7", "https://example.com");
         rewrite_part_rels_in_blocks(&mut blocks, &remap);
@@ -728,6 +732,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::AlternateContent(ac)],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))];
         let remap = remap_one("rId1", "header3.xml::rId1");
         rewrite_part_rels_in_blocks(&mut blocks, &remap);
@@ -775,6 +780,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::Pict(pict)],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))];
         let remap = remap_one("rId1", "grouped");
         rewrite_part_rels_in_blocks(&mut blocks, &remap);

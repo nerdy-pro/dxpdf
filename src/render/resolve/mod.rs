@@ -9,6 +9,7 @@ pub mod images;
 pub mod locale;
 pub mod numbering;
 pub mod properties;
+pub mod revision;
 pub mod sections;
 pub mod shape_geometry;
 pub mod shape_visuals;
@@ -75,6 +76,17 @@ pub struct ResolvedDocument {
     /// §17.15.1.25: the document's default tab-stop interval (`w:defaultTabStop`,
     /// spec default 720 twips). Consumed by paragraph tab layout.
     pub default_tab_stop: Dimension<Twips>,
+    /// Issue #154: whether tracked-change marks are drawn (`w:revisionView`).
+    /// When false the final text renders — deletions suppressed, insertions
+    /// plain.
+    pub show_ins_del_marks: bool,
+    /// Issue #154: whether comment anchors and balloons are drawn.
+    pub show_comment_marks: bool,
+    /// Issue #154: revision-mark color per author, in first-appearance order
+    /// — see `resolve::revision`.
+    pub revision_colors: std::collections::HashMap<String, crate::render::resolve::color::RgbColor>,
+    /// Issue #154: comment content keyed by comment ID, for the balloon pass.
+    pub comments: HashMap<crate::model::CommentId, crate::model::Comment>,
 }
 
 /// Transform a raw parsed Document into a layout-ready ResolvedDocument.
@@ -121,9 +133,30 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         footers,
         footnotes,
         endnotes,
+        comments,
         media,
         embedded_fonts,
     } = doc;
+
+    // Before `resolve_sections` consumes the body: the palette walk needs it
+    // borrowed. Headers, footers and notes are not walked — a revision there
+    // still gets a mark, in the fallback color (see `resolve::revision`).
+    // Comment authors join the same numbering, in id order (deterministic
+    // where map iteration is not), so a person who both edited and commented
+    // keeps one color.
+    let mut revision_colors = revision::collect_revision_colors(&body);
+    // Issue #154: a range marker whose id the comments part never defined
+    // must not wash anything — Word ignores such orphans. Cleared here, where
+    // both sides are in hand, so layout can trust every stamp it sees.
+    let mut body = body;
+    revision::clear_orphan_comment_stamps(&mut body, &comments);
+    {
+        let mut ids: Vec<_> = comments.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            revision::register(&comments[&id].author, &mut revision_colors);
+        }
+    }
 
     let resolved_styles = styles::resolve_styles(&styles, theme.as_ref());
     let resolved_numbering = numbering::resolve_numbering(&numbering);
@@ -149,6 +182,10 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         embedded_fonts,
         even_and_odd_headers: settings.even_and_odd_headers,
         default_tab_stop: settings.default_tab_stop,
+        show_ins_del_marks: settings.show_ins_del_marks,
+        show_comment_marks: settings.show_comment_marks,
+        revision_colors,
+        comments,
     }
 }
 
@@ -170,6 +207,7 @@ mod tests {
             footers: HashMap::new(),
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
+            comments: Default::default(),
             media: HashMap::new(),
             embedded_fonts: vec![],
         }
@@ -191,8 +229,11 @@ mod tests {
                 },
                 content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
+                revision: None,
+                comment: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 
