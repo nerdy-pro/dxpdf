@@ -99,6 +99,19 @@ pub struct ParagraphStyle {
     /// §17.3.1.44: when the paragraph *does* split, forbid a single line stranded
     /// at the bottom (orphan) or top (widow) of a page. Word's default is on.
     pub widow_control: bool,
+    /// §17.3.1.32 `w:snapToGrid` as the style cascade resolved it (absent =
+    /// on). Whether it *matters* is [`ParagraphStyle::line_grid`]'s question;
+    /// the two are separate because this one is a property of the paragraph
+    /// and that one a property of where the paragraph is being placed.
+    pub snap_to_grid: bool,
+    /// §17.6.5: the section's applied line-grid pitch, stamped by the body
+    /// page layout at placement time and `None` everywhere else — table
+    /// cells (§17.6.5 excludes them without the unimplemented legacy
+    /// `w:adjustLineHeightInTable`), headers/footers, footnotes and shape
+    /// text never snap, and they stay off this field by never setting it
+    /// rather than by a flag each would have to remember to clear. See
+    /// `line_emit::resolve_line_metrics` for what the pitch does.
+    pub line_grid: Option<Pt>,
     /// §17.3.1.9: suppress spacing between paragraphs of the same style.
     pub contextual_spacing: bool,
     /// Style ID for contextual spacing comparison.
@@ -183,6 +196,8 @@ impl ParagraphStyle {
             keep_next: self.keep_next,
             keep_lines: self.keep_lines,
             widow_control: self.widow_control,
+            snap_to_grid: self.snap_to_grid,
+            line_grid: self.line_grid,
             contextual_spacing: self.contextual_spacing,
             style_id: self.style_id.clone(),
             // Caller will replace these — skip cloning the vec.
@@ -219,6 +234,9 @@ impl Default for ParagraphStyle {
             keep_lines: false,
             // §17.3.1.44: Word enables widow/orphan control by default.
             widow_control: true,
+            // §17.3.1.32: absent in the whole hierarchy means "use the grid".
+            snap_to_grid: true,
+            line_grid: None,
             contextual_spacing: false,
             style_id: None,
             page_floats: Vec::new(),

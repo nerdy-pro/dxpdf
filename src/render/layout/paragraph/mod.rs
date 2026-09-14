@@ -25,7 +25,9 @@ use crate::render::geometry::{PtOffset, PtRect, PtSize};
 use crate::render::layout::fragment::split_oversized_fragments;
 
 use borders::{emit_paragraph_borders_and_shading, emit_segment_borders_and_shading, SegmentEdges};
-use line_emit::{compute_line_placements, emit_line_commands, resolve_line_height};
+#[cfg(test)]
+use line_emit::resolve_line_height;
+use line_emit::{compute_line_placements, emit_line_commands};
 
 // ── Tab leader rendering constants ────────────────────────────────────────────
 
@@ -251,12 +253,12 @@ pub(crate) fn place_paragraph<'a>(
                 } else {
                     default_line_height
                 };
-                let lh = resolve_line_height(natural, text_h, &style.line_spacing, style.auto_fit);
+                let m = line_emit::resolve_line_metrics(natural, text_h, style);
                 if i == n - 1 {
-                    y += lp.line.ascent;
+                    y += m.baseline_shift + lp.line.ascent;
                     break;
                 }
-                y += lh;
+                y += m.advance;
             }
             Some(y)
         }
@@ -278,7 +280,7 @@ pub(crate) fn place_paragraph<'a>(
             } else {
                 default_line_height
             };
-            resolve_line_height(natural, text_h, &style.line_spacing, style.auto_fit)
+            line_emit::resolve_line_metrics(natural, text_h, style).advance
         })
         .collect();
 
