@@ -308,6 +308,19 @@ pub enum Fragment {
         /// fraction is one atom everywhere else in this pipeline.
         hyperlink_url: Option<LinkTarget>,
     },
+    /// An inline vector scene — a SmartArt diagram or a chart (issue #155),
+    /// occupying its `wp:extent` box like an image but carrying pre-built
+    /// draw commands in scene-local coordinates. Collection records the
+    /// source; `build::convert::populate_scenes` renders it, because the
+    /// scene needs the resolved theme and the measurer, which fragment
+    /// collection does not carry.
+    Scene {
+        size: PtSize,
+        source: SceneSource,
+        /// Scene-local commands, `(0,0)`–`size`; emission shifts them to the
+        /// pen. Empty until populated.
+        commands: std::rc::Rc<Vec<crate::render::layout::draw_command::DrawCommand>>,
+    },
     /// One emoji grapheme cluster (UAX #29) classified as an emoji sequence
     /// (UTS #51), to be rasterized at paint time via Skia's raster backend
     /// and embedded as an inline PDF image, because Skia's PDF backend strips
@@ -391,11 +404,20 @@ pub enum Fragment {
     },
 }
 
+/// What an inline [`Fragment::Scene`] renders, by payload key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SceneSource {
+    /// `Document::diagrams` key.
+    Diagram(crate::model::RelId),
+    /// `Document::charts` key.
+    Chart(crate::model::RelId),
+}
+
 impl Fragment {
     pub fn width(&self) -> Pt {
         match self {
             Fragment::Text { width, .. } | Fragment::MathFraction { width, .. } => *width,
-            Fragment::Image { size, .. } => size.width,
+            Fragment::Image { size, .. } | Fragment::Scene { size, .. } => size.width,
             Fragment::Emoji { advance, .. } => *advance,
             Fragment::Tab { fitting_width, .. } => fitting_width.unwrap_or(MIN_TAB_WIDTH),
             Fragment::PTab { .. } => MIN_TAB_WIDTH,
@@ -419,7 +441,7 @@ impl Fragment {
             Fragment::Text { metrics, .. } | Fragment::MathFraction { metrics, .. } => {
                 metrics.height()
             }
-            Fragment::Image { size, .. } => size.height,
+            Fragment::Image { size, .. } | Fragment::Scene { size, .. } => size.height,
             Fragment::Emoji { line_metrics, .. } => line_metrics.height(),
             Fragment::Tab { line_height, .. }
             | Fragment::PTab { line_height, .. }
@@ -474,6 +496,7 @@ impl Fragment {
             Fragment::PageBreak { .. } | Fragment::ColumnBreak | Fragment::Bookmark { .. } => false,
             Fragment::Text { .. }
             | Fragment::Image { .. }
+            | Fragment::Scene { .. }
             | Fragment::Emoji { .. }
             | Fragment::Tab { .. }
             | Fragment::PTab { .. }

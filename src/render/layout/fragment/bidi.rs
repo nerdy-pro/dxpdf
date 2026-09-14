@@ -150,6 +150,7 @@ fn build_analysis(fragments: &[Fragment]) -> (String, Vec<Option<std::ops::Range
                 match other {
                     Fragment::Tab { .. } | Fragment::PTab { .. } => text.push('\t'),
                     Fragment::Image { .. }
+                    | Fragment::Scene { .. }
                     | Fragment::Emoji { .. }
                     | Fragment::MathFraction { .. } => text.push(OBJECT),
                     Fragment::LineBreak { .. }

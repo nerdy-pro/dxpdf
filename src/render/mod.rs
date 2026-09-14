@@ -859,6 +859,8 @@ mod tests {
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
             media: HashMap::new(),
+            diagrams: HashMap::new(),
+            charts: HashMap::new(),
             embedded_fonts: vec![],
         }
     }

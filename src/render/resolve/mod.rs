@@ -43,6 +43,11 @@ pub struct ResolvedDocument {
     pub font_families: Vec<String>,
     /// Embedded media (images) — shared bytes with detected format, keyed by relationship ID.
     pub media: HashMap<RelId, MediaEntry>,
+    /// SmartArt drawings (issue #155), keyed like `media` (body rel ids
+    /// plain, header/footer ids `<part>::<rId>`-synthesized).
+    pub diagrams: HashMap<RelId, crate::model::DiagramDrawing>,
+    /// Chart parts (issue #155), keyed like `media`.
+    pub charts: HashMap<RelId, crate::model::ChartSpace>,
     /// §17.8.3: embedded fonts, carried through so the font registry can be
     /// built from the resolved document alone. They belong here rather than
     /// being read back off the `Document` because [`resolve`] consumes it.
@@ -122,6 +127,8 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
         footnotes,
         endnotes,
         media,
+        diagrams,
+        charts,
         embedded_fonts,
     } = doc;
 
@@ -138,6 +145,8 @@ pub fn resolve(doc: Document) -> ResolvedDocument {
             .into_iter()
             .map(|(id, (data, format))| (id, MediaEntry { data, format }))
             .collect(),
+        diagrams,
+        charts,
         pic_bullets: numbering.pic_bullets,
         doc_defaults_paragraph: styles.doc_defaults_paragraph,
         doc_defaults_run: styles.doc_defaults_run,
@@ -171,6 +180,8 @@ mod tests {
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
             media: HashMap::new(),
+            diagrams: HashMap::new(),
+            charts: HashMap::new(),
             embedded_fonts: vec![],
         }
     }

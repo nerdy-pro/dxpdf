@@ -25,7 +25,12 @@ use crate::docx::parse::primitives::colors::RgbHexU32;
 pub enum DrawingColorXml {
     #[serde(rename = "srgbClr")]
     Srgb(SrgbClrXml),
-    #[serde(rename = "scRgbClr")]
+    // §20.1.2.3.30 spells the element `scrgbClr` (lowercase "rgb"), and that
+    // is what Word writes — e.g. in every SmartArt `dsp:style`'s placeholder
+    // colors. The camel-case spelling is kept as an alias for any producer
+    // that emits it, but the spec form is the primary (issue #155 surfaced
+    // this: real diagram parts failed to parse).
+    #[serde(rename = "scrgbClr", alias = "scRgbClr")]
     ScRgb(ScRgbClrXml),
     #[serde(rename = "hslClr")]
     Hsl(HslClrXml),
