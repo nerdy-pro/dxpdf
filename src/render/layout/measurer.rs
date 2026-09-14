@@ -333,6 +333,7 @@ mod tests {
 
     fn fp_at_scale(scale: f32) -> FontProps {
         FontProps {
+            effects: Default::default(),
             rtl: crate::render::fonts::Toggle::Absent,
             family: Rc::from("Helvetica"),
             size: Pt::new(12.0),

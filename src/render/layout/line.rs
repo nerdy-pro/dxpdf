@@ -365,6 +365,7 @@ mod tests {
         let row = |text: &str| crate::render::layout::fragment::MathRow {
             text: text.into(),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),
@@ -406,6 +407,7 @@ mod tests {
             text: text.into(),
             break_after,
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),
@@ -639,6 +641,7 @@ mod tests {
             Fragment::Tab {
                 line_height: Pt::new(14.0),
                 font: Rc::new(FontProps {
+                    effects: Default::default(),
                     rtl: crate::render::fonts::Toggle::Absent,
                     family: Rc::from("Test"),
                     size: Pt::new(12.0),
@@ -671,6 +674,7 @@ mod tests {
                 text: "small".into(),
                 break_after: BreakAfter::Prohibited,
                 font: Rc::new(FontProps {
+                    effects: Default::default(),
                     rtl: crate::render::fonts::Toggle::Absent,
                     family: Rc::from("Test"),
                     size: Pt::new(10.0),
@@ -703,6 +707,7 @@ mod tests {
                 text: "big".into(),
                 break_after: BreakAfter::Prohibited,
                 font: Rc::new(FontProps {
+                    effects: Default::default(),
                     rtl: crate::render::fonts::Toggle::Absent,
                     family: Rc::from("Test"),
                     size: Pt::new(24.0),
