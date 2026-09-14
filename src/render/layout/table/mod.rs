@@ -18,6 +18,7 @@ pub(crate) mod borders;
 mod emit;
 mod grid;
 mod measure;
+mod shading;
 mod split;
 mod types;
 
@@ -813,11 +814,13 @@ mod tests {
                 }],
                 margins: PtEdgeInsets::ZERO,
                 grid_span: 1,
-                shading: Some(RgbColor {
-                    r: 200,
-                    g: 200,
-                    b: 200,
-                }),
+                shading: Some(crate::render::resolve::shading::ResolvedShading::Flat(
+                    RgbColor {
+                        r: 200,
+                        g: 200,
+                        b: 200,
+                    },
+                )),
                 cell_borders: None,
                 vertical_merge: None,
                 vertical_align: CellVAlign::Top,
@@ -958,11 +961,13 @@ mod tests {
         // x-positions alone cannot see a cell stretching rightward, since the
         // second cell's x is fixed by the first cell's grid column either way.
         let shaded = |text: &str| TableCellInput {
-            shading: Some(RgbColor {
-                r: 200,
-                g: 200,
-                b: 200,
-            }),
+            shading: Some(crate::render::resolve::shading::ResolvedShading::Flat(
+                RgbColor {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                },
+            )),
             ..simple_cell(text)
         };
         let rows = vec![TableRowInput {
@@ -2777,7 +2782,8 @@ mod tests {
         let rows: Vec<TableRowInput> = (0..4)
             .map(|i| {
                 let mut r = labelled_row(&[if i % 2 == 0 { "even " } else { "odd " }]);
-                r.cells[0].shading = Some(GREY);
+                r.cells[0].shading =
+                    Some(crate::render::resolve::shading::ResolvedShading::Flat(GREY));
                 r.cant_split = Some(true);
                 r
             })
