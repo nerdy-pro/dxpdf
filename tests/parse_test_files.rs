@@ -426,6 +426,7 @@ const ALL_FILES: &[&str] = &[
     "issue-157-empty-row-edge.docx",
     "equations-omml.docx",
     "universal-measures.docx",
+    "devanagari.docx",
 ];
 
 #[test]

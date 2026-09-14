@@ -253,10 +253,10 @@ pub struct ParagraphLayout {
     pub size: PtSize,
 }
 
-/// Optional text measurement callback for accurate per-character splitting.
-pub type MeasureTextFn<'a> = Option<
-    &'a dyn Fn(
-        &str,
-        &super::super::fragment::FontProps,
-    ) -> (Pt, super::super::fragment::TextMetrics),
->;
+/// Optional measuring capability for accurate per-character splitting — the
+/// same trait object as `fragment::split::MeasureFn`, aliased so the two
+/// layers keep passing one value. See [`SplitMeasure`] for the two
+/// operations and why a shaped piece needs the second.
+pub type MeasureTextFn<'a> = Option<&'a dyn SplitMeasure>;
+
+pub use super::super::fragment::SplitMeasure;

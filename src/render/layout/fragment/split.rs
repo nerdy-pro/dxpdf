@@ -16,10 +16,50 @@ use super::{BreakAfter, FontProps, Fragment, TextMetrics};
 use crate::render::dimension::Pt;
 use crate::render::spacing;
 
-/// Text measurement callback. Structurally identical to
-/// `paragraph::MeasureTextFn`, restated here so this module doesn't depend on
-/// the paragraph layer — callers in either layer pass the same closures.
-pub type MeasureFn<'a> = Option<&'a dyn Fn(&str, &FontProps) -> (Pt, TextMetrics)>;
+/// The measuring capability the split (and the paragraph layer's tab
+/// machinery) is handed — `paragraph::MeasureTextFn` aliases the same trait
+/// object, defined here so neither layer depends on the other.
+///
+/// Two operations because a piece of a shaped fragment must be measured the
+/// way it will be painted (issue #153): the painter re-shapes each piece
+/// through HarfBuzz, and for an Indic conjunct — one grapheme, so one piece —
+/// the cmap sum of its consonants can run half again wider than the ligature
+/// the shaper draws. Measuring such a piece with [`SplitMeasure::measure`]
+/// alone reserves the cmap width and strands the underline past the glyphs.
+pub trait SplitMeasure {
+    /// Cmap measurement — `TextMeasurer::measure`: advance (scaled, with
+    /// §17.3.2.35 spacing per grapheme cluster) and font metrics.
+    fn measure(&self, text: &str, font: &FontProps) -> (Pt, TextMetrics);
+
+    /// Shaped measurement for one piece of a shaped fragment —
+    /// `TextMeasurer::shaped_measurement`: the HarfBuzz advance (scaled, no
+    /// spacing) and the piece's shaped-cluster count. `None` when shaping is
+    /// unavailable or failed; the caller falls back to [`Self::measure`],
+    /// which is also what the painter's cmap fallback will draw.
+    fn shaped_piece(
+        &self,
+        text: &str,
+        font: &FontProps,
+        direction: crate::render::shape::RunDirection,
+    ) -> Option<(Pt, usize)> {
+        let _ = (text, font, direction);
+        None
+    }
+}
+
+/// Adapter for tests and callers that measure with a plain closure — the
+/// closure supplies the cmap half and [`SplitMeasure::shaped_piece`] keeps
+/// its `None` default.
+pub struct MeasureWith<F>(pub F);
+
+impl<F: Fn(&str, &FontProps) -> (Pt, TextMetrics)> SplitMeasure for MeasureWith<F> {
+    fn measure(&self, text: &str, font: &FontProps) -> (Pt, TextMetrics) {
+        (self.0)(text, font)
+    }
+}
+
+/// Optional measuring capability, `None` in width-approximating tests.
+pub type MeasureFn<'a> = Option<&'a dyn SplitMeasure>;
 
 /// True for a text fragment that is both too wide and actually splittable.
 ///
@@ -101,17 +141,44 @@ pub fn split_oversized_fragments(
         let unit_count = spacing::unit_count(text);
         let per_unit_fallback = *width / unit_count as f32;
         for unit in spacing::units(text) {
-            let (w, unit_metrics) = match measure {
-                Some(m) => m(unit, font),
-                None => (per_unit_fallback, *metrics),
+            // A piece of a shaped fragment is measured the way the painter
+            // will draw it — shaped. The cut still costs an Arabic word its
+            // joining (each piece re-shapes in isolation, the documented last
+            // resort), but a piece that is itself a ligature — an Indic
+            // conjunct is one grapheme, hence one piece — keeps its shaped
+            // width, where the cmap sum of its consonants can be half again
+            // wider than the glyph and would strand the underline past it.
+            let shaped_piece = match (measure, shaped) {
+                (Some(m), Some(s)) => m.shaped_piece(unit, font, s.direction),
+                _ => None,
+            };
+            let (w, unit_metrics, piece_units) = match (shaped_piece, measure) {
+                (Some((advance, units)), Some(m)) => (
+                    // §17.3.2.35: spacing per shaped cluster, the same
+                    // formula `fragment::shape` charges a whole fragment.
+                    advance + font.char_spacing * units as f32,
+                    m.measure(unit, font).1,
+                    units,
+                ),
+                (None, Some(m)) => {
+                    let (w, metrics) = m.measure(unit, font);
+                    (w, metrics, 1)
+                }
+                (_, None) => (per_unit_fallback, *metrics, 1),
             };
             result.push(Fragment::Text {
-                // Kept, though it buys little: a single cluster shapes to its
-                // isolated form, which is what the cmap would have given
-                // anyway. Cutting a word here is what costs the joining, and
-                // that is already this module's documented last resort — it
-                // now costs a joining script more than it costs Latin.
-                shaped: *shaped,
+                // The unit count is re-stamped, not copied: the piece's own
+                // shaped-cluster count when shaping measured it, else one —
+                // a piece is one grapheme cluster, and a shaped cluster is
+                // never finer than one where UAX #29 GB9c holds (it does not
+                // in Tamil, Kannada, Gurmukhi or Sinhala, whose viramas the
+                // pinned segmenter leaves outside InCB — there a conjunct
+                // spans two pieces and the cut degrades it to halant forms,
+                // the same accepted degradation as the lost Arabic joining).
+                shaped: shaped.map(|s| super::Shaping {
+                    unit_count: piece_units,
+                    ..s
+                }),
                 // UAX #9: a cluster of the parent's text is at the parent's
                 // level. Cutting a word never crosses a level boundary —
                 // `fragment::bidi` has already split at every one of those, so
@@ -199,6 +266,117 @@ mod tests {
             .collect()
     }
 
+    /// Issue #153: a piece of a shaped fragment is one grapheme cluster, and a
+    /// shaped cluster is never finer than one — so the piece's spacing-unit
+    /// count is re-stamped to 1, not inherited from the whole word, or every
+    /// piece would claim the parent's full complement of distribution gaps.
+    #[test]
+    fn a_shaped_fragment_splits_into_single_unit_pieces() {
+        let mut frags = vec![text_frag("مرحبا", 60.0)];
+        if let Fragment::Text { shaped, .. } = &mut frags[0] {
+            *shaped = Some(super::super::Shaping {
+                direction: crate::render::shape::RunDirection::RightToLeft,
+                unit_count: 5,
+            });
+        }
+        let result = split_oversized_fragments(&frags, Pt::new(20.0), None).expect("splits");
+        assert_eq!(result.len(), 5);
+        for frag in &result {
+            let Fragment::Text {
+                shaped: Some(s), ..
+            } = frag
+            else {
+                panic!("pieces stay marked shaped");
+            };
+            assert_eq!(s.unit_count, 1, "one grapheme piece, one spacing unit");
+            assert_eq!(
+                s.direction,
+                crate::render::shape::RunDirection::RightToLeft,
+                "direction survives the split"
+            );
+        }
+    }
+
+    /// The review finding behind the `shaped_piece` operation: a piece of a
+    /// shaped fragment must get its *shaped* width, not the cmap sum — for a
+    /// Devanagari conjunct the two differ by the whole ligature saving, and
+    /// the painter draws the shaped form. A measurer offering both answers
+    /// (cmap 30pt, shaped 17pt per piece, 1 cluster) must see the shaped one
+    /// win, with §17.3.2.35 spacing charged per shaped cluster on top.
+    #[test]
+    fn a_shaped_piece_is_measured_shaped_not_by_cmap() {
+        struct FakeMeasure;
+        impl SplitMeasure for FakeMeasure {
+            fn measure(&self, _: &str, _: &FontProps) -> (Pt, TextMetrics) {
+                (
+                    Pt::new(30.0),
+                    TextMetrics {
+                        ascent: Pt::new(9.0),
+                        descent: Pt::new(3.0),
+                        leading: Pt::ZERO,
+                    },
+                )
+            }
+            fn shaped_piece(
+                &self,
+                _: &str,
+                _: &FontProps,
+                _: crate::render::shape::RunDirection,
+            ) -> Option<(Pt, usize)> {
+                Some((Pt::new(17.0), 1))
+            }
+        }
+
+        let mut frags = vec![text_frag("क्षमता", 90.0)];
+        if let Fragment::Text { shaped, font, .. } = &mut frags[0] {
+            *shaped = Some(super::super::Shaping {
+                direction: crate::render::shape::RunDirection::LeftToRight,
+                unit_count: 3,
+            });
+            *font = Rc::new(FontProps {
+                char_spacing: Pt::new(2.0),
+                ..(**font).clone()
+            });
+        }
+        let result =
+            split_oversized_fragments(&frags, Pt::new(20.0), Some(&FakeMeasure)).expect("splits");
+        assert_eq!(result.len(), 3, "क्ष / म / ता — three grapheme pieces");
+        for frag in &result {
+            let Fragment::Text {
+                width,
+                shaped: Some(s),
+                ..
+            } = frag
+            else {
+                panic!("pieces stay marked shaped");
+            };
+            assert!(
+                (width.raw() - 19.0).abs() < 1e-4,
+                "shaped 17pt + 2pt spacing × 1 cluster, not cmap 30pt; got {width:?}"
+            );
+            assert_eq!(s.unit_count, 1);
+        }
+
+        // The same fragment with no shaped mark keeps the cmap measurement —
+        // shaped_piece must not leak onto the cmap path.
+        let mut plain = frags.clone();
+        if let Fragment::Text { shaped, .. } = &mut plain[0] {
+            *shaped = None;
+        }
+        let result =
+            split_oversized_fragments(&plain, Pt::new(20.0), Some(&FakeMeasure)).expect("splits");
+        for frag in &result {
+            let Fragment::Text { width, shaped, .. } = frag else {
+                unreachable!();
+            };
+            assert!(shaped.is_none());
+            assert!(
+                (width.raw() - 30.0).abs() < 1e-4,
+                "cmap width, got {width:?}"
+            );
+        }
+    }
+
     #[test]
     fn splits_into_one_fragment_per_character() {
         // "ab" at 60pt is wider than max_width=20pt → two 30pt characters
@@ -234,8 +412,8 @@ mod tests {
             )
         };
         let frags = vec![text_frag("wi", 50.0)];
-        let result =
-            split_oversized_fragments(&frags, Pt::new(20.0), Some(&measure)).expect("splits");
+        let result = split_oversized_fragments(&frags, Pt::new(20.0), Some(&MeasureWith(measure)))
+            .expect("splits");
         let widths: Vec<f32> = result
             .iter()
             .map(|f| match f {

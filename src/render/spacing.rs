@@ -48,31 +48,48 @@
 //! break between a letter and its own accent and carry the mark to the next
 //! line.
 //!
-//! # Why not the shaped cluster
+//! # For a shaped run, the unit is the shaped cluster
 //!
-//! A shaping engine reports finer, script-aware boundaries, and issue #82 asks
-//! for them. For **most** text they would be boundaries the painter cannot
-//! honour: `draw_str` and `TextBlob::from_str` map codepoints to glyphs through
-//! the cmap alone, with no GSUB, and that is still the path every Latin,
-//! Cyrillic, Greek, CJK, Hebrew and Thai run takes.
+//! This module's grapheme cluster is the unit **for text the painter draws
+//! from its string**: `draw_str` and `TextBlob::from_str` map codepoints to
+//! glyphs through the cmap alone, with no GSUB, so no finer or coarser
+//! boundary than UAX #29's is honourable there — and that is still the path
+//! every Latin, Cyrillic, Greek, CJK and Thai run takes (and Hebrew *script*
+//! could take, but a Hebrew run at its ordinary right-to-left level is shaped
+//! for glyph order — `layout::fragment::shape`'s reason 2 — so in practice
+//! Hebrew text uses the shaped unit below), which is why nothing in this file
+//! changed for issue #153.
 //!
-//! Since issue #131 it is no longer the path *every* run takes. A run in a
-//! cursive-joining script — the ones [`crate::render::shape::needs_shaping`]
-//! picks out — is shaped through HarfBuzz and painted with `draw_glyphs_at`,
-//! so for those runs a shaped cluster is a boundary the painter could honour.
-//! This module does not yet offer one, and the consequence is stated at the
-//! seam that decides it (`layout::fragment::shape`): §17.3.2.35 `w:spacing` and
-//! §17.3.1.13 `distribute` are **not applied to a shaped run**, because
-//! inserting space at grapheme-cluster boundaries that shaping has since
-//! ligated across would put it in the wrong places, and neither measurement
-//! nor paint adds it.
+//! A run [`crate::render::shape::needs_shaping`] picks out — cursive-joining
+//! since issue #131, reordering (Indic) since issue #153 — or that sits at a
+//! right-to-left level is shaped through HarfBuzz, and its unit is the
+//! **shaped cluster**: the glyphs sharing one HarfBuzz cluster value. A conjunct's glyphs share one; a ligature merges
+//! what were separate grapheme clusters; a prebase matra's glyph belongs to a
+//! cluster whose text it precedes. Grapheme boundaries would fall inside all
+//! three, which is exactly the "spacing inside a unit" defect the table above
+//! shows for scalars. The same three functions of the question exist for that
+//! unit, one per asker:
 //!
-//! So the seam this module's own doc used to point at is now half-crossed. What
-//! remains for issue #82 is the other half: make the unit here the shaped
-//! cluster for a shaped run, and every caller above stays as it is. Indic
-//! reordering waits on the same change — README tracks it as its own row, and
-//! that is why it is not simply another entry in
-//! [`crate::render::shape::needs_shaping`]'s predicate.
+//! | Caller | Shaped counterpart |
+//! |---|---|
+//! | measurement | [`ShapedRun::unit_count`](crate::render::shape::ShapedRun::unit_count), via `TextMeasurer::shaped_measurement` — `layout::fragment::shape` swaps both the advance and the spacing term's count |
+//! | distribution | the count stored on the fragment (`fragment::Shaping::unit_count`), because `line_emit` has no measurer |
+//! | paint | the painter's own shaping pass, grouped by cluster value (`painter::cluster_spacing_shifts`) |
+//!
+//! All three are one number because all three come from the same shaper over
+//! the same typeface — the same argument that keeps `units`/`unit_count`
+//! below a single definition for the cmap path.
+//!
+//! One caller keeps the grapheme unit even for a shaped run: the emergency
+//! splitter (`layout::fragment::split`). A shaped cluster is never *finer*
+//! than a grapheme cluster — the shape module folds cluster values to
+//! grapheme starts — so a grapheme seam falls either *between* shaped
+//! clusters or across a ligature that re-shaping the halves degrades legibly:
+//! a lam-alef loses its ligature, and a conjunct in the scripts whose viramas
+//! UAX #29's InCB derivation leaves out (Tamil, Kannada, Gurmukhi, Sinhala —
+//! GB9c keeps the *other* Indic conjuncts one grapheme) degrades to halant
+//! forms. Both are that module's documented last resort, and each piece is
+//! re-measured shaped so its box still matches what is painted.
 
 use unicode_segmentation::UnicodeSegmentation;
 

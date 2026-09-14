@@ -234,12 +234,15 @@ impl PaintState {
 /// Positions come back as absolute offsets from the run origin, which is what
 /// [`Canvas::draw_glyphs_at`] takes — the same convention `render::emoji`'s
 /// rasterizer relies on, and the reason neither accumulates a pen.
+#[allow(clippy::too_many_arguments)] // one draw command's fields, passed through
 fn draw_shaped(
     canvas: &skia_safe::Canvas,
     shaper: Option<&crate::render::shape::Shaper>,
     font: &skia_safe::Font,
     text: &str,
     direction: crate::render::shape::RunDirection,
+    char_spacing: Pt,
+    text_scale: f32,
     position: crate::render::geometry::PtOffset,
     paint: &Paint,
 ) -> bool {
@@ -253,13 +256,150 @@ fn draw_shaped(
         return false;
     }
     let ids: Vec<skia_safe::GlyphId> = run.glyphs.iter().map(|g| g.id).collect();
-    let offsets: Vec<skia_safe::Point> = run
-        .glyphs
-        .iter()
-        .map(|g| skia_safe::Point::new(f32::from(g.x), f32::from(g.y)))
+    let offsets = shaped_offsets(&run.glyphs, char_spacing, text_scale, direction);
+    let offsets: Vec<skia_safe::Point> = offsets
+        .into_iter()
+        .zip(run.glyphs.iter())
+        .map(|(x, g)| skia_safe::Point::new(f32::from(x), f32::from(g.y)))
         .collect();
     canvas.draw_glyphs_at(&ids, &*offsets, to_point(position), font, paint);
     true
+}
+
+/// The horizontal offset each shaped glyph is drawn at: its shaped position
+/// scaled per §17.3.2.45, plus its cluster's §17.3.2.35 spacing shift.
+///
+/// The scaling is what keeps the painted run inside the box layout reserved.
+/// `shaped_measurement` charges `total_advance × text_scale`, and the glyph
+/// outlines are widened by the font clone's `scale_x` — but the shaper reports
+/// positions against the *unscaled* font, so drawing them verbatim under
+/// `w:w` paints a run 1/scale as wide as its box (glyphs overlapping under
+/// expansion, gapping under compression) with the underline and borders spanning
+/// the box. Scaling the positions is the other half of `scale_x`.
+/// `char_spacing` stays unscaled, exactly as it does in the measured width.
+fn shaped_offsets(
+    glyphs: &[crate::render::shape::ShapedGlyph],
+    char_spacing: Pt,
+    text_scale: f32,
+    direction: crate::render::shape::RunDirection,
+) -> Vec<Pt> {
+    let shifts = (char_spacing.abs() > Pt::ZERO)
+        .then(|| cluster_spacing_shifts(glyphs, char_spacing, direction));
+    glyphs
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let shift = shifts.as_ref().map_or(Pt::ZERO, |s| s[i]);
+            g.x * text_scale + shift
+        })
+        .collect()
+}
+
+/// §17.3.2.35 / §17.3.1.13 on a shaped run (issue #153): how far each glyph
+/// moves so that `char_spacing` opens between shaped clusters — never inside
+/// one, which re-shaping per unit would also get wrong by breaking joining.
+///
+/// The model is the visual one `line_emit`'s distribution accounting uses:
+/// one gap after each unit in visual left-to-right order, so the unit at
+/// visual rank `k` moves right by `k × spacing`, whichever way the run reads.
+/// Ranking clusters by their leftmost glyph gives that order regardless of
+/// how the shaper ordered the glyphs. The leftmost unit stays flush at the
+/// fragment's left edge and any run-final gap falls at the box's right edge —
+/// which is exactly what layout reserved in both cases that reach here: an
+/// authored `w:spacing` box is `advance + units × spacing` (its run-final gap
+/// is the box's right edge), and a distributed fragment's box grows by one
+/// spacing per *visual* gap — `units` when another unit follows on the line,
+/// `units − 1` for the line-final fragment, whose last unit must land flush
+/// on the line edge, not a gap beyond it.
+///
+/// For a right-to-left run Word's pen would hang an authored run-final gap on
+/// the *left* edge instead. That is one spacing unit of placement inside the
+/// same box; taking the visual model for both directions is what keeps this
+/// function unable to disagree with the box the line accounting reserved —
+/// the disagreement that overflows a line-final Arabic fragment past its
+/// margin under `distribute`.
+fn cluster_spacing_shifts(
+    glyphs: &[crate::render::shape::ShapedGlyph],
+    char_spacing: Pt,
+    direction: crate::render::shape::RunDirection,
+) -> Vec<Pt> {
+    use std::collections::HashMap;
+    let mut leftmost: HashMap<u32, Pt> = HashMap::new();
+    for g in glyphs {
+        leftmost
+            .entry(g.cluster)
+            .and_modify(|x| {
+                if g.x < *x {
+                    *x = g.x;
+                }
+            })
+            .or_insert(g.x);
+    }
+    let mut visual: Vec<(u32, Pt)> = leftmost.into_iter().collect();
+    // Positions are finite Skia pixel offsets; a tie happens when a
+    // zero-width cluster (an RLM, say) sits flush against its neighbour, and
+    // is broken the way the run reads — text order runs rightward in an LTR
+    // run and leftward in an RTL one, so ascending byte offset is the visual
+    // order for the first and descending for the second.
+    let rtl = direction == crate::render::shape::RunDirection::RightToLeft;
+    visual.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| if rtl { b.0.cmp(&a.0) } else { a.0.cmp(&b.0) })
+    });
+    let rank: HashMap<u32, usize> = visual
+        .iter()
+        .enumerate()
+        .map(|(k, (cluster, _))| (*cluster, k))
+        .collect();
+    glyphs
+        .iter()
+        .map(|g| char_spacing * rank[&g.cluster] as f32)
+        .collect()
+}
+
+/// §17.3.2.35 w:spacing / §17.3.1.13 distribute on the cmap path — draw one
+/// spacing unit at a time with explicit spacing between them, matching the
+/// measured fragment width. The unit is a grapheme cluster, and comes from the
+/// same module the measurer counts with, so the width laid out and the width
+/// painted are the same number — see [`crate::render::spacing`].
+fn draw_with_char_spacing(
+    canvas: &skia_safe::Canvas,
+    font: &skia_safe::Font,
+    text: &str,
+    position: crate::render::geometry::PtOffset,
+    char_spacing: Pt,
+    paint: &Paint,
+) {
+    let unit_count = spacing::unit_count(text);
+    let glyphs = font.text_to_glyphs_vec(text);
+    // Batch path: use text_to_glyphs + get_widths when glyph count matches
+    // unit count (common Latin/CJK text). A multi-codepoint cluster maps to
+    // more glyphs than units, so it falls to per-unit measure_str below and
+    // is drawn whole — the mark composes over its base because its own
+    // advance is zero.
+    let batch_widths = if glyphs.len() == unit_count {
+        let mut widths = vec![0f32; glyphs.len()];
+        font.get_widths(&glyphs, &mut widths);
+        Some(widths)
+    } else {
+        None
+    };
+
+    let mut cursor = position;
+    for (i, unit) in spacing::units(text).enumerate() {
+        // Per-glyph widths from `get_widths` already include scale_x —
+        // they're advances of the scaled font. measure_str on the scaled font
+        // likewise returns the scaled advance, so no further multiplication
+        // is needed. char_spacing stays unscaled (§17.3.2.45).
+        let w = if let Some(ref widths) = batch_widths {
+            widths[i]
+        } else {
+            font.measure_str(unit, None).0
+        };
+        canvas.draw_str(unit, to_point(cursor), font, paint);
+        cursor.x += Pt::new(w) + char_spacing;
+    }
 }
 
 fn render_page(
@@ -365,62 +505,49 @@ fn render_page(
                     // codepoint (see `subset::collect`), so the substitutions
                     // survive subsetting.
                     //
-                    // §17.3.2.35 `w:spacing` is not applied to a shaped run —
-                    // `layout::fragment::shape` says why, and does not add it
-                    // to the measured width either.
+                    // §17.3.2.35 `w:spacing` on a shaped run opens between
+                    // the *shaped* clusters — the same units the measured
+                    // width charged it for (issue #153, `layout::fragment::
+                    // shape`); `cluster_spacing_shifts` states the geometry.
                     if !draw_shaped(
                         canvas,
                         shaper.as_ref(),
                         font,
                         text,
                         *direction,
+                        *char_spacing,
+                        *text_scale,
                         *position,
                         &text_paint,
                     ) {
                         // No shaper in this build, or nothing came back. Fall
                         // through to the cmap path: wrong in the way this
-                        // engine was wrong before #131, rather than blank.
-                        canvas.draw_str(text, to_point(*position), font, &text_paint);
+                        // engine was wrong before #131, rather than blank. The
+                        // fragment's width then kept its cmap measurement —
+                        // grapheme-cluster spacing included — so the cmap
+                        // spacing loop is the matching way to draw it.
+                        if char_spacing.abs() > Pt::ZERO {
+                            draw_with_char_spacing(
+                                canvas,
+                                font,
+                                text,
+                                *position,
+                                *char_spacing,
+                                &text_paint,
+                            );
+                        } else {
+                            canvas.draw_str(text, to_point(*position), font, &text_paint);
+                        }
                     }
                 } else if char_spacing.abs() > Pt::ZERO {
-                    // §17.3.2.35 w:spacing / §17.3.1.13 distribute — draw one
-                    // spacing unit at a time with explicit spacing between
-                    // them, matching the measured fragment width. The unit is
-                    // a grapheme cluster, and comes from the same module the
-                    // measurer counts with, so the width laid out and the width
-                    // painted are the same number — see
-                    // [`crate::render::spacing`].
-                    let unit_count = spacing::unit_count(text);
-                    let glyphs = font.text_to_glyphs_vec(&**text);
-                    // Batch path: use text_to_glyphs + get_widths when glyph
-                    // count matches unit count (common Latin/CJK text).
-                    // A multi-codepoint cluster maps to more glyphs than units,
-                    // so it falls to per-unit measure_str below and is drawn
-                    // whole — the mark composes over its base because its own
-                    // advance is zero.
-                    let batch_widths = if glyphs.len() == unit_count {
-                        let mut widths = vec![0f32; glyphs.len()];
-                        font.get_widths(&glyphs, &mut widths);
-                        Some(widths)
-                    } else {
-                        None
-                    };
-
-                    let mut cursor = *position;
-                    for (i, unit) in spacing::units(text).enumerate() {
-                        // Per-glyph widths from `get_widths` already include
-                        // scale_x — they're advances of the scaled font.
-                        // measure_str on the scaled font likewise returns the
-                        // scaled advance, so no further multiplication is
-                        // needed. char_spacing stays unscaled (§17.3.2.45).
-                        let w = if let Some(ref widths) = batch_widths {
-                            widths[i]
-                        } else {
-                            font.measure_str(unit, None).0
-                        };
-                        canvas.draw_str(unit, to_point(cursor), font, &text_paint);
-                        cursor.x += Pt::new(w) + *char_spacing;
-                    }
+                    draw_with_char_spacing(
+                        canvas,
+                        font,
+                        text,
+                        *position,
+                        *char_spacing,
+                        &text_paint,
+                    );
                 } else if let Some(slot) = blob_slot {
                     // Common path: reuse a cached, position-independent glyph
                     // run instead of remapping text→glyphs on every draw_str.
@@ -1052,8 +1179,122 @@ mod tests {
     use crate::render::fonts::Toggle;
     use crate::render::geometry::{PtOffset, PtSize};
     use crate::render::resolve::color::RgbColor;
+    use crate::render::shape::{RunDirection, ShapedGlyph};
     use skia_safe::FontMgr;
     use std::rc::Rc;
+
+    // ── §17.3.2.35 on shaped runs: cluster_spacing_shifts ─────────────────
+
+    fn glyph(cluster: u32, x: f32) -> ShapedGlyph {
+        ShapedGlyph {
+            id: 1,
+            x: Pt::new(x),
+            y: Pt::ZERO,
+            cluster,
+        }
+    }
+
+    fn shifts_of(glyphs: &[ShapedGlyph], spacing: f32) -> Vec<f32> {
+        shifts_of_dir(glyphs, spacing, RunDirection::LeftToRight)
+    }
+
+    fn shifts_of_dir(glyphs: &[ShapedGlyph], spacing: f32, direction: RunDirection) -> Vec<f32> {
+        cluster_spacing_shifts(glyphs, Pt::new(spacing), direction)
+            .into_iter()
+            .map(f32::from)
+            .collect()
+    }
+
+    /// LTR: the unit at visual rank k has k opened gaps to its left, and the
+    /// run-final gap stays at the right — matching the cmap loop, whose cursor
+    /// adds the spacing after every unit including the last.
+    #[test]
+    fn ltr_clusters_shift_by_their_visual_rank() {
+        let glyphs = [glyph(0, 0.0), glyph(1, 10.0), glyph(2, 20.0)];
+        assert_eq!(shifts_of(&glyphs, 2.0), vec![0.0, 2.0, 4.0]);
+    }
+
+    /// The defining property of the shaped unit: glyphs sharing a cluster —
+    /// a conjunct, a base and its reordered matra — move together, so no
+    /// spacing ever opens inside one.
+    #[test]
+    fn glyphs_of_one_cluster_share_one_shift() {
+        let glyphs = [glyph(0, 0.0), glyph(0, 4.0), glyph(3, 12.0)];
+        assert_eq!(
+            shifts_of(&glyphs, 2.0),
+            vec![0.0, 0.0, 2.0],
+            "a merged cluster is one unit however many glyphs and bytes it spans"
+        );
+    }
+
+    /// A right-to-left run uses the same visual ranking — see the function's
+    /// doc for why the model is visual for both directions. The shaper hands
+    /// RTL glyphs over logical-first (= visually rightmost first), so this
+    /// also pins that the ranking follows positions, not array order: the
+    /// glyph listed first is visually last and gets the largest shift.
+    #[test]
+    fn rtl_clusters_rank_by_position_not_glyph_order() {
+        let glyphs = [glyph(0, 20.0), glyph(2, 10.0), glyph(4, 0.0)];
+        assert_eq!(
+            shifts_of_dir(&glyphs, 2.0, RunDirection::RightToLeft),
+            vec![4.0, 2.0, 0.0]
+        );
+    }
+
+    /// A zero-width cluster — an RLM riding along in Arabic text — ties with
+    /// its neighbour at one x, and the tie is broken the way the run reads:
+    /// in an RTL run the earlier byte offset is the *rightward* neighbour, so
+    /// ascending-byte ranking would swap the two and mis-size the gaps on
+    /// both of their sides by one spacing step.
+    #[test]
+    fn a_zero_width_cluster_tie_breaks_in_reading_order() {
+        // RTL run "A·RLM·B" (bytes 0, 2, 5): B visually leftmost at x=0; the
+        // zero-width RLM sits flush at B's right edge, x=10 — exactly where A
+        // begins.
+        let glyphs = [glyph(0, 10.0), glyph(2, 10.0), glyph(5, 0.0)];
+        assert_eq!(
+            shifts_of_dir(&glyphs, 2.0, RunDirection::RightToLeft),
+            vec![4.0, 2.0, 0.0],
+            "reading order at the tie: RLM (byte 2) stands left of A (byte 0)"
+        );
+        // The same positions in an LTR run read the other way around.
+        assert_eq!(
+            shifts_of_dir(&glyphs, 2.0, RunDirection::LeftToRight),
+            vec![2.0, 4.0, 0.0]
+        );
+    }
+
+    /// §17.3.2.45: shaped glyph positions are advances of the *unscaled*
+    /// font, so the painter multiplies them by `text_scale` — the reserved
+    /// box did (`shaped_measurement` scales the advance) — while the spacing
+    /// shift stays unscaled, exactly as the measured width charged it.
+    #[test]
+    fn shaped_offsets_scale_positions_but_not_spacing() {
+        let glyphs = [glyph(0, 0.0), glyph(1, 10.0), glyph(2, 20.0)];
+        let offsets: Vec<f32> =
+            shaped_offsets(&glyphs, Pt::new(2.0), 1.5, RunDirection::LeftToRight)
+                .into_iter()
+                .map(f32::from)
+                .collect();
+        assert_eq!(offsets, vec![0.0, 17.0, 34.0], "x × 1.5 + rank × 2.0");
+        let unscaled: Vec<f32> = shaped_offsets(&glyphs, Pt::ZERO, 1.0, RunDirection::LeftToRight)
+            .into_iter()
+            .map(f32::from)
+            .collect();
+        assert_eq!(
+            unscaled,
+            vec![0.0, 10.0, 20.0],
+            "scale 1.0, no spacing: verbatim"
+        );
+    }
+
+    /// §17.3.2.35 allows negative spacing (condensed text); the shifts follow
+    /// the sign, they don't assume expansion.
+    #[test]
+    fn negative_spacing_condenses() {
+        let glyphs = [glyph(0, 0.0), glyph(1, 10.0)];
+        assert_eq!(shifts_of(&glyphs, -1.5), vec![0.0, -1.5]);
+    }
 
     fn test_font_mgr() -> FontMgr {
         FontMgr::new()
