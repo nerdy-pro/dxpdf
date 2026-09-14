@@ -20,10 +20,20 @@ pub struct MediaEntry {
 }
 
 /// Extract the embedded image relationship ID from a DrawingML Image.
-/// Navigates: Image → graphic → Picture → blip_fill → blip → embed.
+/// Navigates: Image → graphic → Picture → blip_fill → blip.
+///
+/// The `svgBlip` extension outranks the main embed (issue #150):
+/// [MS-ODRAWXML] "Pictures" defines the main blip's raster as a copy kept
+/// "for backward compatibility" with consumers that cannot draw SVG — this
+/// renderer can, so the SVG part is the picture. LibreOffice 24.2 reads the
+/// pair the same way. Word always writes the SVG part it references, so a
+/// missing part means a package broken in a way no fallback rule saves.
 pub fn extract_image_rel_id(image: &Image) -> Option<&RelId> {
     match image.graphic.as_ref()? {
-        GraphicContent::Picture(pic) => pic.blip_fill.blip.as_ref()?.embed.as_ref(),
+        GraphicContent::Picture(pic) => {
+            let blip = pic.blip_fill.blip.as_ref()?;
+            blip.svg_embed.as_ref().or(blip.embed.as_ref())
+        }
         GraphicContent::WordProcessingShape(_) => None,
     }
 }
@@ -112,6 +122,7 @@ mod tests {
                     rotate_with_shape: None,
                     dpi: None,
                     blip: Some(Blip {
+                        svg_embed: None,
                         embed: Some(RelId::new(rel_id)),
                         link: None,
                         compression: None,

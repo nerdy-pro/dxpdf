@@ -255,6 +255,37 @@ pub struct BlipXml {
     pub link: Option<String>,
     #[serde(rename = "@cstate", default)]
     pub cstate: Option<StBlipCompression>,
+    /// §20.1.2.2.16 `a:extLst` — read for the one extension this engine
+    /// consumes, [MS-ODRAWXML]'s `asvg:svgBlip` (issue #150).
+    #[serde(rename = "extLst", default)]
+    pub ext_lst: Vec<BlipExtLstXml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BlipExtLstXml {
+    #[serde(rename = "ext", default)]
+    pub ext: Vec<BlipExtXml>,
+}
+
+/// One `a:ext`. The `svgBlip` child is what identifies the SVG extension —
+/// more robust than matching the `@uri` GUID, and Word writes other
+/// extensions (`a14:useLocalDpi`) into the same list, which simply carry no
+/// `svgBlip` and contribute nothing.
+#[derive(Debug, Deserialize)]
+pub struct BlipExtXml {
+    #[serde(rename = "svgBlip", default)]
+    pub svg_blip: Vec<SvgBlipXml>,
+}
+
+/// [MS-ODRAWXML] `CT_SVGBlip` (namespace
+/// `http://schemas.microsoft.com/office/drawing/2016/SVG/main`): the same
+/// `AG_Blob` attribute group as `a:blip` itself. Only `r:embed` is consumed
+/// — an `r:link` SVG lives outside the package, like every other linked
+/// image this engine does not fetch.
+#[derive(Debug, Deserialize)]
+pub struct SvgBlipXml {
+    #[serde(rename = "@r:embed", alias = "@embed", default)]
+    pub embed: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -342,10 +373,23 @@ impl From<StRectAlignment> for RectAlignment {
 impl From<BlipFillXml> for BlipFill {
     fn from(x: BlipFillXml) -> Self {
         use crate::docx::model::RelId;
-        let blip = Dup::from(x.blip).into_value().map(|b| Blip {
-            embed: b.embed.map(RelId::new),
-            link: b.link.map(RelId::new),
-            compression: b.cstate.map(Into::into),
+        let blip = Dup::from(x.blip).into_value().map(|b| {
+            // [MS-ODRAWXML] "Pictures": the svgBlip extension carries the
+            // SVG part's relationship, beside the main blip's rasterized
+            // fallback. First occurrence wins — the extension is defined
+            // once; a duplicate is a malformed producer.
+            let svg_embed = b
+                .ext_lst
+                .iter()
+                .flat_map(|l| &l.ext)
+                .flat_map(|e| &e.svg_blip)
+                .find_map(|svg| svg.embed.clone());
+            Blip {
+                embed: b.embed.map(RelId::new),
+                link: b.link.map(RelId::new),
+                compression: b.cstate.map(Into::into),
+                svg_embed: svg_embed.map(RelId::new),
+            }
         });
         let fill_kind = match (
             Dup::from(x.stretch).into_value(),

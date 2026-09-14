@@ -477,7 +477,7 @@ fn render_page(
                         // The cached bitmap already has any crop baked in → the
                         // whole bitmap maps to `dst`.
                         canvas.draw_image_rect(image, None, dst, &default_paint);
-                    } else if let Some(decoded) = decode_image(image_data) {
+                    } else if let Some(decoded) = decode_image(image_data, (target_w, target_h)) {
                         match &crop {
                             // Bake the visible sub-region into a right-sized
                             // bitmap so the PDF never carries the cropped-away
@@ -870,11 +870,23 @@ fn paint_effect(
 
 /// Decode a `MediaEntry` to a Skia image, dispatching on format.
 ///
+/// `target` is the display size in pixels the caller computed for
+/// downsampling. Only SVG reads it — a vector has no resolution of its own,
+/// so it rasterizes at exactly the size the page needs, and the bitmap
+/// cache's size-keyed entries keep two differently-sized placements apart.
+/// The raster formats decode at their native size and are downsampled after,
+/// as before.
+///
 /// Returns `None` if the format is unsupported or the data is malformed.
-fn decode_image(entry: &MediaEntry) -> Option<skia_safe::Image> {
+fn decode_image(entry: &MediaEntry, target: (i32, i32)) -> Option<skia_safe::Image> {
     use crate::model::ImageFormat;
     match entry.format {
         ImageFormat::Emf => crate::render::emf::decode_emf_bitmap(&entry.data),
+        ImageFormat::Wmf => crate::render::wmf::decode_wmf_bitmap(&entry.data),
+        ImageFormat::Svg => {
+            let (w, h) = target;
+            crate::render::svg::decode_svg(&entry.data, Some((w.max(1) as u32, h.max(1) as u32)))
+        }
         // All other formats are handled by Skia's built-in decoder.
         _ => skia_safe::Image::from_encoded(Data::new_copy(&entry.data)),
     }
