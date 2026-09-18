@@ -436,6 +436,240 @@ pub fn resolve_and_layout(doc: Document) -> (ResolvedDocument, Vec<LayoutedPage>
 
 /// Lay out a resolved document using Skia font metrics resolved through
 /// the supplied [`fonts::FontRegistry`].
+/// Issue #154: draw one balloon per comment anchor into the page's right
+/// margin band, with a connector line from the anchor.
+///
+/// Anchors (`DrawCommand::CommentAnchor`) are consumed — removed from the
+/// command stream — whether or not a balloon is drawn, so nothing downstream
+/// sees them. Balloons stack top-down in anchor order: each opens level with
+/// its anchor when the slot is free, else below the previous balloon. The
+/// band is the right page margin minus a 4pt gap each side; a margin too
+/// narrow to hold readable text (< 24pt of band) draws nothing, with a
+/// warning, rather than smearing glyphs over the page edge — Word widens the
+/// sheet for its markup area, which a fixed page cannot.
+fn render_comment_balloons(
+    pages: &mut [LayoutedPage],
+    config: &PageConfig,
+    ctx: &BuildContext,
+    bodies: &std::collections::HashMap<
+        crate::model::CommentId,
+        Vec<(
+            Vec<layout::fragment::Fragment>,
+            layout::paragraph::ParagraphStyle,
+        )>,
+    >,
+    // One balloon per comment, document-wide: §17.4.49 repeated table header
+    // rows replay their commands — anchor included — on every continuation
+    // page, and only the first occurrence should balloon. Later anchors are
+    // consumed without drawing.
+    seen: &mut std::collections::HashSet<crate::model::CommentId>,
+    default_line_height: dimension::Pt,
+) {
+    use crate::render::geometry::{PtLineSegment, PtOffset, PtRect};
+    use crate::render::layout::draw_command::DrawCommand;
+    use crate::render::resolve::revision::{COMMENT_RANGE_SHADING, REVISION_FALLBACK_COLOR};
+    use dimension::Pt;
+
+    const EDGE_GAP: f32 = 4.0;
+    const PAD: f32 = 4.0;
+    const STACK_GAP: f32 = 6.0;
+    const LABEL_SIZE: f32 = 8.0;
+
+    let band_x = config.page_size.width - config.margins.right + Pt::new(EDGE_GAP);
+    let band_w = config.margins.right - Pt::new(2.0 * EDGE_GAP);
+    let band_usable = band_w >= Pt::new(24.0);
+    let mut warned = false;
+    let mut warned_overflow = false;
+
+    for page in pages {
+        let mut anchors: Vec<(PtOffset, crate::model::CommentId)> = Vec::new();
+        page.commands.retain(|cmd| match cmd {
+            DrawCommand::CommentAnchor { position, id } => {
+                anchors.push((*position, *id));
+                false
+            }
+            _ => true,
+        });
+        if anchors.is_empty() {
+            continue;
+        }
+        if !band_usable {
+            if !warned {
+                log::warn!(
+                    "comment balloons skipped: right margin leaves a {:.1}pt band",
+                    f32::from(band_w),
+                );
+                warned = true;
+            }
+            continue;
+        }
+        anchors.sort_by(|a, b| {
+            (f32::from(a.0.y), f32::from(a.0.x))
+                .partial_cmp(&(f32::from(b.0.y), f32::from(b.0.x)))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let measure_fn = |text: &str,
+                          font: &layout::fragment::FontProps|
+         -> (Pt, layout::fragment::TextMetrics) {
+            ctx.measurer.measure(text, font)
+        };
+        let inner_w = band_w - Pt::new(2.0 * PAD);
+        let constraints = layout::BoxConstraints::tight_width(inner_w, Pt::INFINITY);
+        let mut prev_bottom = Pt::new(f32::NEG_INFINITY);
+
+        for (anchor, id) in anchors {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(paras) = bodies.get(&id) else {
+                // An anchor whose comment the comments part never defined.
+                continue;
+            };
+            let Some(comment) = ctx.resolved.comments.get(&id) else {
+                continue;
+            };
+            let color = ctx
+                .resolved
+                .revision_colors
+                .get(&comment.author)
+                .copied()
+                .unwrap_or(REVISION_FALLBACK_COLOR);
+
+            // The author label leads the balloon; its face comes from the
+            // comment's own first run so the balloon matches the document.
+            let label_family: std::rc::Rc<str> = paras
+                .iter()
+                .flat_map(|(frags, _)| frags.iter())
+                .find_map(|f| f.font_props().map(|fp| fp.family.clone()))
+                .unwrap_or_else(|| std::rc::Rc::from("Helvetica"));
+            let label_font = layout::fragment::FontProps {
+                family: label_family,
+                size: Pt::new(LABEL_SIZE),
+                bold: crate::render::fonts::Toggle::On,
+                italic: crate::render::fonts::Toggle::Absent,
+                underline: false,
+                rtl: crate::render::fonts::Toggle::Absent,
+                char_spacing: Pt::ZERO,
+                text_scale: 1.0,
+                underline_position: Pt::ZERO,
+                underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
+            };
+            let (_, label_metrics) = ctx.measurer.measure(&comment.author, &label_font);
+            let label_h = label_metrics.height() + Pt::new(2.0);
+
+            let para_layouts: Vec<_> = paras
+                .iter()
+                .map(|(frags, style)| {
+                    layout::paragraph::layout_paragraph(
+                        frags,
+                        &constraints,
+                        style,
+                        default_line_height,
+                        Some(&measure_fn),
+                    )
+                })
+                .collect();
+            let content_h: Pt = para_layouts
+                .iter()
+                .fold(Pt::ZERO, |acc, l| acc + l.size.height);
+            let balloon_h = label_h + content_h + Pt::new(2.0 * PAD);
+
+            let desired = anchor.y - label_metrics.ascent;
+            let balloon_y = if f32::from(prev_bottom).is_finite() {
+                let floor = prev_bottom + Pt::new(STACK_GAP);
+                if desired > floor {
+                    desired
+                } else {
+                    floor
+                }
+            } else {
+                desired
+            };
+
+            // Background wash, then content, then the border and connector —
+            // paint order is command order.
+            page.commands.push(DrawCommand::Rect {
+                rect: PtRect::from_xywh(band_x, balloon_y, band_w, balloon_h),
+                color: COMMENT_RANGE_SHADING,
+            });
+            page.commands.push(DrawCommand::Text {
+                position: PtOffset::new(
+                    band_x + Pt::new(PAD),
+                    balloon_y + Pt::new(PAD) + label_metrics.ascent,
+                ),
+                text: std::rc::Rc::from(comment.author.as_str()),
+                font_family: label_font.family.clone(),
+                char_spacing: Pt::ZERO,
+                font_size: label_font.size,
+                bold: crate::render::fonts::Toggle::On,
+                italic: crate::render::fonts::Toggle::Absent,
+                color,
+                text_scale: 1.0,
+                shaped: None,
+            });
+            let mut y = balloon_y + Pt::new(PAD) + label_h;
+            for l in para_layouts {
+                for mut cmd in l.commands {
+                    cmd.shift(band_x + Pt::new(PAD), y);
+                    page.commands.push(cmd);
+                }
+                y += l.size.height;
+            }
+            let corners = [
+                (band_x, balloon_y, band_x + band_w, balloon_y),
+                (
+                    band_x,
+                    balloon_y + balloon_h,
+                    band_x + band_w,
+                    balloon_y + balloon_h,
+                ),
+                (band_x, balloon_y, band_x, balloon_y + balloon_h),
+                (
+                    band_x + band_w,
+                    balloon_y,
+                    band_x + band_w,
+                    balloon_y + balloon_h,
+                ),
+            ];
+            for (x0, y0, x1, y1) in corners {
+                page.commands.push(DrawCommand::Line {
+                    line: PtLineSegment::new(PtOffset::new(x0, y0), PtOffset::new(x1, y1)),
+                    color,
+                    width: Pt::new(0.75),
+                });
+            }
+            page.commands.push(DrawCommand::Line {
+                line: PtLineSegment::new(
+                    anchor,
+                    PtOffset::new(
+                        band_x,
+                        balloon_y + Pt::new(PAD) + label_metrics.ascent * 0.5,
+                    ),
+                ),
+                color,
+                width: Pt::new(0.5),
+            });
+
+            prev_bottom = balloon_y + balloon_h;
+            // Many or long comments can stack past the sheet — Word grows its
+            // markup area, which a fixed page cannot. The overflow is drawn
+            // (truthful, if clipped by the viewer) rather than silently
+            // dropped, and reported once.
+            if prev_bottom > config.page_size.height && !warned_overflow {
+                log::warn!(
+                    "comment balloons overflow the page bottom ({:.0}pt past)",
+                    f32::from(prev_bottom - config.page_size.height),
+                );
+                warned_overflow = true;
+            }
+        }
+    }
+}
+
 pub fn layout_document(
     resolved: &ResolvedDocument,
     registry: &fonts::FontRegistry,
@@ -638,6 +872,15 @@ pub fn layout_document(
     // so a multi-section document doesn't repeat them per section.
     let all_endnotes = build_document_endnotes(&ctx, &mut state);
 
+    // Issue #154: comment bodies, likewise document-scoped — one build, the
+    // balloon pass lays each out per page it anchors on. Empty when the view
+    // hides comments or the document has none.
+    let comment_bodies = if ctx.resolved.show_comment_marks && !ctx.resolved.comments.is_empty() {
+        crate::render::layout::build::build_comment_bodies(&ctx, &mut state)
+    } else {
+        Default::default()
+    };
+
     // Phase 2: render headers/footers with correct NUMPAGES (total page count).
     let total_pages = all_pages.len();
     for info in &section_hf {
@@ -659,6 +902,21 @@ pub fn layout_document(
                 logical_page_base: info.logical_page_base,
                 total_pages,
             },
+        );
+    }
+
+    // Phase 2.5 (issue #154): comment balloons, after headers/footers so the
+    // page set is final, before `coalesce_abutting_rects` below. Anchors are
+    // consumed (removed) even when a page draws no balloon.
+    let mut ballooned = std::collections::HashSet::new();
+    for info in &section_hf {
+        render_comment_balloons(
+            &mut all_pages[info.page_range.clone()],
+            &info.config,
+            &ctx,
+            &comment_bodies,
+            &mut ballooned,
+            dlh,
         );
     }
 
@@ -705,6 +963,17 @@ pub fn layout_document(
             }
             cursor_y += para.size.height;
         }
+        // Issue #154: the endnote page is born after the per-section balloon
+        // pass and belongs to no section range — a comment anchored in an
+        // endnote balloons here, and its anchor is consumed like the rest.
+        render_comment_balloons(
+            std::slice::from_mut(&mut endnote_page),
+            &last_config,
+            &ctx,
+            &comment_bodies,
+            &mut ballooned,
+            dlh,
+        );
         all_pages.push(endnote_page);
     }
 
@@ -858,6 +1127,7 @@ mod tests {
             footers: HashMap::new(),
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
+            comments: Default::default(),
             media: HashMap::new(),
             embedded_fonts: vec![],
         }
@@ -873,8 +1143,11 @@ mod tests {
                 properties: RunProperties::default(),
                 content: vec![RunElement::Text(text.to_string())],
                 rsids: RevisionIds::default(),
+                revision: None,
+                comment: None,
             }))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 
@@ -1195,6 +1468,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![Inline::FootnoteRef(NoteId::new(2))],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))]
     }
 

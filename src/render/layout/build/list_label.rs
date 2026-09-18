@@ -680,6 +680,10 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            show_ins_del_marks: true,
+            show_comment_marks: true,
+            revision_colors: Default::default(),
+            comments: Default::default(),
         }
     }
 
@@ -690,6 +694,7 @@ mod tests {
             mark_run_properties: None,
             content: Vec::new(),
             rsids: model::ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }
     }
 
