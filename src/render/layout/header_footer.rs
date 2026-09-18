@@ -593,6 +593,7 @@ mod tests {
                 x_offset: Pt::ZERO,
                 width: Pt::new(468.0),
             }],
+            line_grid: None,
         }
     }
 
