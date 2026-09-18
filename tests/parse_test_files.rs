@@ -435,6 +435,7 @@ const ALL_FILES: &[&str] = &[
     "counting-th.docx",
     "counting-en-dollar.docx",
     "shading-patterns.docx",
+    "devanagari.docx",
 ];
 
 #[test]
