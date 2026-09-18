@@ -10,6 +10,7 @@
 //!    and replace each typeface with a subsetted variant before paint
 //! 4. **Paint** — emit draw commands to Skia PDF canvas (requires `skia-safe`)
 
+pub(crate) mod dib;
 pub mod dimension;
 pub(crate) mod emf;
 pub mod emoji;
@@ -24,6 +25,8 @@ pub mod skia_conv;
 pub mod spacing;
 #[cfg(feature = "subset-fonts")]
 pub mod subset;
+pub(crate) mod svg;
+pub(crate) mod wmf;
 
 use crate::model::Document;
 
