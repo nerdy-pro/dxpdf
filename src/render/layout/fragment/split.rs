@@ -161,6 +161,7 @@ mod tests {
             text: Rc::from(text),
             break_after: super::super::fixture_break_after(text),
             font: Rc::new(FontProps {
+                effects: Default::default(),
                 rtl: crate::render::fonts::Toggle::Absent,
                 family: Rc::from("Test"),
                 size: Pt::new(12.0),
