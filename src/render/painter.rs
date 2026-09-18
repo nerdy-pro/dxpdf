@@ -720,27 +720,77 @@ fn emit_subpath(builder: &mut PathBuilder, sub: &SubPath) {
                 start_angle,
                 swing_angle,
             } => {
-                // OOXML arcTo positions the arc on the oval centered at the
-                // current pen point offset by (-wr, -hr) — §20.1.9.3. Skia's
-                // PathBuilder::arc_to expects the bounding oval; we compute
-                // it from the current point + radii. Angles are kept in
-                // OOXML's convention (0° = 3 o'clock, clockwise +) which
-                // matches Skia.
-                let (cx, cy) = last_pt;
-                let (wr, hr) = (radii.width.raw(), radii.height.raw());
-                let oval = skia_safe::Rect::from_xywh(cx - wr, cy - hr, wr * 2.0, hr * 2.0);
-                let start_deg = start_angle.raw() as f32 / 60_000.0;
-                let sweep_deg = swing_angle.raw() as f32 / 60_000.0;
-                builder.arc_to(oval, start_deg, sweep_deg, false);
-                // Update last point to the arc's end position.
-                let end_rad = (start_deg + sweep_deg).to_radians();
-                last_pt = (cx + wr * end_rad.cos(), cy + hr * end_rad.sin());
+                // §20.1.9.3: the arc starts at the current pen position,
+                // which lies ON the ellipse at `stAng` — the spec locks the
+                // start angle "to the last known pen position", so the
+                // center is the pen minus the start-point offset, not the
+                // pen itself. `stAng`/`swAng` are ray angles measured at the
+                // center (0° = 3 o'clock, clockwise positive); Skia's
+                // `arc_to` angles are parametric (the point at angle t is
+                // center + (wr·cos t, hr·sin t)), so each ray angle is
+                // skewed onto the ellipse via t = atan2(wr·sinθ, hr·cosθ) —
+                // the same conversion LibreOffice's ARCANGLETO and Apache
+                // POI's ArcToCommand apply. On a circle the two conventions
+                // coincide.
+                let (wr, hr) = (radii.width.raw() as f64, radii.height.raw() as f64);
+                let st = start_angle.raw() as f64 / 60_000.0;
+                // Word clamps the swing to one full revolution
+                // (LibreOffice matches it — tdf#122323).
+                let sw = (swing_angle.raw() as f64 / 60_000.0).clamp(-360.0, 360.0);
+                let t1 = ellipse_param_deg(st, wr, hr);
+                let t2 = ellipse_param_deg(st + sw, wr, hr);
+                let (cx, cy) = (
+                    last_pt.0 as f64 - wr * t1.to_radians().cos(),
+                    last_pt.1 as f64 - hr * t1.to_radians().sin(),
+                );
+                let oval = skia_safe::Rect::from_xywh(
+                    (cx - wr) as f32,
+                    (cy - hr) as f32,
+                    (wr * 2.0) as f32,
+                    (hr * 2.0) as f32,
+                );
+                // Skia treats a sweep modulo 360°, which would erase a
+                // full-circle swing — emit it as two half turns.
+                if sw.abs() >= 360.0 {
+                    let tm = ellipse_param_deg(st + sw / 2.0, wr, hr);
+                    builder.arc_to(oval, t1 as f32, (tm - t1) as f32, false);
+                    builder.arc_to(oval, tm as f32, (t2 - tm) as f32, false);
+                } else {
+                    builder.arc_to(oval, t1 as f32, (t2 - t1) as f32, false);
+                }
+                let end = t2.to_radians();
+                last_pt = ((cx + wr * end.cos()) as f32, (cy + hr * end.sin()) as f32);
             }
             PathVerb::Close => {
                 builder.close();
             }
         }
     }
+}
+
+/// Skew a §20.1.9.3 ray angle (degrees, 0° = 3 o'clock, clockwise positive)
+/// onto the ellipse's parametric angle (degrees), staying in the same
+/// revolution as the input so sweeps keep their direction and multiplicity.
+///
+/// A point at ray angle θ from the center of an `(wr, hr)` ellipse sits at
+/// parametric angle `t = atan2(wr·sinθ, hr·cosθ)`: the ray hits the ellipse
+/// where `(wr·cos t, hr·sin t) ∝ (cosθ, sinθ)`. `atan2` collapses
+/// revolutions, so the skew is re-applied as a delta around θ — the true
+/// skew never reaches ±90°, which keeps the wrap-around unambiguous.
+fn ellipse_param_deg(theta_deg: f64, wr: f64, hr: f64) -> f64 {
+    let (s, c) = theta_deg.to_radians().sin_cos();
+    let (y, x) = (wr * s, hr * c);
+    if x == 0.0 && y == 0.0 {
+        // Degenerate radii — keep the ray angle.
+        return theta_deg;
+    }
+    let mut delta = (y.atan2(x).to_degrees() - theta_deg) % 360.0;
+    if delta > 180.0 {
+        delta -= 360.0;
+    } else if delta < -180.0 {
+        delta += 360.0;
+    }
+    theta_deg + delta
 }
 
 /// The paint for a shape's fill, or `None` when nothing should be filled.
@@ -1061,6 +1111,109 @@ mod tests {
 
     fn test_registry() -> FontRegistry {
         FontRegistry::new(test_font_mgr())
+    }
+
+    // ── §20.1.9.3 arcTo ─────────────────────────────────────────────
+    //
+    // Expected values are computed from the spec's geometry, not from the
+    // implementation: the pen lies ON the ellipse at `stAng` (the spec locks
+    // the start angle "to the last known pen position"), so the center is
+    // `pen − (wr·cos t₁, hr·sin t₁)` with t₁ the parametric angle of the
+    // ray angle `stAng`; the end point sits at ray angle `stAng + swAng`.
+    // Apache POI's `ArcToCommandIf` and LibreOffice's `ARCANGLETO` implement
+    // the same construction.
+
+    fn arc_path(move_to: (f32, f32), radii: (f32, f32), st: i64, sw: i64) -> Path {
+        let sub = SubPath {
+            verbs: vec![
+                PathVerb::MoveTo(PtOffset::new(Pt::new(move_to.0), Pt::new(move_to.1))),
+                PathVerb::ArcTo {
+                    radii: PtSize::new(Pt::new(radii.0), Pt::new(radii.1)),
+                    start_angle: crate::model::dimension::Dimension::new(st),
+                    swing_angle: crate::model::dimension::Dimension::new(sw),
+                },
+            ],
+            fill_mode: crate::model::PathFillMode::Norm,
+            stroked: true,
+        };
+        let mut builder = PathBuilder::new();
+        emit_subpath(&mut builder, &sub);
+        builder.snapshot()
+    }
+
+    fn assert_close(actual: skia_safe::Point, expected: (f32, f32), what: &str) {
+        let (dx, dy) = (actual.x - expected.0, actual.y - expected.1);
+        assert!(
+            dx.abs() < 0.02 && dy.abs() < 0.02,
+            "{what}: got ({}, {}), expected ({}, {})",
+            actual.x,
+            actual.y,
+            expected.0,
+            expected.1
+        );
+    }
+
+    #[test]
+    fn arc_starts_at_pen_and_ends_on_ellipse() {
+        // Pen (10,10) at stAng 0° on a circle of radius 5 → center (5,10).
+        // A +90° swing ends at (5,15). Nothing may reach right of the pen:
+        // the buggy center-at-pen reading put the arc start at (15,10) and
+        // lined over to it.
+        let path = arc_path((10.0, 10.0), (5.0, 5.0), 0, 5_400_000);
+        assert_close(path.last_pt().unwrap(), (5.0, 15.0), "arc end");
+        let b = path.compute_tight_bounds();
+        assert!(
+            (b.left - 5.0).abs() < 0.02
+                && (b.top - 10.0).abs() < 0.02
+                && (b.right - 10.0).abs() < 0.02
+                && (b.bottom - 15.0).abs() < 0.02,
+            "quarter-arc bounds: {b:?}, expected (5,10)-(10,15)"
+        );
+    }
+
+    #[test]
+    fn arc_angles_are_ray_angles_not_parametric() {
+        // wr=20, hr=10, stAng=45°: the parametric angle of the pen is
+        // t₁ = atan2(20·sin45°, 10·cos45°) = 63.435°, so the pen offset is
+        // (20·cos t₁, 10·sin t₁) = (8.944, 8.944) and center = pen − that =
+        // (111.056, 41.056). A +90° swing ends at ray angle 135°, i.e.
+        // t₂ = 116.565° → end = center + (−8.944, 8.944) = (102.111, 50.0).
+        // Reading the angles as parametric instead would end at
+        // center + (20·cos135°, 10·sin135°) = (96.91, 48.13).
+        let path = arc_path((120.0, 50.0), (20.0, 10.0), 2_700_000, 5_400_000);
+        assert_close(path.last_pt().unwrap(), (102.1115, 50.0), "ellipse arc end");
+    }
+
+    #[test]
+    fn arc_full_swing_draws_whole_ellipse() {
+        // swAng = 21600000 (360°) draws the complete circle around
+        // center (5,10) and returns to the pen. Skia treats a single
+        // arc_to sweep modulo 360°, so an unsplit full swing vanishes.
+        let path = arc_path((10.0, 10.0), (5.0, 5.0), 0, 21_600_000);
+        assert_close(path.last_pt().unwrap(), (10.0, 10.0), "full-circle end");
+        let b = path.compute_tight_bounds();
+        assert!(
+            (b.left - 0.0).abs() < 0.02
+                && (b.top - 5.0).abs() < 0.02
+                && (b.right - 10.0).abs() < 0.02
+                && (b.bottom - 15.0).abs() < 0.02,
+            "full-circle bounds: {b:?}, expected (0,5)-(10,15)"
+        );
+    }
+
+    #[test]
+    fn arc_negative_swing_sweeps_counterclockwise() {
+        // Same circle as above; −90° sweeps the other way and ends at (5,5).
+        let path = arc_path((10.0, 10.0), (5.0, 5.0), 0, -5_400_000);
+        assert_close(path.last_pt().unwrap(), (5.0, 5.0), "ccw arc end");
+        let b = path.compute_tight_bounds();
+        assert!(
+            (b.left - 5.0).abs() < 0.02
+                && (b.top - 5.0).abs() < 0.02
+                && (b.right - 10.0).abs() < 0.02
+                && (b.bottom - 10.0).abs() < 0.02,
+            "ccw quarter-arc bounds: {b:?}, expected (5,5)-(10,10)"
+        );
     }
 
     // ── render_to_pdf integration ───────────────────────────────────
