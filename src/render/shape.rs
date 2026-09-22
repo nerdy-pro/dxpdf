@@ -6,16 +6,19 @@
 //! * **`render::emoji`** — a multi-codepoint sequence (`1️⃣` keycap, `👍🏿`
 //!   modifier, `👨‍👩‍👧` ZWJ family) must rasterize as the *ligated* single
 //!   glyph, not as its constituents side by side.
-//! * **body text in a joining script** (issue #131) — an Arabic word painted
-//!   from its cmap comes out in isolated forms, letter by letter, which is not
-//!   a degraded rendering of the word so much as a different one.
+//! * **body text in a joining or reordering script** (issues #131, #153) — an
+//!   Arabic word painted from its cmap comes out in isolated forms, letter by
+//!   letter, which is not a degraded rendering of the word so much as a
+//!   different one; a Devanagari word comes out with its prebase vowels on the
+//!   wrong side of their consonants, which is worse.
 //!
 //! [`needs_shaping`] is what separates the second caller's text from
 //! everything else, and the separation is load-bearing rather than an
 //! optimization: shaping applies GPOS kerning and standard ligatures too, so
 //! routing *all* text through here would change the measured width of every
-//! Latin word in every document. See that function for the predicate and why
-//! it is the Unicode `Joining_Type` property and not a list of scripts.
+//! Latin word in every document. See that function for the two-property
+//! predicate — `Joining_Type` for positional forms, plus the reordering
+//! scripts `Joining_Type` cannot see.
 //!
 //! Shaping runs through **Skia's own HarfBuzz** (`skia-safe`'s `textlayout`
 //! feature), driven by a [`Typeface`] rather than raw font bytes. That
@@ -43,25 +46,27 @@ use skia_safe::shapers;
 use skia_safe::{Font, GlyphId, Point, Typeface};
 use thiserror::Error;
 use unicode_joining_type::{get_joining_type, JoiningType};
+use unicode_script::{Script, UnicodeScript};
 
 use crate::i18n::bidi::BidiLevel;
 use crate::render::dimension::Pt;
 
 /// Whether `text` is in a script that cmap-only painting renders *wrongly*, as
-/// opposed to merely without kerning.
+/// opposed to merely without kerning. Two properties answer it, one per way a
+/// cmap walk can be wrong about a legible script:
 ///
-/// The predicate is the Unicode **`Joining_Type`** property, and specifically
-/// its three "this letter has positional forms" values. That is not a
-/// hand-drawn list of scripts standing in for the real rule — it *is* the rule:
-/// a letter with a joining type of dual-, left-, or right-joining is one whose
-/// shape depends on its neighbours, which is exactly the case a cmap lookup
-/// cannot answer. Arabic, Syriac, N'Ko, Mongolian, Adlam, Hanifi Rohingya and
-/// the rest fall out of it without being named — and, just as usefully, Hebrew
-/// and Thaana do not: both are right-to-left, and both spell their final forms
-/// as separate codepoints rather than as positional variants, so a cmap lookup
-/// is the whole answer for them.
+/// **The letters have positional forms** — the Unicode **`Joining_Type`**
+/// property, and specifically its three "this letter joins" values. That is
+/// not a hand-drawn list of scripts standing in for the real rule — it *is*
+/// the rule: a letter with a joining type of dual-, left-, or right-joining is
+/// one whose shape depends on its neighbours, which is exactly the case a cmap
+/// lookup cannot answer. Arabic, Syriac, N'Ko, Mongolian, Adlam, Hanifi
+/// Rohingya and the rest fall out of it without being named — and, just as
+/// usefully, Hebrew and Thaana do not: both are right-to-left, and both spell
+/// their final forms as separate codepoints rather than as positional
+/// variants, so a cmap lookup is the whole answer for them.
 ///
-/// Two values are deliberately excluded:
+/// Two `Joining_Type` values are deliberately excluded:
 ///
 /// * `Transparent` — combining marks, which includes the Latin combining
 ///   diacriticals at U+0300. Including it would send `e` + U+0301 through the
@@ -72,17 +77,59 @@ use crate::render::dimension::Pt;
 ///   sequences that fell back to the text path, and shaping a Latin run
 ///   because it contains one would change that run's width for no gain.
 ///
-/// What this does not cover is Indic reordering: a Brahmic script needs the
-/// painter's unit to become the shaped cluster (the seam
-/// [`crate::render::spacing`] names), which is a change to every caller of that
-/// module rather than a new call site here. README tracks it as its own row.
+/// **The script reorders** (issue #153) — `script_reorders`, the Brahmic
+/// scripts whose glyphs do not come out in character order. `Joining_Type`
+/// cannot see these: a Devanagari letter never changes shape by position, yet
+/// a cmap walk of `कि` draws the vowel on the wrong side of its consonant.
 pub fn needs_shaping(text: &str) -> bool {
     text.chars().any(|c| {
         matches!(
             get_joining_type(c),
             JoiningType::DualJoining | JoiningType::LeftJoining | JoiningType::RightJoining
-        )
+        ) || script_reorders(c)
     })
+}
+
+/// Whether `c` belongs to a script whose shaping moves glyphs relative to
+/// their characters, so that even a font with every nominal glyph draws the
+/// string wrongly *in order* from the cmap.
+///
+/// No Unicode character property expresses "this script reorders" — it is a
+/// property of the script's OpenType shaping model, not of any codepoint — so
+/// this is a list, drawn from the shaping models themselves: the nine scripts
+/// of Microsoft's Indic shaping spec (prebase matras, reph), plus Sinhala,
+/// Khmer and Myanmar, whose own specs describe the same prebase-reordering
+/// vowels and conjunct formation. A prebase vowel is stored after its
+/// consonant and drawn before it; a virama-bound conjunct substitutes across
+/// characters; both need HarfBuzz, and both also need the *spacing unit* to be
+/// the shaped cluster — `crate::render::spacing` tells that half of the story.
+///
+/// Deliberately not here:
+///
+/// * **Thai and Lao** — their prebase vowels are stored in visual order
+///   (Unicode encodes them before the consonant), so the cmap walk is already
+///   right, and keeping them off the shaper keeps their measured widths — and
+///   the corpus documents that use them — exactly as they were.
+/// * **Tibetan** — stacks below the base without reordering; a cmap walk is
+///   degraded (unstacked) but ordered. Left out until evidence that the
+///   degradation is the kind #131 exists to fix, because adding it re-measures
+///   every Tibetan run.
+fn script_reorders(c: char) -> bool {
+    matches!(
+        c.script(),
+        Script::Devanagari
+            | Script::Bengali
+            | Script::Gurmukhi
+            | Script::Gujarati
+            | Script::Oriya
+            | Script::Tamil
+            | Script::Telugu
+            | Script::Kannada
+            | Script::Malayalam
+            | Script::Sinhala
+            | Script::Khmer
+            | Script::Myanmar
+    )
 }
 
 /// Which way [`Shaper::shape`] lays a run's glyphs out.
@@ -126,6 +173,28 @@ pub struct ShapedGlyph {
     /// Vertical offset from the run origin, in pixels, **y-down** per Skia's
     /// convention. Zero for the overwhelming majority of emoji clusters.
     pub y: Pt,
+    /// The UTF-8 byte offset into the shaped text of the **grapheme cluster**
+    /// this glyph came from. Glyphs sharing a value form one **shaped
+    /// cluster** — the §17.3.2.35 / §17.3.1.13 spacing unit for a shaped run
+    /// (issue #153), which is what [`ShapedRun::unit_count`] counts and the
+    /// painter groups by.
+    ///
+    /// This is HarfBuzz's cluster value *folded to the start of its UAX #29
+    /// grapheme cluster* by [`Shaper::shape`]. The folding is load-bearing:
+    /// Skia's HarfBuzz reports character-level clusters, which merge under
+    /// reordering and ligation but leave an ordinary combining mark — a
+    /// Devanagari above-base matra, an accent no font ligates — as a cluster
+    /// of its own, and an unfolded value would let `w:spacing` open between a
+    /// base and its own mark, the defect `crate::render::spacing` exists to
+    /// prevent. Folded, a shaped cluster is never finer than a grapheme
+    /// cluster — the invariant the emergency splitter
+    /// (`layout::fragment::split`) also leans on.
+    ///
+    /// Offsets are absolute into the whole string handed to
+    /// [`Shaper::shape`], across every sub-run Skia splits off — pinned by
+    /// `clusters_are_absolute_byte_offsets` below, because nothing in the
+    /// SkShaper API states it.
+    pub cluster: u32,
 }
 
 /// Output of shaping one run of text.
@@ -135,6 +204,24 @@ pub struct ShapedRun {
     /// Sum of run advances in pixels — the rasterizer uses this to size the
     /// offscreen surface, and layout uses it to reserve the cluster's width.
     pub total_advance: Pt,
+}
+
+impl ShapedRun {
+    /// How many shaped clusters the run holds — the number of §17.3.2.35 /
+    /// §17.3.1.13 spacing units, counterpart to
+    /// [`crate::render::spacing::unit_count`] for text the shaper has since
+    /// regrouped (a conjunct's glyphs share one cluster; a ligature can merge
+    /// what were separate grapheme clusters).
+    ///
+    /// Counts *distinct* cluster values rather than value changes: a
+    /// right-to-left run's glyphs arrive in visual order, and Skia may append
+    /// sub-runs, so equal values need not be adjacent.
+    pub fn unit_count(&self) -> usize {
+        let mut clusters: Vec<u32> = self.glyphs.iter().map(|g| g.cluster).collect();
+        clusters.sort_unstable();
+        clusters.dedup();
+        clusters.len()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -202,14 +289,30 @@ impl Shaper {
             return Err(ShapeError::NoGlyphs);
         }
 
+        // Fold each cluster value to the start of the grapheme cluster that
+        // contains it — see [`ShapedGlyph::cluster`] for why character-level
+        // values from HarfBuzz are not usable as spacing units directly.
+        let grapheme_starts: Vec<u32> = {
+            use unicode_segmentation::UnicodeSegmentation;
+            text.grapheme_indices(true).map(|(i, _)| i as u32).collect()
+        };
+        let fold = |cluster: u32| -> u32 {
+            let idx = grapheme_starts
+                .partition_point(|&start| start <= cluster)
+                .saturating_sub(1);
+            grapheme_starts.get(idx).copied().unwrap_or(0)
+        };
+
         let glyphs = collector
             .glyphs
             .iter()
             .zip(collector.positions.iter())
-            .map(|(&id, p)| ShapedGlyph {
+            .zip(collector.clusters.iter())
+            .map(|((&id, p), &cluster)| ShapedGlyph {
                 id,
                 x: Pt::new(p.x),
                 y: Pt::new(p.y),
+                cluster: fold(cluster),
             })
             .collect();
 
@@ -227,6 +330,7 @@ impl Shaper {
 struct Collector {
     glyphs: Vec<GlyphId>,
     positions: Vec<Point>,
+    clusters: Vec<u32>,
     advance_x: f32,
 }
 
@@ -248,12 +352,19 @@ impl RunHandler for Collector {
         self.glyphs.resize(base + info.glyph_count, 0);
         self.positions
             .resize(base + info.glyph_count, Point::new(0.0, 0.0));
+        // Skia asserts `clusters.len() == glyph_count` when the slice is
+        // given, so it grows in lockstep with the other two.
+        self.clusters.resize(base + info.glyph_count, 0);
         self.advance_x += info.advance.x;
-        Buffer::new(
-            &mut self.glyphs[base..],
-            &mut self.positions[base..],
-            origin,
-        )
+        // `Buffer::new` hardcodes `clusters: None`; the struct's fields are
+        // public, so asking for cluster values is a literal, not a constructor.
+        Buffer {
+            glyphs: &mut self.glyphs[base..],
+            positions: &mut self.positions[base..],
+            offsets: None,
+            clusters: Some(&mut self.clusters[base..]),
+            point: origin,
+        }
     }
 
     fn commit_run_buffer(&mut self, _info: &RunInfo) {}
@@ -267,6 +378,7 @@ mod tests {
     use super::*;
     use crate::render::emoji::resolve::EmojiFamily;
     use skia_safe::{FontMgr, FontStyle};
+    use unicode_segmentation::UnicodeSegmentation;
 
     /// The host's color emoji typeface, or `None` on a host without one —
     /// tests that need it return early rather than fail, since CI images vary.
@@ -331,6 +443,35 @@ mod tests {
     #[test]
     fn a_right_to_left_script_without_cursive_joining_is_not_shaped() {
         assert!(!needs_shaping("\u{0780}\u{0783}"));
+    }
+
+    /// Issue #153, the predicate's second property: a Brahmic script's glyphs
+    /// do not come out in character order, which `Joining_Type` cannot see —
+    /// every one of these letters is `Non_Joining`.
+    #[test]
+    fn reordering_scripts_are_shaped() {
+        for (script, text) in [
+            ("Devanagari", "हिन्दी"),
+            ("Bengali", "বাংলা"),
+            ("Tamil", "தமிழ்"),
+            ("Telugu", "తెలుగు"),
+            ("Malayalam", "മലയാളം"),
+            ("Sinhala", "සිංහල"),
+            ("Khmer", "ខ្មែរ"),
+            ("Myanmar", "မြန်မာ"),
+        ] {
+            assert!(needs_shaping(text), "{script} shaping reorders");
+        }
+    }
+
+    /// The boundary of the reordering list: Thai and Lao store their prebase
+    /// vowels in visual order, so the cmap walk is already right and their
+    /// measured widths must not move. (Thai is also in the not-shaped list
+    /// above; Lao is the same case and pins the same boundary.)
+    #[test]
+    fn visual_order_scripts_stay_on_the_cmap_path() {
+        assert!(!needs_shaping("ພາສາລາວ"), "Lao");
+        assert!(!needs_shaping("ภาษาไทย"), "Thai");
     }
 
     /// A zero-width joiner is `Joining_Type=Join_Causing`, which the predicate
@@ -499,6 +640,120 @@ mod tests {
         assert!(
             widths.iter().all(|w| *w > 0.0),
             "every shaped glyph id must have a width in the same font: {widths:?}"
+        );
+    }
+
+    /// The contract [`ShapedGlyph::cluster`] documents and nothing in the
+    /// SkShaper API states: cluster values are byte offsets into the *whole*
+    /// string handed to `shape`, across sub-run splits. `"aあb"` forces a
+    /// script split (Latin / Hiragana / Latin), so a shaper reporting
+    /// run-relative offsets would repeat 0 where this expects 4 — cluster
+    /// values are written whether or not the face covers the character, so no
+    /// coverage probe is needed.
+    #[test]
+    fn clusters_are_absolute_byte_offsets() {
+        let Some(tf) = any_typeface() else { return };
+        let shaper = Shaper::new().expect("shaper");
+
+        let run = shaper
+            .shape(&tf, "ab cd", 20.0, RunDirection::LeftToRight)
+            .expect("shape");
+        let mut clusters: Vec<u32> = run.glyphs.iter().map(|g| g.cluster).collect();
+        clusters.sort_unstable();
+        assert_eq!(clusters, vec![0, 1, 2, 3, 4], "one ASCII char, one cluster");
+
+        let run = shaper
+            .shape(&tf, "a\u{3042}b", 20.0, RunDirection::LeftToRight)
+            .expect("shape");
+        let mut clusters: Vec<u32> = run.glyphs.iter().map(|g| g.cluster).collect();
+        clusters.sort_unstable();
+        clusters.dedup();
+        assert_eq!(
+            clusters,
+            vec![0, 1, 4],
+            "offsets must survive the script split absolute, not restart at 0"
+        );
+    }
+
+    /// [`ShapedRun::unit_count`] is the shaped counterpart of
+    /// `spacing::unit_count`: one unit per ASCII letter, and a combining mark
+    /// is folded into its base's cluster — by this module's grapheme folding,
+    /// not by the font. `e` + U+0301 alone cannot pin that: most Latin faces
+    /// compose the pair to one glyph, which merges the clusters with no help.
+    /// U+0489 (a Cyrillic enclosing mark) is a mark no ordinary face ligates
+    /// or even covers — cluster values are written for `.notdef` glyphs too —
+    /// so before the folding it demonstrably stood as a unit of its own,
+    /// which is `w:spacing` opening between a base and its own mark.
+    #[test]
+    fn unit_count_folds_a_combining_mark_into_its_base() {
+        let Some(tf) = any_typeface() else { return };
+        let shaper = Shaper::new().expect("shaper");
+        let abc = shaper
+            .shape(&tf, "abc", 20.0, RunDirection::LeftToRight)
+            .expect("shape");
+        assert_eq!(abc.unit_count(), 3);
+        for (label, text) in [
+            ("composable accent", "e\u{301}"),
+            ("unligatable enclosing mark", "a\u{0489}"),
+            ("marks on both letters", "e\u{301}o\u{0489}"),
+        ] {
+            let run = shaper
+                .shape(&tf, text, 20.0, RunDirection::LeftToRight)
+                .expect("shape");
+            assert_eq!(
+                run.unit_count(),
+                text.graphemes(true).count(),
+                "{label}: a mark must share its base's unit"
+            );
+        }
+    }
+
+    /// **Issue #153's done criterion, at the shaper.** `कि` stores the vowel
+    /// after the consonant; drawn correctly, the vowel stands to its left. The
+    /// two nominal glyph ids come from the face's own cmap, so the assertion
+    /// is structural — no font is named, and a host without a Devanagari face
+    /// (or one whose shaper substitutes both forms) skips rather than fails.
+    #[test]
+    fn devanagari_prebase_matra_is_drawn_before_its_consonant() {
+        const KA: char = '\u{0915}';
+        const MATRA_I: char = '\u{093F}';
+        let Some(tf) = FontMgr::new()
+            .match_family_style_character("", FontStyle::normal(), &[], KA as i32)
+            .filter(|tf| tf.unichar_to_glyph(KA as i32) != 0)
+        else {
+            eprintln!("skipping: no face on this host covers U+0915");
+            return;
+        };
+        let ka_glyph = tf.unichar_to_glyph(KA as i32);
+        let matra_glyph = tf.unichar_to_glyph(MATRA_I as i32);
+        if matra_glyph == 0 {
+            eprintln!("skipping: the Devanagari face has no nominal matra glyph");
+            return;
+        }
+
+        let shaper = Shaper::new().expect("shaper");
+        let run = shaper
+            .shape(
+                &tf,
+                &format!("{KA}{MATRA_I}"),
+                24.0,
+                RunDirection::LeftToRight,
+            )
+            .expect("shape");
+
+        assert_eq!(run.unit_count(), 1, "one akshara, one shaped cluster");
+        let ka = run.glyphs.iter().find(|g| g.id == ka_glyph);
+        let matra = run.glyphs.iter().find(|g| g.id == matra_glyph);
+        let (Some(ka), Some(matra)) = (ka, matra) else {
+            eprintln!("skipping: this face substitutes the nominal forms");
+            return;
+        };
+        assert!(
+            matra.x < ka.x,
+            "the prebase matra must be reordered before its consonant \
+             (matra at {:?}, consonant at {:?})",
+            matra.x,
+            ka.x,
         );
     }
 
