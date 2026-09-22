@@ -930,7 +930,14 @@ pub(super) fn emit_line_commands(
                             color: copy_color,
                             text_scale: font.text_scale,
                             shaped: *shaped,
-                            outline: effects.outline,
+                            // LibreOffice VCL's `ImplDrawSpecialText` (the
+                            // reference this module follows) always draws
+                            // the shadow/relief copy as a solid filled
+                            // glyph and applies the outline stroke only to
+                            // the main text afterward — never to the copy,
+                            // even when shadow+outline (§17.3.2.31's one
+                            // permitted combination) are both set.
+                            outline: false,
                         });
                     }
 
