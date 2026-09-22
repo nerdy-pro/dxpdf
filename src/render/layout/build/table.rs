@@ -256,9 +256,11 @@ fn reserve_cell_spacing(col_widths: Vec<Pt>, cell_spacing: Pt) -> Vec<Pt> {
 ///
 /// * a table displaced rightward (`w:tblInd`, `w:jc`, `w:tblpX`) can still
 ///   reach past the edge by that displacement;
-/// * a *nested* table is measured against the page rather than against its
-///   cell, so it may still overflow the cell — but the enclosing table's own
-///   width already keeps it on the sheet;
+/// * a *nested* table is measured against its host cell — `container`, below —
+///   because there the caller's width is a real container and not a margin a
+///   table may reach into (issue #229). A nested table that also floats
+///   (§17.4.57) keeps the page limit until a Word render says whether Word
+///   confines one;
 /// * §17.4.66 draws a table's outer border **outside** its box
 ///   (`table::borders::rasterize_border_grid`), and this is given the grid,
 ///   not the borders that will be drawn around it — so a clamped table's own
@@ -271,17 +273,19 @@ fn reserve_cell_spacing(col_widths: Vec<Pt>, cell_spacing: Pt) -> Vec<Pt> {
 /// **Word reference render needed**: what width Word actually gives an
 /// overflowing `w:type="auto"` table, at `tblLayout` both `fixed` and
 /// `autofit`. That measurement is what would replace this guard with a rule.
-fn clamp_auto_grid_to_page(
+fn clamp_auto_grid(
     grid_cols: &[Pt],
     num_cols: usize,
     available_width: Pt,
+    container: Option<Pt>,
     page: &crate::render::layout::page::PageConfig,
 ) -> Vec<Pt> {
     let declared: Pt = grid_cols.iter().copied().sum();
     // `max(available_width)` so a pathological page — margins wider than the
     // sheet, which `PageConfig::content_width` also has to defend against —
     // cannot make the limit narrower than the space the caller just offered.
-    let limit = (page.page_size.width - page.margins.left).max(available_width);
+    let limit = container
+        .unwrap_or_else(|| (page.page_size.width - page.margins.left).max(available_width));
     if declared <= limit {
         return grid_cols.to_vec();
     }
@@ -470,11 +474,49 @@ fn dxa_twips(m: &model::TableMeasure) -> Option<Dimension<Twips>> {
     }
 }
 
+/// §17.4.71: the width every column is *preferred* to have, when each of them
+/// says so in `w:tcW` — the input Word's §17.4.52 autofit resolves a table from.
+///
+/// # Why this outranks `w:tblGrid`
+///
+/// §17.4.63 and §17.4.71 carry the same paragraph verbatim — all widths are
+/// "preferred", the table "shall satisfy the shared columns as specified by the
+/// tblGrid", and "the table layout algorithm can require a preference to be
+/// overridden" — so the spec states the conflict without resolving it. Word
+/// resolves it toward the preferences whenever the layout is autofit, which
+/// §17.4.52 makes the default. Measured on Word 16.0 with a 2000/4000/4080
+/// grid, `tcW` 1000/3000/6080 and a 504 pt text column: 50 / 150 / 304 pt — the
+/// preferences exactly, with the grid discarded (issue #231).
+///
+/// `None` unless every column has a `dxa` preference of its own. A spanned
+/// cell states one width for several columns and says nothing about how to
+/// divide it, so a table containing one keeps its grid rather than being
+/// resolved from a guess.
+fn tcw_preferred_grid(rows: &[model::TableRow], num_cols: usize) -> Option<Vec<Pt>> {
+    let mut preferred: Vec<Option<Pt>> = vec![None; num_cols];
+    for row in rows {
+        let mut col = row.properties.grid_before as usize;
+        for cell in &row.cells {
+            let span = (*cell.properties.grid_span.get().unwrap_or(&1)).max(1) as usize;
+            if span == 1 && col < num_cols {
+                if let Some(Some(tcw)) = cell.properties.width.get().map(dxa_twips) {
+                    // First row that states one wins, matching the way the
+                    // grid itself is read top-down.
+                    preferred[col].get_or_insert(Pt::from(tcw));
+                }
+            }
+            col = col.saturating_add(span);
+        }
+    }
+    preferred.into_iter().collect()
+}
+
 /// Recursively build a table: resolve styles, conditional formatting, and
 /// recurse into each cell's content blocks.
 pub(super) fn build_table(
     t: &Table,
     available_width: Pt,
+    container_ceiling: Option<Pt>,
     ctx: &BuildContext,
     state: &mut BuildState,
 ) -> BuiltTable {
@@ -724,8 +766,22 @@ pub(super) fn build_table(
             // move it toward. **Word reference render needed**: a nested table
             // at `w:tblW w:type="pct" w:w="5000"` inside a half-width cell
             // separates the two readings in one measurement.
+            //
+            // # The cell-margin extension is full width's alone
+            //
+            // The extension above models Word's autofit-to-window: a table that
+            // fills the window is widened by its cell margins and pulled left by
+            // one, so the cell *text* lands on the body text's edge.
+            // `tests/table_geometry_sizing.rs` pins it at `w:w="5000"`.
+            //
+            // It fired for anything at or past full width, and Word does not
+            // extend a table that asks for *more* than the window: for a 104%
+            // table Word saves a `<w:tblGrid>` summing to 1.04 × the text
+            // extents, with no margin term — which is all §17.4.63 describes.
+            // The 2.3% of extra width stopped a header cell wrapping where Word
+            // wraps it and pushed the table past the right margin (issue #231).
             let ratio = pct.to_fraction();
-            let base = if *pct >= Dimension::FULL && extends_for_alignment {
+            let base = if *pct == Dimension::FULL && extends_for_alignment {
                 available_width + cell_margins_h
             } else {
                 available_width
@@ -755,8 +811,45 @@ pub(super) fn build_table(
     // would ignore the element either way. The 226 `<w:tblLayout>` elements the
     // corpus does put on a `<w:tbl>` are the direct level, which §2.1.250(a)
     // says nothing about.
-    let col_widths = if is_auto_width && !grid_cols.is_empty() {
-        clamp_auto_grid_to_page(&grid_cols, num_cols, available_width, &state.page_config)
+    // §17.4.57: a floating table is positioned, not flowed, and whether Word
+    // confines one nested in a cell is unmeasured — so it keeps the page limit
+    // and this change moves only the tables the defect was reported against.
+    let container_ceiling = container_ceiling.filter(|_| positioning.is_none());
+    // §17.4.52: `autofit` is the default, and it is the mode in which Word
+    // re-derives the columns from the cells' §17.4.71 preferences. `fixed` is
+    // the instruction to use the declared widths instead, so such a table keeps
+    // its grid — which is what the 39 tables of `KAB_2026-03-25` and the rest
+    // of the corpus evidence in `clamp_auto_grid`'s comment rely on. Read at
+    // the direct level only: §2.1.250(a) lists `tblLayout` among the elements a
+    // style may not contribute, and two corpus documents ship a default
+    // `TableNormal` declaring `fixed` that Word ignores.
+    let autofit_layout = !matches!(t.properties.layout.get(), Some(model::TableLayout::Fixed));
+    let preferred = if is_auto_width && autofit_layout {
+        tcw_preferred_grid(&t.rows, num_cols)
+    } else {
+        None
+    };
+    let col_widths = if let Some(preferred) = preferred {
+        // The preferences are drawn as asked when they fit — Word does not
+        // stretch an autofit table to its container — and scaled down
+        // proportionally when they do not. The container is the text column for
+        // a top-level table and the host cell for a nested one, never the paper:
+        // a table resolved from preferences has no declared grid to defend.
+        clamp_auto_grid(
+            &preferred,
+            num_cols,
+            available_width,
+            Some(container_ceiling.unwrap_or(available_width)),
+            &state.page_config,
+        )
+    } else if is_auto_width && !grid_cols.is_empty() {
+        clamp_auto_grid(
+            &grid_cols,
+            num_cols,
+            available_width,
+            container_ceiling,
+            &state.page_config,
+        )
     } else {
         compute_column_widths(&grid_cols, num_cols, target_width)
     };
@@ -1636,7 +1729,9 @@ fn build_cell_blocks(
                 }
             }
             Block::Table(nested_t) => {
-                let built = build_table(nested_t, inner_width, ctx, state);
+                // §17.4.42: `inner_width` is the host cell's content box, and for a
+                // nested table that is a container, not merely an offer (issue #229).
+                let built = build_table(nested_t, inner_width, Some(inner_width), ctx, state);
                 blocks.push(LayoutBlock::Table {
                     rows: built.rows,
                     col_widths: built.col_widths,
@@ -1940,7 +2035,7 @@ mod tests {
     fn a_fitting_auto_grid_is_returned_verbatim() {
         let grid = vec![Pt::new(100.0), Pt::new(200.0)];
         assert_eq!(
-            clamp_auto_grid_to_page(&grid, 2, Pt::new(468.0), &letter()),
+            clamp_auto_grid(&grid, 2, Pt::new(468.0), None, &letter()),
             grid
         );
     }
@@ -1953,7 +2048,7 @@ mod tests {
     fn a_grid_past_the_text_column_but_on_the_paper_is_left_alone() {
         let grid = vec![Pt::new(500.0)];
         assert_eq!(
-            clamp_auto_grid_to_page(&grid, 1, Pt::new(468.0), &letter()),
+            clamp_auto_grid(&grid, 1, Pt::new(468.0), None, &letter()),
             grid
         );
     }
@@ -1962,10 +2057,11 @@ mod tests {
     /// their declared ratio rather than being equalised.
     #[test]
     fn a_grid_past_the_paper_is_scaled_to_the_paper() {
-        let out = clamp_auto_grid_to_page(
+        let out = clamp_auto_grid(
             &[Pt::new(800.0), Pt::new(400.0)],
             2,
             Pt::new(468.0),
+            None,
             &letter(),
         );
         let total: Pt = out.iter().copied().sum();
@@ -1981,8 +2077,40 @@ mod tests {
     fn a_page_narrower_than_its_own_margins_falls_back_to_the_offered_width() {
         let mut page = letter();
         page.margins.left = Pt::new(900.0);
-        let out = clamp_auto_grid_to_page(&[Pt::new(1000.0)], 1, Pt::new(468.0), &page);
+        let out = clamp_auto_grid(&[Pt::new(1000.0)], 1, Pt::new(468.0), None, &page);
         assert_eq!(out, vec![Pt::new(468.0)]);
+    }
+
+    /// §17.4.42 / issue #229: given a container — the host cell's content box —
+    /// the limit is the container and not the paper, so a grid that fits the
+    /// sheet but not the cell is scaled down to it.
+    #[test]
+    fn a_container_ceiling_replaces_the_paper_limit() {
+        let out = clamp_auto_grid(
+            &[Pt::new(180.0), Pt::new(180.0)],
+            2,
+            Pt::new(240.0),
+            Some(Pt::new(240.0)),
+            &letter(),
+        );
+        let total: Pt = out.iter().copied().sum();
+        assert_eq!(
+            total,
+            Pt::new(240.0),
+            "scaled to the cell, not to the paper"
+        );
+        assert_eq!(out, vec![Pt::new(120.0), Pt::new(120.0)], "ratio kept 1:1");
+    }
+
+    /// The ceiling only ever narrows: a nested grid already inside its cell is
+    /// returned verbatim rather than stretched to fill it.
+    #[test]
+    fn a_container_ceiling_does_not_stretch_a_grid_that_fits() {
+        let grid = vec![Pt::new(60.0), Pt::new(60.0)];
+        assert_eq!(
+            clamp_auto_grid(&grid, 2, Pt::new(240.0), Some(Pt::new(240.0)), &letter()),
+            grid
+        );
     }
 
     // ── §17.4.84 promote_orphan_vmerge_continues ─────────────────────────
@@ -2260,7 +2388,7 @@ mod tests {
             resolved: &resolved,
         };
         let mut state = BuildState::default();
-        let built = build_table(t, offered, &ctx, &mut state);
+        let built = build_table(t, offered, None, &ctx, &mut state);
         (built, state)
     }
 

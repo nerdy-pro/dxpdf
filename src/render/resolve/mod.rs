@@ -26,7 +26,6 @@ use crate::model::{
 };
 
 use self::images::MediaEntry;
-use self::numbering::ResolvedNumberingLevel;
 use self::sections::ResolvedSection;
 use self::styles::ResolvedStyle;
 
@@ -39,8 +38,9 @@ pub struct ResolvedDocument {
     pub sections: Vec<ResolvedSection>,
     /// Fully resolved styles (basedOn chains walked, doc defaults applied).
     pub styles: HashMap<StyleId, ResolvedStyle>,
-    /// Flattened numbering definitions.
-    pub numbering: HashMap<NumId, Vec<ResolvedNumberingLevel>>,
+    /// Flattened numbering definitions, instance by instance — each carrying
+    /// the abstract definition its counter belongs to (§17.9.2).
+    pub numbering: HashMap<NumId, numbering::ResolvedNumbering>,
     /// All unique font families referenced in the document.
     pub font_families: Vec<String>,
     /// Embedded media (images) — shared bytes with detected format, keyed by relationship ID.
@@ -312,7 +312,7 @@ mod tests {
         );
 
         let resolved = resolve(doc);
-        let levels = resolved.numbering.get(&NumId::new(1)).unwrap();
+        let levels = &resolved.numbering.get(&NumId::new(1)).unwrap().levels;
         assert_eq!(levels.len(), 1);
         assert_eq!(levels[0].format, NumberFormat::Decimal);
     }

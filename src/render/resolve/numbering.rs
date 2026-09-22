@@ -3,12 +3,26 @@
 use std::collections::HashMap;
 
 use crate::model::{
-    Alignment, Indentation, LevelSuffix, NumId, NumPicBulletId, NumberFormat, NumberingDefinitions,
-    NumberingLevelDefinition, RunProperties,
+    AbstractNumId, Alignment, Indentation, LevelSuffix, NumId, NumPicBulletId, NumberFormat,
+    NumberingDefinitions, NumberingLevelDefinition, RunProperties,
 };
 use crate::render::resolve::counting;
 use crate::render::resolve::locale::Locale;
 use crate::render::resolve::spellout;
+
+/// §17.9.2 / §17.9.15: an abstract numbering definition with the level
+/// overrides of one `w:num` instance applied.
+///
+/// The abstract id travels with the levels because the *counter* belongs to the
+/// abstract definition, not to the instance: several `w:num` entries may point
+/// at one `w:abstractNum`, and Word runs one sequence across all of them
+/// (issue #230). Layout keys `BuildState::list_counters` on
+/// `abstract_num_id`, so it has to arrive here.
+#[derive(Clone, Debug)]
+pub struct ResolvedNumbering {
+    pub abstract_num_id: AbstractNumId,
+    pub levels: Vec<ResolvedNumberingLevel>,
+}
 
 /// A resolved numbering level — ready for label generation.
 #[derive(Clone, Debug)]
@@ -16,6 +30,12 @@ pub struct ResolvedNumberingLevel {
     pub format: NumberFormat,
     pub level_text: String,
     pub start: u32,
+    /// §17.9.28: `w:startOverride` on this instance's level — a one-shot
+    /// restart of the shared sequence, fired when the instance is first used,
+    /// and *not* the level's start value. Collapsing the two erases the
+    /// difference: a later item on the same instance would restart again, and
+    /// the other instances of the abstract definition would never see it.
+    pub start_override: Option<u32>,
     /// §17.9.3: run properties for the numbering symbol (font, color, etc.).
     pub run_properties: Option<RunProperties>,
     /// §17.9.3: paragraph indentation from the numbering level definition.
@@ -37,9 +57,7 @@ pub struct ResolvedNumberingLevel {
 /// Resolve numbering definitions into a flat lookup: `NumId` →
 /// `Vec<ResolvedNumberingLevel>`.
 /// Each instance's abstract definition is looked up and level overrides applied.
-pub fn resolve_numbering(
-    defs: &NumberingDefinitions,
-) -> HashMap<NumId, Vec<ResolvedNumberingLevel>> {
+pub fn resolve_numbering(defs: &NumberingDefinitions) -> HashMap<NumId, ResolvedNumbering> {
     let mut result = HashMap::new();
 
     for (num_id, instance) in &defs.numbering_instances {
@@ -64,11 +82,17 @@ pub fn resolve_numbering(
                 levels[idx] = resolve_level(def);
             }
             if let Some(start) = ovr.start_override {
-                levels[idx].start = start;
+                levels[idx].start_override = Some(start);
             }
         }
 
-        result.insert(*num_id, levels);
+        result.insert(
+            *num_id,
+            ResolvedNumbering {
+                abstract_num_id: instance.abstract_num_id,
+                levels,
+            },
+        );
     }
 
     result
@@ -78,6 +102,7 @@ fn resolve_level(def: &NumberingLevelDefinition) -> ResolvedNumberingLevel {
     ResolvedNumberingLevel {
         format: def.format.unwrap_or(NumberFormat::None),
         level_text: def.level_text.clone(),
+        start_override: None,
         start: def.start.unwrap_or(1),
         run_properties: def.run_properties.clone(),
         indentation: def.indentation,
@@ -94,8 +119,8 @@ fn resolve_level(def: &NumberingLevelDefinition) -> ResolvedNumberingLevel {
 pub fn format_list_label(
     levels: &[ResolvedNumberingLevel],
     level: u8,
-    counters: &HashMap<(NumId, u8), u32>,
-    num_id: NumId,
+    counters: &HashMap<(AbstractNumId, u8), u32>,
+    abstract_num_id: AbstractNumId,
     locale: Locale,
 ) -> Option<String> {
     let lvl = levels.get(level as usize)?;
@@ -115,7 +140,7 @@ pub fn format_list_label(
         // ilvl=255 would overflow `i + 1` (§17.9.9 placeholders are 1-based).
         let placeholder = format!("%{}", u32::from(i) + 1);
         if result.contains(&placeholder) {
-            let count = counters.get(&(num_id, i)).copied().unwrap_or(1);
+            let count = counters.get(&(abstract_num_id, i)).copied().unwrap_or(1);
             let fmt = if lvl.is_legal {
                 NumberFormat::Decimal
             } else {
@@ -695,7 +720,7 @@ mod tests {
         );
 
         let resolved = resolve_numbering(&defs);
-        let levels = resolved.get(&NumId::new(1)).unwrap();
+        let levels = &resolved.get(&NumId::new(1)).unwrap().levels;
 
         assert_eq!(levels.len(), 1);
         assert_eq!(levels[0].format, NumberFormat::Decimal);
@@ -722,7 +747,7 @@ mod tests {
         );
 
         let resolved = resolve_numbering(&defs);
-        let levels = resolved.get(&NumId::new(1)).unwrap();
+        let levels = &resolved.get(&NumId::new(1)).unwrap().levels;
 
         assert_eq!(levels.len(), 2);
         assert_eq!(levels[0].format, NumberFormat::Bullet, "overridden");
@@ -738,7 +763,7 @@ mod tests {
         );
 
         let resolved = resolve_numbering(&defs);
-        let levels = resolved.get(&NumId::new(1)).unwrap();
+        let levels = &resolved.get(&NumId::new(1)).unwrap().levels;
         assert!(levels.is_empty());
     }
 
@@ -761,18 +786,21 @@ mod tests {
 
         let resolved = resolve_numbering(&defs);
 
-        let l1 = resolved.get(&NumId::new(1)).unwrap();
+        let l1 = &resolved.get(&NumId::new(1)).unwrap().levels;
         assert_eq!(l1[0].level_text, "%1.");
         assert_eq!(l1[0].start, 1);
 
-        let l2 = resolved.get(&NumId::new(2)).unwrap();
+        let l2 = &resolved.get(&NumId::new(2)).unwrap().levels;
         assert_eq!(l2[0].level_text, "%1)");
         assert_eq!(l2[0].start, 10);
     }
 
+    /// §17.9.28: the override is carried beside the level's own `w:start`, not
+    /// written over it. Layout fires it once, at the instance's first use, and
+    /// then the shared sequence continues — behaviour a single `start` field
+    /// cannot express (issue #230).
     #[test]
-    fn start_override_restarts_level_counter() {
-        // A startOverride-only lvlOverride resets the level's start value.
+    fn start_override_is_carried_separately_from_start() {
         let mut abstract_nums = HashMap::new();
         abstract_nums.insert(
             AbstractNumId::new(0),
@@ -798,7 +826,9 @@ mod tests {
             pic_bullets: HashMap::new(),
         };
         let resolved = resolve_numbering(&defs);
-        assert_eq!(resolved[&NumId::new(1)][0].start, 5);
+        let lvl = &resolved[&NumId::new(1)].levels[0];
+        assert_eq!(lvl.start, 1, "the abstract level's own start is untouched");
+        assert_eq!(lvl.start_override, Some(5));
     }
 
     #[test]
@@ -808,6 +838,7 @@ mod tests {
                 format: NumberFormat::UpperRoman,
                 level_text: "%1".to_string(),
                 start: 1,
+                start_override: None,
                 run_properties: None,
                 indentation: None,
                 justification: None,
@@ -819,6 +850,7 @@ mod tests {
                 format: NumberFormat::LowerLetter,
                 level_text: "%1.%2".to_string(),
                 start: 1,
+                start_override: None,
                 run_properties: None,
                 indentation: None,
                 justification: None,
@@ -828,10 +860,16 @@ mod tests {
             },
         ];
         let mut counters = HashMap::new();
-        counters.insert((NumId::new(1), 0u8), 3u32); // would be "III" un-legal
-        counters.insert((NumId::new(1), 1u8), 2u32); // would be "b" un-legal
-        let label =
-            format_list_label(&levels, 1, &counters, NumId::new(1), Locale::English).unwrap();
+        counters.insert((AbstractNumId::new(1), 0u8), 3u32); // would be "III" un-legal
+        counters.insert((AbstractNumId::new(1), 1u8), 2u32); // would be "b" un-legal
+        let label = format_list_label(
+            &levels,
+            1,
+            &counters,
+            AbstractNumId::new(1),
+            Locale::English,
+        )
+        .unwrap();
         assert_eq!(
             label, "3.2",
             "isLgl forces decimal for every referenced level"
@@ -860,7 +898,7 @@ mod tests {
         );
 
         let resolved = resolve_numbering(&defs);
-        let levels = resolved.get(&NumId::new(1)).unwrap();
+        let levels = &resolved.get(&NumId::new(1)).unwrap().levels;
         assert_eq!(levels[0].format, NumberFormat::None);
         assert_eq!(levels[0].start, 1);
     }

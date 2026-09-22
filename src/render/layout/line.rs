@@ -317,16 +317,31 @@ pub fn fit_lines_with_first(
     }
 
     // Emit remaining fragments as the last line.
+    //
+    // §17.3.1.29 / §17.13.6.1: a tail holding nothing that draws is not a line.
+    // `MarkLine::of` injects the paragraph mark's `LineBreak` at the *front* of
+    // the fragment vector, so a paragraph of pure annotations arrives here as
+    // `[LineBreak, Bookmark]` — the break closes the mark's line and strands the
+    // bookmark, which would otherwise be charged a second line box because
+    // `paragraph::line_height_for` substitutes the default height for a line
+    // that measures zero. Word gives such a paragraph one line, never two
+    // (issue #228). Widen the line before it instead, so the bookmark stays
+    // inside a range and still reaches `line_emit`, which turns it into a PDF
+    // named destination.
     if line_start < fragments.len() {
-        lines.push(FittedLine {
-            start: line_start,
-            end: fragments.len(),
-            width: line_width,
-            height: line_height,
-            text_height: line_text_height,
-            ascent: line_ascent,
-            has_break: false,
-        });
+        let draws = fragments[line_start..].iter().any(Fragment::occupies_line);
+        match lines.last_mut() {
+            Some(previous) if !draws => previous.end = fragments.len(),
+            _ => lines.push(FittedLine {
+                start: line_start,
+                end: fragments.len(),
+                width: line_width,
+                height: line_height,
+                text_height: line_text_height,
+                ascent: line_ascent,
+                has_break: false,
+            }),
+        }
     }
 
     lines
@@ -677,6 +692,47 @@ mod tests {
         assert!(lines[0].has_break);
         assert_eq!(lines[1].start, 2);
         assert_eq!(lines[1].end, 3); // "after"
+    }
+
+    /// §17.13.6.1: a bookmark draws nothing, so the tail it is stranded on by
+    /// the paragraph mark's own `LineBreak` is not a line of its own — it joins
+    /// the line before it, keeping the annotation inside a range (issue #228).
+    #[test]
+    fn a_trailing_bookmark_joins_the_line_before_it() {
+        let frags = vec![
+            Fragment::LineBreak {
+                line_height: Pt::new(14.0),
+            },
+            Fragment::Bookmark {
+                name: "_GoBack".into(),
+            },
+        ];
+        let lines = fit_lines(&frags, Pt::new(100.0));
+
+        assert_eq!(lines.len(), 1, "the paragraph mark's line, and only it");
+        assert_eq!(
+            lines[0].end, 2,
+            "the bookmark stays inside the line's range"
+        );
+    }
+
+    /// The same tail after real text: the bookmark widens that line's range and
+    /// does not open a second one.
+    #[test]
+    fn a_bookmark_after_text_does_not_open_a_line() {
+        let frags = vec![
+            text_frag("word", 30.0),
+            Fragment::LineBreak {
+                line_height: Pt::new(14.0),
+            },
+            Fragment::Bookmark {
+                name: "anchor".into(),
+            },
+        ];
+        let lines = fit_lines(&frags, Pt::new(100.0));
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].end, 3);
     }
 
     #[test]

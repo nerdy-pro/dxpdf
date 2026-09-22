@@ -61,8 +61,14 @@ pub struct BuildState {
     pub footnotes: crate::render::layout::fragment::FootnoteTracker,
     /// Sequential endnote display number (i, ii, iii...).
     pub endnote_counter: u32,
-    /// Per-(numId, level) running counters for list labels.
-    pub list_counters: HashMap<(model::NumId, u8), u32>,
+    /// §17.9.2: per-(abstractNumId, level) running counters for list labels.
+    /// The counter belongs to the *abstract* definition, so every `w:num`
+    /// instance over one `w:abstractNum` advances the same sequence.
+    pub list_counters: HashMap<(model::AbstractNumId, u8), u32>,
+    /// §17.9.28: the (numId, level) pairs whose `w:startOverride` has already
+    /// fired. The restart happens once, when the instance is first used; after
+    /// that the instance simply continues the shared sequence.
+    pub started_overrides: std::collections::HashSet<(model::NumId, u8)>,
     /// §17.3.1.19: the document outline being accumulated.
     pub outline: OutlineCollector,
     /// Field evaluation context (page number, total pages).
@@ -325,7 +331,7 @@ fn build_non_story_content(
                 });
             }
             Block::Table(t) => {
-                let built = build_table(t, available_width, ctx, state);
+                let built = build_table(t, available_width, None, ctx, state);
                 layout_blocks.push(LayoutBlock::Table {
                     rows: built.rows,
                     col_widths: built.col_widths,
@@ -459,7 +465,7 @@ mod tests {
     #[test]
     fn speculatively_rolls_back_document_order_counters() {
         let mut state = BuildState::default();
-        let num = (model::NumId::new(1), 0u8);
+        let num = (model::AbstractNumId::new(1), 0u8);
         state.endnote_counter = 7;
         state.list_counters.insert(num, 3);
         state.outline = OutlineCollector::Collecting(5);
@@ -468,7 +474,8 @@ mod tests {
         state.speculatively(|s| {
             s.endnote_counter += 1;
             *s.list_counters.entry(num).or_default() += 1;
-            s.list_counters.insert((model::NumId::new(99), 0), 42);
+            s.list_counters
+                .insert((model::AbstractNumId::new(99), 0), 42);
             s.next_outline_node_id();
             s.page_config = crate::render::layout::page::PageConfig::default();
             s.page_config.margins.left = Pt::new(999.0);
@@ -483,7 +490,7 @@ mod tests {
         assert!(
             !state
                 .list_counters
-                .contains_key(&(model::NumId::new(99), 0)),
+                .contains_key(&(model::AbstractNumId::new(99), 0)),
             "a counter the speculative build *created* must not survive it"
         );
         assert_eq!(
@@ -586,7 +593,8 @@ struct DocumentPosition {
     page_config: crate::render::layout::page::PageConfig,
     footnotes: crate::render::layout::fragment::FootnoteTracker,
     endnote_counter: u32,
-    list_counters: HashMap<(model::NumId, u8), u32>,
+    list_counters: HashMap<(model::AbstractNumId, u8), u32>,
+    started_overrides: std::collections::HashSet<(model::NumId, u8)>,
     outline: OutlineCollector,
     field_ctx: crate::render::layout::fragment::FieldContext,
     shape_default_text_color: Option<crate::render::resolve::color::RgbColor>,
@@ -601,6 +609,7 @@ impl DocumentPosition {
             footnotes,
             endnote_counter,
             list_counters,
+            started_overrides,
             outline,
             field_ctx,
             shape_default_text_color,
@@ -617,6 +626,7 @@ impl DocumentPosition {
             footnotes: footnotes.clone(),
             endnote_counter: *endnote_counter,
             list_counters: list_counters.clone(),
+            started_overrides: started_overrides.clone(),
             outline: *outline,
             field_ctx: *field_ctx,
             shape_default_text_color: *shape_default_text_color,
@@ -630,6 +640,10 @@ impl DocumentPosition {
         state.footnotes = self.footnotes;
         state.endnote_counter = self.endnote_counter;
         state.list_counters = self.list_counters;
+        // §17.9.28: a speculative pass that consumed an instance's one-shot
+        // restart must give it back, or the real pass would renumber from the
+        // shared counter instead of from the override.
+        state.started_overrides = self.started_overrides;
         state.outline = self.outline;
         state.field_ctx = self.field_ctx;
         state.shape_default_text_color = self.shape_default_text_color;

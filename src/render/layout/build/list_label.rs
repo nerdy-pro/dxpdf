@@ -58,10 +58,35 @@ pub(super) fn inject_list_label(
     let num_id = model::NumId::new(num_ref.num_id);
     let level = num_ref.level;
 
-    let levels = match ctx.resolved.numbering.get(&num_id) {
-        Some(levels) => levels,
+    let resolved_num = match ctx.resolved.numbering.get(&num_id) {
+        Some(resolved) => resolved,
         None => return,
     };
+    // §17.9.2: the counter belongs to the abstract definition. Two `w:num`
+    // instances over one `w:abstractNum` are one list, and Word numbers them as
+    // one sequence — measured against Word 16.0, which draws 1…5 across two
+    // instances where a per-instance counter draws 1, 2, 1, 2, 3 (issue #230).
+    let abstract_num_id = resolved_num.abstract_num_id;
+    let levels = &resolved_num.levels;
+
+    // §17.9.28: a `w:startOverride` on this instance's level restarts the
+    // shared sequence — once, the first time this instance touches that level.
+    // Word 16.0 numbers 1, 2, 8, 9, 10, 11 for items alternating between an
+    // instance and an overriding one, so the restart neither repeats nor is
+    // inherited by the other instances afterwards.
+    //
+    // "Touches" includes instantiating the level as an *ancestor*: in
+    // `test-files/numbering-direct-indent.docx` the first item is `ilvl=2` on an
+    // instance that overrides level 0, and Word's render continues 2. 3. 4.
+    // afterwards rather than restarting at 1. The ancestor seeding below
+    // consumes the restart for exactly that reason.
+    let start_override = |lvl: u8| levels.get(lvl as usize).and_then(|l| l.start_override);
+    let restart = start_override(level).filter(|_| state.started_overrides.insert((num_id, level)));
+    let ancestor_restarts: Vec<Option<u32>> = (0..level)
+        .map(|ancestor| {
+            start_override(ancestor).filter(|_| state.started_overrides.insert((num_id, ancestor)))
+        })
+        .collect();
 
     // Update counters: increment this level, reset deeper levels.
     //
@@ -80,26 +105,26 @@ pub(super) fn inject_list_label(
         // "1.1.1"-style items, the next top-level item continues as "2.", not
         // "1.". Only ancestors missing from the map are touched.
         for ancestor in 0..level {
-            counters
-                .entry((num_id, ancestor))
-                .or_insert_with(|| level_start(ancestor));
+            let seed =
+                ancestor_restarts[ancestor as usize].unwrap_or_else(|| level_start(ancestor));
+            counters.entry((abstract_num_id, ancestor)).or_insert(seed);
         }
-        match counters.entry((num_id, level)) {
+        match counters.entry((abstract_num_id, level)) {
             Entry::Vacant(slot) => {
-                slot.insert(level_start(level));
+                slot.insert(restart.unwrap_or_else(|| level_start(level)));
             }
             Entry::Occupied(mut slot) => {
-                let next = slot.get().saturating_add(1);
+                let next = restart.unwrap_or_else(|| slot.get().saturating_add(1));
                 slot.insert(next);
             }
         }
         // Reset deeper levels. `saturating_add`: `w:ilvl` is parsed as a raw
         // u8, so a crafted ilvl=255 must yield an empty range here — `level + 1`
         // would overflow (panic in debug, wrap to 0 in release and wipe every
-        // counter this numId owns, including the ancestors seeded above).
+        // counter this list owns, including the ancestors seeded above).
         let max_level = levels.len() as u8;
         for deeper in level.saturating_add(1)..max_level {
-            counters.remove(&(num_id, deeper));
+            counters.remove(&(abstract_num_id, deeper));
         }
     }
 
@@ -189,6 +214,7 @@ pub(super) fn inject_list_label(
             merged_props,
             ctx,
             &state.list_counters,
+            abstract_num_id,
             levels,
             level,
             level_def,
@@ -326,15 +352,14 @@ fn inject_text_label(
     fragments: &mut Vec<Fragment>,
     merged_props: &mut ParagraphProperties,
     ctx: &BuildContext,
-    counters: &std::collections::HashMap<(model::NumId, u8), u32>,
+    counters: &std::collections::HashMap<(model::AbstractNumId, u8), u32>,
+    abstract_num_id: model::AbstractNumId,
     levels: &[crate::render::resolve::numbering::ResolvedNumberingLevel],
     level: u8,
     level_def: Option<&crate::render::resolve::numbering::ResolvedNumberingLevel>,
     auto_fit: crate::render::layout::ShapeAutoFit,
     layout_ind: Option<model::Indentation>,
 ) {
-    let num_id = model::NumId::new(merged_props.numbering.get().unwrap().num_id);
-
     let (default_family, default_size, default_color, _, paragraph_style_run) =
         resolve_paragraph_defaults(para, ctx.resolved, false, None, None);
 
@@ -361,7 +386,11 @@ fn inject_text_label(
     );
 
     let label_text = match crate::render::resolve::numbering::format_list_label(
-        levels, level, counters, num_id, locale,
+        levels,
+        level,
+        counters,
+        abstract_num_id,
+        locale,
     ) {
         Some(t) => t,
         None => return,
@@ -647,6 +676,7 @@ mod tests {
             format,
             level_text: level_text.into(),
             start: 1,
+            start_override: None,
             run_properties: None,
             indentation: None,
             justification: None,
@@ -663,7 +693,13 @@ mod tests {
 
     fn resolved_with(levels: Vec<ResolvedNumberingLevel>) -> ResolvedDocument {
         let mut numbering = HashMap::new();
-        numbering.insert(NumId::new(7), levels);
+        numbering.insert(
+            NumId::new(7),
+            crate::render::resolve::numbering::ResolvedNumbering {
+                abstract_num_id: crate::model::AbstractNumId::new(7),
+                levels,
+            },
+        );
         ResolvedDocument {
             sections: Vec::new(),
             styles: HashMap::new(),

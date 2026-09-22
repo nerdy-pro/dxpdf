@@ -30,6 +30,10 @@ pub struct PageConfig {
     pub footer_margin: Pt,
     /// §17.6.4: column layout. Single-element vec for normal single-column.
     pub columns: Vec<ColumnGeometry>,
+    /// §17.6.4 `w:sep`: draw a vertical rule down each gutter. Word draws it
+    /// only between columns that actually received content, and only for the
+    /// height those columns used — see `paint_column_separators`.
+    pub column_separator: bool,
     /// §17.6.6 `w:bidi`: which side of the content area is the section's
     /// **leading** margin.
     ///
@@ -63,6 +67,7 @@ impl Default for PageConfig {
             ),
             header_margin: SPEC_DEFAULT_MARGIN / 2.0,
             footer_margin: SPEC_DEFAULT_MARGIN / 2.0,
+            column_separator: false,
             columns: vec![ColumnGeometry {
                 x_offset: Pt::ZERO,
                 width: content_width,
@@ -111,6 +116,11 @@ impl PageConfig {
         // page whose margins exceed its width yields zero-width columns rather
         // than negative ones.
         cfg.columns = compute_columns(cfg.content_width(), sect.columns.get());
+        cfg.column_separator = sect
+            .columns
+            .get()
+            .and_then(|c| c.separator)
+            .unwrap_or(false);
 
         // §17.6.6: absent or `w:val="0"` leaves the section left-to-right.
         if sect.bidi == Some(true) {
@@ -201,9 +211,8 @@ fn clamp_column_count(requested: u32, content_width: Pt, space: Pt) -> usize {
 /// present — Word writes `equalWidth="0"` whenever it means the individual
 /// definitions to win.
 ///
-/// **Tier 0:** §17.6.4 `w:sep` — the vertical rule drawn between columns — is
-/// parsed onto `model::Columns::separator` but never drawn. Position and width
-/// of the columns themselves are unaffected; only the divider line is missing.
+/// §17.6.4 `w:sep` does not affect the geometry here — it is carried on
+/// [`PageConfig::column_separator`] and drawn by `paint_column_separators`.
 fn compute_columns(content_width: Pt, columns: Option<&Columns>) -> Vec<ColumnGeometry> {
     let single = || {
         vec![ColumnGeometry {

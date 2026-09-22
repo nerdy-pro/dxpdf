@@ -1330,6 +1330,9 @@ pub(super) fn build_shape_text_commands(
         footnotes: Default::default(),
         endnote_counter: 0,
         list_counters: std::collections::HashMap::new(),
+        // §17.9.28: its own set too — a shape body is a separate story, so an
+        // override fired inside it must not be remembered for the main flow.
+        started_overrides: std::collections::HashSet::new(),
         field_ctx: state.field_ctx,
         shape_default_text_color,
         shape_default_font_family,
@@ -1680,6 +1683,7 @@ mod tests {
             footnotes: Default::default(),
             endnote_counter: 0,
             list_counters: Default::default(),
+            started_overrides: Default::default(),
             field_ctx: Default::default(),
             warned_border_styles: Default::default(),
             warned_row_cell_spacing: false,

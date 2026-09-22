@@ -38,7 +38,7 @@ pub(super) fn build_block(
     match block {
         Block::Paragraph(p) => build_paragraph_block(p, ctx, state, pending_dropcap, None, None),
         Block::Table(t) => {
-            let built = build_table(t, available_width, ctx, state);
+            let built = build_table(t, available_width, None, ctx, state);
             Some(LayoutBlock::Table {
                 rows: built.rows,
                 col_widths: built.col_widths,

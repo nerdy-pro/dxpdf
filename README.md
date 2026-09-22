@@ -385,7 +385,7 @@ Validated against ISO 29500 (Office Open XML). **82 entries fully implemented, 1
 | Section breaks (nextPage) | ✅ |
 | Section breaks (continuous) | ✅ continues on current page |
 | Section breaks (even, odd, nextColumn) | ⚠️ treated as nextPage |
-| Multi-column sections | ✅ incl. splitting across unequal-width columns |
+| Multi-column sections | ✅ incl. splitting across unequal-width columns, balancing at a continuous break, and the `w:sep` rule |
 | Page borders, doc grid | ❌ doc grid parsed, not applied |
 
 ### Headers & Footers

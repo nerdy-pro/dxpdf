@@ -40,9 +40,25 @@ struct LayoutCtx<'cx> {
     measure_text: super::super::paragraph::MeasureTextFn<'cx>,
     separator_indent: Pt,
     default_line_height: Pt,
+    /// §17.6.4: an equal-height target for one page's columns, decided by a
+    /// previous pass (see [`BalanceTarget`]).
+    balance: Option<BalanceTarget>,
 }
 
 impl LayoutCtx<'_> {
+    /// §17.6.4: the y the *columns* of this page may not pass. It is the page's
+    /// own body bottom everywhere except the one page a [`BalanceTarget`] names,
+    /// where it is the balanced height — lower than the body bottom, so the
+    /// columns end level with room to spare beneath them. Footnotes and the
+    /// §17.6.22 handoff keep using the body bottom.
+    fn column_bottom(&self, section_page_index: usize) -> Pt {
+        let bottom = self.page_bounds(section_page_index).bottom;
+        match self.balance {
+            Some(t) if t.page_index == section_page_index => bottom.min(t.column_bottom),
+            _ => bottom,
+        }
+    }
+
     fn page_bounds(&self, section_page_index: usize) -> PageBodyBounds {
         match self.last_page.bounds_override() {
             // §17.6.22: this page is shared with a following Continuous
@@ -56,6 +72,69 @@ impl LayoutCtx<'_> {
         }
     }
 }
+
+/// §17.6.4 `w:sep`: draw the vertical rule down each gutter that separates two
+/// columns this page actually used.
+///
+/// Measured against Word 16.0 (Office 2024 LTSC) on a Letter page with a 25 pt
+/// gutter centred on x = 306: Word draws a hairline at x = 305.76 running from
+/// the body top down to the bottom of the deepest column — the *used* height,
+/// not the page's. Two probes of the same section with all the content in
+/// column 1 drew no rule at all, so an empty column gets no divider.
+fn paint_column_separators(
+    page: &mut LayoutedPage,
+    config: &crate::render::layout::page::PageConfig,
+    column_top: Pt,
+    bottoms: &[Pt],
+) {
+    if !config.column_separator || config.columns.len() < 2 || bottoms.len() < 2 {
+        return;
+    }
+    let deepest = bottoms.iter().copied().fold(column_top, Pt::max);
+    if deepest <= column_top {
+        return;
+    }
+    // One rule per gutter *between occupied columns*: `bottoms` has an entry per
+    // column that received content, so `bottoms.len() - 1` gutters are drawn.
+    for i in 0..bottoms.len().saturating_sub(1) {
+        let (left, right) = match (config.columns.get(i), config.columns.get(i + 1)) {
+            (Some(l), Some(r)) => (l, r),
+            _ => break,
+        };
+        let gutter_start = config.margins.left + left.x_offset + left.width;
+        let gutter_end = config.margins.left + right.x_offset;
+        let x = (gutter_start + gutter_end) / 2.0;
+        page.commands.push(DrawCommand::Line {
+            line: crate::render::geometry::PtLineSegment::new(
+                crate::render::geometry::PtOffset::new(x, column_top),
+                crate::render::geometry::PtOffset::new(x, deepest),
+            ),
+            color: crate::render::resolve::color::RgbColor::BLACK,
+            width: COLUMN_SEPARATOR_WIDTH,
+        });
+    }
+}
+
+/// §17.6.4: describe the last page's columns for a caller that may balance
+/// them. `None` for a single-column section, where there is nothing to level.
+fn balance_probe(
+    ctx: &LayoutCtx<'_>,
+    page_index: usize,
+    column_top: Pt,
+    column_bottoms: Vec<Pt>,
+) -> Option<BalanceProbe> {
+    let columns = ctx.config.columns.len();
+    (columns > 1).then_some(BalanceProbe {
+        page_index,
+        column_top,
+        column_bottoms,
+        columns,
+    })
+}
+
+/// §17.6.4: Word draws the column separator as a hairline — one device pixel at
+/// 150 dpi in the reference render, i.e. half a point.
+const COLUMN_SEPARATOR_WIDTH: Pt = Pt::new(0.5);
 
 /// All mutable paging state threaded through `layout_section`.
 /// Extracted from the function to make ownership and page-break resets explicit.
@@ -88,6 +167,12 @@ struct PageLayoutState<'doc> {
     /// as much room as anywhere else. See
     /// [`at_full_height_column_top`](PageLayoutState::at_full_height_column_top).
     inherited_short_columns: bool,
+    /// §17.6.4: the bottom each column of the current page was left at, in
+    /// column order and excluding the one being filled. With `cursor_y` it says
+    /// how much of the page each column actually used, which is what the
+    /// §17.6.4 `w:sep` rule is drawn against and what the balance estimate in
+    /// `render::layout_document` divides.
+    column_bottoms: Vec<Pt>,
     /// §17.6.4: the lowest y any *left* column of the current page reached —
     /// the flow bottom of the columned content so far. `cursor_y` alone loses
     /// this the moment the flow moves to the next column, but a §17.6.22
@@ -96,6 +181,14 @@ struct PageLayoutState<'doc> {
     deepest_column_bottom: Pt,
     /// Effective bottom boundary — reduced as footnotes are reserved.
     bottom: Pt,
+    /// §17.6.4: the y the columns may not pass. Every reader that decides
+    /// whether *content* still fits uses this; `bottom` stays the page's own
+    /// body bottom, which footnote reservation and the §17.6.22 handoff need.
+    /// Equal to `bottom` on every page
+    /// except one being balanced, where it is the equal-height target; reduced
+    /// with `bottom` as footnotes are reserved, so a balanced page's columns
+    /// still stay clear of its notes.
+    column_bottom: Pt,
     /// Footnotes accumulated for the current page.
     page_footnotes: Vec<(
         &'doc [super::super::fragment::Fragment],
@@ -137,6 +230,7 @@ impl<'doc> PageLayoutState<'doc> {
         config: &PageConfig,
         continuation: Option<ContinuationState>,
         bounds: PageBodyBounds,
+        column_bottom: Pt,
         logical_page_base: usize,
     ) -> Self {
         // §17.6.22: a continuation resumes *inside* a page, so it inherits
@@ -174,7 +268,9 @@ impl<'doc> PageLayoutState<'doc> {
                 // and needs no exception.
                 inherited_short_columns: c.cursor_y > bounds.top,
                 deepest_column_bottom: c.cursor_y,
+                column_bottoms: Vec::new(),
                 bottom: c.bottom,
+                column_bottom: column_bottom.min(c.bottom),
                 page_footnotes: Vec::new(),
                 carried_footnotes: c.page_footnotes,
                 // §17.3.1.33: the page top is above the preceding section's
@@ -202,7 +298,9 @@ impl<'doc> PageLayoutState<'doc> {
                 current_col: 0,
                 inherited_short_columns: false,
                 deepest_column_bottom: bounds.top,
+                column_bottoms: Vec::new(),
                 bottom: bounds.bottom,
+                column_bottom,
                 page_footnotes: Vec::new(),
                 carried_footnotes: Vec::new(),
                 first_on_section_page: true,
@@ -254,8 +352,18 @@ impl<'doc> PageLayoutState<'doc> {
     /// [`finalize`]: PageLayoutState::finalize
     fn advance_to_next_column(&mut self) {
         self.deepest_column_bottom = self.deepest_column_bottom.max(self.cursor_y);
+        self.column_bottoms.push(self.cursor_y);
         self.current_col += 1;
         self.cursor_y = self.column_top;
+    }
+
+    /// §17.6.4: how far down each column of this page reached, the one being
+    /// filled included. Empty trailing columns are simply absent, which is what
+    /// makes "did this column get any content" answerable.
+    fn used_column_bottoms(&self) -> Vec<Pt> {
+        let mut bottoms = self.column_bottoms.clone();
+        bottoms.push(self.cursor_y);
+        bottoms
     }
 
     /// Render accumulated footnotes onto the current page and clear the list.
@@ -300,6 +408,13 @@ impl<'doc> PageLayoutState<'doc> {
     /// Callers that also need `prev_space_after = Pt::ZERO` must set that separately.
     fn push_new_page(&mut self, block_idx: usize, ctx: &LayoutCtx<'_>) {
         self.flush_footnotes(ctx);
+        let bottoms = self.used_column_bottoms();
+        paint_column_separators(
+            &mut self.current_page,
+            ctx.config,
+            self.column_top,
+            &bottoms,
+        );
         self.pages.push(std::mem::replace(
             &mut self.current_page,
             LayoutedPage::new(ctx.config.page_size),
@@ -314,7 +429,9 @@ impl<'doc> PageLayoutState<'doc> {
         // so the inherited short column set is behind us.
         self.inherited_short_columns = false;
         self.deepest_column_bottom = bounds.top;
+        self.column_bottoms.clear();
         self.bottom = bounds.bottom;
+        self.column_bottom = ctx.column_bottom(self.page_index);
         self.page_start_block = block_idx;
         self.abs_floats_dirty = true;
         self.page_floats.clear();
@@ -332,10 +449,19 @@ impl<'doc> PageLayoutState<'doc> {
         match ctx.last_page {
             LastPageOwner::Own => {
                 self.flush_footnotes(ctx);
+                let bottoms = self.used_column_bottoms();
+                paint_column_separators(
+                    &mut self.current_page,
+                    ctx.config,
+                    self.column_top,
+                    &bottoms,
+                );
+                let probe = balance_probe(ctx, self.page_index, self.column_top, bottoms);
                 self.pages.push(self.current_page);
                 SectionLayout {
                     pages: self.pages,
                     tail: SectionTail::Complete,
+                    balance_probe: probe,
                 }
             }
             // §17.6.22: the last page belongs to the section that follows. It
@@ -344,6 +470,14 @@ impl<'doc> PageLayoutState<'doc> {
             // separator — and stays out of `pages` so no caller can commit it
             // twice.
             LastPageOwner::SharedWithNext { .. } => {
+                let bottoms = self.used_column_bottoms();
+                paint_column_separators(
+                    &mut self.current_page,
+                    ctx.config,
+                    self.column_top,
+                    &bottoms,
+                );
+                let probe = balance_probe(ctx, self.page_index, self.column_top, bottoms);
                 let carried = std::mem::take(&mut self.carried_footnotes);
                 let own: Vec<_> = self
                     .page_footnotes
@@ -351,6 +485,7 @@ impl<'doc> PageLayoutState<'doc> {
                     .map(|(frags, style)| (frags.to_vec(), (*style).clone()))
                     .collect();
                 SectionLayout {
+                    balance_probe: probe,
                     pages: self.pages,
                     tail: SectionTail::SharedWithNext(ContinuationState {
                         page: self.current_page,
@@ -522,7 +657,9 @@ struct PageReplayCheckpoint<'doc> {
     /// other would describe a column set that never existed.
     inherited_short_columns: bool,
     deepest_column_bottom: Pt,
+    column_bottoms: Vec<Pt>,
     bottom: Pt,
+    column_bottom: Pt,
     page_footnotes: Vec<(
         &'doc [super::super::fragment::Fragment],
         &'doc ParagraphStyle,
@@ -551,7 +688,9 @@ impl<'doc> PageReplayCheckpoint<'doc> {
             column_top: state.column_top,
             inherited_short_columns: state.inherited_short_columns,
             deepest_column_bottom: state.deepest_column_bottom,
+            column_bottoms: state.column_bottoms.clone(),
             bottom: state.bottom,
+            column_bottom: state.column_bottom,
             page_footnotes: state.page_footnotes.clone(),
             first_on_section_page: state.first_on_section_page,
             prev_space_after: state.prev_space_after,
@@ -576,7 +715,9 @@ impl<'doc> PageReplayCheckpoint<'doc> {
         state.column_top = self.column_top;
         state.inherited_short_columns = self.inherited_short_columns;
         state.deepest_column_bottom = self.deepest_column_bottom;
+        state.column_bottoms.clone_from(&self.column_bottoms);
         state.bottom = self.bottom;
+        state.column_bottom = self.column_bottom;
         state.page_footnotes.clone_from(&self.page_footnotes);
         state.first_on_section_page = self.first_on_section_page;
         state.prev_space_after = self.prev_space_after;
@@ -647,7 +788,7 @@ mod paragraph_float_checkpoint_tests {
             top: Pt::ZERO,
             bottom: Pt::new(700.0),
         };
-        PageLayoutState::new(&config, None, bounds, 0)
+        PageLayoutState::new(&config, None, bounds, bounds.bottom, 0)
     }
 
     #[test]
@@ -1336,8 +1477,10 @@ fn reserve_footnotes<'doc>(
         // Reserve separator space only for the first footnote on this page.
         if state.page_footnotes.is_empty() {
             state.bottom -= FOOTNOTE_SEPARATOR_GAP;
+            state.column_bottom -= FOOTNOTE_SEPARATOR_GAP;
         }
         state.bottom -= fn_para.size.height;
+        state.column_bottom -= fn_para.size.height;
         state.page_footnotes.push((fn_frags, fn_style));
     }
 }
@@ -1414,7 +1557,7 @@ fn emit_split_paragraph<'doc>(
 
     loop {
         let col_width = config.columns[state.current_col].width;
-        let page_height = (state.bottom - state.page_top).max(Pt::ZERO);
+        let page_height = (state.column_bottom - state.page_top).max(Pt::ZERO);
         let constraints = BoxConstraints::new(Pt::ZERO, col_width, Pt::ZERO, page_height);
         let placed = place_paragraph(
             &remaining,
@@ -1437,7 +1580,7 @@ fn emit_split_paragraph<'doc>(
         // whole paragraph and let it overflow" over "move it", and the overflow
         // it admits is bounded.
         let at_page_top = state.cursor_y <= state.column_top;
-        let avail = (state.bottom - state.cursor_y).max(Pt::ZERO);
+        let avail = (state.column_bottom - state.cursor_y).max(Pt::ZERO);
         // §17.3.1.24/§17.3.1.33: the bottom border space is spent once, on the
         // segment carrying the paragraph's last line.
         //
@@ -1631,6 +1774,37 @@ fn prefix_adjusted_head(
     }
 }
 
+/// §17.6.4: an equal-height target for the columns of one page.
+///
+/// Balancing is a second pass by nature: the height that makes the columns
+/// level can only be computed once the greedy pass has said how much content
+/// the page holds. The caller measures that, then lays the section out again
+/// with this.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BalanceTarget {
+    /// 0-based physical page within the section whose columns are balanced —
+    /// the last one of the run, which is the only page Word balances.
+    pub page_index: usize,
+    /// The y the columns of that page may not pass. Never below the page's own
+    /// body bottom, which still bounds the flow.
+    pub column_bottom: Pt,
+}
+
+/// §17.6.4: what the greedy pass learned about the last page's columns, for a
+/// caller deciding whether to balance them and at what height.
+#[derive(Clone, Debug)]
+pub(crate) struct BalanceProbe {
+    /// 0-based physical page within the section.
+    pub page_index: usize,
+    /// The y the columns of that page start at.
+    pub column_top: Pt,
+    /// How far down each *occupied* column reached, in column order. Shorter
+    /// than `columns` when the flow never reached the later ones.
+    pub column_bottoms: Vec<Pt>,
+    /// §17.6.4: how many columns that page's section declares.
+    pub columns: usize,
+}
+
 /// Where a section begins in the document's page sequence.
 ///
 /// The three travel together because they answer one question — which page
@@ -1647,6 +1821,9 @@ pub(crate) struct SectionStart<'a> {
     /// §17.10.6: logical number of the section's first page, with
     /// `w:pgNumType/@start` applied. Drives §20.4.3.1 float mirroring.
     pub logical_page_base: usize,
+    /// §17.6.4: an equal-height target for one page's columns, from a previous
+    /// pass over this same section. `None` on the greedy pass.
+    pub balance: Option<BalanceTarget>,
 }
 
 /// §17.6.22: who owns a section's last page.
@@ -1719,6 +1896,9 @@ pub fn layout_section(
             // A section laid out on its own starts at page 1 — the §17.10.6
             // renumbering only exists across a document's section list.
             logical_page_base: 1,
+            // §17.6.4: balancing is decided by the document-level driver, which
+            // is the only caller that knows whether a continuous break follows.
+            balance: None,
         },
     )
     .pages
@@ -1732,6 +1912,9 @@ pub(crate) struct SectionLayout {
     /// not a state a caller can construct or forget to handle.
     pub pages: Vec<LayoutedPage>,
     pub tail: SectionTail,
+    /// §17.6.4: the column extents of this section's last page, for a caller
+    /// that may want to balance them. `None` for a single-column section.
+    pub balance_probe: Option<BalanceProbe>,
 }
 
 /// §17.6.22: what became of a section's last page.
@@ -1770,6 +1953,7 @@ pub(crate) fn layout_section_with_clearance(
         clearance,
         last_page,
         logical_page_base,
+        balance,
     } = start;
     let content_width = config.content_width();
     let num_cols = config.num_columns();
@@ -1781,9 +1965,15 @@ pub(crate) fn layout_section_with_clearance(
         measure_text,
         separator_indent,
         default_line_height,
+        balance,
     };
-    let mut state =
-        PageLayoutState::new(config, continuation, ctx.page_bounds(0), logical_page_base);
+    let mut state = PageLayoutState::new(
+        config,
+        continuation,
+        ctx.page_bounds(0),
+        ctx.column_bottom(0),
+        logical_page_base,
+    );
 
     // Column-aware constraints and x-offset for the current column.
     let col_constraints = |col: usize, page_height: Pt| -> BoxConstraints {
@@ -1844,7 +2034,7 @@ pub(crate) fn layout_section_with_clearance(
                 {
                     let constraints = col_constraints(
                         state.current_col,
-                        (state.bottom - state.page_top).max(Pt::ZERO),
+                        (state.column_bottom - state.page_top).max(Pt::ZERO),
                     );
                     if let Some(group) = measure_keep_next_group(
                         blocks,
@@ -1883,7 +2073,7 @@ pub(crate) fn layout_section_with_clearance(
                                 ..
                             }) if !rows.is_empty() => {
                                 let current_available =
-                                    state.bottom - current_group_top - current_group_height;
+                                    state.column_bottom - current_group_top - current_group_height;
                                 let full_page_available =
                                     full_page_height - fresh_page_group_height;
                                 let leading_group_height = measure_leading_table_group_height(
@@ -1912,7 +2102,8 @@ pub(crate) fn layout_section_with_clearance(
                                 // leading row is not covered by that guarantee
                                 // and keeps the whole-move (handled above).
                                 fresh_page_group_height <= full_page_height
-                                    && current_group_top + current_group_height > state.bottom
+                                    && current_group_top + current_group_height
+                                        > state.column_bottom
                                     && !leading_keep_next_paragraph_splittable(
                                         &blocks[block_idx],
                                         &constraints,
@@ -2138,7 +2329,7 @@ pub(crate) fn layout_section_with_clearance(
 
                         let constraints = col_constraints(
                             state.current_col,
-                            (state.bottom - state.page_top).max(Pt::ZERO),
+                            (state.column_bottom - state.page_top).max(Pt::ZERO),
                         );
                         let placed = place_paragraph(
                             chunk,
@@ -2208,7 +2399,21 @@ pub(crate) fn layout_section_with_clearance(
                             // height, so anything following on this page is
                             // placed exactly as before.
                             let fit_height = para.size.height - effective_style.space_after;
-                            if state.cursor_y + fit_height > state.bottom
+                            // §17.6.4 / §17.6.17: a balanced column is shorter
+                            // than the page, and an empty section-terminal
+                            // paragraph — the structural marker carrying the
+                            // `w:sectPr`, which draws nothing — must not be the
+                            // thing that overflows it. Word keeps the marker on
+                            // the balanced page: its own render of the probe
+                            // document puts the mark at the foot of column 2
+                            // with the columns still 3 / 3. The marker is
+                            // measured against the page's real bottom instead.
+                            let budget = if is_empty_section_terminal_paragraph(blocks, block_idx) {
+                                state.bottom
+                            } else {
+                                state.column_bottom
+                            };
+                            if state.cursor_y + fit_height > budget
                                 && !state.at_full_height_column_top()
                             {
                                 // `placed` (which borrows `effective_style`) is no
@@ -2267,7 +2472,7 @@ pub(crate) fn layout_section_with_clearance(
                                 effective_style.page_floats = state.page_floats.clone();
                                 let destination_constraints = col_constraints(
                                     state.current_col,
-                                    (state.bottom - state.page_top).max(Pt::ZERO),
+                                    (state.column_bottom - state.page_top).max(Pt::ZERO),
                                 );
                                 para = place_paragraph(
                                     chunk,
@@ -2427,7 +2632,7 @@ pub(crate) fn layout_section_with_clearance(
                     // it, push the table to the next page before resolving
                     // the anchor. This matches Word's "don't anchor on a
                     // page that's already mostly full" behavior.
-                    if state.cursor_y + table.size.height > state.bottom
+                    if state.cursor_y + table.size.height > state.column_bottom
                         && state.cursor_y > state.page_top
                     {
                         state.push_new_page(block_idx, &ctx);
@@ -2467,7 +2672,7 @@ pub(crate) fn layout_section_with_clearance(
                             table.size.height,
                             fi.overlap,
                             &state.page_floats,
-                            state.bottom,
+                            state.column_bottom,
                         ) {
                             FloatingTableAnchor::OnCurrentPage(y) => break y,
                             FloatingTableAnchor::Shifted { from, to } => {
@@ -2498,7 +2703,7 @@ pub(crate) fn layout_section_with_clearance(
                     // remaining height (`bottom - float_y_start`);
                     // continuation slices get the selected body height for
                     // each subsequent page.
-                    let available_first = (state.bottom - float_y_start).max(Pt::ZERO);
+                    let available_first = (state.column_bottom - float_y_start).max(Pt::ZERO);
                     let section_page_index = state.page_index;
                     let slices = layout_table_paginated_with_page_heights(
                         rows,
@@ -2591,7 +2796,7 @@ pub(crate) fn layout_section_with_clearance(
 
                 // Non-floating table: paginated row-level splitting.
                 // §17.4.49 / §17.4.6: split at row boundaries, repeat headers.
-                let available = state.bottom - state.cursor_y;
+                let available = state.column_bottom - state.cursor_y;
                 let section_page_index = state.page_index;
                 let slices = layout_table_paginated_with_page_heights(
                     rows,

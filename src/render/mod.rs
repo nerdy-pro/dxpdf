@@ -160,6 +160,66 @@ struct FitSharedPage<'a> {
 /// non-promotion — both are open questions the issue names but does not
 /// resolve. A render settling either would narrow or widen this function, not
 /// its call sites.
+/// §17.6.4: how many times the balance search may lay a section out again
+/// before giving up and keeping the greedy result. Each attempt is one pass
+/// over one section, and the estimate below is usually accepted on the first.
+const BALANCE_ATTEMPTS: usize = 6;
+
+/// §17.6.4: stop bisecting when the remaining interval is thinner than this —
+/// well under a line, so a further step could not change which line fits.
+const BALANCE_PRECISION: dimension::Pt = dimension::Pt::new(1.0);
+
+/// §17.6.4: the equal-height target for a page's columns — the total content
+/// height divided by the column count, which is what Word balances to.
+///
+/// `None` when there is nothing to do: a single-column section, a page whose
+/// columns are already level, or one whose content does not reach the second
+/// column at all (there the greedy answer *is* the balanced one).
+fn column_balance_estimate(
+    probe: Option<&layout::section::BalanceProbe>,
+) -> Option<layout::section::BalanceTarget> {
+    let probe = probe?;
+    if probe.columns < 2 || probe.column_bottoms.is_empty() {
+        return None;
+    }
+    let top = probe.column_top;
+    let deepest = probe
+        .column_bottoms
+        .iter()
+        .copied()
+        .fold(top, dimension::Pt::max);
+    if deepest <= top {
+        return None;
+    }
+    let total: dimension::Pt = probe
+        .column_bottoms
+        .iter()
+        .map(|b| (*b - top).max(dimension::Pt::ZERO))
+        .fold(dimension::Pt::ZERO, |a, b| a + b);
+    let target = top + total / probe.columns as f32;
+    // Already level, or levelling would not move anything.
+    if target >= deepest {
+        return None;
+    }
+    Some(layout::section::BalanceTarget {
+        page_index: probe.page_index,
+        column_bottom: target,
+    })
+}
+
+/// §17.6.4: the height the greedy pass already proved fits — the upper end of
+/// the bisection, never a guess.
+fn column_balance_ceiling(probe: Option<&layout::section::BalanceProbe>) -> dimension::Pt {
+    probe
+        .map(|p| {
+            p.column_bottoms
+                .iter()
+                .copied()
+                .fold(p.column_top, dimension::Pt::max)
+        })
+        .unwrap_or(dimension::Pt::ZERO)
+}
+
 fn continuous_break_promotes_to_page_break(
     prev: &PageConfig,
     next: &crate::model::SectionProperties,
@@ -253,6 +313,7 @@ fn shared_page_owner_bounds(
                     // computed is what will replace them.
                     last_page: layout::section::LastPageOwner::SharedWithNext { bounds: None },
                     logical_page_base: base,
+                    balance: None,
                 },
             );
             (!laid.pages.is_empty(), laid.tail)
@@ -548,7 +609,8 @@ pub fn layout_document(
         };
 
         let lay_out = |continuation: Option<layout::section::ContinuationState>,
-                       bounds: Option<layout::section::FinalPageBounds>| {
+                       bounds: Option<layout::section::FinalPageBounds>,
+                       balance: Option<layout::section::BalanceTarget>| {
             layout_section_with_clearance(
                 &built.blocks,
                 &config,
@@ -560,11 +622,72 @@ pub fn layout_document(
                     clearance: &clearance,
                     last_page: owner(bounds),
                     logical_page_base,
+                    balance,
                 },
             )
         };
 
-        let mut layout = lay_out(continuation.clone(), None);
+        let mut layout = lay_out(continuation.clone(), None, None);
+
+        // §17.6.4: balance the columns of the run a continuous break closes.
+        //
+        // Word does this at a continuous break and only there — measured on
+        // Word 16.0 (Office 2024 LTSC): six short paragraphs in a two-column
+        // section come out 3 / 3 when the run is closed by
+        // `<w:type w:val="continuous"/>`, and all six in column 1 when it is
+        // closed by `nextPage` or when the section simply ends the document.
+        // So the greedy pass above is the right answer everywhere else, and
+        // this is a second pass over the one page that needs a target height
+        // (issue #232).
+        let mut balance = None;
+        if next_continuous {
+            if let Some(estimate) = column_balance_estimate(layout.balance_probe.as_ref()) {
+                // The estimate — total content height divided by the column
+                // count — is what Word starts from, and it is usually right.
+                // When a line does not fit at that height the page spills, and
+                // the smallest height that does not spill is found by bisecting
+                // up toward the greedy bottom the first pass already proved fits.
+                let greedy_pages = layout.pages.len();
+                let attempt_at = |column_bottom| {
+                    let target = layout::section::BalanceTarget {
+                        column_bottom,
+                        ..estimate
+                    };
+                    let attempt = lay_out(continuation.clone(), None, Some(target));
+                    // The page count is the whole predicate: a target too short
+                    // for the content pushes a column onto a new page, and
+                    // nothing else about a shorter column can fail.
+                    (attempt.pages.len() <= greedy_pages).then_some((target, attempt))
+                };
+
+                // `hi` is the height the greedy pass already proved fits, so the
+                // search is a bisection between a target that may be too short
+                // and one that certainly is not — converging on the shortest
+                // height the content still fits in, which is the balanced one.
+                let mut lo = estimate.column_bottom;
+                let mut hi = column_balance_ceiling(layout.balance_probe.as_ref());
+                let mut best = attempt_at(lo);
+                if best.is_none() {
+                    for _ in 0..BALANCE_ATTEMPTS {
+                        if hi - lo < BALANCE_PRECISION {
+                            break;
+                        }
+                        let mid = (lo + hi) / 2.0;
+                        match attempt_at(mid) {
+                            Some(fitting) => {
+                                hi = mid;
+                                best = Some(fitting);
+                            }
+                            None => lo = mid,
+                        }
+                    }
+                }
+                if let Some((target, attempt)) = best {
+                    layout = attempt;
+                    balance = Some(target);
+                }
+            }
+        }
         if next_continuous {
             let outcome = fit_shared_page(
                 &mut layout,
@@ -580,7 +703,7 @@ pub fn layout_document(
                 },
                 &ctx,
                 &mut state,
-                |bounds| lay_out(continuation.clone(), bounds),
+                |bounds| lay_out(continuation.clone(), bounds, balance),
             );
             log::debug!("[section {section_idx}] shared-page fit: {outcome:?}");
         }

@@ -68,6 +68,7 @@ mod types;
 pub use layout::layout_section;
 pub(crate) use layout::layout_section_with_clearance;
 pub(crate) use layout::SectionStart;
+pub(crate) use layout::{BalanceProbe, BalanceTarget};
 pub(crate) use layout::{FinalPageBounds, LastPageOwner, SectionLayout, SectionTail};
 pub use stacker::{stack_blocks, CellLine, StackResult};
 pub use types::*;
@@ -278,6 +279,7 @@ mod tests {
     fn small_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            column_separator: false,
             base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
@@ -380,6 +382,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 2,
+                balance: None,
             },
         )
         .pages;
@@ -553,6 +556,7 @@ mod tests {
     fn two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            column_separator: false,
             base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
@@ -1034,6 +1038,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 1,
+                balance: None,
             },
         )
         .pages;
@@ -1110,6 +1115,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 1,
+                balance: None,
             },
         )
         .pages;
@@ -1187,6 +1193,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 1,
+                balance: None,
             },
         )
         .pages;
@@ -1917,6 +1924,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 1,
+                balance: None,
             },
         )
         .pages;
@@ -1991,6 +1999,7 @@ mod tests {
                 last_page: super::layout::LastPageOwner::Own,
                 clearance: &clearance,
                 logical_page_base: 1,
+                balance: None,
             },
         )
         .pages;
@@ -2903,6 +2912,7 @@ mod tests {
     fn tall_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            column_separator: false,
             base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(160.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
@@ -3619,6 +3629,7 @@ mod tests {
     fn unequal_two_column_config() -> PageConfig {
         use crate::render::layout::page::ColumnGeometry;
         PageConfig {
+            column_separator: false,
             base_direction: Default::default(),
             page_size: PtSize::new(Pt::new(200.0), Pt::new(100.0)),
             margins: PtEdgeInsets::new(Pt::new(10.0), Pt::new(10.0), Pt::new(10.0), Pt::new(10.0)),
