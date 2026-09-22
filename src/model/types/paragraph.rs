@@ -21,6 +21,11 @@ pub struct Paragraph {
     pub mark_run_properties: Option<RunProperties>,
     pub content: Vec<Inline>,
     pub rsids: ParagraphRevisionIds,
+    /// §17.13.5.15 (issue #154): the paragraph *mark* is tracked-deleted —
+    /// `<w:del>` inside `pPr/rPr`, Word's spelling of a whole-paragraph
+    /// delete. In the final view a paragraph whose mark and content are both
+    /// deleted merges away instead of leaving a blank line.
+    pub mark_deleted: bool,
 }
 
 /// Paragraph properties — only fields explicitly present in the XML are set.

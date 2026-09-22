@@ -210,6 +210,7 @@ mod tests {
             footers: HashMap::new(),
             footnotes: HashMap::new(),
             endnotes: HashMap::new(),
+            comments: Default::default(),
             media: HashMap::new(),
             embedded_fonts: vec![],
         }
@@ -227,6 +228,8 @@ mod tests {
             },
             content: vec![RunElement::Text(text.into())],
             rsids: RevisionIds::default(),
+            revision: None,
+            comment: None,
         }))
     }
 
@@ -237,6 +240,7 @@ mod tests {
             mark_run_properties: None,
             content: vec![text_run(font, "hello")],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     }
 

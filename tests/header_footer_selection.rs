@@ -25,6 +25,7 @@ fn empty_document() -> Document {
         footers: HashMap::new(),
         footnotes: HashMap::new(),
         endnotes: HashMap::new(),
+        comments: Default::default(),
         media: HashMap::new(),
         embedded_fonts: vec![],
     }
@@ -36,6 +37,8 @@ fn run_with(elements: Vec<RunElement>) -> Inline {
         properties: RunProperties::default(),
         content: elements,
         rsids: RevisionIds::default(),
+        revision: None,
+        comment: None,
     }))
 }
 
@@ -46,6 +49,7 @@ fn para(text: &str) -> Block {
         mark_run_properties: None,
         content: vec![run_with(vec![RunElement::Text(text.to_string())])],
         rsids: ParagraphRevisionIds::default(),
+        mark_deleted: false,
     }))
 }
 
@@ -61,6 +65,7 @@ fn para_after_page_break(text: &str) -> Block {
             RunElement::Text(text.to_string()),
         ])],
         rsids: ParagraphRevisionIds::default(),
+        mark_deleted: false,
     }))
 }
 
@@ -438,6 +443,7 @@ fn pg_num_type_start_renders_in_page_field_in_header() {
             content: vec![run_with(vec![RunElement::Text("999".into())])],
         })],
         rsids: ParagraphRevisionIds::default(),
+        mark_deleted: false,
     }));
     doc.headers.insert(r_default.clone(), vec![page_field_para]);
     doc.final_section = SectionProperties {
@@ -851,6 +857,7 @@ fn shared_page_uses_the_even_slot_when_its_logical_number_is_even() {
                 RunElement::Text("BEFORE_BREAK".to_string()),
             ])],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         })),
         Block::SectionBreak(Box::new(SectionProperties {
             header_refs: header_refs(Some("rA"), None, Some("rAEven")),
@@ -909,6 +916,7 @@ fn page_numbering_counts_a_shared_page_exactly_once() {
                 content: vec![],
             })],
             rsids: ParagraphRevisionIds::default(),
+            mark_deleted: false,
         }))
     };
     let mut doc = empty_document();

@@ -990,6 +990,37 @@ pub(super) fn emit_line_commands(
                             width: stroke_width,
                         });
                     }
+
+                    // §17.3.2.37 / §17.3.2.9: one line through the run, or two
+                    // for `w:dstrike` straddling the single-strike position a
+                    // thickness apart — in the run's own color, like the
+                    // underline above. Emitted as `DrawCommand::Line`: the
+                    // painter already draws Underline and Line identically.
+                    //
+                    // Measured from `box_left`, not from a running `x`: the
+                    // pen owns the advance now, and the underline above takes
+                    // its extent from the same pair.
+                    if font.strike_lines > 0 {
+                        let strike_y = y - font.strike_position;
+                        let offsets: &[f32] = if font.strike_lines >= 2 {
+                            &[-1.0, 1.0]
+                        } else {
+                            &[0.0]
+                        };
+                        for off in offsets {
+                            let line_y = strike_y + font.strike_thickness * *off;
+                            commands.push(DrawCommand::Line {
+                                line: crate::render::geometry::PtLineSegment::new(
+                                    PtOffset::new(box_left, line_y),
+                                    PtOffset::new(box_left + rendered_width, line_y),
+                                ),
+                                // The relief-substituted colour, for the same
+                                // reason the underline uses it.
+                                color: paint_color,
+                                width: font.strike_thickness,
+                            });
+                        }
+                    }
                 }
                 Fragment::Image {
                     size,
@@ -1283,6 +1314,15 @@ pub(super) fn emit_line_commands(
                     commands.push(DrawCommand::NamedDestination {
                         position: PtOffset::new(pen.position(), *cursor_y),
                         name: name.clone(),
+                    });
+                }
+                Fragment::CommentAnchor(id) => {
+                    commands.push(DrawCommand::CommentAnchor {
+                        // The pen owns the cursor now, as the bookmark arm above
+                        // already does: an anchor draws nothing and takes no
+                        // advance, so it marks the pen's current position.
+                        position: PtOffset::new(pen.position(), *cursor_y + line.ascent),
+                        id: *id,
                     });
                 }
             }
@@ -2075,6 +2115,9 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                strike_lines: 0,
+                strike_position: Pt::ZERO,
+                strike_thickness: Pt::ZERO,
             }),
             color: crate::render::resolve::color::RgbColor::BLACK,
             shading: None,

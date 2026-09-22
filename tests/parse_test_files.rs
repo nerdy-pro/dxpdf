@@ -437,6 +437,10 @@ const ALL_FILES: &[&str] = &[
     "shading-patterns.docx",
     "bidi-tabs.docx",
     "text-effects.docx",
+    "tracked-changes.docx",
+    "tracked-changes-final.docx",
+    "comments.docx",
+    "comments-hidden.docx",
 ];
 
 #[test]
