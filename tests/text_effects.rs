@@ -114,14 +114,21 @@ fn outline_strokes_a_single_command() {
     assert!(draws[0].3, "the command carries the outline flag");
 }
 
-/// Shadow + outline is the one §17.3.2.31-permitted combination: both
-/// commands stroke, and the shadow offset grows by one pixel — so it must
-/// exceed the plain shadow's.
+/// Shadow + outline is the one §17.3.2.31-permitted combination. LibreOffice
+/// VCL's `ImplDrawSpecialText` — the reference this module follows — draws
+/// the shadow copy as a solid filled glyph via `ImplDrawTextDirect` and
+/// applies the outline stroke only to the main text afterward, never to the
+/// shadow: only the main glyphs stroke. The shadow offset still grows by one
+/// pixel to compensate for the main glyphs' stroke width, so it must exceed
+/// the plain shadow's.
 #[test]
-fn shadow_plus_outline_strokes_both_and_offsets_further() {
+fn shadow_plus_outline_strokes_only_the_main_glyphs_and_offsets_further() {
     let pages = pages();
     let (copy, main) = copy_and_main(&pages, "SHOUT");
-    assert!(copy.3 && main.3, "both the copy and the main glyphs stroke");
+    assert!(
+        !copy.3 && main.3,
+        "the shadow copy is a solid fill even when outlined; only the main glyphs stroke"
+    );
     let combined_dx = copy.0 - main.0;
 
     let (plain_copy, plain_main) = copy_and_main(&pages, "SHDW");
