@@ -437,6 +437,8 @@ const ALL_FILES: &[&str] = &[
     "shading-patterns.docx",
     "bidi-tabs.docx",
     "text-effects.docx",
+    "wmf-image.docx",
+    "svg-image.docx",
 ];
 
 #[test]
