@@ -24,7 +24,11 @@ pub struct MediaEntry {
 pub fn extract_image_rel_id(image: &Image) -> Option<&RelId> {
     match image.graphic.as_ref()? {
         GraphicContent::Picture(pic) => pic.blip_fill.blip.as_ref()?.embed.as_ref(),
-        GraphicContent::WordProcessingShape(_) => None,
+        // Shapes, diagrams and charts are vector content — they have no
+        // media entry; each rides its own channel through layout.
+        GraphicContent::WordProcessingShape(_)
+        | GraphicContent::Diagram(_)
+        | GraphicContent::Chart(_) => None,
     }
 }
 

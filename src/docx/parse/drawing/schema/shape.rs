@@ -495,7 +495,7 @@ pub(crate) struct WspXml {
 // whose schema differs (`fontRef/@idx` is a string enum, not a number), so
 // they're silently skipped via serde's default unknown-element behavior.
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub(crate) struct ShapeStyleXml {
     #[serde(rename = "lnRef", default)]
     pub(crate) ln_ref: Vec<StyleMatrixRefXml>,
@@ -510,7 +510,7 @@ pub(crate) struct ShapeStyleXml {
 }
 
 /// §20.1.4.1.17 CT_FontReference.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct FontRefXml {
     #[serde(rename = "@idx", default)]
     pub(crate) idx: StFontCollectionIndex,
@@ -519,7 +519,7 @@ pub(crate) struct FontRefXml {
 }
 
 /// §20.1.8.30 ST_FontCollectionIndex.
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum StFontCollectionIndex {
     Major,
@@ -549,7 +549,7 @@ impl From<FontRefXml> for FontReference {
 
 /// §20.1.4.2.19 CT_StyleMatrixReference — `idx` + optional color for
 /// `phClr` substitution within the referenced theme style.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct StyleMatrixRefXml {
     #[serde(rename = "@idx")]
     pub(crate) idx: u32,

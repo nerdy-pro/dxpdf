@@ -210,6 +210,15 @@ pub fn stack_blocks(
                             stroke: fs.stroke.clone(),
                             effects: fs.effects.clone(),
                         });
+                        // Text (and issue #155 scene commands) over the fill —
+                        // the page-level twin calls `emit_shape_text` here;
+                        // dropping them made a topAndBottom shape in a cell or
+                        // header lose its text, and a chart/SmartArt scene
+                        // lose everything.
+                        for mut cmd in fs.text_commands.iter().cloned() {
+                            cmd.shift(fs.x.resolve(parity), shape_y);
+                            commands.push(cmd);
+                        }
                         let bottom = shape_y + fs.size.height;
                         band_bottom = Some(match band_bottom {
                             Some(prev) => prev.max(bottom),

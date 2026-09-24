@@ -126,6 +126,13 @@ impl From<Dimension<Twips>> for Pt {
     }
 }
 
+impl From<Dimension<crate::model::dimension::CentiPoints>> for Pt {
+    /// §20.1.10.68: 100 hundredths = 1 pt.
+    fn from(d: Dimension<crate::model::dimension::CentiPoints>) -> Self {
+        Self(d.raw() as f32 / 100.0)
+    }
+}
+
 impl From<Dimension<HalfPoints>> for Pt {
     /// 1 half-point = 0.5 pt.
     fn from(d: Dimension<HalfPoints>) -> Self {

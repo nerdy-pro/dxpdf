@@ -79,7 +79,14 @@ fn find_anchor_images<'a>(
             // branch owns their layout path end-to-end.
             Inline::Image(img)
                 if matches!(img.placement, ImagePlacement::Anchor(_))
-                    && !matches!(img.graphic, Some(GraphicContent::WordProcessingShape(_))) =>
+                    && !matches!(
+                        img.graphic,
+                        Some(
+                            GraphicContent::WordProcessingShape(_)
+                                | GraphicContent::Diagram(_)
+                                | GraphicContent::Chart(_)
+                        )
+                    ) =>
             {
                 out.push(img);
             }
@@ -168,7 +175,14 @@ fn find_anchor_shapes<'a>(
         match inline {
             Inline::Image(img)
                 if matches!(img.placement, ImagePlacement::Anchor(_))
-                    && matches!(img.graphic, Some(GraphicContent::WordProcessingShape(_))) =>
+                    && matches!(
+                        img.graphic,
+                        Some(
+                            GraphicContent::WordProcessingShape(_)
+                                | GraphicContent::Diagram(_)
+                                | GraphicContent::Chart(_)
+                        )
+                    ) =>
             {
                 out.push(img);
             }
@@ -218,6 +232,52 @@ pub(super) fn extract_floating_shapes(
             ShapeAnchorClass::PageAnchored => !anchors_to_paragraph(anchor),
         };
         if !class_match {
+            continue;
+        }
+        // Issue #155: an anchored SmartArt/chart rides the shape channel as
+        // a pre-built scene — an empty geometry with the scene's commands in
+        // `text_commands`, which the emitters already shift to the anchor
+        // origin. Wrapping, distances and behind-text come along for free.
+        let scene = match img.graphic.as_ref() {
+            Some(GraphicContent::Diagram(d)) => ctx.resolved.diagrams.get(&d.data).map(|dd| {
+                super::graphic_scene::build_diagram_scene(
+                    dd,
+                    PtSize::new(Pt::from(img.extent.width), Pt::from(img.extent.height)),
+                    ctx,
+                    state,
+                )
+            }),
+            Some(GraphicContent::Chart(c)) => ctx.resolved.charts.get(&c.part).map(|cs| {
+                super::chart_scene::build_chart_scene(
+                    cs,
+                    PtSize::new(Pt::from(img.extent.width), Pt::from(img.extent.height)),
+                    ctx,
+                    state,
+                )
+            }),
+            _ => None,
+        };
+        if let Some(commands) = scene {
+            let w = Pt::from(img.extent.width);
+            let h = Pt::from(img.extent.height);
+            let (x, y) = resolve_anchor_position(anchor, w, h, state, frame);
+            shapes.push(FloatingShape {
+                x,
+                y,
+                size: PtSize::new(w, h),
+                rotation: Default::default(),
+                flip_h: false,
+                flip_v: false,
+                wrap_mode: crate::render::layout::section::WrapMode::from_model(&anchor.wrap),
+                dist_left: Pt::from(anchor.distance.left),
+                dist_right: Pt::from(anchor.distance.right),
+                behind_doc: anchor.behind_text,
+                paths: Vec::new(),
+                fill: crate::render::layout::draw_command::ResolvedFill::None,
+                stroke: None,
+                effects: Vec::new(),
+                text_commands: commands,
+            });
             continue;
         }
         let wsp = match img.graphic.as_ref() {
@@ -1986,6 +2046,8 @@ mod tests {
             numbering: HashMap::new(),
             font_families: Vec::new(),
             media: HashMap::new(),
+            diagrams: Default::default(),
+            charts: Default::default(),
             embedded_fonts: Vec::new(),
             pic_bullets: HashMap::new(),
             theme: None,
