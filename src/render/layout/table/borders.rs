@@ -1586,7 +1586,11 @@ fn resolve_override(ovr: &CellBorderOverride) -> CellEdge {
 /// `is_horizontal` says which axis is the border's **short** one, since that is
 /// the axis a `double` divides across — the same division [`sub_rules`] gives a
 /// junction square, applied to one axis here because a segment has only one.
-fn emit_border_rect(
+///
+/// `pub(crate)` because the §17.6.10 page-border painter
+/// (`layout::page_borders`) draws its edges through the same expansion, so a
+/// `double` page border and a `double` table border cannot drift apart.
+pub(crate) fn emit_border_rect(
     commands: &mut Vec<DrawCommand>,
     b: &TableBorderLine,
     rect: PtRect,
