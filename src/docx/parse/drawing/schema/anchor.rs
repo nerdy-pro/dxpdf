@@ -60,11 +60,22 @@ impl From<EffectExtentXml> for EdgeInsets<Emu> {
     }
 }
 
+/// §21.1.2.3.5 `<a:hlinkClick>` — the hyperlink a picture carries, as a
+/// relationship id. Word writes it on `wp:docPr` when a link is added to a
+/// picture (issue #250).
+#[derive(Debug, Deserialize)]
+pub struct HlinkClickXml {
+    #[serde(rename = "@id", default)]
+    pub r_id: Option<String>,
+}
+
 /// `<wp:docPr>` — inline-image variant (distinct from `<pic:cNvPr>`).
 #[derive(Debug, Deserialize)]
 pub struct DocPrXml {
     #[serde(rename = "@id", default)]
     pub id: Option<u32>,
+    #[serde(rename = "hlinkClick", default)]
+    pub hlink_click: Option<HlinkClickXml>,
     #[serde(rename = "@name", default)]
     pub name: Option<String>,
     #[serde(rename = "@descr", default)]
@@ -83,6 +94,13 @@ impl From<DocPrXml> for DocProperties {
             description: x.descr,
             hidden: x.hidden.map(|b| b.0),
             title: x.title,
+            // An empty r:id is what Word leaves behind when a link is removed
+            // from a picture; it names nothing.
+            hyperlink: x
+                .hlink_click
+                .and_then(|h| h.r_id)
+                .filter(|id| !id.is_empty())
+                .map(|id| crate::model::HyperlinkTarget::ExternalRel(crate::model::RelId::new(id))),
         }
     }
 }

@@ -139,6 +139,7 @@ pub(super) fn inject_list_label(
                 rel_id: rel_id.as_str().to_string(),
                 image_data: Some(image_bytes.clone()),
                 src_rect: None,
+                hyperlink_url: None,
             };
             Some((label_frag, size.height))
         });

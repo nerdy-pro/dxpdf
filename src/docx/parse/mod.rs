@@ -350,6 +350,16 @@ fn resolve_hyperlinks_in_inlines(
             Inline::Field(field) => {
                 resolve_hyperlinks_in_inlines(&mut field.content, rels);
             }
+            // §21.1.2.3.5: a picture's own link resolves like a `w:hyperlink`.
+            Inline::Image(img) => {
+                if let Some(HyperlinkTarget::ExternalRel(ref rel_id)) = img.doc_properties.hyperlink
+                {
+                    if let Some(rel) = rels.find_by_id(rel_id.as_str()) {
+                        img.doc_properties.hyperlink =
+                            Some(HyperlinkTarget::ExternalUrl(rel.target.clone()));
+                    }
+                }
+            }
             Inline::AlternateContent(ac) => {
                 // §M.2.2: choices are the preferred (usually rendered) branch,
                 // so resolve their hyperlinks too — not just the fallback.

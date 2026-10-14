@@ -114,6 +114,11 @@ pub struct DocProperties {
     pub hidden: Option<bool>,
     /// Title (Office 2010+).
     pub title: Option<String>,
+    /// §21.1.2.3.5 `a:hlinkClick`: the hyperlink the picture is a hotspot for.
+    /// Parsed as `ExternalRel`; the body-level `resolve_hyperlinks` pass and
+    /// the subordinate-part rel rewrite turn it into the final target, exactly
+    /// as for a `w:hyperlink` (issue #250).
+    pub hyperlink: Option<super::content::HyperlinkTarget>,
 }
 
 /// §20.1.2.2.19 CT_GraphicalObjectFrameLocking.

@@ -412,7 +412,7 @@ Validated against ISO 29500 (Office Open XML). **82 entries fully implemented, 1
 |---|---|
 | PAGE, NUMPAGES | ✅ evaluated per page |
 | DATE, TIME | ✅ §17.16.4.2 evaluated against the `\@` picture at the moment of the render, with month, weekday and AM/PM names taken from the paragraph's own `w:lang`; a field naming no picture gets that locale's short date or time |
-| Hyperlinks | ✅ clickable PDF annotations |
+| Hyperlinks | ✅ clickable PDF annotations — on text, and on pictures via `a:hlinkClick` or a `w:hyperlink` around the drawing (§21.1.2.3.5) |
 | All other fields | ✅ Word's cached result text is rendered, so a TOC or MERGEFIELD written by Word displays correctly but is not recomputed |
 | Field instruction parser (`dxpdf::field`) | ✅ ~20 instructions parsed and evaluable as a library — REF, PAGEREF, SEQ, IF, MERGEFIELD, DOCPROPERTY, SYMBOL and more — but only PAGE, NUMPAGES, DATE and TIME are wired into rendering |
 

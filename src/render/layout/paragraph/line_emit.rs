@@ -1002,6 +1002,7 @@ pub(super) fn emit_line_commands(
                     size,
                     image_data,
                     src_rect,
+                    hyperlink_url: image_link,
                     ..
                 } => {
                     let advance = size.width
@@ -1009,13 +1010,16 @@ pub(super) fn emit_line_commands(
                             * distribution_gap_count_after(fragments, &order, pos) as f32;
                     let x = pen.place(size.width, advance);
                     if let Some(data) = image_data {
+                        let rect = crate::render::geometry::PtRect::from_xywh(
+                            x,
+                            *cursor_y,
+                            size.width,
+                            size.height,
+                        );
+                        // §21.1.2.3.5: the picture is the hotspot (issue #250).
+                        push_link_over(commands, image_link.as_ref(), rect);
                         commands.push(DrawCommand::Image {
-                            rect: crate::render::geometry::PtRect::from_xywh(
-                                x,
-                                *cursor_y,
-                                size.width,
-                                size.height,
-                            ),
+                            rect,
                             image_data: data.clone(),
                             src_rect: *src_rect,
                         });
@@ -1838,6 +1842,25 @@ pub(super) fn resolve_line_height(
         LineSpacingRule::AtLeast(min) => natural.max(*min),
     };
     auto_fit.scale_line_height(resolved)
+}
+
+/// §17.16.22: one link annotation over `rect`, routed by the target's kind.
+pub(crate) fn push_link_over(
+    commands: &mut Vec<DrawCommand>,
+    link: Option<&LinkTarget>,
+    rect: crate::render::geometry::PtRect,
+) {
+    match link {
+        Some(LinkTarget::External(url)) => commands.push(DrawCommand::LinkAnnotation {
+            rect,
+            url: url.clone(),
+        }),
+        Some(LinkTarget::Internal(dest)) => commands.push(DrawCommand::InternalLink {
+            rect,
+            destination: dest.clone(),
+        }),
+        None => {}
+    }
 }
 
 #[cfg(test)]

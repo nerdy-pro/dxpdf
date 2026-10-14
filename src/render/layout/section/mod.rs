@@ -218,6 +218,7 @@ mod tests {
             dist_left: Pt::ZERO,
             dist_right: Pt::ZERO,
             behind_doc: false,
+            hyperlink: None,
         }
     }
 
@@ -3558,6 +3559,7 @@ mod tests {
                 dist_left: Pt::ZERO,
                 dist_right: Pt::ZERO,
                 behind_doc: false,
+                hyperlink: None,
             }],
             floating_shapes: vec![],
         }

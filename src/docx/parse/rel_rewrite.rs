@@ -108,6 +108,11 @@ fn rewrite_in_inlines(inlines: &mut [Inline], remap: &HashMap<RelId, RelId>) {
 }
 
 fn rewrite_in_image(image: &mut Image, remap: &HashMap<RelId, RelId>) {
+    // §21.1.2.3.5: the picture's own hyperlink resolves through the part's
+    // rels like a `w:hyperlink` does.
+    if let Some(ref mut target) = image.doc_properties.hyperlink {
+        rewrite_in_hyperlink_target(target, remap);
+    }
     if let Some(ref mut graphic) = image.graphic {
         match graphic {
             GraphicContent::Picture(pic) => {
@@ -283,6 +288,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::Picture(Picture {
@@ -293,6 +299,7 @@ mod tests {
                         description: None,
                         hidden: None,
                         title: None,
+                        hyperlink: None,
                     },
                     cnv_pic_pr: None,
                 },
@@ -455,6 +462,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::WordProcessingShape(WordProcessingShape {

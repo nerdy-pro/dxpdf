@@ -135,6 +135,13 @@ pub(super) fn extract_floating_images(
             image_data,
             size: PtSize::new(w, h),
             src_rect: crate::render::resolve::images::extract_src_rect(img),
+            // §21.1.2.3.5: the picture's link follows it to wherever the
+            // anchor puts it (issue #250).
+            hyperlink: img
+                .doc_properties
+                .hyperlink
+                .as_ref()
+                .and_then(crate::render::layout::fragment::link_target_of),
             x,
             y,
             wrap_mode: crate::render::layout::section::WrapMode::from_model(&anchor.wrap),
@@ -413,6 +420,9 @@ fn build_vml_floating_image(
     Some(FloatingImage {
         image_data,
         size: PtSize::new(width, height),
+        // §14.1.2.19 `v:shape/@href` is the VML spelling of a picture link;
+        // not read here.
+        hyperlink: None,
         // VML crops (`v:imagedata` crop*) are a separate mechanism; not modelled.
         src_rect: None,
         x,
@@ -1447,6 +1457,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::WordProcessingShape(WordProcessingShape {
@@ -2193,6 +2204,7 @@ mod tests {
                     description: None,
                     hidden: None,
                     title: None,
+                    hyperlink: None,
                 },
                 cnv_pic_pr: None,
             },

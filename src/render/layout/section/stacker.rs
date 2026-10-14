@@ -145,13 +145,19 @@ pub fn stack_blocks(
                                 None => y_start,
                             },
                         };
+                        let rect = PtRect::from_xywh(
+                            fi.x.resolve(parity),
+                            img_y,
+                            fi.size.width,
+                            fi.size.height,
+                        );
+                        crate::render::layout::paragraph::push_link_over(
+                            &mut commands,
+                            fi.hyperlink.as_ref(),
+                            rect,
+                        );
                         commands.push(DrawCommand::Image {
-                            rect: PtRect::from_xywh(
-                                fi.x.resolve(parity),
-                                img_y,
-                                fi.size.width,
-                                fi.size.height,
-                            ),
+                            rect,
                             image_data: fi.image_data.clone(),
                             src_rect: fi.src_rect,
                         });
@@ -301,13 +307,19 @@ pub fn stack_blocks(
                         continue;
                     }
                     let img_y = fi.y.at(parity, para_content_top);
+                    let rect = PtRect::from_xywh(
+                        fi.x.resolve(parity),
+                        img_y,
+                        fi.size.width,
+                        fi.size.height,
+                    );
+                    crate::render::layout::paragraph::push_link_over(
+                        &mut commands,
+                        fi.hyperlink.as_ref(),
+                        rect,
+                    );
                     commands.push(DrawCommand::Image {
-                        rect: PtRect::from_xywh(
-                            fi.x.resolve(parity),
-                            img_y,
-                            fi.size.width,
-                            fi.size.height,
-                        ),
+                        rect,
                         image_data: fi.image_data.clone(),
                         src_rect: fi.src_rect,
                     });
@@ -449,6 +461,7 @@ mod tests {
             dist_left: Pt::ZERO,
             dist_right: Pt::ZERO,
             behind_doc: false,
+            hyperlink: None,
         }
     }
 

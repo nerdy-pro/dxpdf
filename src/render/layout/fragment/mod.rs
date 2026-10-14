@@ -19,6 +19,7 @@ use crate::render::shape::RunDirection;
 
 mod bidi;
 mod collect;
+pub(crate) use collect::link_target_of;
 mod fallback;
 mod math;
 mod segment;
@@ -436,6 +437,9 @@ pub enum Fragment {
         image_data: Option<MediaEntry>,
         /// §20.1.10.48 `a:srcRect` — fractional source crop in `[0, 1]`.
         src_rect: Option<PtRect>,
+        /// §21.1.2.3.5 / §17.16.22: the picture's own `a:hlinkClick`, or the
+        /// `w:hyperlink` enclosing it — the hotspot is the drawn image.
+        hyperlink_url: Option<LinkTarget>,
     },
     /// §22.1 `m:f` — a numerator / rule / denominator stack, pre-measured so
     /// line fitting sees one atom. `metrics` is synthesized: the ascent
@@ -819,6 +823,7 @@ mod mark_line_tests {
             rel_id: "rId1".into(),
             image_data: None,
             src_rect: None,
+            hyperlink_url: None,
         }
     }
 

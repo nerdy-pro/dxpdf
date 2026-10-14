@@ -110,6 +110,7 @@ impl From<CNvPrXml> for DocProperties {
             description: x.descr,
             hidden: x.hidden.map(|b| b.0),
             title: x.title,
+            hyperlink: None,
         }
     }
 }

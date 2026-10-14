@@ -109,6 +109,8 @@ pub struct FloatingImage {
     pub dist_right: Pt,
     /// §20.4.2.3 @behindDoc: image is painted behind document text.
     pub behind_doc: bool,
+    /// §21.1.2.3.5: the picture's hyperlink; the hotspot follows the float.
+    pub hyperlink: Option<crate::render::layout::fragment::LinkTarget>,
 }
 
 impl FloatingImage {

@@ -723,13 +723,16 @@ fn register_paragraph_floats(
         let y_start = fi.y.at(parity, content_top);
         let y_end = y_start + fi.size.height;
         if fi.is_wrap_top_and_bottom() {
+            let rect =
+                PtRect::from_xywh(fi.x.resolve(parity), y_start, fi.size.width, fi.size.height);
+            // §21.1.2.3.5: the picture is the hotspot (issue #250).
+            crate::render::layout::paragraph::push_link_over(
+                &mut state.current_page.commands,
+                fi.hyperlink.as_ref(),
+                rect,
+            );
             state.current_page.commands.push(DrawCommand::Image {
-                rect: PtRect::from_xywh(
-                    fi.x.resolve(parity),
-                    y_start,
-                    fi.size.width,
-                    fi.size.height,
-                ),
+                rect,
                 image_data: fi.image_data.clone(),
                 src_rect: fi.src_rect,
             });
@@ -2322,13 +2325,20 @@ pub(crate) fn layout_section_with_clearance(
                         continue;
                     }
                     let img_y = fi.y.at(parity, para_start_y + effective_style.space_before);
+                    let rect = PtRect::from_xywh(
+                        fi.x.resolve(parity),
+                        img_y,
+                        fi.size.width,
+                        fi.size.height,
+                    );
+                    // §21.1.2.3.5: the picture is the hotspot (issue #250).
+                    crate::render::layout::paragraph::push_link_over(
+                        &mut state.current_page.commands,
+                        fi.hyperlink.as_ref(),
+                        rect,
+                    );
                     state.current_page.commands.push(DrawCommand::Image {
-                        rect: PtRect::from_xywh(
-                            fi.x.resolve(parity),
-                            img_y,
-                            fi.size.width,
-                            fi.size.height,
-                        ),
+                        rect,
                         image_data: fi.image_data.clone(),
                         src_rect: fi.src_rect,
                     });

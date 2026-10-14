@@ -5,6 +5,7 @@
 
 mod borders;
 mod line_emit;
+pub(crate) use line_emit::push_link_over;
 
 // §17.3.1.30: line fitting needs the same position-tab resolution emission
 // uses, so the two cannot disagree about where a tab puts content.
@@ -91,6 +92,7 @@ fn clip_oversized_images(fragments: &[Fragment], max_width: Pt) -> Option<Vec<Fr
                     rel_id,
                     image_data,
                     src_rect,
+                    hyperlink_url,
                 } if size.width > max_width => {
                     // Fraction of the object's width that survives the clip.
                     let visible = max_width.raw() / size.width.raw();
@@ -113,6 +115,7 @@ fn clip_oversized_images(fragments: &[Fragment], max_width: Pt) -> Option<Vec<Fr
                         size: PtSize::new(max_width, size.height),
                         rel_id: rel_id.clone(),
                         image_data: image_data.clone(),
+                        hyperlink_url: hyperlink_url.clone(),
                         src_rect: Some(cropped),
                     }
                 }
@@ -648,6 +651,7 @@ mod tests {
             rel_id: "rId1".to_string(),
             image_data: None,
             src_rect: None,
+            hyperlink_url: None,
         }
     }
 

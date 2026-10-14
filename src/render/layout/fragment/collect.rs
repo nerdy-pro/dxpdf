@@ -486,6 +486,27 @@ where
     }
 }
 
+/// §17.16.22: the link a resolved hyperlink target emits — a closed ADT, so
+/// the emitter routes external→URI and internal→GoTo without guessing from
+/// the string.
+///
+/// A relationship whose target is a bare `#fragment` names a bookmark in this
+/// document — the form LibreOffice writes for a picture linked to a bookmark,
+/// where a `w:hyperlink` would have used `w:anchor` — so it is a GoTo too.
+pub(crate) fn link_target_of(target: &crate::model::HyperlinkTarget) -> Option<LinkTarget> {
+    match target {
+        crate::model::HyperlinkTarget::ExternalUrl(url) => match url.strip_prefix('#') {
+            Some(anchor) if !anchor.is_empty() => Some(LinkTarget::Internal(Rc::from(anchor))),
+            _ => Some(LinkTarget::External(Rc::from(url.as_str()))),
+        },
+        crate::model::HyperlinkTarget::Internal { anchor } => {
+            Some(LinkTarget::Internal(Rc::from(anchor.as_str())))
+        }
+        // An unresolved rId (no matching relationship) has no link.
+        crate::model::HyperlinkTarget::ExternalRel(_) => None,
+    }
+}
+
 /// Invariant context threaded through all recursive `collect_fragments` calls.
 pub struct FragmentCtx<'a> {
     pub default_family: &'a str,
@@ -861,6 +882,14 @@ where
                                 rel_id: rel_id.as_str().to_string(),
                                 image_data: None,
                                 src_rect: crate::render::resolve::images::extract_src_rect(img),
+                                // §21.1.2.3.5: the picture's own link wins over
+                                // a `w:hyperlink` around its run (issue #250).
+                                hyperlink_url: img
+                                    .doc_properties
+                                    .hyperlink
+                                    .as_ref()
+                                    .and_then(link_target_of)
+                                    .or_else(|| hyperlink_url.cloned()),
                             });
                         }
                     }
@@ -871,16 +900,7 @@ where
                     // guessing from the string (§17.16.22).
                     // One allocation per `w:hyperlink`, shared by every word
                     // fragment inside it and every command they emit.
-                    let target: Option<LinkTarget> = match &link.target {
-                        crate::model::HyperlinkTarget::ExternalUrl(url) => {
-                            Some(LinkTarget::External(Rc::from(url.as_str())))
-                        }
-                        crate::model::HyperlinkTarget::Internal { anchor } => {
-                            Some(LinkTarget::Internal(Rc::from(anchor.as_str())))
-                        }
-                        // An unresolved rId (no matching relationship) has no link.
-                        crate::model::HyperlinkTarget::ExternalRel(_) => None,
-                    };
+                    let target: Option<LinkTarget> = link_target_of(&link.target);
                     let mut sub = collect_fragments(
                         &link.content,
                         ctx,

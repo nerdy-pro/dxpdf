@@ -95,6 +95,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::Picture(Picture {
@@ -105,6 +106,7 @@ mod tests {
                         description: None,
                         hidden: None,
                         title: None,
+                        hyperlink: None,
                     },
                     cnv_pic_pr: None,
                 },
@@ -150,6 +152,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: None,
@@ -176,6 +179,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::Picture(Picture {
@@ -186,6 +190,7 @@ mod tests {
                         description: None,
                         hidden: None,
                         title: None,
+                        hyperlink: None,
                     },
                     cnv_pic_pr: None,
                 },
@@ -221,6 +226,7 @@ mod tests {
                 description: None,
                 hidden: None,
                 title: None,
+                hyperlink: None,
             },
             graphic_frame_locks: None,
             graphic: Some(GraphicContent::WordProcessingShape(WordProcessingShape {
