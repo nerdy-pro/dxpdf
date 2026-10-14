@@ -12,6 +12,7 @@
 //! | 1 | an embedded font's full, compatible-full, PostScript or instance name | the document's own font, by face |
 //! | 2 | an embedded font's family | the document's own font, by family |
 //! | 3 | a host family, exactly | the host, by family |
+//! | 3b | a metric-compatible substitute, when the key's own family is absent | a curated table — placed here because step 4 is the expensive one |
 //! | 4 | a host face's full, compatible-full or PostScript name | the font's `name` table |
 //! | 5 | any other name the font sanctions — typographic, WWS, localized, a `STAT` style, an `fvar` instance | the font's own tables |
 //! | 6 | a family plus a trailing weight word, parsed | a guess |
@@ -194,8 +195,36 @@ pub fn resolve(request: &FaceRequest<'_>, catalog: &FaceCatalog) -> FaceResoluti
         }
     }
 
+    // 3b — a curated substitute for a table key whose own family the host
+    // lacks. Placed *before* the metadata tier on purpose: reaching step 4 is
+    // what builds that tier, and on fontconfig building it instantiates every
+    // face on the host — three `FT_Open_Face` per face, up to 1024 of them
+    // retained — so a document naming Arial on a machine with Liberation Sans
+    // paid seconds and hundreds of megabytes before the table that answers
+    // "Arial → Liberation Sans" was consulted at all (issue #188).
+    //
+    // The guard keeps the metadata path for keys whose *base* family is
+    // present: "Segoe UI Light" with Segoe UI installed still goes looking for
+    // the real Light face. What the shortcut gives up is a face that carries
+    // the key only as a typographic or localized alias (Arial Narrow's
+    // typographic family is "Arial"); for a request by family name, the
+    // metric-compatible substitute is the better answer than a face that
+    // merely mentions it.
+    if let Some((via, substitutes)) = substitutes_for(request.name) {
+        // Step 3 just asked the host about `request.name`; a key equal to it
+        // is known absent without a second probe.
+        let key_family_present =
+            !via.eq_ignore_ascii_case(request.name) && catalog.family_faces(via).is_some();
+        if !key_family_present {
+            if let Some(selection) = substitute(request, catalog, via, substitutes) {
+                return selected(selection);
+            }
+        }
+    }
+
     // 4 — a host face's own full/compatible-full/PostScript name. Reaching here
     // is what builds the catalogue's deep tier; everything above is cheap.
+    log::debug!("[font] '{}' reached the metadata tier", request.name);
     if let Some(selection) = by_face_name(
         request,
         catalog,
@@ -249,22 +278,12 @@ pub fn resolve(request: &FaceRequest<'_>, catalog: &FaceCatalog) -> FaceResoluti
         }
     }
 
-    // 7 — metric-compatible substitution. The parsed weight carries over, so
-    // `"Segoe UI Light"` asks its substitute for Light rather than Regular.
+    // 7 — metric-compatible substitution for the keys step 3b passed over:
+    // the base family was present, but neither metadata nor the parsed weight
+    // produced a face for it.
     if let Some((via, substitutes)) = substitutes_for(request.name) {
-        let base = IntrinsicStyle {
-            weight: parse_face_name(request.name).map_or(400, |(_, weight)| weight),
-            ..IntrinsicStyle::NEUTRAL
-        };
-        let style = EffectiveStyle::resolve(request, base);
-        for substitute in substitutes {
-            let Some(faces) = catalog.family_faces(substitute) else {
-                continue;
-            };
-            let step = ResolutionStep::Substitution { via, substitute };
-            if let Some(selection) = rank(&faces, &style, step) {
-                return selected(selection);
-            }
+        if let Some(selection) = substitute(request, catalog, via, substitutes) {
+            return selected(selection);
         }
     }
 
@@ -275,6 +294,30 @@ pub fn resolve(request: &FaceRequest<'_>, catalog: &FaceCatalog) -> FaceResoluti
             None => FallbackReason::NoCandidate,
         },
     }
+}
+
+/// Steps 3b and 7: rank the substitutes the curated table lists for `via`.
+/// The parsed weight carries over, so `"Segoe UI Light"` asks its substitute
+/// for Light rather than Regular.
+fn substitute(
+    request: &FaceRequest<'_>,
+    catalog: &FaceCatalog,
+    via: &'static str,
+    substitutes: &'static [&'static str],
+) -> Option<Selection> {
+    let base = IntrinsicStyle {
+        weight: parse_face_name(request.name).map_or(400, |(_, weight)| weight),
+        ..IntrinsicStyle::NEUTRAL
+    };
+    let style = EffectiveStyle::resolve(request, base);
+    substitutes.iter().find_map(|substitute| {
+        let faces = catalog.family_faces(substitute)?;
+        rank(
+            &faces,
+            &style,
+            ResolutionStep::Substitution { via, substitute },
+        )
+    })
 }
 
 fn selected(selection: Selection) -> FaceResolution {

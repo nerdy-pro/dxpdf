@@ -641,3 +641,66 @@ fn the_semibold_fixture_declares_the_names_and_weight_it_should() {
         "the Russian record must be kept and flagged as localized"
     );
 }
+
+// ─── Issue #188: the metadata tier is the expensive step ──────────────────────
+//
+// On fontconfig, building tier 2 instantiates every face on the host — three
+// `FT_Open_Face` per face, up to 1024 of them retained — so a document naming
+// one absent family paid seconds and hundreds of megabytes before the curated
+// substitution table was even consulted. A substitution key whose own family is
+// absent must be answered from the table *before* any metadata is read.
+
+/// "Calibri" is a table key; the host has only its metric substitute. The
+/// answer is the substitute, and tier 2 is never built.
+#[test]
+fn a_table_key_whose_family_is_absent_substitutes_without_the_metadata_tier() {
+    let font_mgr = FontMgr::new();
+    let faces: Vec<(String, Typeface)> = load(&font_mgr, "Dx-Regular.ttf")
+        .into_iter()
+        .map(|(_, tf)| ("Carlito".to_string(), tf))
+        .collect();
+    let catalog = FaceCatalog::from_faces_without_deep_tier(FontMgr::empty(), &faces);
+
+    match resolve(&FaceRequest::plain("Calibri"), &catalog) {
+        FaceResolution::Selected(selection) => assert_eq!(
+            selection.step,
+            ResolutionStep::Substitution {
+                via: "Calibri",
+                substitute: "Carlito"
+            }
+        ),
+        FaceResolution::Default { reason } => panic!("fell through: {reason:?}"),
+    }
+    assert!(
+        !catalog.deep_is_built(),
+        "a curated substitution must not pay for the metadata tier"
+    );
+}
+
+/// "Segoe UI Light" is a table key by its stripped base — but "Segoe UI" *is*
+/// installed, so the real Light face is still worth looking for: the chain
+/// keeps reading metadata and then parses the weight word, as before.
+#[test]
+fn a_table_key_whose_base_family_is_present_still_reaches_the_metadata_tier() {
+    let font_mgr = FontMgr::new();
+    let faces: Vec<(String, Typeface)> = load(&font_mgr, "Dx-Regular.ttf")
+        .into_iter()
+        .map(|(_, tf)| ("Segoe UI".to_string(), tf))
+        .collect();
+    let catalog = FaceCatalog::from_faces_without_deep_tier(FontMgr::empty(), &faces);
+
+    match resolve(&FaceRequest::plain("Segoe UI Light"), &catalog) {
+        FaceResolution::Selected(selection) => assert_eq!(
+            selection.step,
+            ResolutionStep::ParsedFaceName {
+                base_family: "Segoe UI".to_string(),
+                weight: 300
+            }
+        ),
+        FaceResolution::Default { reason } => panic!("fell through: {reason:?}"),
+    }
+    assert!(
+        catalog.deep_is_built(),
+        "with the base family present the metadata tier is consulted first"
+    );
+}

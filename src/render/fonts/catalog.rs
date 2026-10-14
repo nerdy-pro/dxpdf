@@ -50,6 +50,17 @@
 //! So the common case is roughly thirteen times cheaper than before, and the
 //! case that pays for the whole metadata model costs about 9 ms more.
 //!
+//! Those numbers are CoreText's, where instantiating a face is a descriptor
+//! and reading a table is a call into the font server. They do not transfer
+//! to fontconfig/FreeType (issue #188): there every `new_typeface` is an
+//! `FT_Open_Face` with an mmap of the file, `enumerate` walks every font on
+//! the host per family and opens each one that matches, and the manager
+//! retains up to 1024 of the opened faces — so the deep tier costs seconds and
+//! hundreds of megabytes on a Linux desktop, proportional to the host's font
+//! count rather than to the document. That is why the resolver answers a
+//! curated substitution *before* reaching this tier (`resolve.rs`, step 3b),
+//! and why `family_faces` and `host_default` ask the host once per name.
+//!
 //! # Ownership
 //!
 //! Per render, owned by [`FontRegistry`](super::FontRegistry), never process
@@ -74,7 +85,7 @@
 //! `String`s — and the registry caches whole resolutions, so a clone happens
 //! once per distinct request rather than once per word of text.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 
 use skia_safe::{FontMgr, FontStyle, FontStyleSet, Typeface};
@@ -182,6 +193,12 @@ pub struct FaceCatalog {
     embedded: Vec<FaceRecord>,
     embedded_index: NameIndex,
     deep: OnceCell<DeepTier>,
+    /// Folded name → the slot `adopt_unenumerated` answered with, both ways.
+    /// One host probe per name per render; see `family_faces`.
+    adopted: RefCell<HashMap<String, Option<usize>>>,
+    /// How many times the manager was asked about a name it did not enumerate
+    /// — the observable the memo's test reads.
+    adoption_probes: Cell<usize>,
 }
 
 impl FaceCatalog {
@@ -211,7 +228,25 @@ impl FaceCatalog {
             embedded: Vec::new(),
             embedded_index: NameIndex::default(),
             deep: OnceCell::new(),
+            adopted: RefCell::new(HashMap::new()),
+            adoption_probes: Cell::new(0),
         }
+    }
+
+    /// [`Self::from_faces`], but with tier 2 left to be built on first use —
+    /// so a test can observe, through [`Self::deep_is_built`], whether a
+    /// request reached the metadata tier at all. `from_faces` pre-builds it
+    /// and so cannot answer that question.
+    pub fn from_faces_without_deep_tier(font_mgr: FontMgr, faces: &[(String, Typeface)]) -> Self {
+        let mut catalog = Self::from_faces(font_mgr, faces);
+        catalog.deep = OnceCell::new();
+        catalog
+    }
+
+    /// How many times the manager has been asked about a name it did not
+    /// enumerate.
+    pub fn adoption_probes(&self) -> usize {
+        self.adoption_probes.get()
     }
 
     /// Build a catalogue over an explicit set of faces instead of the host's.
@@ -372,9 +407,26 @@ impl FaceCatalog {
     /// merely after failing to find it in the enumeration; see
     /// `adopt_unenumerated` below.
     pub fn family_faces(&self, name: &str) -> Option<Vec<(FaceRef, FaceRecord)>> {
-        let family = match self.family_index.get(&fold_name(name)) {
+        let folded = fold_name(name);
+        let family = match self.family_index.get(&folded) {
             Some(&family) => family,
-            None => self.adopt_unenumerated(name)?,
+            // Asked of the manager once per name per render, whichever way it
+            // answered. `preload` asks for four style variants of every family,
+            // and before this memo each repeat was another host probe — on
+            // fontconfig an `FcFontMatch` plus an `FT_Open_Face` — and, for a
+            // name the manager *does* match, another duplicate slot in
+            // `families` that the deep tier then read as well (issue #188).
+            None => {
+                let adopted = self.adopted.borrow().get(&folded).copied();
+                match adopted {
+                    Some(slot) => slot?,
+                    None => {
+                        let slot = self.adopt_unenumerated(name);
+                        self.adopted.borrow_mut().insert(folded, slot);
+                        slot?
+                    }
+                }
+            }
         };
         self.enumerate(family);
         let families = self.families.borrow();
@@ -403,6 +455,7 @@ impl FaceCatalog {
     /// that check every miss would be swallowed as a hit on Linux and the whole
     /// rest of the chain would be unreachable.
     fn adopt_unenumerated(&self, name: &str) -> Option<usize> {
+        self.adoption_probes.set(self.adoption_probes.get() + 1);
         let matched = self
             .font_mgr
             .match_family_style(name, FontStyle::normal())
@@ -421,8 +474,8 @@ impl FaceCatalog {
         });
         drop(families);
         // Not inserted into `family_index`: that map is built once from the
-        // manager's own enumeration and is shared immutably. Re-adopting costs
-        // one `match_family_style`, and only for a name that reached step 3.
+        // manager's own enumeration and is shared immutably. `family_faces`
+        // remembers the answer instead, so the probe runs once per name.
         Some(index)
     }
 
@@ -1617,6 +1670,23 @@ mod tests {
         for (face_ref, record) in faces {
             assert_eq!(catalog.face(face_ref).as_ref(), Some(&record));
         }
+    }
+
+    /// Issue #188: a name the host does not enumerate is asked about once per
+    /// render, whichever way the manager answers — `preload` asks for four
+    /// style variants of every family, and on fontconfig every probe is an
+    /// `FcFontMatch` plus an `FT_Open_Face`.
+    #[test]
+    fn an_unenumerable_name_is_probed_once() {
+        let catalog = FaceCatalog::build(FontMgr::new());
+        let name = "No Such Family 8f3a1c";
+        assert!(catalog.family_faces(name).is_none());
+        assert!(catalog.family_faces(name).is_none());
+        assert_eq!(
+            catalog.adoption_probes(),
+            1,
+            "the second ask is answered from memory"
+        );
     }
 
     // ── the deep tier, against whatever the host actually has ────────────

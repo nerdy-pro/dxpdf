@@ -17,12 +17,14 @@ pub fn collect_font_families(doc: &Document) -> Vec<String> {
         add_nonempty(&mut families, &theme.minor_font.east_asian);
         add_nonempty(&mut families, &theme.major_font.complex_script);
         add_nonempty(&mut families, &theme.minor_font.complex_script);
-        for sf in &theme.major_font.script_fonts {
-            add_nonempty(&mut families, &sf.typeface);
-        }
-        for sf in &theme.minor_font.script_fonts {
-            add_nonempty(&mut families, &sf.typeface);
-        }
+        // §20.1.4.1.16 per-script fonts are deliberately *not* collected.
+        // Nothing can request one: `resolve_theme_font_ref` maps only the
+        // latin / east-asian / complex-script slots, so the thirty-odd script
+        // fonts a Word theme lists (宋体, Nyala, Tunga, Vrinda…) were preloaded
+        // and resolved for no run at all — and on a host without them every
+        // one was an absent family, which is what built the font metadata
+        // tier on every themed document on Linux (issue #188). A font that a
+        // run does use still resolves lazily through `FontCache::get`.
     }
 
     // Style sheet defaults
@@ -321,6 +323,32 @@ mod tests {
         let families = collect_font_families(&doc);
         assert!(families.contains(&"Calibri Light".to_string()));
         assert!(families.contains(&"Calibri".to_string()));
+    }
+
+    /// Issue #188: a theme's per-script fonts are not preloaded — no run can
+    /// reference one, and on a host without them each was an absent family
+    /// that forced the metadata tier to be built.
+    #[test]
+    fn theme_script_fonts_are_not_preloaded() {
+        let mut doc = empty_doc();
+        doc.theme = Some(Theme {
+            minor_font: ThemeFontScheme {
+                latin: "Calibri".into(),
+                script_fonts: vec![ThemeScriptFont {
+                    script: ScriptTag::Arab,
+                    typeface: "MS Mincho".into(),
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let families = collect_font_families(&doc);
+        assert!(families.contains(&"Calibri".to_string()));
+        assert!(
+            !families.contains(&"MS Mincho".to_string()),
+            "a script font is not a family any run asks for"
+        );
     }
 
     #[test]

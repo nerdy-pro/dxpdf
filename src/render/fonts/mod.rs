@@ -52,7 +52,7 @@ pub use instance_bake::InstanceBakeFailure;
 pub use request::{EffectiveStyle, FaceRequest, Synthesis, Toggle};
 pub use resolve::{FaceResolution, FallbackReason, ResolutionStep, Selection};
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use skia_safe::font_style::{Slant, Weight};
@@ -272,6 +272,11 @@ pub struct FontRegistry {
     /// family rather than once per style variant. [`Self::preload`] alone would
     /// otherwise emit four identical lines for every missing font.
     warned: RefCell<HashSet<String>>,
+    /// `legacy_make_typeface` answers, keyed by the effective style — the host
+    /// default is the same face for every request with the same toggles.
+    host_defaults: RefCell<HashMap<(i32, i32, i32), Typeface>>,
+    /// How many times the host was actually asked; the memo's test reads it.
+    host_default_fetches: Cell<usize>,
 }
 
 impl FontRegistry {
@@ -284,6 +289,8 @@ impl FontRegistry {
             typefaces: RefCell::new(HashMap::new()),
             faces: RefCell::new(HashMap::new()),
             warned: RefCell::new(HashSet::new()),
+            host_defaults: RefCell::new(HashMap::new()),
+            host_default_fetches: Cell::new(0),
         }
     }
 
@@ -533,10 +540,29 @@ impl FontRegistry {
         // guarantee — that constructor is for tests, which supply a real
         // `FontMgr`.
         let style = EffectiveStyle::resolve(request, IntrinsicStyle::NEUTRAL);
-        let tf = self
-            .font_mgr
-            .legacy_make_typeface(None::<&str>, style.font_style())
-            .expect("FontRegistry::build guarantees a last-resort typeface");
+        // One host ask per effective style per render: `legacy_make_typeface`
+        // is an `FcFontMatch` plus an `FT_Open_Face` on fontconfig, and every
+        // unresolvable family in a document reached it four times (issue #188).
+        let font_style = style.font_style();
+        let key = (
+            *font_style.weight(),
+            *font_style.width(),
+            font_style.slant() as i32,
+        );
+        let cached = self.host_defaults.borrow().get(&key).cloned();
+        let tf = match cached {
+            Some(tf) => tf,
+            None => {
+                self.host_default_fetches
+                    .set(self.host_default_fetches.get() + 1);
+                let tf = self
+                    .font_mgr
+                    .legacy_make_typeface(None::<&str>, font_style)
+                    .expect("FontRegistry::build guarantees a last-resort typeface");
+                self.host_defaults.borrow_mut().insert(key, tf.clone());
+                tf
+            }
+        };
         log::debug!(
             "[font] '{}' → host default '{}'",
             request.name,
@@ -550,6 +576,11 @@ impl FontRegistry {
         let selected = IntrinsicStyle::from_font_style(entry.typeface.font_style());
         entry.synthesis = Synthesis::compute(request, &selected);
         entry
+    }
+
+    /// How many times the host was asked for its default face.
+    pub fn host_default_fetches(&self) -> usize {
+        self.host_default_fetches.get()
     }
 
     /// One warning per requested family, however many style variants ask.
@@ -909,6 +940,22 @@ fn apply_variation(base: &Typeface, instance: &VariationInstance) -> Option<Type
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// Issue #188: the host default is one face per effective style, and
+    /// asking the host for it is an `FcFontMatch` plus an `FT_Open_Face` on
+    /// fontconfig — so two unknown names with the same toggles fetch it once.
+    #[test]
+    fn the_host_default_is_fetched_once_per_style() {
+        let registry = FontRegistry::new(skia_safe::FontMgr::new());
+        let first = registry.resolve(&FaceRequest::plain("No Such Family 8f3a1c"));
+        let second = registry.resolve(&FaceRequest::plain("Another Missing Family 2b7e"));
+        assert_eq!(registry.host_default_fetches(), 1);
+        assert_eq!(
+            TypefaceId::from(&first.typeface),
+            TypefaceId::from(&second.typeface),
+            "both answers are the same host face"
+        );
+    }
+
     use super::*;
     use crate::render::fonts::opentype::NameId;
     use crate::render::fonts::{FaceRequest, Toggle};
