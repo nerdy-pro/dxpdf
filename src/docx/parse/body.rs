@@ -220,6 +220,12 @@ fn extend_from_run(r: RunXml, out: &mut Vec<Inline>, ctx: &mut ConvertCtx) {
                 flush(&mut acc, out);
                 out.push(Inline::InstrText(t.content));
             }
+            // §17.16.13: a field instruction deleted under change tracking. The
+            // run it sits in is inside a `w:del`, which drops the run wholesale
+            // (see `ParaChildXml::Del`); and were it ever kept, a deleted
+            // instruction is not a field — it must not open one. Tolerated,
+            // never drawn (issue #253).
+            RunChildXml::DelInstrText(_) => {}
             RunChildXml::FldChar(fc) => {
                 flush(&mut acc, out);
                 out.push(Inline::FieldChar(FieldChar {
@@ -665,6 +671,22 @@ mod tests {
                 r#"<w:p xmlns:w="x"><w:del><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>"#
             ),
             ""
+        );
+    }
+
+    /// §17.16.13: `w:delInstrText` is to `w:instrText` what `w:delText` is to
+    /// `w:t`. It used to be an unknown variant, so a document holding one — any
+    /// field deleted while tracking changes — failed to parse at all, while a
+    /// deleted *word* parsed fine (issue #253).
+    #[test]
+    fn del_instr_text_is_accepted_and_dropped() {
+        assert_eq!(
+            para_text(
+                r#"<w:p xmlns:w="x"><w:r><w:t>Kept</w:t></w:r>
+                   <w:del><w:r><w:delInstrText xml:space="preserve"> SEQ exhibit \* ARABIC </w:delInstrText>
+                   <w:delText>gone</w:delText></w:r></w:del></w:p>"#
+            ),
+            "Kept"
         );
     }
 

@@ -223,6 +223,11 @@ pub(crate) enum RunChildXml {
     Sym(SymXml),
     #[serde(rename = "instrText")]
     InstrText(TextXml),
+    /// §17.16.13: the deleted counterpart of `instrText`, exactly as
+    /// `delText` is of `t` — written whenever a field is deleted while
+    /// changes are tracked.
+    #[serde(rename = "delInstrText")]
+    DelInstrText(TextXml),
     #[serde(rename = "fldChar")]
     FldChar(FldCharXml),
     #[serde(rename = "footnoteReference")]
