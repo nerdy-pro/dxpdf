@@ -681,6 +681,7 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            hyphenation: Default::default(),
         }
     }
 

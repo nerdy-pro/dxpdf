@@ -262,6 +262,17 @@ pub struct FontProps {
     pub underline_position: Pt,
     /// Underline thickness from font metrics.
     pub underline_thickness: Pt,
+    /// §17.3.2.20 `w:lang/@w:val` as the §17.7.2 cascade left it, reduced to
+    /// the hyphenation dictionary this engine has for it (issue #158), or
+    /// `None` for an untagged run or a language with no vendored patterns —
+    /// either of which the line fitter never hyphenates.
+    ///
+    /// On `FontProps` rather than on the fragment for the reason `rtl` is: it
+    /// is per *run*, and this is the per-run resolved presentation every text
+    /// fragment already shares by `Rc`. Resolved from the run's own cascade,
+    /// not from the paragraph mark `ParagraphStyle::locale` reads — a German
+    /// quotation inside an English paragraph hyphenates as German.
+    pub hyphenation: Option<crate::i18n::hyphenate::HyphenLanguage>,
 }
 
 /// Font metrics for a specific font at a specific size.
@@ -337,10 +348,12 @@ pub enum LinkTarget {
 /// character list did not include it. [`crate::i18n::segment`] is the one
 /// place that answers the question now; this enum is how the answer travels.
 ///
-/// Two states, not three. UAX #14 also has *mandatory* breaks ([LB4]/[LB5]),
-/// and none can reach a fragment: CR, LF and every other C0 control but TAB
-/// are stripped while the text is collected, and an authored `<w:br/>`
-/// (§17.3.3.1) becomes [`Fragment::LineBreak`] instead of text.
+/// Two UAX #14 states, not three. UAX #14 also has *mandatory* breaks
+/// ([LB4]/[LB5]), and none can reach a fragment: CR, LF and every other C0
+/// control but TAB are stripped while the text is collected, and an authored
+/// `<w:br/>` (§17.3.3.1) becomes [`Fragment::LineBreak`] instead of text.
+/// The third variant is not UAX #14's at all — it is the engine's own, and
+/// exists only after line fitting has run.
 ///
 /// [LB4]: https://www.unicode.org/reports/tr14/#LB4
 /// [LB5]: https://www.unicode.org/reports/tr14/#LB5
@@ -355,6 +368,15 @@ pub enum BreakAfter {
     /// `0`), or the fragment ends at a `<w:r>` boundary that falls inside a
     /// token and the run after it carries the rest.
     Prohibited,
+    /// §17.15.1.10 (issue #158): an opportunity this engine *created* by
+    /// cutting a word at a hyphenation point. The fragment is the head of
+    /// that word and its text already ends in the U+002D it inserted, so
+    /// emission paints it as ordinary text; the fragment after it is the
+    /// word's tail. Only `layout::line` produces this, only at the end of a
+    /// fitted line, and `PlacedParagraph::fragments_from_line` rejoins such a
+    /// pair before any fragment is re-fitted at another width — a head whose
+    /// tail fits beside it again would otherwise paint a hyphen mid-word.
+    Hyphenated,
 }
 
 /// A measured fragment — the atomic unit for line fitting.
@@ -759,6 +781,17 @@ pub fn font_props_from_run(
         // Populated by the measurer from Skia font metrics.
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        // §17.3.2.20 → §17.15.1.10 (issue #158). `Locale::first_tag`'s
+        // emptiness rule applies: an empty `@w:val` sets nothing. Only the
+        // Latin-script `@w:val` is consulted — `@w:eastAsia`/`@w:bidi` name
+        // scripts whose text is either never hyphenated (CJK) or shaped
+        // (Arabic), both of which the fitter excludes before asking.
+        hyphenation: rp
+            .lang
+            .get()
+            .and_then(|l| l.val.as_deref())
+            .filter(|tag| !tag.is_empty())
+            .and_then(crate::i18n::hyphenate::HyphenLanguage::from_tag),
     }
 }
 
@@ -924,6 +957,7 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            hyphenation: None,
         });
         let zero_metrics = TextMetrics {
             ascent: Pt::ZERO,
@@ -965,6 +999,52 @@ mod tests {
         assert_eq!(fp.size.raw(), 12.0);
         assert_eq!(fp.bold, Toggle::Absent);
         assert_eq!(fp.italic, Toggle::Absent);
+    }
+
+    // ── §17.3.2.20 language → hyphenation dictionary (issue #158) ──────────
+
+    /// `w:lang/@w:val` as the §17.7.2 cascade left it on the run becomes the
+    /// run's hyphenation dictionary. It is `rp.lang` — the *run's* cascaded
+    /// value — not the paragraph mark's: a German quotation inside an English
+    /// paragraph is a run-level fact. Absent, empty and unknown tags all mean
+    /// "never hyphenate this run".
+    #[test]
+    fn the_runs_cascaded_lang_picks_its_hyphenation_dictionary() {
+        use crate::i18n::hyphenate::HyphenLanguage;
+        let at = |val: Option<&str>| {
+            font_props_from_run(
+                &RunProperties {
+                    lang: Dup::from(Some(crate::model::Lang {
+                        val: val.map(str::to_string),
+                        east_asia: None,
+                        bidi: None,
+                    })),
+                    ..RunProperties::default()
+                },
+                "Helvetica",
+                Pt::new(12.0),
+                crate::render::layout::ShapeAutoFit::NONE,
+            )
+            .hyphenation
+        };
+        assert_eq!(at(Some("de-DE")), Some(HyphenLanguage::De1996));
+        assert_eq!(at(Some("en-GB")), Some(HyphenLanguage::EnGb));
+        assert_eq!(at(Some("en-US")), Some(HyphenLanguage::EnUs));
+        assert_eq!(at(Some("ru-RU")), Some(HyphenLanguage::Ru));
+        assert_eq!(at(Some("fr-FR")), None, "no vendored dictionary");
+        assert_eq!(at(Some("")), None, "an empty @w:val sets nothing");
+        assert_eq!(at(None), None, "no tag on the run");
+        assert_eq!(
+            font_props_from_run(
+                &RunProperties::default(),
+                "Helvetica",
+                Pt::new(12.0),
+                crate::render::layout::ShapeAutoFit::NONE,
+            )
+            .hyphenation,
+            None,
+            "no w:lang at all"
+        );
     }
 
     // ── §17.3.2.1 / §17.3.2.16 bold and italic tri-state ───────────────────

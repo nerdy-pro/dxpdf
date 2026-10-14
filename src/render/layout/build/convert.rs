@@ -327,12 +327,20 @@ pub(super) fn base_direction(props: &model::ParagraphProperties) -> BaseDirectio
     }
 }
 
+/// `hyphenation` is the document's §17.15.1.10 setting
+/// (`ResolvedDocument::hyphenation`); it is combined here with the
+/// paragraph's cascaded §17.3.1.34 `w:suppressAutoHyphens`, because the
+/// clause makes the paragraph's exemption a §17.7.2 property — "determined by
+/// the setting previously set at any level of the style hierarchy" — and
+/// `props` is that cascade's result. A document with the setting off
+/// hyphenates nothing regardless of what any paragraph says.
 pub(super) fn paragraph_style_from_props(
     props: &model::ParagraphProperties,
     default_tab_stop: Pt,
     auto_fit: crate::render::layout::ShapeAutoFit,
     (locale, decimal_separator): (crate::render::resolve::locale::Locale, char),
     outline: Option<crate::render::layout::draw_command::OutlineHeading>,
+    hyphenation: &crate::model::HyphenationSettings,
 ) -> ParagraphStyle {
     let indent_left = props
         .indentation
@@ -432,6 +440,15 @@ pub(super) fn paragraph_style_from_props(
         page_y: crate::render::dimension::Pt::ZERO,
         page_x: crate::render::dimension::Pt::ZERO,
         page_content_width: crate::render::dimension::Pt::ZERO,
+        // §17.15.1.10 and §17.3.1.34 (issue #158). `Some(true)` is the
+        // exemption; `None` and `Some(false)` both inherit the document.
+        hyphenation: (hyphenation.enabled && props.suppress_auto_hyphens != Some(true)).then(
+            || crate::render::layout::paragraph::AutoHyphenation {
+                zone: Pt::from(hyphenation.zone),
+                consecutive_limit: hyphenation.consecutive_limit,
+                no_caps: hyphenation.no_caps,
+            },
+        ),
     }
 }
 
@@ -965,6 +982,49 @@ mod tests {
     use crate::model::{Border, BorderStyle, Color, ParagraphBorders, ParagraphProperties};
     use crate::render::resolve::color::rgb_from_u32;
 
+    /// §17.3.1.34 against §17.15.1.10 (issue #158): the document turns
+    /// hyphenation on, and a paragraph may exempt itself — "If omitted on a
+    /// given paragraph, its value is determined by the setting previously set
+    /// at any level of the style hierarchy … If never specified … the default
+    /// hyphenation settings for the document, as specified in
+    /// autoHyphenation, shall apply." So on the cascaded properties:
+    /// `Some(true)` is exempt, `None` and `Some(false)` inherit the document,
+    /// and a document with the setting off hyphenates nothing regardless.
+    #[test]
+    fn suppress_auto_hyphens_exempts_the_paragraph() {
+        use crate::model::HyphenationSettings;
+        let style = |suppress: Option<bool>, enabled: bool| {
+            paragraph_style_from_props(
+                &ParagraphProperties {
+                    suppress_auto_hyphens: suppress,
+                    ..Default::default()
+                },
+                Pt::new(36.0),
+                crate::render::layout::ShapeAutoFit::NONE,
+                (crate::render::resolve::locale::Locale::English, '.'),
+                None,
+                &HyphenationSettings {
+                    enabled,
+                    zone: Dimension::new(425),
+                    consecutive_limit: 2,
+                    no_caps: true,
+                },
+            )
+            .hyphenation
+        };
+        let on = style(None, true).expect("the document setting reaches the paragraph");
+        assert_eq!(on.zone.raw(), 425.0 / 20.0, "twips to points");
+        assert_eq!(on.consecutive_limit, 2);
+        assert!(on.no_caps);
+        assert!(
+            style(Some(false), true).is_some(),
+            "an explicit `0` inherits"
+        );
+        assert!(style(Some(true), true).is_none(), "§17.3.1.34 exempts");
+        assert!(style(None, false).is_none(), "§17.15.1.10 omitted: off");
+        assert!(style(Some(false), false).is_none());
+    }
+
     /// An all-empty ResolvedDocument for exercising `resolve_paragraph_defaults`.
     fn empty_resolved() -> ResolvedDocument {
         use std::collections::HashMap;
@@ -985,6 +1045,7 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            hyphenation: Default::default(),
         }
     }
 

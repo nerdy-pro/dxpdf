@@ -204,7 +204,7 @@ pub(crate) fn place_paragraph<'a>(
     // breaking. `Cow` so the common path (nothing over-wide) borrows the input
     // without cloning; only an actual transform materializes an owned `Vec`.
     let min_avail = (content_width - first_line_adjustment).max(Pt::ZERO);
-    let effective: Cow<'a, [Fragment]> = {
+    let mut effective: Cow<'a, [Fragment]> = {
         let clipped: Cow<'a, [Fragment]> = match clip_oversized_images(fragments, content_width) {
             Some(v) => Cow::Owned(v),
             None => Cow::Borrowed(fragments),
@@ -226,9 +226,27 @@ pub(crate) fn place_paragraph<'a>(
         drop_cap_lines,
         default_line_height,
     };
+    // §17.15.1.10 (issue #158): the fitter's hyphenation context, when the
+    // style carries the setting *and* a measurer exists to re-measure a cut
+    // word's head. Without a measurer (registry-less tests) nothing is
+    // hyphenated, the same way `split_oversized_fragments` degrades. Built
+    // per `place_paragraph`, so the §17.15.1.22 count starts at 0 for every
+    // placement — `HyphenationCtx::consecutive` says why that is accepted.
+    let hyphenation = match (style.hyphenation, measure_text) {
+        (Some(h), Some(measure)) => Some(super::line::HyphenationCtx {
+            zone: h.zone,
+            consecutive_limit: h.consecutive_limit,
+            no_caps: h.no_caps,
+            measure,
+            opportunities: &crate::i18n::hyphenate::opportunities,
+            consecutive: std::cell::Cell::new(0),
+        }),
+        _ => None,
+    };
     // Per-line float adjustment: fit one line at a time, computing the available
     // width for each line based on its absolute y position on the page.
-    let line_placements = compute_line_placements(&effective, style, &params);
+    let line_placements =
+        compute_line_placements(&mut effective, style, &params, hyphenation.as_ref());
 
     // §17.3.1.11: compute the drop cap baseline.
     // When frame_height is set (lineRule="exact"):
@@ -327,9 +345,17 @@ impl PlacedParagraph<'_> {
     /// cloned so the stacker can re-place the remainder against the next page's
     /// floats and width (instead of reusing this page's placement). `from` must
     /// be a valid line index (`< line_count()`).
+    ///
+    /// §17.15.1.10: with every word this placement hyphenated inside the
+    /// remainder made whole again (`line::rejoin_hyphenated`) — the next
+    /// page's width is not this one's, and a head re-fitted beside its own
+    /// tail would paint a hyphen mid-word. A tail whose head ended the
+    /// emitted segment is left as it is: its head has been painted.
     pub(crate) fn fragments_from_line(&self, from: usize) -> Vec<Fragment> {
         let start = self.line_placements[from].line.start;
-        self.fragments[start..].to_vec()
+        let mut rest = self.fragments[start..].to_vec();
+        super::line::rejoin_hyphenated(&mut rest, self.measure_text);
+        rest
     }
 
     /// §17.11.12: number of footnote reference marks in lines `[first, last)`.
@@ -564,6 +590,7 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                hyphenation: None,
             }),
             color: RgbColor::BLACK,
             width: Pt::new(width),
@@ -590,6 +617,272 @@ mod tests {
         fragment
     }
 
+    // ── §17.15.1.10 automatic hyphenation (issue #158) ─────────────────────
+    //
+    // The unit tests in `layout::line` prove the fitter's rules against a
+    // table of opportunities; these prove the paragraph layer wires the
+    // style, the measurer and the real en-US patterns to it.
+
+    /// 6 pt per character, hyphen included.
+    fn six_per_char(text: &str, _: &FontProps) -> (Pt, TextMetrics) {
+        (
+            Pt::new(6.0 * text.chars().count() as f32),
+            TextMetrics {
+                ascent: Pt::new(10.0),
+                descent: Pt::new(4.0),
+                leading: Pt::ZERO,
+            },
+        )
+    }
+
+    /// A word of an `en-US` run measured by `six_per_char` (a trailing space
+    /// counts in `width`, not in `trimmed_width`), carrying
+    /// [`BreakAfter::Opportunity`] as `crate::i18n::segment` gives a word
+    /// followed by a space and the last word of a paragraph alike —
+    /// `fixture_break_after`'s character sniff would call a bare final word
+    /// glued, which is the one thing the fitter must never hyphenate.
+    fn hyphenating_word(text: &str) -> Fragment {
+        let mut f = text_frag(text, 6.0 * text.chars().count() as f32);
+        if let Fragment::Text {
+            font,
+            trimmed_width,
+            break_after,
+            ..
+        } = &mut f
+        {
+            *break_after = BreakAfter::Opportunity;
+            *trimmed_width = Pt::new(6.0 * text.trim_end().chars().count() as f32);
+            let mut props = (**font).clone();
+            props.hyphenation = Some(crate::i18n::hyphenate::HyphenLanguage::EnUs);
+            *font = Rc::new(props);
+        }
+        f
+    }
+
+    /// `the hyphenation` as two words: 24 pt (18 visible) and 66 pt.
+    fn hyphenating_paragraph() -> Vec<Fragment> {
+        vec![hyphenating_word("the "), hyphenating_word("hyphenation")]
+    }
+
+    fn hyphenating_style() -> ParagraphStyle {
+        ParagraphStyle {
+            hyphenation: Some(AutoHyphenation {
+                zone: Pt::ZERO,
+                consecutive_limit: 0,
+                no_caps: false,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn painted_texts(commands: &[DrawCommand]) -> Vec<String> {
+        commands
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Text { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// End to end at this layer: the style carries the setting, a measurer
+    /// is at hand, the vendored en-US patterns say `hy-phen-ation`, and the
+    /// painted commands are `hyphen-` on the first line and `ation` on the
+    /// second — `hyphena-` (48 pt) would not fit beside `the ` in 66 pt.
+    #[test]
+    fn the_setting_and_a_measurer_hyphenate_the_overflowing_word() {
+        let frags = hyphenating_paragraph();
+        let style = hyphenating_style();
+        let constraints = body_constraints(66.0);
+        let placed = place_paragraph(
+            &frags,
+            &constraints,
+            &style,
+            Pt::new(14.0),
+            Some(&six_per_char),
+        );
+        assert_eq!(placed.line_count(), 2);
+        assert_eq!(
+            painted_texts(&placed.emit_full().commands),
+            ["the ", "hyphen-", "ation"]
+        );
+    }
+
+    fn text_and_break(f: &Fragment) -> (String, BreakAfter) {
+        match f {
+            Fragment::Text {
+                text, break_after, ..
+            } => (text.to_string(), *break_after),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    /// §4 continuation re-fit: the remainder handed to the next page or
+    /// column is re-placed at *that* page's width, and a word this placement
+    /// cut may fit whole there. A head still reading `hyphen-` beside its
+    /// tail `ation` on one line would paint a hyphen mid-word, so the
+    /// remainder must be the paragraph's text as it was before this
+    /// placement hyphenated it: every head rejoined with its tail, the
+    /// inserted hyphen gone, the width re-measured and the tail's own
+    /// `break_after` restored.
+    #[test]
+    fn fragments_from_line_rejoins_a_hyphenated_head_with_its_tail() {
+        let frags = hyphenating_paragraph();
+        let style = hyphenating_style();
+        let constraints = body_constraints(66.0);
+        let placed = place_paragraph(
+            &frags,
+            &constraints,
+            &style,
+            Pt::new(14.0),
+            Some(&six_per_char),
+        );
+        assert_eq!(placed.line_count(), 2, "the fixture hyphenates");
+
+        let remainder = placed.fragments_from_line(0);
+        assert_eq!(
+            remainder.iter().map(text_and_break).collect::<Vec<_>>(),
+            [
+                ("the ".to_string(), BreakAfter::Opportunity),
+                ("hyphenation".to_string(), BreakAfter::Opportunity),
+            ]
+        );
+        assert_eq!(remainder[1].width().raw(), 66.0, "re-measured whole");
+        assert_eq!(remainder[1].trimmed_width().raw(), 66.0);
+    }
+
+    /// The head of a word cut at the *end of the emitted segment* has been
+    /// painted; only its tail travels, and it travels as it is.
+    #[test]
+    fn fragments_from_line_keeps_a_tail_whose_head_was_already_emitted() {
+        let frags = hyphenating_paragraph();
+        let style = hyphenating_style();
+        let constraints = body_constraints(66.0);
+        let placed = place_paragraph(
+            &frags,
+            &constraints,
+            &style,
+            Pt::new(14.0),
+            Some(&six_per_char),
+        );
+        let remainder = placed.fragments_from_line(1);
+        assert_eq!(
+            remainder.iter().map(text_and_break).collect::<Vec<_>>(),
+            [("ation".to_string(), BreakAfter::Opportunity)]
+        );
+    }
+
+    /// Registry-less layout has no measurer, so a head's width cannot be
+    /// known and nothing is cut, however the style is set — the same way
+    /// `split_oversized_fragments` degrades without one.
+    #[test]
+    fn without_a_measurer_nothing_is_hyphenated() {
+        let frags = hyphenating_paragraph();
+        let style = hyphenating_style();
+        let constraints = body_constraints(66.0);
+        let placed = place_paragraph(&frags, &constraints, &style, Pt::new(14.0), None);
+        assert_eq!(placed.line_count(), 2);
+        assert_eq!(
+            painted_texts(&placed.emit_full().commands),
+            ["the ", "hyphenation"]
+        );
+    }
+
+    /// The floats path (`line_emit::compute_line_placements` with
+    /// `page_floats`) fits one line per call, each at its own width, through
+    /// the same `fit_lines_in`. A float narrows the first three 14 pt lines of
+    /// a 126 pt paragraph to 66 pt; below it the full width returns. The
+    /// narrow lines must hyphenate, and no inserted hyphen may ever be
+    /// followed by anything on its line: a word cut while fitting one line
+    /// must not be left spliced for a later call to re-fit at another width,
+    /// which is what `FitWindow::max_lines` is for. Mutation: `max_lines:
+    /// None` at that call site fits every remaining line at 66 pt on the
+    /// first call, and the fourth line, back at 126 pt, then paints
+    /// `the hyphen- ation the ` as one line.
+    #[test]
+    fn the_floats_path_hyphenates_each_line_at_its_own_width() {
+        use crate::render::layout::float::{ActiveFloat, FloatSource, WrapTextSide};
+        let float = ActiveFloat {
+            page_x: Pt::ZERO,
+            page_y_start: Pt::ZERO,
+            page_y_end: Pt::new(30.0),
+            width: Pt::new(60.0),
+            source: FloatSource::Image,
+            wrap_text: WrapTextSide::BothSides,
+        };
+        let style = ParagraphStyle {
+            page_floats: vec![float],
+            page_x: Pt::ZERO,
+            page_content_width: Pt::new(126.0),
+            ..hyphenating_style()
+        };
+        let mut frags = Vec::new();
+        for _ in 0..6 {
+            frags.push(hyphenating_word("the "));
+            frags.push(hyphenating_word("hyphenation "));
+        }
+        let constraints = body_constraints(126.0);
+        let placed = place_paragraph(
+            &frags,
+            &constraints,
+            &style,
+            Pt::new(14.0),
+            Some(&six_per_char),
+        );
+        assert!(placed.line_count() > 3, "the paragraph clears the float");
+
+        let commands = placed.emit_full().commands;
+        // The first, narrowed line is `the hyphen-`, exactly as the no-floats
+        // fixture above lays out at 66 pt.
+        assert_eq!(painted_texts(&commands)[..2], ["the ", "hyphen-"]);
+
+        let mut lines: std::collections::BTreeMap<i64, Vec<(i64, String)>> =
+            std::collections::BTreeMap::new();
+        for c in &commands {
+            if let DrawCommand::Text { position, text, .. } = c {
+                lines
+                    .entry(position.y.raw().round() as i64)
+                    .or_default()
+                    .push((position.x.raw().round() as i64, text.to_string()));
+            }
+        }
+        let mut hyphenated = 0;
+        for (y, mut pieces) in lines {
+            pieces.sort_by_key(|(x, _)| *x);
+            for (idx, (_, text)) in pieces.iter().enumerate() {
+                if text.ends_with('-') {
+                    hyphenated += 1;
+                    assert_eq!(
+                        idx + 1,
+                        pieces.len(),
+                        "y={y}: an inserted hyphen inside a line — {pieces:?}"
+                    );
+                }
+            }
+        }
+        assert!(hyphenated >= 2, "both widths hyphenate: {hyphenated} lines");
+    }
+
+    /// The control for the test above it: the same fragments and measurer
+    /// under a style without the setting are never hyphenated.
+    #[test]
+    fn without_the_setting_a_measurer_changes_nothing() {
+        let frags = hyphenating_paragraph();
+        let style = ParagraphStyle::default();
+        let constraints = body_constraints(66.0);
+        let placed = place_paragraph(
+            &frags,
+            &constraints,
+            &style,
+            Pt::new(14.0),
+            Some(&six_per_char),
+        );
+        assert_eq!(
+            painted_texts(&placed.emit_full().commands),
+            ["the ", "hyphenation"]
+        );
+    }
+
     /// A minimal `§22.1` fraction fragment, for testing the paint side of
     /// a hyperlinked equation independently of the OMML→fragment path.
     fn math_fraction_frag(hyperlink_url: Option<LinkTarget>) -> Fragment {
@@ -605,6 +898,7 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            hyphenation: None,
         });
         let metrics = TextMetrics {
             ascent: Pt::new(10.0),
@@ -2418,6 +2712,7 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            hyphenation: None,
         })
     }
 

@@ -261,6 +261,7 @@ pub(super) fn build_paragraph_block(
         state.shape_auto_fit,
         super::convert::paragraph_locale(p, ctx.resolved),
         outline,
+        &ctx.resolved.hyphenation,
     );
     style.style_id = p.style_id.clone();
 
@@ -378,6 +379,7 @@ fn build_note_blocks(
                     text_scale: 1.0,
                     underline_position: Pt::ZERO,
                     underline_thickness: Pt::ZERO,
+                    hyphenation: None,
                 });
                 let ref_size =
                     font.size * crate::render::layout::fragment::SUPERSCRIPT_FONT_SIZE_RATIO;
@@ -423,6 +425,7 @@ fn build_note_blocks(
                 // this whole call. Asking rather than passing `None` keeps the
                 // heading decision in one place for every path.
                 super::convert::paragraph_outline(p, &merged_props, state),
+                &ctx.resolved.hyphenation,
             );
             results.push((display_num.to_string(), frags, style));
         }
@@ -622,6 +625,7 @@ mod tests {
             endnotes: HashMap::new(),
             even_and_odd_headers: false,
             default_tab_stop: Dimension::new(720),
+            hyphenation: Default::default(),
         }
     }
 

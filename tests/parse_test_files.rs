@@ -437,6 +437,16 @@ const ALL_FILES: &[&str] = &[
     "shading-patterns.docx",
     "bidi-tabs.docx",
     "text-effects.docx",
+    // §17.15.1.10 (issue #158): one document under six hyphenation settings
+    // plus the unequal-column continuation case; `compat15` is a probe. See
+    // `scripts/make_auto_hyphenation_fixtures.py`.
+    "auto-hyphenation-base.docx",
+    "auto-hyphenation-zone-wide.docx",
+    "auto-hyphenation-limit-1.docx",
+    "auto-hyphenation-nocaps.docx",
+    "auto-hyphenation-off.docx",
+    "auto-hyphenation-compat15.docx",
+    "auto-hyphenation-columns.docx",
 ];
 
 #[test]

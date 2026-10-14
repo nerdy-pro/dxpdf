@@ -69,6 +69,7 @@
 use icu_provider_blob::BlobDataProvider;
 
 pub mod bidi;
+pub mod hyphenate;
 pub mod segment;
 
 static ICU_DATA: &[u8] = include_bytes!("data/icu_data.blob");

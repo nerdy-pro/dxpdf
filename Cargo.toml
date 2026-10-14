@@ -224,6 +224,27 @@ writeable = "0.6.3"
 # boundaries at all and break mid-word. CJK needs no model — UAX #14's own
 # rules handle class ID — so this is the whole of the complex-script cost.
 icu_segmenter = { version = "2.2.0", default-features = false, features = ["auto", "serde"] }
+# §17.15.1.10 automatic hyphenation (issue #158): Knuth–Liang pattern
+# hyphenation over the TeX hyph-utf8 pattern sets. Pinned exactly, not by
+# caret: the crate's last release is from 2021, declares no MSRV, and the
+# `.bincode` dictionaries vendored under `src/i18n/data/hyph/` are serialized
+# with its own `bincode 1.x` schema for `Standard` — a different crate version
+# may not read them, so the two move together (`scripts/make_hyphenation_data.sh`
+# reads the version from this line). `default-features = false` turns off
+# `embed_all`/`embed_en-us` (which would compile every one of the 82 dictionaries,
+# ~2.8 MB, into the binary via a build script — the #124 wheel-size risk by
+# name) and the `build_dictionaries` feature, so the four committed files are
+# the *only* copy of the data, loaded once per language through `Load::from_reader`.
+# No Cargo feature gate, for the reason `src/i18n/mod.rs` gives for ICU data.
+#
+# Size, measured on the vendored files: 385,596 bytes raw (de-1996 204,040,
+# en-us 90,932, en-gb 48,093, ru 42,531), 214,624 bytes (56%) deflated — the
+# same order as the #130 LSTM models (+331 KB on the wheel) rather than the
+# CLDR text tables. The wheel delta itself is not yet measured: this change was
+# built where a release build was off limits. The first release build to carry
+# it should record the before/after `maturin build --release --features python`
+# figure here, as #130 and #131 did.
+hyphenation = { version = "=0.8.4", default-features = false }
 
 # `vendor/quick-xml-0.41.0` — see that directory's `PATCH.md` for why: a
 # same-local-name collision across two different XML namespaces that

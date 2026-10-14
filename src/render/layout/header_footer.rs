@@ -558,6 +558,7 @@ mod tests {
             text_scale: 1.0,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            hyphenation: None,
         };
         Fragment::Text {
             shaped: None,

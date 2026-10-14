@@ -344,6 +344,7 @@ mod tests {
             text_scale: scale,
             underline_position: Pt::ZERO,
             underline_thickness: Pt::ZERO,
+            hyphenation: None,
         }
     }
 

@@ -14,11 +14,18 @@ use crate::render::geometry::PtOffset;
 ///
 /// When `style.page_floats` is non-empty each line is fitted individually so
 /// the available width can vary depending on the line's absolute y position.
-/// When there are no floats a single call to `fit_lines_with_first` is used.
+/// When there are no floats a single call to `fit_lines_in` is used.
+///
+/// `fragments` is the paragraph's effective vector, mutable because
+/// §17.15.1.10 hyphenation splices a cut word into it (see
+/// `line::fit_lines_in`); the placements index the vector as it is *after*
+/// this returns. `hyphenation` is `None` for every paragraph the setting does
+/// not reach, and then nothing here differs from before issue #158.
 pub(super) fn compute_line_placements(
-    fragments: &[Fragment],
+    fragments: &mut std::borrow::Cow<'_, [Fragment]>,
     style: &ParagraphStyle,
     params: &LineLayoutParams,
+    hyphenation: Option<&super::super::line::HyphenationCtx<'_>>,
 ) -> Vec<LinePlacement> {
     let content_width = params.content_width;
     let first_line_adjustment = params.first_line_adjustment;
@@ -49,12 +56,14 @@ pub(super) fn compute_line_placements(
         } else {
             content_width
         };
-        return super::super::line::fit_lines_with_first(
+        return super::super::line::fit_lines_in(
             fragments,
+            super::super::line::FitWindow::ALL,
             first_line_width,
             remaining_width,
             ptab_geometry,
             bidi_rtl,
+            hyphenation,
         )
         .into_iter()
         .map(|line| LinePlacement {
@@ -96,8 +105,11 @@ pub(super) fn compute_line_placements(
 
         // Fit one line at this width. Each call fits exactly one line, so the
         // geometry is *this* line's: its own float narrowing, and the
-        // first-line indent only when it really is the first.
-        let remaining = &fragments[frag_idx..];
+        // first-line indent only when it really is the first. The window
+        // starts at `frag_idx` in the whole vector rather than slicing it,
+        // because a hyphenated word is spliced into that vector, and it stops
+        // after one line so nothing beyond this line is cut at a width the
+        // next iteration will not use.
         let line_geometry = PTabGeometry {
             indent_first_line: if is_first {
                 ptab_geometry.indent_first_line
@@ -108,24 +120,19 @@ pub(super) fn compute_line_placements(
             float_right: fr,
             ..ptab_geometry
         };
-        let fitted = super::super::line::fit_lines_with_first(
-            remaining,
+        let fitted = super::super::line::fit_lines_in(
+            fragments,
+            super::super::line::FitWindow {
+                start: frag_idx,
+                max_lines: Some(1),
+            },
             line_width,
             line_width,
             line_geometry,
             bidi_rtl,
+            hyphenation,
         );
-        let fitted_line = if let Some(first) = fitted.into_iter().next() {
-            super::super::line::FittedLine {
-                start: first.start + frag_idx,
-                end: first.end + frag_idx,
-                width: first.width,
-                height: first.height,
-                text_height: first.text_height,
-                ascent: first.ascent,
-                has_break: first.has_break,
-            }
-        } else {
+        let Some(fitted_line) = fitted.into_iter().next() else {
             break;
         };
 
@@ -1948,7 +1955,12 @@ mod tests {
             drop_cap_lines: 0,
             default_line_height: Pt::new(14.0),
         };
-        let placements = compute_line_placements(&fragments, style, &params);
+        let placements = compute_line_placements(
+            &mut std::borrow::Cow::Borrowed(&fragments[..]),
+            style,
+            &params,
+            None,
+        );
         let mut commands = Vec::new();
         let mut cursor_y = Pt::ZERO;
         emit_line_commands(
@@ -2082,6 +2094,7 @@ mod tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                hyphenation: None,
             }),
             color: crate::render::resolve::color::RgbColor::BLACK,
             shading: None,

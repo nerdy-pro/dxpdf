@@ -2834,6 +2834,7 @@ mod paragraph_breakable_tests {
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                hyphenation: None,
             }),
             color: RgbColor::BLACK,
             width: Pt::new(30.0),

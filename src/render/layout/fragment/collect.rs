@@ -413,6 +413,7 @@ fn emit_field_substitution<F>(
                 text_scale: 1.0,
                 underline_position: Pt::ZERO,
                 underline_thickness: Pt::ZERO,
+                hyphenation: None,
             },
             TextRunStyle {
                 color: default_color,
@@ -461,6 +462,7 @@ where
         text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        hyphenation: None,
     };
     let (w, m) = measure_text(&text, &font);
     Fragment::Text {
@@ -1036,6 +1038,7 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        hyphenation: None,
                     };
                     let ch = char::from_u32(sym.char_code as u32).unwrap_or('\u{FFFD}');
                     let text = ch.to_string();
@@ -1089,6 +1092,7 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        hyphenation: None,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     // Raise the mark clear of the baseline (see the constant).
@@ -1132,6 +1136,7 @@ where
                         text_scale: 1.0,
                         underline_position: Pt::ZERO,
                         underline_thickness: Pt::ZERO,
+                        hyphenation: None,
                     };
                     let (w, m) = measure_text(&num_text, &ref_font);
                     let baseline_offset = -(default_size * super::NOTE_REF_BASELINE_OFFSET_RATIO);

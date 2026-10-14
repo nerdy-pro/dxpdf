@@ -35,6 +35,18 @@
 //!   an em dash becomes a unit of its own (class B2 breaks on both sides)
 //!   rather than clinging to the word before it.
 //!
+//! # What is deliberately not here
+//!
+//! Automatic hyphenation (§17.15.1.10, issue #158) is the one class of line
+//! break this module does not report, on purpose. UAX #14 names opportunities
+//! that exist in the text; a hyphenation point is one the engine *creates*,
+//! by inserting a glyph the author never typed, and whether to take it
+//! depends on how much of the line is left (§17.15.1.53's zone) — which only
+//! the line fitter knows. So [`super::hyphenate`] answers the per-word
+//! language question and `layout::line` decides at the overflow; a soft
+//! hyphen's U+00AD (class BA) would be an opportunity here with no visible
+//! hyphen, which is why `w:softHyphen` is still dropped at parse.
+//!
 //! # Tailoring
 //!
 //! [`break_offsets`] takes no options because the two OOXML properties that

@@ -114,6 +114,29 @@ pub struct ParagraphStyle {
     pub page_x: Pt,
     /// Total content width (for float_adjustments computation).
     pub page_content_width: Pt,
+    /// §17.15.1.10 (issue #158): automatic hyphenation as it applies to this
+    /// paragraph — `Some` when the document turns it on *and* the §17.7.2
+    /// cascade did not set §17.3.1.34 `w:suppressAutoHyphens` on it. `None`
+    /// is the whole of "do not hyphenate", for either reason; see
+    /// `build::convert::paragraph_style_from_props`.
+    pub hyphenation: Option<AutoHyphenation>,
+}
+
+/// §17.15.1.10 / .53 / .22 / .27: the document's hyphenation controls in
+/// layout units — [`HyphenationSettings`](crate::model::HyphenationSettings)
+/// with the zone in points. Carried on [`ParagraphStyle`] so every
+/// `place_paragraph` caller (body, cells, continuation re-fits) inherits it
+/// without per-caller plumbing; `place_paragraph` turns it into the fitter's
+/// `HyphenationCtx` when a measurer is at hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AutoHyphenation {
+    /// §17.15.1.53: the gap a line may leave before its next word is cut.
+    pub zone: Pt,
+    /// §17.15.1.22: lines in a row that may end in an inserted hyphen; `0`
+    /// is no limit.
+    pub consecutive_limit: u32,
+    /// §17.15.1.27 `w:doNotHyphenateCaps`.
+    pub no_caps: bool,
 }
 
 /// Resolved paragraph border style for rendering.
@@ -193,6 +216,7 @@ impl ParagraphStyle {
             page_y: Pt::ZERO,
             page_x: Pt::ZERO,
             page_content_width: Pt::ZERO,
+            hyphenation: self.hyphenation,
         }
     }
 }
@@ -228,6 +252,8 @@ impl Default for ParagraphStyle {
             page_y: Pt::ZERO,
             page_x: Pt::ZERO,
             page_content_width: Pt::ZERO,
+            // §17.15.1.10: omitted means off.
+            hyphenation: None,
         }
     }
 }

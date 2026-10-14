@@ -59,6 +59,7 @@ fn math_font(size: Pt) -> FontProps {
         text_scale: 1.0,
         underline_position: Pt::ZERO,
         underline_thickness: Pt::ZERO,
+        hyphenation: None,
     }
 }
 
