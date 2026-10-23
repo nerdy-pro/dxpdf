@@ -26,6 +26,11 @@ use crate::docx::zip::{self, PackageContents};
 
 /// Parse a DOCX file from raw bytes into a `Document`.
 pub fn parse(data: &[u8]) -> Result<Document> {
+    parse_with_limits(data, &crate::ResourceLimits::default())
+}
+
+/// Parse a DOCX using caller-supplied input and ZIP budgets.
+pub fn parse_with_limits(data: &[u8], limits: &crate::ResourceLimits) -> Result<Document> {
     // Unmodelled-property reporting is deduplicated per document, so the set
     // has to be forgotten here rather than kept for the process — otherwise
     // the second document rendered would look clean because the first already
@@ -33,7 +38,7 @@ pub fn parse(data: &[u8]) -> Result<Document> {
     serde_xml::reset_unknown_child_log();
 
     // Phase 1: Unzip
-    let mut package = PackageContents::from_bytes(data)?;
+    let mut package = PackageContents::from_bytes_with_limits(data, limits)?;
 
     // Phase 1b: Find main document part via package-level rels
     let pkg_rels_data = package.require_part("_rels/.rels")?;

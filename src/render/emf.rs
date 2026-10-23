@@ -49,9 +49,34 @@ const BI_BITFIELDS: u32 = 3;
 /// - the data is not a valid EMF file,
 /// - no supported bitmap record is found,
 /// - the DIB uses an unsupported bit-depth or compression.
-pub fn decode_emf_bitmap(emf_data: &[u8]) -> Option<Image> {
-    validate_emf_header(emf_data)?;
-    let (width, height, rgba) = extract_bitmap(emf_data)?;
+pub(crate) fn decode_emf_bitmap_with_limits(
+    emf_data: &[u8],
+    limits: &crate::ResourceLimits,
+) -> Result<Option<Image>, crate::ResourceLimitError> {
+    if validate_emf_header(emf_data).is_none() {
+        return Ok(None);
+    }
+    let bitmap = visit_bitmap(emf_data, &|bmi, bits| {
+        if bmi.len() < BITMAPINFOHEADER_SIZE as usize || read_u32(bmi, 0)? < BITMAPINFOHEADER_SIZE {
+            return None;
+        }
+        let width = read_i32(bmi, 4)?;
+        let height = read_i32(bmi, 8)?.unsigned_abs();
+        if width <= 0 || height == 0 {
+            return None;
+        }
+        if let Err(error) = crate::limits::check_image_pixels(width as u32, height, limits) {
+            return Some(Err(error));
+        }
+        if height > i32::MAX as u32 {
+            return None;
+        }
+        decode_dib(bmi, bits).map(Ok)
+    })
+    .transpose()?;
+    let Some((width, height, rgba)) = bitmap else {
+        return Ok(None);
+    };
     // `Opaque`, not `Premul`: every decoder below writes `0xFF` alpha, because
     // no DIB format this module accepts carries an alpha channel (see
     // `decode_32bpp`). Declaring `Premul` over straight DIB bytes was a lie
@@ -63,7 +88,17 @@ pub fn decode_emf_bitmap(emf_data: &[u8]) -> Option<Image> {
         AlphaType::Opaque,
         None,
     );
-    images::raster_from_data(&info, Data::new_copy(&rgba), width as usize * 4)
+    Ok(images::raster_from_data(
+        &info,
+        Data::new_copy(&rgba),
+        width as usize * 4,
+    ))
+}
+
+#[cfg(test)]
+fn decode_emf_bitmap(emf_data: &[u8]) -> Option<Image> {
+    decode_emf_bitmap_with_limits(emf_data, &crate::ResourceLimits::default())
+        .expect("test bitmap fits default resource limits")
 }
 
 // ── Header validation ────────────────────────────────────────────────────────
@@ -87,24 +122,30 @@ fn validate_emf_header(data: &[u8]) -> Option<()> {
 
 // ── Record scanning ──────────────────────────────────────────────────────────
 
+#[cfg(test)]
 fn extract_bitmap(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    visit_bitmap(data, &decode_dib)
+}
+
+fn visit_bitmap<T>(data: &[u8], decode: &impl Fn(&[u8], &[u8]) -> Option<T>) -> Option<T> {
     let mut offset: usize = 0;
     while offset + 8 <= data.len() {
         let record_type = read_u32(data, offset)?;
         let record_size = read_u32(data, offset + 4)? as usize;
 
-        if record_size < 8 || offset + record_size > data.len() {
+        let record_end = offset.checked_add(record_size)?;
+        if record_size < 8 || record_end > data.len() {
             break;
         }
 
         match record_type {
             EMR_STRETCHDIBITS => {
-                if let Some(result) = parse_stretchdibits(data, offset, record_size) {
+                if let Some(result) = parse_stretchdibits(data, offset, record_size, decode) {
                     return Some(result);
                 }
             }
             EMR_BITBLT => {
-                if let Some(result) = parse_bitblt(data, offset, record_size) {
+                if let Some(result) = parse_bitblt(data, offset, record_size, decode) {
                     return Some(result);
                 }
             }
@@ -112,7 +153,7 @@ fn extract_bitmap(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
             _ => {}
         }
 
-        offset += record_size;
+        offset = record_end;
     }
     None
 }
@@ -139,11 +180,12 @@ fn extract_bitmap(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 ///  72       4   cxDest
 ///  76       4   cyDest
 /// ```
-fn parse_stretchdibits(
+fn parse_stretchdibits<T>(
     data: &[u8],
     record_start: usize,
     record_size: usize,
-) -> Option<(u32, u32, Vec<u8>)> {
+    decode: &impl Fn(&[u8], &[u8]) -> Option<T>,
+) -> Option<T> {
     if record_size < 80 {
         return None;
     }
@@ -163,16 +205,12 @@ fn parse_stretchdibits(
         return None;
     }
 
-    let bmi_abs = record_start + off_bmi;
-    let bits_abs = record_start + off_bits;
+    let bmi_abs = record_start.checked_add(off_bmi)?;
+    let bits_abs = record_start.checked_add(off_bits)?;
 
-    if bmi_abs + cb_bmi > data.len() || bits_abs + cb_bits > data.len() {
-        return None;
-    }
-
-    decode_dib(
-        &data[bmi_abs..bmi_abs + cb_bmi],
-        &data[bits_abs..bits_abs + cb_bits],
+    decode(
+        data.get(bmi_abs..bmi_abs.checked_add(cb_bmi)?)?,
+        data.get(bits_abs..bits_abs.checked_add(cb_bits)?)?,
     )
 }
 
@@ -198,11 +236,12 @@ fn parse_stretchdibits(
 ///  84       4   offBitsSrc
 ///  88       4   cbBitsSrc
 /// ```
-fn parse_bitblt(
+fn parse_bitblt<T>(
     data: &[u8],
     record_start: usize,
     record_size: usize,
-) -> Option<(u32, u32, Vec<u8>)> {
+    decode: &impl Fn(&[u8], &[u8]) -> Option<T>,
+) -> Option<T> {
     if record_size < 92 {
         return None;
     }
@@ -221,16 +260,12 @@ fn parse_bitblt(
         return None;
     }
 
-    let bmi_abs = record_start + off_bmi;
-    let bits_abs = record_start + off_bits;
+    let bmi_abs = record_start.checked_add(off_bmi)?;
+    let bits_abs = record_start.checked_add(off_bits)?;
 
-    if bmi_abs + cb_bmi > data.len() || bits_abs + cb_bits > data.len() {
-        return None;
-    }
-
-    decode_dib(
-        &data[bmi_abs..bmi_abs + cb_bmi],
-        &data[bits_abs..bits_abs + cb_bits],
+    decode(
+        data.get(bmi_abs..bmi_abs.checked_add(cb_bmi)?)?,
+        data.get(bits_abs..bits_abs.checked_add(cb_bits)?)?,
     )
 }
 
@@ -289,8 +324,8 @@ fn decode_32bpp(
     height: u32,
     bottom_up: bool,
 ) -> Option<(u32, u32, Vec<u8>)> {
-    let row_bytes = width as usize * 4;
-    let total = row_bytes * height as usize;
+    let row_bytes = (width as usize).checked_mul(4)?;
+    let total = row_bytes.checked_mul(height as usize)?;
     if bits.len() < total {
         return None;
     }
@@ -323,10 +358,10 @@ fn decode_24bpp(
     bottom_up: bool,
 ) -> Option<(u32, u32, Vec<u8>)> {
     // DIB rows are padded to a 4-byte boundary.
-    let src_row_bytes = ((width as usize * 3) + 3) & !3;
-    let dst_row_bytes = width as usize * 4;
-    let total_src = src_row_bytes * height as usize;
-    let total_dst = dst_row_bytes * height as usize;
+    let src_row_bytes = (width as usize).checked_mul(3)?.checked_add(3)? & !3;
+    let dst_row_bytes = (width as usize).checked_mul(4)?;
+    let total_src = src_row_bytes.checked_mul(height as usize)?;
+    let total_dst = dst_row_bytes.checked_mul(height as usize)?;
     if bits.len() < total_src {
         return None;
     }
@@ -478,6 +513,59 @@ mod tests {
                 pixels: pixels_32bpp_2x2(),
             },
         )
+    }
+
+    #[test]
+    fn resource_limits_cover_both_emf_records_and_bitmap_depths() {
+        let limits = crate::ResourceLimits {
+            max_image_pixels: 3,
+            ..Default::default()
+        };
+        for record in [EMR_STRETCHDIBITS, EMR_BITBLT] {
+            for bpp in [24, 32] {
+                for height in [2, -2] {
+                    let emf = make_emf(
+                        record,
+                        &DibSpec {
+                            width: 2,
+                            height,
+                            bpp,
+                            compression: BI_RGB,
+                            pixels: vec![0; 16],
+                        },
+                    );
+                    let error = decode_emf_bitmap_with_limits(&emf, &limits)
+                        .expect_err("4-pixel DIB exceeds 3-pixel budget");
+                    assert_eq!(error.resource, "image pixels");
+                    assert_eq!((error.actual, error.limit), (4, 3));
+                    let exact = crate::ResourceLimits {
+                        max_image_pixels: 4,
+                        ..limits
+                    };
+                    let image = decode_emf_bitmap_with_limits(&emf, &exact)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!((image.width(), image.height()), (2, 2));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resource_limits_reject_emf_dimensions_before_pixel_allocation() {
+        let emf = make_emf(
+            EMR_STRETCHDIBITS,
+            &DibSpec {
+                width: 100_000,
+                height: -100_000,
+                bpp: 32,
+                compression: BI_RGB,
+                pixels: vec![0; 4],
+            },
+        );
+        let error = decode_emf_bitmap_with_limits(&emf, &crate::ResourceLimits::default())
+            .expect_err("oversized header must be rejected without decoding its pixels");
+        assert_eq!(error.actual, 10_000_000_000);
     }
 
     #[test]

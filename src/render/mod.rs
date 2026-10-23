@@ -59,7 +59,7 @@ fn sanitize_image_dpi(image_dpi: f32) -> f32 {
     }
 }
 
-/// Tunable knobs for the paint phase.
+/// Conversion resource budgets and paint-phase options.
 ///
 /// Constructed via [`RenderOptions::default`] and the `with_*` builder setters,
 /// so requested values are sanitized on the way in and additional knobs can be
@@ -69,9 +69,21 @@ pub struct RenderOptions {
     /// Target resolution (pixels per inch) images are downsampled to before
     /// embedding. Higher values yield crisper images and larger PDFs.
     image_dpi: f32,
+    resource_limits: crate::ResourceLimits,
 }
 
 impl RenderOptions {
+    /// Set input and raster-image budgets for this conversion.
+    pub fn with_resource_limits(mut self, limits: crate::ResourceLimits) -> Self {
+        self.resource_limits = limits;
+        self
+    }
+
+    /// The input and raster-image budgets.
+    pub fn resource_limits(&self) -> &crate::ResourceLimits {
+        &self.resource_limits
+    }
+
     /// Set the target image resolution in pixels per inch.
     ///
     /// Non-positive or non-finite requests are **silently clamped** up to
@@ -95,6 +107,7 @@ impl Default for RenderOptions {
     fn default() -> Self {
         Self {
             image_dpi: DEFAULT_IMAGE_DPI,
+            resource_limits: crate::ResourceLimits::default(),
         }
     }
 }

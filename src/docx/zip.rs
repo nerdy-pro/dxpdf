@@ -1,9 +1,9 @@
 //! ZIP extraction and OOXML package-path resolution.
 
 use std::collections::HashMap;
-use std::io::Read;
 
 use crate::docx::error::{ParseError, Result};
+use crate::limits::{check_limit, read_limited};
 
 /// The contents of a DOCX package, extracted from the ZIP archive.
 pub struct PackageContents {
@@ -14,15 +14,33 @@ pub struct PackageContents {
 impl PackageContents {
     /// Extract all parts from a DOCX ZIP archive.
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
+        Self::from_bytes_with_limits(data, &crate::ResourceLimits::default())
+    }
+
+    /// Extract parts using caller-supplied resource budgets.
+    pub fn from_bytes_with_limits(data: &[u8], limits: &crate::ResourceLimits) -> Result<Self> {
+        check_limit("input bytes", data.len() as u64, limits.max_input_bytes)?;
         let cursor = std::io::Cursor::new(data);
         let mut archive = zip::ZipArchive::new(cursor)?;
+        check_limit("ZIP entries", archive.len() as u64, limits.max_zip_entries)?;
+        let mut declared_total = 0;
+        for i in 0..archive.len() {
+            let file = archive.by_index_raw(i)?;
+            check_limit("ZIP entry bytes", file.size(), limits.max_zip_entry_bytes)?;
+            check_total_bytes(declared_total, file.size(), limits.max_zip_total_bytes)?;
+            declared_total += file.size();
+        }
         let mut parts = HashMap::with_capacity(archive.len());
+        let mut total = 0;
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
+            let file = archive.by_index(i)?;
             let name = normalize_path(file.name());
-            let mut buf = Vec::with_capacity(file.size() as usize);
-            file.read_to_end(&mut buf)?;
+            let buf = read_limited(file, |size| {
+                check_limit("ZIP entry bytes", size, limits.max_zip_entry_bytes)?;
+                check_total_bytes(total, size, limits.max_zip_total_bytes)
+            })?;
+            total += buf.len() as u64;
             parts.insert(name, buf);
         }
 
@@ -45,6 +63,24 @@ impl PackageContents {
     pub fn take_part(&mut self, path: &str) -> Option<Vec<u8>> {
         let normalized = normalize_path(path);
         self.parts.remove(&normalized)
+    }
+}
+
+fn check_total_bytes(
+    total: u64,
+    size: u64,
+    limit: u64,
+) -> std::result::Result<(), crate::ResourceLimitError> {
+    // Compare against the remaining budget before adding, including when a
+    // caller has explicitly selected u64::MAX.
+    if size > limit - total {
+        Err(crate::ResourceLimitError {
+            resource: "ZIP total bytes",
+            actual: total.saturating_add(size),
+            limit,
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -111,6 +147,130 @@ pub fn part_directory(part_path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    fn archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            writer
+                .start_file(
+                    *name,
+                    zip::write::SimpleFileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn assert_limit(data: &[u8], limits: crate::ResourceLimits, resource: &str) {
+        match PackageContents::from_bytes_with_limits(data, &limits) {
+            Err(ParseError::ResourceLimit(error)) => assert_eq!(error.resource, resource),
+            Err(error) => panic!("expected resource limit, got {error}"),
+            Ok(_) => panic!("expected {resource} limit to reject archive"),
+        }
+    }
+
+    #[test]
+    fn resource_limits_reject_input_before_zip_parsing() {
+        assert_limit(
+            b"not a zip",
+            crate::ResourceLimits {
+                max_input_bytes: 8,
+                ..Default::default()
+            },
+            "input bytes",
+        );
+    }
+
+    #[test]
+    fn resource_limits_reject_excess_zip_entries() {
+        assert_limit(
+            &archive(&[("one", b""), ("two/", b"")]),
+            crate::ResourceLimits {
+                max_zip_entries: 1,
+                ..Default::default()
+            },
+            "ZIP entries",
+        );
+    }
+
+    #[test]
+    fn resource_limits_reject_expanded_entry_not_just_compressed_size() {
+        let data = archive(&[("compressed", &[0; 8192])]);
+        assert!(data.len() < 1024);
+        assert_limit(
+            &data,
+            crate::ResourceLimits {
+                max_zip_entry_bytes: 8191,
+                ..Default::default()
+            },
+            "ZIP entry bytes",
+        );
+    }
+
+    #[test]
+    fn resource_limits_enforce_actual_bytes_when_zip_sizes_lie() {
+        let mut data = archive(&[("compressed", &[0; 8192])]);
+        let central = data
+            .windows(4)
+            .position(|bytes| bytes == b"PK\x01\x02")
+            .expect("central directory");
+        data[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        data[22..26].copy_from_slice(&1u32.to_le_bytes());
+        assert_limit(
+            &data,
+            crate::ResourceLimits {
+                max_zip_entry_bytes: 8191,
+                ..Default::default()
+            },
+            "ZIP entry bytes",
+        );
+        assert_limit(
+            &data,
+            crate::ResourceLimits {
+                max_zip_total_bytes: 8191,
+                ..Default::default()
+            },
+            "ZIP total bytes",
+        );
+    }
+
+    #[test]
+    fn resource_limits_count_colliding_paths_toward_total() {
+        assert_limit(
+            &archive(&[("ONE", b"123"), ("one", b"456")]),
+            crate::ResourceLimits {
+                max_zip_total_bytes: 5,
+                ..Default::default()
+            },
+            "ZIP total bytes",
+        );
+    }
+
+    #[test]
+    fn resource_limits_accept_exact_boundaries() {
+        let data = archive(&[("one", b"123"), ("two", b"456")]);
+        let limits = crate::ResourceLimits {
+            max_input_bytes: data.len() as u64,
+            max_zip_entries: 2,
+            max_zip_entry_bytes: 3,
+            max_zip_total_bytes: 6,
+            ..Default::default()
+        };
+        let package = PackageContents::from_bytes_with_limits(&data, &limits).unwrap();
+        assert_eq!(package.get_part("one"), Some(b"123".as_slice()));
+        assert_eq!(package.get_part("two"), Some(b"456".as_slice()));
+    }
+
+    #[test]
+    fn resource_limits_total_arithmetic_is_inclusive_and_overflow_safe() {
+        assert!(check_total_bytes(3, 3, 6).is_ok());
+        assert!(check_total_bytes(3, 4, 6).is_err());
+        assert!(check_total_bytes(u64::MAX - 1, 1, u64::MAX).is_ok());
+        assert!(check_total_bytes(u64::MAX - 1, 2, u64::MAX).is_err());
+    }
 
     #[test]
     fn normalize_strips_leading_slash_and_lowercases() {

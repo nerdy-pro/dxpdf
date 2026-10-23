@@ -82,6 +82,11 @@ jobs:
       - name: Build without default features
         run: cargo build --no-default-features
 
+      - name: Test Python resource limits
+        run: |
+          cargo build --features python --lib
+          python3 tests/python_limits.py target/debug/libdxpdf.so
+
   # The full cross-platform pass, gated to PRs from a `release/*` branch —
   # issue #117 is why this matrix exists at all (Windows had never run a
   # single test, leaving DirectWrite font resolution unverified), but paying
