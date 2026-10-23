@@ -1,3 +1,3 @@
-from dxpdf.dxpdf import convert, convert_file
+from dxpdf.dxpdf import ResourceLimits, convert, convert_file
 
-__all__ = ["convert", "convert_file"]
+__all__ = ["ResourceLimits", "convert", "convert_file"]

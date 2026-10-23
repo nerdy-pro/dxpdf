@@ -147,6 +147,68 @@ pdf_bytes = dxpdf.convert(open("input.docx", "rb").read(), image_dpi=300)
 dxpdf.convert_file("input.docx", "output.pdf", image_dpi=300)
 ```
 
+### Untrusted documents and resource limits
+
+**Run conversion in a separate, low-privilege worker process for untrusted
+uploads, not inside your web/API process.** Set OS/container memory and CPU
+limits, a wall-clock timeout, bounded concurrency, and an upload-size limit
+before buffering the request. Deny worker network access and restrict filesystem
+access. Releasing Python's GIL does not isolate native-code crashes, stack
+overflows, or out-of-memory aborts.
+
+New conversions use these inclusive defaults:
+
+| Budget | Default |
+|---|---|
+| Compressed DOCX input | 32 MiB |
+| ZIP entries (including directories) | 4096 |
+| Uncompressed bytes per ZIP entry | 64 MiB |
+| Total uncompressed ZIP bytes (including duplicate paths) | 256 MiB |
+| Source pixels per raster image, before downsampling/cropping | 25,000,000 |
+
+Exceeding a budget fails the conversion explicitly (`RuntimeError` in Python),
+rather than silently dropping an oversized image. Zero permits none of that
+resource; it does not mean unlimited. Actual decompressed bytes are bounded,
+not only the sizes reported by ZIP headers. No compression-ratio threshold is
+needed to enforce these byte budgets.
+
+Python's `convert` and `convert_file` accept a keyword-only `limits` object:
+
+```python
+limits = dxpdf.ResourceLimits(
+    max_input_bytes=16 * 1024 * 1024,
+    max_zip_entries=2048,
+    max_zip_entry_bytes=32 * 1024 * 1024,
+    max_zip_total_bytes=128 * 1024 * 1024,
+    max_image_pixels=12_000_000,
+)
+pdf_bytes = dxpdf.convert(docx_bytes, image_dpi=220, limits=limits)
+dxpdf.convert_file("input.docx", "output.pdf", limits=limits)
+```
+
+Rust callers use `RenderOptions::with_resource_limits`:
+
+```rust
+let limits = dxpdf::ResourceLimits {
+    max_image_pixels: 12_000_000,
+    ..Default::default()
+};
+let options = dxpdf::RenderOptions::default().with_resource_limits(limits);
+let pdf = dxpdf::convert_with_options(&docx_bytes, &options)?;
+// For parsing separately, use docx::parse_with_limits(&docx_bytes, &limits).
+```
+
+The CLI and newly built C ABI use the defaults; their existing interfaces do
+not expose budget overrides. Prebuilt Go libraries must be rebuilt before they
+contain source-level security fixes.
+
+These budgets **are not a sandbox or a total-memory ceiling**: ZIP metadata
+indexing (which precedes the entry-count check), XML/model
+expansion, recursive parsing, layout, embedded fonts, native decoders, image
+caches, and PDF output can consume additional resources. The pixel limit is per
+image, not a cumulative decoded-image budget. Treat generated PDFs as untrusted
+too: document hyperlinks are preserved, not fetched or scheme-filtered.
+
 ### Go — Convert DOCX to PDF Programmatically
 
 ```go

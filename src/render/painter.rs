@@ -174,7 +174,7 @@ pub fn render_to_pdf(
         let mut on_page = doc.begin_page(to_size(page.page_size), None);
         {
             let canvas = on_page.canvas();
-            render_page(canvas, page, registry, &mut state, options);
+            render_page(canvas, page, registry, &mut state, options)?;
         }
         doc = on_page.end_page();
     }
@@ -268,7 +268,7 @@ fn render_page(
     registry: &FontRegistry,
     state: &mut PaintState,
     options: &RenderOptions,
-) {
+) -> Result<(), RenderError> {
     // Destructure into disjoint `&mut` field bindings — same borrow semantics as
     // the individual caches, so the paint body below is unchanged.
     let PaintState {
@@ -492,7 +492,9 @@ fn render_page(
                         // The cached bitmap already has any crop baked in → the
                         // whole bitmap maps to `dst`.
                         canvas.draw_image_rect(image, None, dst, &default_paint);
-                    } else if let Some(decoded) = decode_image(image_data) {
+                    } else if let Some(decoded) =
+                        decode_image(image_data, options.resource_limits())?
+                    {
                         match &crop {
                             // Bake the visible sub-region into a right-sized
                             // bitmap so the PDF never carries the cropped-away
@@ -652,6 +654,7 @@ fn render_page(
             }
         }
     }
+    Ok(())
 }
 
 // ── Shape path helpers ──────────────────────────────────────────────────────
@@ -886,13 +889,29 @@ fn paint_effect(
 /// Decode a `MediaEntry` to a Skia image, dispatching on format.
 ///
 /// Returns `None` if the format is unsupported or the data is malformed.
-fn decode_image(entry: &MediaEntry) -> Option<skia_safe::Image> {
+/// Oversized sources fail the conversion before any pixel decode/downsampling.
+fn decode_image(
+    entry: &MediaEntry,
+    limits: &crate::ResourceLimits,
+) -> Result<Option<skia_safe::Image>, RenderError> {
     use crate::model::ImageFormat;
-    match entry.format {
-        ImageFormat::Emf => crate::render::emf::decode_emf_bitmap(&entry.data),
-        // All other formats are handled by Skia's built-in decoder.
-        _ => skia_safe::Image::from_encoded(Data::new_copy(&entry.data)),
+    if entry.format == ImageFormat::Emf {
+        return Ok(crate::render::emf::decode_emf_bitmap_with_limits(
+            &entry.data,
+            limits,
+        )?);
     }
+    let data = Data::new_copy(&entry.data);
+    let Some(codec) = skia_safe::Codec::from_data(data.clone()) else {
+        return Ok(None);
+    };
+    let dimensions = codec.dimensions();
+    if dimensions.width <= 0 || dimensions.height <= 0 {
+        return Ok(None);
+    }
+    crate::limits::check_image_pixels(dimensions.width as u32, dimensions.height as u32, limits)?;
+    drop(codec);
+    Ok(skia_safe::Image::from_encoded(data))
 }
 
 /// Downsample an image if its native pixel dimensions significantly exceed
@@ -1390,6 +1409,52 @@ mod tests {
             .expect("encode png")
             .as_bytes()
             .to_vec()
+    }
+
+    #[test]
+    fn resource_limits_reject_source_image_even_when_downsampled_or_cropped() {
+        let media = MediaEntry {
+            data: std::sync::Arc::from(textured_png(4)),
+            format: crate::model::ImageFormat::Png,
+        };
+        let options = RenderOptions::default()
+            .with_image_dpi(1.0)
+            .with_resource_limits(crate::ResourceLimits {
+                max_image_pixels: 15,
+                ..Default::default()
+            });
+        for src_rect in [None, Some(rect(0.5, 0.5))] {
+            let page = LayoutedPage {
+                commands: vec![DrawCommand::Image {
+                    rect: rect(1.0, 1.0),
+                    image_data: media.clone(),
+                    src_rect,
+                }],
+                page_size: PtSize::new(Pt::new(200.0), Pt::new(200.0)),
+            };
+            match render_to_pdf(&[page], &test_registry(), &options) {
+                Err(RenderError::ResourceLimit(error)) => {
+                    assert_eq!(error.resource, "image pixels");
+                    assert_eq!((error.actual, error.limit), (16, 15));
+                }
+                Err(error) => panic!("expected image limit, got {error}"),
+                Ok(_) => panic!("oversized source must reject the entire conversion"),
+            }
+        }
+    }
+
+    #[test]
+    fn resource_limits_accept_image_at_exact_pixel_limit() {
+        let media = MediaEntry {
+            data: std::sync::Arc::from(textured_png(4)),
+            format: crate::model::ImageFormat::Png,
+        };
+        let limits = crate::ResourceLimits {
+            max_image_pixels: 16,
+            ..Default::default()
+        };
+        let image = decode_image(&media, &limits).unwrap().unwrap();
+        assert_eq!((image.width(), image.height()), (4, 4));
     }
 
     #[test]

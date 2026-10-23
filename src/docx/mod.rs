@@ -29,3 +29,11 @@ pub mod zip;
 pub fn parse(data: &[u8]) -> error::Result<model::Document> {
     parse::parse(data)
 }
+
+/// Parse a DOCX using caller-supplied input and ZIP budgets.
+pub fn parse_with_limits(
+    data: &[u8],
+    limits: &crate::ResourceLimits,
+) -> error::Result<model::Document> {
+    parse::parse_with_limits(data, limits)
+}

@@ -3,6 +3,9 @@ use thiserror::Error;
 /// All errors that can occur during DOCX parsing.
 #[derive(Debug, Error)]
 pub enum ParseError {
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::ResourceLimitError),
+
     #[error("failed to read ZIP archive: {0}")]
     Zip(#[from] zip::result::ZipError),
 
